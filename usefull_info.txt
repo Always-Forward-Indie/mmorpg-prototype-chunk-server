@@ -1,0 +1,5 @@
+Build project using cmake and terminal 
+
+cd build
+cmake ..
+make
