@@ -1,5 +1,4 @@
 #include "chunk_server/CharacterManager.hpp"
-#include "helpers/Database.hpp"
 #include <pqxx/pqxx>
 #include <iostream>
 #include <vector>
@@ -10,55 +9,10 @@ CharacterManager::CharacterManager()
     // Initialize properties or perform any setup here
 }
 
-// Method to get characters list
-std::vector<CharacterDataStruct> CharacterManager::getCharactersList(Database &database, ClientData &clientData, int accountId)
-{
-    // initialize a vector of strings for characters
-    std::vector<CharacterDataStruct> charactersList;
-    // Create a CharacterDataStruct to save the character data from DB
-    CharacterDataStruct characterDataStruct;
-
-    try
-    {
-        pqxx::work transaction(database.getConnection()); // Start a transaction
-        pqxx::result selectCharacterData = database.executeQueryWithTransaction(
-                    transaction,
-                    "get_characters_list",
-                    {accountId});
-
-        if (selectCharacterData.empty())
-        {
-            transaction.abort(); // Rollback the transaction
-            return charactersList;
-        }
-
-        // Iterate through the result set and populate CharacterDataStruct objects
-        for (const auto& row : selectCharacterData) {
-            CharacterDataStruct characterDataStruct;
-            characterDataStruct.characterId = row["character_id"].as<int>();
-            characterDataStruct.characterLevel = row["character_lvl"].as<int>();
-            characterDataStruct.characterName = row["character_name"].as<std::string>();
-            characterDataStruct.characterClass = row["character_class"].as<std::string>();
-            
-            // Add the populated CharacterDataStruct to the vector
-            charactersList.push_back(characterDataStruct);
-        }
-
-        transaction.commit(); // Commit the transaction
-    }
-    catch (const std::exception &e)
-    {
-        // Handle database connection or query errors
-        database.handleDatabaseError(e);
-        // You might want to send an error response back to the client or log the error
-        return charactersList;
-    }
-
-    return charactersList;
-}
+//TODO - Update methods where remove database calls and use the clientData object instead
 
 // Method to select a character
-CharacterDataStruct CharacterManager::getCharacterData(Database &database, ClientData &clientData, int accountId, int characterId)
+CharacterDataStruct CharacterManager::getCharacterData(ClientData &clientData, int accountId, int characterId)
 {
     // Create a CharacterDataStruct to save the character data from DB
     CharacterDataStruct characterDataStruct;
@@ -99,7 +53,7 @@ CharacterDataStruct CharacterManager::getCharacterData(Database &database, Clien
 
 
 // Method to get a character position
-PositionStruct CharacterManager::getCharacterPosition(Database &database, ClientData &clientData, int accountId, int characterId)
+PositionStruct CharacterManager::getCharacterPosition(ClientData &clientData, int accountId, int characterId)
 {
     // Create a characterPosition to save the character position data from DB
     PositionStruct characterPosition;
@@ -148,7 +102,7 @@ void CharacterManager::setCharacterData(ClientData& clientData, int accountId, C
 }
 
 // update character position in the database
-void CharacterManager::updateCharacterPosition(Database& database, ClientData& clientData, int accountId, int characterId, PositionStruct &position){
+void CharacterManager::updateCharacterPosition(ClientData& clientData, int accountId, int characterId, PositionStruct &position){
     try {
         pqxx::work transaction(database.getConnection()); // Start a transaction
         pqxx::result updateCharacterPosition = database.executeQueryWithTransaction(
@@ -177,7 +131,7 @@ void CharacterManager::updateCharacterPosition(Database& database, ClientData& c
 }
 
 // update character data in the database
-void CharacterManager::updateCharacterData(Database& database, ClientData& clientData, int accountId, int characterId, CharacterDataStruct &characterData){
+void CharacterManager::updateCharacterData(ClientData& clientData, int accountId, int characterId, CharacterDataStruct &characterData){
     try {
         pqxx::work transaction(database.getConnection()); // Start a transaction
         pqxx::result updateCharacterData = database.executeQueryWithTransaction(

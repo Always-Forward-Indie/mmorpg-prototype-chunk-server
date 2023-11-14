@@ -6,7 +6,9 @@
 #include "Authenticator.hpp"
 #include "GameServerWorker.hpp"
 #include "CharacterManager.hpp"
-#include "helpers/Database.hpp"
+#include "Event.hpp"
+#include "EventQueue.hpp"
+#include "EventHandler.hpp"
 
 
 class ChunkServer {
@@ -23,12 +25,18 @@ private:
     void sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::string& responseString);
     std::string generateResponseMessage(const std::string& status, const nlohmann::json& message, const int& id);
     
+    //Events
+    void onPlayerMoveReceived(int playerId, int x, int y);
+    void mainEventLoop();
+
+    // Data members
     boost::asio::io_context& io_context_;
     boost::asio::ip::tcp::acceptor acceptor_;
 
     ClientData clientData_;
     Authenticator authenticator_;
     CharacterManager characterManager_;
-    Database database_;
     GameServerWorker gameServerWorker_;
+    EventQueue _eventQueue;
+    EventHandler _eventHandler;
 };

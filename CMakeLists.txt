@@ -13,7 +13,9 @@ set(SOURCE_FILES
     src/chunk_server/ClientData.cpp
     src/chunk_server/GameServerWorker.cpp
     src/chunk_server/CharacterManager.cpp
-    src/helpers/Database.cpp
+    src/chunk_server/Event.cpp
+    src/chunk_server/EventQueue.cpp
+    src/chunk_server/EventHandler.cpp
     src/helpers/Config.cpp
     # ... other source files
 )
@@ -25,7 +27,9 @@ set(HEADER_FILES
     include/chunk_server/ClientData.hpp
     include/chunk_server/GameServerWorker.hpp
     include/chunk_server/CharacterManager.hpp
-    include/helpers/Database.hpp
+    include/chunk_server/Event.hpp
+    include/chunk_server/EventQueue.hpp
+    include/chunk_server/EventHandler.hpp
     include/helpers/Config.hpp
 
     # ... other header files

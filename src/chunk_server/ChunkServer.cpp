@@ -1,5 +1,7 @@
 #include "chunk_server/ChunkServer.hpp"
 #include <iostream>
+#include <chrono>
+#include <thread>
 #include <nlohmann/json.hpp>
 
 ChunkServer::ChunkServer(boost::asio::io_context &io_context, const std::string &customIP, short customPort, short maxClients)
@@ -8,7 +10,6 @@ ChunkServer::ChunkServer(boost::asio::io_context &io_context, const std::string 
       clientData_(),
       authenticator_(),
       characterManager_(),
-      database_(),
       gameServerWorker_()
 {
     boost::system::error_code ec;
@@ -34,6 +35,10 @@ ChunkServer::ChunkServer(boost::asio::io_context &io_context, const std::string 
 
     // Print IP address and port when the server starts
     std::cout << "Chunk Server started on IP: " << customIP << ", Port: " << customPort << std::endl;
+
+    // Start the main event loop in a new thread
+    std::thread eventLoopThread(&ChunkServer::mainEventLoop, this);
+    eventLoopThread.detach(); // Or manage the thread more carefully based on your application's needs
 }
 
 void ChunkServer::startAccept()
@@ -88,7 +93,7 @@ void ChunkServer::handleClientData(std::shared_ptr<boost::asio::ip::tcp::socket>
 void ChunkServer::joinGame(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::string &hash, const int &characterId, const int &clientId)
 {
     // Authenticate the client
-    int characterID = authenticator_.authenticate(database_, clientData_, hash, clientId);
+    int characterID = authenticator_.authenticate(clientData_, hash, clientId);
     // Create a JSON object for the response
     nlohmann::json response;
 
@@ -118,11 +123,11 @@ void ChunkServer::joinGame(std::shared_ptr<boost::asio::ip::tcp::socket> clientS
     }
 
     // Get the character data from the database
-    CharacterDataStruct characterData = characterManager_.getCharacterData(database_, clientData_, clientId, characterId);
+    CharacterDataStruct characterData = characterManager_.getCharacterData(clientData_, clientId, characterId);
     // Set the character data in the clientData_ object
     characterManager_.setCharacterData(clientData_, clientId, characterData);
     // Get the character position from the database
-    PositionStruct characterPosition = characterManager_.getCharacterPosition(database_, clientData_, clientId, characterId);
+    PositionStruct characterPosition = characterManager_.getCharacterPosition(clientData_, clientId, characterId);
     // Set the character position in the clientData_ object
     characterManager_.setCharacterPosition(clientData_, clientId, characterPosition);
 
@@ -231,4 +236,24 @@ std::string ChunkServer::generateResponseMessage(const std::string &status, cons
     std::cout << "Client data: " << responseString << std::endl;
 
     return responseString;
+}
+
+void ChunkServer::onPlayerMoveReceived(int playerId, int x, int y) {
+    std::unordered_map<std::string, int> data = {{"x", x}, {"y", y}};
+    Event moveEvent(Event::MOVE, playerId, data);
+    _eventQueue.push(moveEvent);
+}
+
+void ChunkServer::mainEventLoop() {
+    std::cout << "Waiting for Events..." << std::endl;
+
+    while (true) {
+        Event event;
+        if (_eventQueue.pop(event)) {
+            _eventHandler.dispatchEvent(event);
+        }
+
+        // Optionally include a small delay or yield to prevent the loop from consuming too much CPU
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
