@@ -1,11 +1,4 @@
 {
-    "database": {
-        "dbname": "mmo_prototype",
-        "user": "postgres",
-        "password": "root",
-        "host": "127.0.0.1",
-        "port": 5432
-    },
     "game_server": {
         "host": "127.0.0.1",
         "port": 27015,

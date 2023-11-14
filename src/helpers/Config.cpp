@@ -1,7 +1,6 @@
 #include "helpers/Config.hpp"
 
-    std::tuple<DatabaseConfig, GameServerConfig, ChunkServerConfig> Config::parseConfig(const std::string& configFile) {
-    DatabaseConfig DBConfig;
+    std::tuple<GameServerConfig, ChunkServerConfig> Config::parseConfig(const std::string& configFile) {
     GameServerConfig GSConfig;
     ChunkServerConfig CSConfig;
 
@@ -15,13 +14,6 @@
         // Parse the JSON data
         nlohmann::json root;
         ifs >> root;
-
-        // Extract Database connection details
-        DBConfig.dbname = root["database"]["dbname"].get<std::string>();
-        DBConfig.user = root["database"]["user"].get<std::string>();
-        DBConfig.password = root["database"]["password"].get<std::string>();
-        DBConfig.host = root["database"]["host"].get<std::string>();
-        DBConfig.port = root["database"]["port"].get<short>();
 
         // Extract Game server connection details
         GSConfig.host = root["game_server"]["host"].get<std::string>();
@@ -40,5 +32,5 @@
     }
 
     // Construct and return the tuple with the extracted values
-    return std::make_tuple(DBConfig, GSConfig, CSConfig);
+    return std::make_tuple(GSConfig, CSConfig);
 }

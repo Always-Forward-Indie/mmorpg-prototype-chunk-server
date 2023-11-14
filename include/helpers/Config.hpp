@@ -4,14 +4,6 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
-struct DatabaseConfig {
-    std::string dbname;
-    std::string user;
-    std::string password;
-    std::string host;
-    short port;
-};
-
 struct GameServerConfig {
     std::string host;
     short port;
@@ -26,5 +18,5 @@ struct ChunkServerConfig {
 
 class Config {
 public:
-    std::tuple<DatabaseConfig, GameServerConfig, ChunkServerConfig> parseConfig(const std::string& configFile);
+    std::tuple<GameServerConfig, ChunkServerConfig> parseConfig(const std::string& configFile);
 };
