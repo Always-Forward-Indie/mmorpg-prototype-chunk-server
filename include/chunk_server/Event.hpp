@@ -3,23 +3,27 @@
 #include <string>
 #include <unordered_map>
 #include <mutex>
+#include <variant>
+#include "ClientData.hpp"
 
+// Define the types of data that can be sent in an event
+using EventData = std::variant<int, float, std::string, PositionStruct, CharacterDataStruct, ClientDataStruct /* other types */>;
 
 class Event {
 public:
     enum EventType { MOVE, INTERACT }; // Define more event types as needed
-    Event(); // Default constructor
-    Event(EventType type, int clientID, const std::unordered_map<std::string, int>& data);
+    Event() = default; // Default constructor
+    Event(EventType type, int clientID, const EventData& data);
 
-    // ... Getter methods for type, playerID, and data
-
+    // Get Event Data
+    const EventData& getData() const;
+    // Get Client ID
+    int getClientID() const;
     //Get Event Type
-    EventType getType() const {
-        return type;
-    }
+    EventType getType() const;
 
 private:
-    EventType type;
     int clientID;
-    std::unordered_map<std::string, int> eventData; // Example data structure; adjust as needed
+    EventType type;
+    EventData eventData;
 };

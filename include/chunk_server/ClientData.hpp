@@ -35,10 +35,10 @@ public:
     ClientData();
 
     void storeClientData(const ClientDataStruct &clientData);
-    void updateClientData(const int &id, const std::string &field, const std::string &value);
-    void updateCharacterData(const int &id, const CharacterDataStruct &characterData);
-    void updateCharacterPositionData(const int &id, const PositionStruct &positionData);
-    const ClientDataStruct *getClientData(const int &id) const;
+    void updateClientData(const int &clientID, const std::string &field, const std::string &value);
+    void updateCharacterData(const int &clientID, const CharacterDataStruct &characterData);
+    void updateCharacterPositionData(const int &clientID, const PositionStruct &positionData);
+    const ClientDataStruct *getClientData(const int &clientID) const;
 
 private:
     std::unordered_map<int, ClientDataStruct> clientDataMap_;

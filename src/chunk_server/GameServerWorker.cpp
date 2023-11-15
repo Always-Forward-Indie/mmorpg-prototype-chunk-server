@@ -4,8 +4,8 @@
         // Initialize and establish the connection here (called only once)
         Config config;
         auto configs = config.parseConfig("config.json");
-        short port = std::get<2>(configs).port;
-        std::string host = std::get<2>(configs).host;
+        short port = std::get<0>(configs).port;
+        std::string host = std::get<0>(configs).host;
 
         boost::asio::ip::tcp::resolver resolver(io_context_);
         auto endpoints = resolver.resolve(host, std::to_string(port));
@@ -16,10 +16,10 @@
             [this](const boost::system::error_code& ec, boost::asio::ip::tcp::endpoint) {
                 if (!ec) {
                     // Connection successful
-                    std::cout << "Connected to Game Server!" << std::endl;
+                    std::cout << "Connected to the Game Server!" << std::endl;
                 } else {
                     // Handle connection error
-                    std::cerr << "Error connecting to the server: " << ec.message() << std::endl;
+                    std::cerr << "Error connecting to the Game Server: " << ec.message() << std::endl;
                 }
             });
     }

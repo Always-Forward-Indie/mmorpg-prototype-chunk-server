@@ -238,9 +238,14 @@ std::string ChunkServer::generateResponseMessage(const std::string &status, cons
     return responseString;
 }
 
-void ChunkServer::onPlayerMoveReceived(int playerId, int x, int y) {
-    std::unordered_map<std::string, int> data = {{"x", x}, {"y", y}};
-    Event moveEvent(Event::MOVE, playerId, data);
+void ChunkServer::onPlayerMoveReceived(const int &clientId, float x, float y, float z) {
+    // Create a PositionStruct object with the new position
+    PositionStruct characterPosition;
+    characterPosition.positionX = x;
+    characterPosition.positionY = y;
+    characterPosition.positionZ = z;
+    // Create a new event and push it to the queue
+    Event moveEvent(Event::MOVE, clientId, characterPosition);
     _eventQueue.push(moveEvent);
 }
 
@@ -250,7 +255,7 @@ void ChunkServer::mainEventLoop() {
     while (true) {
         Event event;
         if (_eventQueue.pop(event)) {
-            _eventHandler.dispatchEvent(event);
+            _eventHandler.dispatchEvent(event, clientData_);
         }
 
         // Optionally include a small delay or yield to prevent the loop from consuming too much CPU

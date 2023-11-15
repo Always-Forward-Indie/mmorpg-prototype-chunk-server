@@ -26,7 +26,7 @@ private:
     std::string generateResponseMessage(const std::string& status, const nlohmann::json& message, const int& id);
     
     //Events
-    void onPlayerMoveReceived(int playerId, int x, int y);
+    void onPlayerMoveReceived(const int &clientId, float x, float y, float z);
     void mainEventLoop();
 
     // Data members
