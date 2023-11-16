@@ -30,6 +30,7 @@ set(HEADER_FILES
     include/chunk_server/Event.hpp
     include/chunk_server/EventQueue.hpp
     include/chunk_server/EventHandler.hpp
+    include/helpers/TerminalColors.hpp
     include/helpers/Config.hpp
 
     # ... other header files

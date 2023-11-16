@@ -3,7 +3,8 @@
 
 #include <string>
 #include <boost/asio.hpp>
-#include "chunk_server/ClientData.hpp" // Include the header file for ClientData
+#include "chunk_server/ClientData.hpp"
+#include "helpers/TerminalColors.hpp"
 
 class Authenticator {
 public:

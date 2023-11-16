@@ -9,6 +9,7 @@
 #include "Event.hpp"
 #include "EventQueue.hpp"
 #include "EventHandler.hpp"
+#include "helpers/TerminalColors.hpp"
 
 
 class ChunkServer {
