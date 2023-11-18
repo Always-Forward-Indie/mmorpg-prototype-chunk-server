@@ -31,7 +31,7 @@ void GameServerWorker::startIOEventLoop()
 // In your destructor, join the io_thread to ensure it's properly cleaned up
 GameServerWorker::~GameServerWorker()
 {
-    logger_.log("GameServerWorker destructor called", BLUE);
+    logger_.logError("GameServerWorker destructor called");
     // Clean up
     work_.reset(); // Allow io_context to exit
     if (io_thread_.joinable())
