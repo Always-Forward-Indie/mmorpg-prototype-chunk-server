@@ -92,13 +92,13 @@ void GameServerWorker::sendDataToGameServer(const std::string &data)
                                              logger_.logError("Error in sending data to Game Server: " + error.message());
                                          }
 
-                                         logger_.log("Data sent successfully to Game Server. Bytes transferred: " + std::to_string(bytes_transferred));
+                                         logger_.log("Data sent successfully to Game Server. Bytes transferred: " + std::to_string(bytes_transferred), GREEN);
                                      }
                                  });
     }
     catch (const std::exception &e)
     {
-        logger_.log("Exception: " + std::string(e.what()));
+        logger_.logError("Exception: " + std::string(e.what()));
     }
 }
 
@@ -112,5 +112,6 @@ void GameServerWorker::receiveDataFromGameServer(std::function<void(const boost:
 // Close the connection when done
 void GameServerWorker::closeConnection()
 {
+    logger_.logError("Closing connection to chunk server");
     game_server_socket_.close();
 }

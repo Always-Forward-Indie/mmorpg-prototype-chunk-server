@@ -168,7 +168,7 @@ void ChunkServer::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> cli
     boost::asio::async_write(*clientSocket, boost::asio::buffer(responseString),
                              [this, clientSocket](const boost::system::error_code &error, size_t bytes_transferred)
                              {
-                                 logger_.log("Data sent successfully. Bytes transferred: " + std::to_string(bytes_transferred));
+                                 logger_.log("Data sent successfully to Game Server. Bytes transferred: " + std::to_string(bytes_transferred), GREEN);
 
                                  if (!error)
                                  {
