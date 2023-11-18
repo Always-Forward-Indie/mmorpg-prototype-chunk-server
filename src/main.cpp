@@ -2,19 +2,29 @@
 #include <iostream>
 #include "chunk_server/ChunkServer.hpp"
 #include "chunk_server/GameServerWorker.hpp"
+#include "helpers/Logger.hpp"
 
 int main() {
     try {
-        boost::asio::io_context io_context;
+        // Initialize Config
         Config config;
-        auto configs = config.parseConfig("config.json");
-        short port = std::get<1>(configs).port;
-        std::string ip = std::get<1>(configs).host;
-        short maxClients = std::get<1>(configs).max_clients;
+        // Get configs for connections to servers from config.json
+        auto configs = config.parseConfig("/home/shardanov/mmorpg-prototype-chunk-server/build/config.json");
+        
+        // Initialize Logger
+        Logger logger;
 
-        ChunkServer chunkServer(io_context, ip, port, maxClients);
+        // Initialize GameServerWorker
+        GameServerWorker gameServerWorker(configs, logger);
 
-        io_context.run();  // Start the event loop
+        // Start GameServerWorker IO Context in a separate thread
+        gameServerWorker.startIOEventLoop(); 
+
+        // Initialize ChunkServer
+        ChunkServer chunkServer(gameServerWorker, configs, logger);
+
+        //Start ChunkServer IO Context as the main thread
+        chunkServer.startIOEventLoop();
 
         return 0;
     } catch (const std::exception& e) {

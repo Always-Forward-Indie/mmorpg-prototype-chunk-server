@@ -2,9 +2,6 @@
 #include <iostream>
 #include <mutex>
 
-// Somewhere in your ClientData class definition
-//std::mutex updateMutex;
-
 ClientData::ClientData()
 {
     clientDataMap_.reserve(10000); // Reserve space for 10,000 clients, adjust as needed

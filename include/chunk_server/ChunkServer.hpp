@@ -3,6 +3,7 @@
 #include <boost/asio.hpp>
 #include <array>
 #include <string>
+#include <nlohmann/json.hpp>
 #include "Authenticator.hpp"
 #include "GameServerWorker.hpp"
 #include "CharacterManager.hpp"
@@ -14,8 +15,9 @@
 
 class ChunkServer {
 public:
-    ChunkServer(boost::asio::io_context& io_context, const std::string& customIP, short customPort, short maxClients);
-
+    ChunkServer(GameServerWorker& gameServerWorker, std::tuple<GameServerConfig, ChunkServerConfig>& configs, Logger& logger);
+    void startIOEventLoop();
+    
 private:
     static constexpr size_t max_length = 1024; // Define the appropriate value
     
@@ -30,14 +32,15 @@ private:
     void onPlayerMoveReceived(const int &clientId, float x, float y, float z);
     void mainEventLoop();
 
-    // Data members
-    boost::asio::io_context& io_context_;
+    boost::asio::io_context io_context_;
     boost::asio::ip::tcp::acceptor acceptor_;
 
     ClientData clientData_;
     Authenticator authenticator_;
     CharacterManager characterManager_;
-    GameServerWorker gameServerWorker_;
+    GameServerWorker& gameServerWorker_; // Reference to the GameServerWorker instance
+    Logger& logger_; // Reference to the Logger instance
+    std::tuple<GameServerConfig, ChunkServerConfig>& configs_;
     EventQueue _eventQueue;
     EventHandler _eventHandler;
 };

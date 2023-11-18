@@ -4,6 +4,7 @@ project(MMOChunkServer)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_BUILD_TYPE Debug)
 
 # Define your project's source files
 set(SOURCE_FILES
@@ -17,6 +18,7 @@ set(SOURCE_FILES
     src/chunk_server/EventQueue.cpp
     src/chunk_server/EventHandler.cpp
     src/helpers/Config.cpp
+    src/helpers/Logger.cpp
     # ... other source files
 )
 
@@ -32,6 +34,7 @@ set(HEADER_FILES
     include/chunk_server/EventHandler.hpp
     include/helpers/TerminalColors.hpp
     include/helpers/Config.hpp
+    include/helpers/Logger.hpp
 
     # ... other header files
 )

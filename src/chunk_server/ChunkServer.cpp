@@ -2,21 +2,27 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
-#include <nlohmann/json.hpp>
 
-ChunkServer::ChunkServer(boost::asio::io_context &io_context, const std::string &customIP, short customPort, short maxClients)
-    : io_context_(io_context),
-      acceptor_(io_context),
+ChunkServer::ChunkServer(GameServerWorker &gameServerWorker, std::tuple<GameServerConfig, ChunkServerConfig> &configs, Logger &logger)
+    : acceptor_(io_context_),
       clientData_(),
       authenticator_(),
       characterManager_(),
-      gameServerWorker_()
+      gameServerWorker_(gameServerWorker),
+      logger_(logger),
+      configs_(configs)
 {
     boost::system::error_code ec;
+
+    // Get the custom port and IP address from the configs
+    short customPort = std::get<1>(configs).port;
+    std::string customIP = std::get<1>(configs).host;
+    short maxClients = std::get<1>(configs).max_clients;
 
     // Create an endpoint with the custom IP and port
     boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(customIP), customPort);
 
+    // Open the acceptor and bind it to the endpoint
     acceptor_.open(endpoint.protocol(), ec);
     if (!ec)
     {
@@ -27,14 +33,15 @@ ChunkServer::ChunkServer(boost::asio::io_context &io_context, const std::string 
 
     if (ec)
     {
-        std::cerr << RED << "Error during server initialization: " << ec.message() << RESET << std::endl;
+        logger.logError("Error during server initialization: " + ec.message(), RED);
         return;
     }
 
+    // Start accepting new connections
     startAccept();
 
     // Print IP address and port when the server starts
-    std::cout << GREEN << "Chunk Server started on IP: " << customIP << ", Port: " << customPort << RESET << std::endl;
+    logger_.log("Chunk Server started on IP: " + customIP + ", Port: " + std::to_string(customPort), GREEN);
 
     // Start the main event loop in a new thread
     std::thread eventLoopThread(&ChunkServer::mainEventLoop, this);
@@ -52,14 +59,19 @@ void ChunkServer::startAccept()
             std::string clientIP = remoteEndpoint.address().to_string();
 
             // Print the client's IP address
-            std::cout << GREEN << "New client with IP: " << clientIP << " connected!" << RESET << std::endl;
-
+            logger_.log("New client with IP: " + clientIP + " connected!", GREEN);
+            
             // Start reading data from the client
             startReadingFromClient(clientSocket);
         }
 
         // Continue accepting new connections even if there's an error
         startAccept(); });
+}
+
+void ChunkServer::startIOEventLoop()
+{
+    io_context_.run(); // Start the event loop
 }
 
 void ChunkServer::handleClientData(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::array<char, max_length> &dataBuffer, size_t bytes_transferred)
@@ -74,6 +86,8 @@ void ChunkServer::handleClientData(std::shared_ptr<boost::asio::ip::tcp::socket>
         std::string type = jsonData["type"] != nullptr ? jsonData["type"] : "";
         std::string hash = jsonData["hash"] != nullptr ? jsonData["hash"] : "";
 
+        logger_.log("Received data from Game Server: " + std::string(dataBuffer.data(), bytes_transferred), YELLOW);
+
         // Check if the type of request is joinGame
         if (type == "joinGame")
         {
@@ -85,8 +99,7 @@ void ChunkServer::handleClientData(std::shared_ptr<boost::asio::ip::tcp::socket>
     }
     catch (const nlohmann::json::parse_error &e)
     {
-        std::cerr << RED << "JSON parsing error: " << e.what() << RESET << std::endl;
-        // Handle the error (e.g., close the socket)
+        logger_.logError("JSON parsing error: " + std::string(e.what()), RED);
     }
 }
 
@@ -98,18 +111,6 @@ void ChunkServer::joinGame(std::shared_ptr<boost::asio::ip::tcp::socket> clientS
     // Create a JSON object for the response
     nlohmann::json response;
 
-    // Define a callback function to handle the completion of the send operation
-    auto sendToGameServerCallback = [](const boost::system::error_code &error, std::size_t bytes_transferred)
-    {
-        if (!error)
-        {
-            std::cout << GREEN << "Data sent successfully to the Game server." << RESET << std::endl;
-        }
-        else
-        {
-            std::cerr << RED << "Error sending data to the Game server: " << error.message() << RESET << std::endl;
-        }
-    };
 
     // Check if the authentication was successful
     if (characterID == 0)
@@ -146,7 +147,7 @@ void ChunkServer::joinGame(std::shared_ptr<boost::asio::ip::tcp::socket> clientS
     characterData = currentClientData->characterData;
 
     // Send data to the chunk server
-    gameServerWorker_.sendDataToGameServer("Hello, Chunk Server!\n", sendToGameServerCallback);
+    gameServerWorker_.sendDataToGameServer("Hello, Game Server!");
 
     // Add the message to the response
     response["message"] = "Authentication success for user!";
@@ -167,6 +168,8 @@ void ChunkServer::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> cli
     boost::asio::async_write(*clientSocket, boost::asio::buffer(responseString),
                              [this, clientSocket](const boost::system::error_code &error, size_t bytes_transferred)
                              {
+                                 logger_.log("Data sent successfully. Bytes transferred: " + std::to_string(bytes_transferred));
+
                                  if (!error)
                                  {
                                      // Response sent successfully, now start listening for the client's next message
@@ -174,8 +177,7 @@ void ChunkServer::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> cli
                                  }
                                  else
                                  {
-                                     std::cerr << RED << "Error during async_write: " << error.message() << RESET << std::endl;
-                                     // Handle the error (e.g., close the socket)
+                                     logger_.logError("Error during async_write: " + error.message(), RED);
                                  }
                              });
 }
@@ -196,8 +198,9 @@ void ChunkServer::startReadingFromClient(std::shared_ptr<boost::asio::ip::tcp::s
                                       }
                                       else if (error == boost::asio::error::eof)
                                       {
+                                        
                                           // The client has closed the connection
-                                          std::cerr << RED << "Client disconnected gracefully." << RESET << std::endl;
+                                          logger_.logError("Client disconnected gracefully.", RED);
 
                                           // You can perform any cleanup or logging here if needed
 
@@ -207,8 +210,8 @@ void ChunkServer::startReadingFromClient(std::shared_ptr<boost::asio::ip::tcp::s
                                       else if (error == boost::asio::error::operation_aborted)
                                       {
                                           // The read operation was canceled, likely due to the client disconnecting
-                                          std::cerr << RED << "Read operation canceled (client disconnected)." << RESET << std::endl;
-
+                                          logger_.logError("Read operation canceled (client disconnected).", RED);
+                                          
                                           // You can perform any cleanup or logging here if needed
 
                                           // Close the client socket
@@ -217,8 +220,8 @@ void ChunkServer::startReadingFromClient(std::shared_ptr<boost::asio::ip::tcp::s
                                       else
                                       {
                                           // Handle other errors
-                                          std::cerr << RED << "Error during async_read_some: " << error.message() << RESET << std::endl;
-
+                                          logger_.logError("Error during async_read_some: " + error.message(), RED);
+                                          
                                           // You can also close the socket in case of other errors if needed
                                           clientSocket->close();
                                       }
@@ -234,7 +237,7 @@ std::string ChunkServer::generateResponseMessage(const std::string &status, cons
 
     std::string responseString = response.dump();
 
-    std::cout << YELLOW << "Client data: " << responseString << RESET << std::endl;
+    logger_.log("Response generated: " + responseString, YELLOW);
 
     return responseString;
 }
@@ -251,7 +254,7 @@ void ChunkServer::onPlayerMoveReceived(const int &clientId, float x, float y, fl
 }
 
 void ChunkServer::mainEventLoop() {
-    std::cout << BLUE << "Waiting for Events..." << RESET << std::endl;
+    logger_.log("Starting the main event loop...", YELLOW);
 
     while (true) {
         Event event;
