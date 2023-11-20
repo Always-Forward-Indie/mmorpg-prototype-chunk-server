@@ -1,6 +1,6 @@
 #include <iostream>
 #include <vector>
-#include <chunk_server/ClientData.hpp>
+#include <data/ClientData.hpp>
 
 class CharacterManager {
 public:

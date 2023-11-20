@@ -4,7 +4,7 @@
 #include <iomanip>
 #include <sstream>
 #include <ctime>
-#include "helpers/TerminalColors.hpp"
+#include "utils/TerminalColors.hpp"
 
 class Logger {
 public:

@@ -1,30 +1,33 @@
-#include "helpers/Config.hpp"
 #include <iostream>
+#include "utils/Config.hpp"
+#include "utils/Logger.hpp"
 #include "chunk_server/ChunkServer.hpp"
-#include "chunk_server/GameServerWorker.hpp"
-#include "helpers/Logger.hpp"
+#include "network/NetworkManager.hpp"
 
 int main() {
     try {
         // Initialize Config
         Config config;
-        // Get configs for connections to servers from config.json
-        auto configs = config.parseConfig("/home/shardanov/mmorpg-prototype-chunk-server/build/config.json");
-        
         // Initialize Logger
         Logger logger;
+        
+        // Get configs for connections to servers from config.json
+        auto configs = config.parseConfig("/home/shardanov/mmorpg-prototype-chunk-server/build/config.json");
 
-        // Initialize GameServerWorker
-        GameServerWorker gameServerWorker(configs, logger);
-
-        // Start GameServerWorker IO Context in a separate thread
-        gameServerWorker.startIOEventLoop(); 
-
+        // Initialize EventQueue
+        EventQueue eventQueue;
+        
+        // Initialize NetworkManager
+        NetworkManager networkManager(eventQueue, configs, logger);
+            
         // Initialize ChunkServer
-        ChunkServer chunkServer(gameServerWorker, configs, logger);
+        ChunkServer chunkServer(eventQueue, networkManager, logger);
 
-        //Start ChunkServer IO Context as the main thread
-        chunkServer.startIOEventLoop();
+        //Start the main event loop
+        chunkServer.startMainEventLoop();
+
+        //Start the IO Networking event loop
+        networkManager.startIOEventLoop();
 
         return 0;
     } catch (const std::exception& e) {

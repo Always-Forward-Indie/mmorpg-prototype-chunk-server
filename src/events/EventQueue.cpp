@@ -1,4 +1,4 @@
-#include "chunk_server/EventQueue.hpp"
+#include "events/EventQueue.hpp"
 
 void EventQueue::push(const Event &event)
 {

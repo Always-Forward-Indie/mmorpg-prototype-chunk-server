@@ -10,31 +10,32 @@ set(CMAKE_BUILD_TYPE Debug)
 set(SOURCE_FILES
     src/main.cpp
     src/chunk_server/ChunkServer.cpp
-    src/chunk_server/Authenticator.cpp
-    src/chunk_server/ClientData.cpp
-    src/chunk_server/GameServerWorker.cpp
     src/chunk_server/CharacterManager.cpp
-    src/chunk_server/Event.cpp
-    src/chunk_server/EventQueue.cpp
-    src/chunk_server/EventHandler.cpp
-    src/helpers/Config.cpp
-    src/helpers/Logger.cpp
+    src/network/NetworkManager.cpp
+    src/data/ClientData.cpp
+    src/events/Event.cpp
+    src/events/EventQueue.cpp
+    src/events/EventHandler.cpp
+    src/utils/JSONParser.cpp
+    src/utils/Config.cpp
+    src/utils/Logger.cpp
     # ... other source files
 )
 
 # Define your project's header files
 set(HEADER_FILES
     include/chunk_server/ChunkServer.hpp
-    include/chunk_server/Authenticator.hpp
-    include/chunk_server/ClientData.hpp
-    include/chunk_server/GameServerWorker.hpp
     include/chunk_server/CharacterManager.hpp
-    include/chunk_server/Event.hpp
-    include/chunk_server/EventQueue.hpp
-    include/chunk_server/EventHandler.hpp
-    include/helpers/TerminalColors.hpp
-    include/helpers/Config.hpp
-    include/helpers/Logger.hpp
+    include/network/NetworkManager.hpp
+    include/data/DataStructs.hpp
+    include/data/ClientData.hpp
+    include/events/Event.hpp
+    include/events/EventQueue.hpp
+    include/events/EventHandler.hpp
+    include/utils/JSONParser.hpp
+    include/utils/TerminalColors.hpp
+    include/utils/Config.hpp
+    include/utils/Logger.hpp
 
     # ... other header files
 )

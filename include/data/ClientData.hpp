@@ -1,33 +1,8 @@
-// ClientData.hpp
 #pragma once
-
 #include <string>
 #include <unordered_map>
 #include <mutex>
-
-struct PositionStruct
-{
-    float positionX;
-    float positionY;
-    float positionZ;
-};
-
-struct CharacterDataStruct
-{
-    int characterId;
-    int characterLevel;
-    std::string characterName;
-    std::string characterClass;
-    std::string characterRace;
-    PositionStruct characterPosition;
-};
-
-struct ClientDataStruct
-{
-    int clientId;
-    std::string hash;
-    CharacterDataStruct characterData;
-};
+#include "DataStructs.hpp"
 
 class ClientData
 {
