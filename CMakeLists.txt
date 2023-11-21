@@ -4,7 +4,10 @@ project(MMOChunkServer)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
+# Set compiler flags for debug mode (need to remove when compiling for production)
 set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
 
 # Define your project's source files
 set(SOURCE_FILES

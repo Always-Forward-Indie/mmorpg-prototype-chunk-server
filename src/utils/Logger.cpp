@@ -3,7 +3,7 @@
 std::mutex logger_mutex_;
 
 std::string Logger::getCurrentTimestamp() {
-        std::lock_guard<std::mutex> lock(logger_mutex_);
+        //std::lock_guard<std::mutex> lock(logger_mutex_);
         auto now = std::chrono::system_clock::now();
         auto in_time_t = std::chrono::system_clock::to_time_t(now);
 

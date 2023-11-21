@@ -173,7 +173,7 @@ std::string NetworkManager::generateResponseMessage(const std::string &status, c
 
     std::string responseString = response.dump();
 
-    //logger_.log("Response generated: " + responseString, YELLOW);
+    logger_.log("Response generated: " + responseString, YELLOW);
 
     return responseString;
 }
