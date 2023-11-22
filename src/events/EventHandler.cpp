@@ -14,9 +14,6 @@ void EventHandler::handleJoinEvent(const Event &event, ClientData &clientData)
     int clientID = event.getClientID();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getClientSocket();
 
-    std::cout << "Client ID: " << clientID << std::endl;
-
-
     // Extract init data
     try
     {
@@ -56,6 +53,9 @@ void EventHandler::handleJoinEvent(const Event &event, ClientData &clientData)
             response["body"]["characterPosZ"] = initData.characterData.characterPosition.positionZ;
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
+
+            // Send the response to the client
+            networkManager_.sendResponse(clientSocket, responseData);
         }
         else
         {

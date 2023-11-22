@@ -159,15 +159,11 @@ void NetworkManager::startReadingFromClient(std::shared_ptr<boost::asio::ip::tcp
 std::string NetworkManager::generateResponseMessage(const std::string &status, const nlohmann::json &message)
 {
     nlohmann::json response;
-
-    // TODO - Need to understand why logger_ is not working here (returning a segmentation fault)
-
-
-    //std::string currentTimestamp = logger_.getCurrentTimestamp();
+    std::string currentTimestamp = logger_.getCurrentTimestamp();
 
     response["header"]["status"] = status;
     response["header"] = message["header"];
-    //response["header"]["timestamp"] = currentTimestamp;
+    response["header"]["timestamp"] = currentTimestamp;
     response["header"]["version"] = "1.0";
     response["body"] = message["body"];
 

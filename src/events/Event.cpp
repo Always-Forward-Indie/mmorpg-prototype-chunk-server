@@ -1,7 +1,7 @@
 #include "events/Event.hpp"
 
 Event::Event(EventType type, int clientID, const EventData data, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket)
-    : type(type), clientID(clientID), eventData(data)
+    : type(type), clientID(clientID), eventData(data), clientSocket(clientSocket)
 {
 }
 
