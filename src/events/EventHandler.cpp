@@ -6,6 +6,7 @@ EventHandler::EventHandler(NetworkManager &networkManager)
 {
 }
 
+//TODO - check this method and maybe refactor it
 void EventHandler::handleJoinEvent(const Event &event, ClientData &clientData)
 {
     // Here we will update the init data of the character when it's joined in the object and send it back to the game server
@@ -26,16 +27,19 @@ void EventHandler::handleJoinEvent(const Event &event, ClientData &clientData)
 
             // Prepare the response message
             nlohmann::json response;
+            ResponseBuilder builder;
 
                 // Check if the authentication was successful
             if (initData.clientId == 0 || initData.hash == "")
             {
                 // Add response data
-                response["header"]["message"] = "Authentication failed for user!";
-                response["header"]["hash"] = initData.hash;
-                response["header"]["clientId"] = initData.clientId;
-                response["header"]["eventType"] = "joinGame";
-                response["body"] = "";
+                response = builder
+                .setHeader("message", "Authentication failed for user!")
+                .setHeader("hash", initData.hash)
+                .setHeader("clientId", initData.clientId)
+                .setHeader("eventType", "joinGame")
+                .setBody("", "")
+                .build();
                 // Prepare a response message
                 std::string responseData = networkManager_.generateResponseMessage("error", response);
                 // Send the response to the client
@@ -44,13 +48,16 @@ void EventHandler::handleJoinEvent(const Event &event, ClientData &clientData)
             }
 
             // Add the message to the response
-            response["header"]["message"] = "Authentication success for user!";
-            response["header"]["hash"] = initData.hash;
-            response["header"]["clientId"] = initData.clientId;
-            response["body"]["characterId"] = initData.characterData.characterId;
-            response["body"]["characterPosX"] = initData.characterData.characterPosition.positionX;
-            response["body"]["characterPosY"] = initData.characterData.characterPosition.positionY;
-            response["body"]["characterPosZ"] = initData.characterData.characterPosition.positionZ;
+             response = builder
+            .setHeader("message", "Authentication success for user!")
+            .setHeader("hash", initData.hash)
+            .setHeader("clientId", initData.clientId)
+            .setHeader("eventType", "joinGame")
+            .setBody("characterId", initData.characterData.characterId)
+            .setBody("characterPosX", initData.characterData.characterPosition.positionX)
+            .setBody("characterPosY", initData.characterData.characterPosition.positionY)
+            .setBody("characterPosZ", initData.characterData.characterPosition.positionZ)
+            .build();
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
 

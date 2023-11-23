@@ -3,6 +3,7 @@
 #include <boost/asio.hpp>
 #include "data/ClientData.hpp"
 #include "network/NetworkManager.hpp"
+#include "utils/ResponseBuilder.hpp"
 
 class EventHandler {
 public:

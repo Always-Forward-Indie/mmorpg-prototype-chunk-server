@@ -36,6 +36,7 @@ set(HEADER_FILES
     include/events/EventQueue.hpp
     include/events/EventHandler.hpp
     include/utils/JSONParser.hpp
+    include/utils/ResponseBuilder.hpp
     include/utils/TerminalColors.hpp
     include/utils/Config.hpp
     include/utils/Logger.hpp
