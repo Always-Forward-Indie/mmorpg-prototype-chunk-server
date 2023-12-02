@@ -7,7 +7,6 @@ ChunkServer::ChunkServer(EventQueue& eventQueue, NetworkManager& networkManager,
       eventQueue_(eventQueue),
       eventHandler_(networkManager)
 {
-
     // Start accepting new connections from Game Server as Client
     networkManager_.startAccept();
 }

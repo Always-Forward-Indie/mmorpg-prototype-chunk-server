@@ -6,8 +6,9 @@ EventHandler::EventHandler(NetworkManager &networkManager)
 {
 }
 
-//TODO - check this method and maybe refactor it
-void EventHandler::handleJoinEvent(const Event &event, ClientData &clientData)
+//TODO - Use Logger to log instead of std::cout
+
+void EventHandler::handleJoinGameEvent(const Event &event, ClientData &clientData)
 {
     // Here we will update the init data of the character when it's joined in the object and send it back to the game server
     // Retrieve the data from the event
@@ -29,17 +30,17 @@ void EventHandler::handleJoinEvent(const Event &event, ClientData &clientData)
             nlohmann::json response;
             ResponseBuilder builder;
 
-                // Check if the authentication was successful
+            // Check if the authentication is not successful
             if (initData.clientId == 0 || initData.hash == "")
             {
                 // Add response data
                 response = builder
-                .setHeader("message", "Authentication failed for user!")
-                .setHeader("hash", initData.hash)
-                .setHeader("clientId", initData.clientId)
-                .setHeader("eventType", "joinGame")
-                .setBody("", "")
-                .build();
+                               .setHeader("message", "Authentication failed for user!")
+                               .setHeader("hash", initData.hash)
+                               .setHeader("clientId", initData.clientId)
+                               .setHeader("eventType", "joinGame")
+                               .setBody("", "")
+                               .build();
                 // Prepare a response message
                 std::string responseData = networkManager_.generateResponseMessage("error", response);
                 // Send the response to the client
@@ -48,16 +49,16 @@ void EventHandler::handleJoinEvent(const Event &event, ClientData &clientData)
             }
 
             // Add the message to the response
-             response = builder
-            .setHeader("message", "Authentication success for user!")
-            .setHeader("hash", initData.hash)
-            .setHeader("clientId", initData.clientId)
-            .setHeader("eventType", "joinGame")
-            .setBody("characterId", initData.characterData.characterId)
-            .setBody("characterPosX", initData.characterData.characterPosition.positionX)
-            .setBody("characterPosY", initData.characterData.characterPosition.positionY)
-            .setBody("characterPosZ", initData.characterData.characterPosition.positionZ)
-            .build();
+            response = builder
+                           .setHeader("message", "Authentication success for user!")
+                           .setHeader("hash", initData.hash)
+                           .setHeader("clientId", initData.clientId)
+                           .setHeader("eventType", "joinGame")
+                           .setBody("characterId", initData.characterData.characterId)
+                           .setBody("characterPosX", initData.characterData.characterPosition.positionX)
+                           .setBody("characterPosY", initData.characterData.characterPosition.positionY)
+                           .setBody("characterPosZ", initData.characterData.characterPosition.positionZ)
+                           .build();
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
 
@@ -70,8 +71,6 @@ void EventHandler::handleJoinEvent(const Event &event, ClientData &clientData)
             // Handle the case where the data is not of type ClientDataStruct
             // This might be logging the error, throwing another exception, etc.
         }
-
-        
     }
     catch (const std::bad_variant_access &ex)
     {
@@ -88,6 +87,7 @@ void EventHandler::handleMoveEvent(const Event &event, ClientData &clientData)
     // Retrieve the data from the event
     const auto &data = event.getData();
     int clientID = event.getClientID();
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getClientSocket();
     PositionStruct characterPosition;
     // Extract movement data
     try
@@ -97,6 +97,7 @@ void EventHandler::handleMoveEvent(const Event &event, ClientData &clientData)
     }
     catch (const std::bad_variant_access &ex)
     {
+        std::cout << "Error here: " << ex.what() << std::endl;
         // Handle the case where the data is not of type PositionStruct
         // This might be logging the error, throwing another exception, etc.
     }
@@ -117,8 +118,8 @@ void EventHandler::dispatchEvent(const Event &event, ClientData &clientData)
 {
     switch (event.getType())
     {
-    case Event::JOIN:
-        handleJoinEvent(event, clientData);
+    case Event::JOIN_GAME:
+        handleJoinGameEvent(event, clientData);
         break;
     case Event::MOVE:
         handleMoveEvent(event, clientData);

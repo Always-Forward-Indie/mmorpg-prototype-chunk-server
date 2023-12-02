@@ -11,7 +11,7 @@ public:
   void dispatchEvent(const Event& event, ClientData& clientData);
 
 private:
-    void handleJoinEvent(const Event& event, ClientData& clientData);
+    void handleJoinGameEvent(const Event& event, ClientData& clientData);
     void handleMoveEvent(const Event& event, ClientData& clientData);
     void handleInteractEvent(const Event& event, ClientData& clientData);
 

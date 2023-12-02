@@ -66,6 +66,8 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
 {
     try
     {
+        logger_.log("Data received from Game Server. Bytes transferred: " + std::to_string(bytes_transferred), GREEN);
+
         // Parse the data received from the client using JSONParser
         std::string eventType = jsonParser_.parseEventType(dataBuffer, bytes_transferred);
         ClientDataStruct clientData = jsonParser_.parseClientData(dataBuffer, bytes_transferred);
@@ -81,8 +83,8 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
             clientData.characterData = characterData;
 
             // Create a new event and push it to the queue
-            Event joinEvent(Event::JOIN, clientData.clientId, clientData, clientSocket);
-            eventQueue_.push(joinEvent);
+            Event joinGameEvent(Event::JOIN_GAME, clientData.clientId, clientData, clientSocket);
+            eventQueue_.push(joinGameEvent);
         }
     }
     catch (const nlohmann::json::parse_error &e)
@@ -161,8 +163,8 @@ std::string NetworkManager::generateResponseMessage(const std::string &status, c
     nlohmann::json response;
     std::string currentTimestamp = logger_.getCurrentTimestamp();
 
-    response["header"]["status"] = status;
     response["header"] = message["header"];
+    response["header"]["status"] = status;
     response["header"]["timestamp"] = currentTimestamp;
     response["header"]["version"] = "1.0";
     response["body"] = message["body"];
@@ -171,5 +173,5 @@ std::string NetworkManager::generateResponseMessage(const std::string &status, c
 
     logger_.log("Response generated: " + responseString, YELLOW);
 
-    return responseString;
+    return responseString+ "\n";
 }
