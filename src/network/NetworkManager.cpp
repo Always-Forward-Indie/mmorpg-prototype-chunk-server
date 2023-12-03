@@ -21,6 +21,7 @@ NetworkManager::NetworkManager(EventQueue& eventQueue, std::tuple<ChunkServerCon
     acceptor_.open(endpoint.protocol(), ec);
     if (!ec)
     {
+        logger_.log("Starting Chunk Server...", YELLOW);
         acceptor_.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true), ec);
         acceptor_.bind(endpoint, ec);
         acceptor_.listen(maxClients, ec);
@@ -59,14 +60,15 @@ void NetworkManager::startAccept()
 
 void NetworkManager::startIOEventLoop()
 {
-    io_context_.run(); // Start the event loop
+    logger_.log("Starting Chunk Server IO Context...", YELLOW);
+    io_context_.run();
 }
 
 void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::array<char, max_length> &dataBuffer, size_t bytes_transferred)
 {
     try
     {
-        logger_.log("Data received from Game Server. Bytes transferred: " + std::to_string(bytes_transferred), GREEN);
+        logger_.log("Data received from Game Server. Bytes transferred: " + std::to_string(bytes_transferred), YELLOW);
 
         // Parse the data received from the client using JSONParser
         std::string eventType = jsonParser_.parseEventType(dataBuffer, bytes_transferred);
@@ -89,7 +91,7 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
     }
     catch (const nlohmann::json::parse_error &e)
     {
-        logger_.logError("JSON parsing error: " + std::string(e.what()), RED);
+        logger_.logError("JSON parsing error: " + std::string(e.what()));
     }
 }
 
@@ -98,7 +100,7 @@ void NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> 
     boost::asio::async_write(*clientSocket, boost::asio::buffer(responseString),
                              [this, clientSocket](const boost::system::error_code &error, size_t bytes_transferred)
                              {
-                                 logger_.log("Data sent successfully to Game Server. Bytes transferred: " + std::to_string(bytes_transferred), GREEN);
+                                 logger_.log("Data sent successfully to Game Server. Bytes transferred: " + std::to_string(bytes_transferred), BLUE);
 
                                  if (!error)
                                  {
@@ -107,7 +109,7 @@ void NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> 
                                  }
                                  else
                                  {
-                                     logger_.logError("Error during async_write: " + error.message(), RED);
+                                     logger_.logError("Error during async_write: " + error.message());
                                  }
                              });
 }
@@ -130,7 +132,7 @@ void NetworkManager::startReadingFromClient(std::shared_ptr<boost::asio::ip::tcp
                                       {
 
                                           // The client has closed the connection
-                                          logger_.logError("Client disconnected gracefully.", RED);
+                                          logger_.logError("Client disconnected gracefully.");
 
                                           // You can perform any cleanup or logging here if needed
 
@@ -140,7 +142,7 @@ void NetworkManager::startReadingFromClient(std::shared_ptr<boost::asio::ip::tcp
                                       else if (error == boost::asio::error::operation_aborted)
                                       {
                                           // The read operation was canceled, likely due to the client disconnecting
-                                          logger_.logError("Read operation canceled (client disconnected).", RED);
+                                          logger_.logError("Read operation canceled (client disconnected).");
 
                                           // You can perform any cleanup or logging here if needed
 
@@ -150,7 +152,7 @@ void NetworkManager::startReadingFromClient(std::shared_ptr<boost::asio::ip::tcp
                                       else
                                       {
                                           // Handle other errors
-                                          logger_.logError("Error during async_read_some: " + error.message(), RED);
+                                          logger_.logError("Error during async_read_some: " + error.message());
 
                                           // You can also close the socket in case of other errors if needed
                                           clientSocket->close();
@@ -171,7 +173,7 @@ std::string NetworkManager::generateResponseMessage(const std::string &status, c
 
     std::string responseString = response.dump();
 
-    logger_.log("Response generated: " + responseString, YELLOW);
+    //logger_.log("Response generated: " + responseString, YELLOW);
 
     return responseString+ "\n";
 }
