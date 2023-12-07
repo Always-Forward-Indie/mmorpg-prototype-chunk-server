@@ -12,6 +12,9 @@ struct CharacterDataStruct
 {
     int characterId = 0;
     int characterLevel = 0;
+    int characterExperiencePoints = 0;
+    int characterCurrentHealth = 0;
+    int characterCurrentMana = 0;
     std::string characterName = "";
     std::string characterClass = "";
     std::string characterRace = "";
