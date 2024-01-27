@@ -85,8 +85,32 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
             clientData.characterData = characterData;
 
             // Create a new event and push it to the queue
-            Event joinGameEvent(Event::JOIN_GAME, clientData.clientId, clientData, clientSocket);
+            Event joinGameEvent(Event::JOIN_GAME, clientData.clientId, characterData.characterId, clientData, clientSocket);
             eventQueue_.push(joinGameEvent);
+        }
+
+        // Check if the type of request is getConnectedCharacters
+        if (eventType == "getConnectedCharacters" && message.status == "success")
+        {
+            // Set the client data
+           // characterData.characterPosition = positionData;
+            //clientData.characterData = characterData;
+
+            // Create a new event and push it to the queue
+            Event getConnectedCharactersEvent(Event::GET_CONNECTED_CHARACTERS, clientData.clientId, characterData.characterId, clientData, clientSocket);
+            eventQueue_.push(getConnectedCharactersEvent);
+        }
+
+        // Check if the type of request is moveCharacter
+        if (eventType == "moveCharacter" && message.status == "success")
+        {
+            // Set the client data
+            //characterData.characterPosition = positionData;
+            //clientData.characterData = characterData;
+
+            // Create a new event and push it to the queue
+            Event characterMovementEvent(Event::CHARACTER_MOVEMENT, clientData.clientId, characterData.characterId, positionData, clientSocket);
+            eventQueue_.push(characterMovementEvent);
         }
     }
     catch (const nlohmann::json::parse_error &e)

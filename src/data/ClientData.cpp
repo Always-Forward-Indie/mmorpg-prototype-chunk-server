@@ -64,6 +64,12 @@ void ClientData::updateCharacterPositionData(const int &clientID, const Position
     }
 }
 
+std::unordered_map<int, ClientDataStruct> ClientData::getClientsDataMap() const
+{
+    std::lock_guard<std::mutex> lock(clientDataMutex_); // lock_guard is a mutex wrapper that provides a convenient RAII-style mechanism for owning a mutex for the duration of a scoped block.
+    return clientDataMap_;
+}
+
 const ClientDataStruct *ClientData::getClientData(const int &clientID) const
 {
     if (clientID == 0)

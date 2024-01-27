@@ -87,6 +87,97 @@ void EventHandler::handleJoinGameEvent(const Event &event, ClientData &clientDat
     }
 }
 
+void EventHandler::handleGetConnectedCharactersEvent(const Event &event, ClientData &clientData)
+{
+    // Here we will update the init data of the character when it's joined in the object and send it back to the game server
+    // Retrieve the data from the event
+    const auto data = event.getData();
+    int clientID = event.getClientID();
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getClientSocket();
+    // Get all existing clients data as array
+    std::unordered_map<int, ClientDataStruct> clientDataMap = clientData.getClientsDataMap();
+
+    // Extract init data
+    try
+    {
+        // Try to extract the data as a ClientDataStruct
+        if (std::holds_alternative<ClientDataStruct>(data))
+        {
+            ClientDataStruct initData = std::get<ClientDataStruct>(data);
+
+            // Prepare the response message
+            nlohmann::json response;
+            ResponseBuilder builder;
+
+            // Check if client id is 0
+            if (clientID == 0)
+            {
+                // Add response data
+                response = builder
+                               .setHeader("message", "Getting connected characters failed...")
+                               .setHeader("hash", "")
+                               .setHeader("clientId", clientID)
+                               .setHeader("eventType", "getConnectedCharacters")
+                               .setBody("", "")
+                               .build();
+                // Prepare a response message
+                std::string responseData = networkManager_.generateResponseMessage("error", response);
+                // Send the response to the client
+                networkManager_.sendResponse(clientSocket, responseData);
+                return;
+            }
+
+            // create json list of characters
+            nlohmann::json charactersList;
+            for (const auto &clientDataItem : clientDataMap)
+            {
+                // Add the message to the response
+                charactersList.push_back({
+                    {"clientId", clientDataItem.second.clientId},
+                    {"characterId", clientDataItem.second.characterData.characterId},
+                    {"characterClass", clientDataItem.second.characterData.characterClass},
+                    {"characterLevel", clientDataItem.second.characterData.characterLevel},
+                    {"characterName", clientDataItem.second.characterData.characterName},
+                    {"characterRace", clientDataItem.second.characterData.characterRace},
+                    {"characterExp", clientDataItem.second.characterData.characterExperiencePoints},
+                    {"characterCurrentHealth", clientDataItem.second.characterData.characterCurrentHealth},
+                    {"characterCurrentMana", clientDataItem.second.characterData.characterCurrentMana},
+                    {"characterPosX", clientDataItem.second.characterData.characterPosition.positionX},
+                    {"characterPosY", clientDataItem.second.characterData.characterPosition.positionY},
+                    {"characterPosZ", clientDataItem.second.characterData.characterPosition.positionZ},
+                });
+            }
+
+
+            // Add the message to the response
+            response = builder
+                           .setHeader("message", "Getting connected characters success!")
+                           .setHeader("hash", "")
+                           .setHeader("clientId", clientID)
+                           .setHeader("eventType", "getConnectedCharacters")
+                           .setBody("charactersList", charactersList)
+                            .build();
+            // Prepare a response message
+            std::string responseData = networkManager_.generateResponseMessage("success", response);
+
+                   // Send the response to the client
+            networkManager_.sendResponse(clientSocket, responseData);
+        }
+        else
+        {
+            std::cout << "Error with extracting data!" << std::endl;
+            // Handle the case where the data is not of type ClientDataStruct
+            // This might be logging the error, throwing another exception, etc.
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        std::cout << "Error here: " << ex.what() << std::endl;
+        // Handle the case where the data is not of type ClientDataStruct
+        // This might be logging the error, throwing another exception, etc.
+    }
+}     
+
 void EventHandler::handleMoveEvent(const Event &event, ClientData &clientData)
 {
     // Here we will update the position of the character in the object and send it back to the game server
@@ -94,13 +185,68 @@ void EventHandler::handleMoveEvent(const Event &event, ClientData &clientData)
     // Retrieve the data from the event
     const auto &data = event.getData();
     int clientID = event.getClientID();
+    int characterID = event.getCharacterID();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getClientSocket();
     PositionStruct characterPosition;
     // Extract movement data
     try
     {
-        // Try to extract the data as a PositionStruct
-        characterPosition = std::get<PositionStruct>(data);
+        // Try to extract the data as a ClientDataStruct
+        if (std::holds_alternative<PositionStruct>(data))
+        {
+            // Try to extract the data as a PositionStruct
+            characterPosition = std::get<PositionStruct>(data);
+
+            // Prepare the response message
+            nlohmann::json response;
+            ResponseBuilder builder;
+
+            // Check if client id is 0
+            if (clientID == 0)
+            {
+                // Add response data
+                response = builder
+                               .setHeader("message", "Character movement failed!")
+                               .setHeader("hash", "")
+                               .setHeader("clientId", clientID)
+                               .setHeader("eventType", "getConnectedCharacters")
+                               .setBody("", "")
+                               .build();
+                // Prepare a response message
+                std::string responseData = networkManager_.generateResponseMessage("error", response);
+                // Send the response to the client
+                networkManager_.sendResponse(clientSocket, responseData);
+                return;
+            }
+
+            // Add the message to the response
+            response = builder
+                        .setHeader("message", "Character movement success!")
+                        .setHeader("hash", "")
+                        .setHeader("clientId", clientID)
+                        .setHeader("eventType", "moveCharacter")
+                        .setBody("characterId", characterID)
+                        .setBody("characterPosX", characterPosition.positionX)
+                        .setBody("characterPosY", characterPosition.positionY)
+                        .setBody("characterPosZ", characterPosition.positionZ)
+                        .build();
+
+            // Prepare a response message
+            std::string responseData = networkManager_.generateResponseMessage("success", response);
+
+            // Update the clientData object with the new position
+            clientData.updateCharacterPositionData(clientID, characterPosition);
+
+            // Send the response to the client
+            networkManager_.sendResponse(clientSocket, responseData);
+        }
+        else
+        {
+            std::cout << "Error with extracting data!" << std::endl;
+            // Handle the case where the data is not of type ClientDataStruct
+            // This might be logging the error, throwing another exception, etc.
+        }
+        
     }
     catch (const std::bad_variant_access &ex)
     {
@@ -108,11 +254,6 @@ void EventHandler::handleMoveEvent(const Event &event, ClientData &clientData)
         // Handle the case where the data is not of type PositionStruct
         // This might be logging the error, throwing another exception, etc.
     }
-
-    // Update the clientData object with the new position
-    clientData.updateCharacterPositionData(clientID, characterPosition);
-
-    // TODO - Send the updated object back to the game server
 }
 
 void EventHandler::handleInteractEvent(const Event &event, ClientData &clientData)
@@ -128,10 +269,13 @@ void EventHandler::dispatchEvent(const Event &event, ClientData &clientData)
     case Event::JOIN_GAME:
         handleJoinGameEvent(event, clientData);
         break;
-    case Event::MOVE:
+    case Event::GET_CONNECTED_CHARACTERS:
+        handleGetConnectedCharactersEvent(event, clientData);
+        break;
+    case Event::CHARACTER_MOVEMENT:
         handleMoveEvent(event, clientData);
         break;
-    case Event::INTERACT:
+    case Event::CHARACTER_INTERACT:
         handleInteractEvent(event, clientData);
         break;
         // Other cases...

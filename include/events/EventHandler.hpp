@@ -12,6 +12,7 @@ public:
 
 private:
     void handleJoinGameEvent(const Event& event, ClientData& clientData);
+    void handleGetConnectedCharactersEvent(const Event &event, ClientData &clientData);
     void handleMoveEvent(const Event& event, ClientData& clientData);
     void handleInteractEvent(const Event& event, ClientData& clientData);
 

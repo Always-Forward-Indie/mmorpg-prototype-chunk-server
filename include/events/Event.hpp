@@ -11,14 +11,16 @@ using EventData = std::variant<int, float, std::string, PositionStruct, Characte
 
 class Event {
 public:
-    enum EventType { JOIN_GAME, MOVE, INTERACT }; // Define more event types as needed
+    enum EventType { JOIN_GAME, GET_CONNECTED_CHARACTERS, CHARACTER_MOVEMENT, CHARACTER_INTERACT }; // Define more event types as needed
     Event() = default; // Default constructor
-    Event(EventType type, int clientID, const EventData data, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket);
+    Event(EventType type, int clientID, int characterID, const EventData data, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket);
 
     // Get Event Data
     const EventData getData() const;
     // Get Client ID
     int getClientID() const;
+    // Get Character ID
+    int getCharacterID() const;
     // Get Client Socket
     std::shared_ptr<boost::asio::ip::tcp::socket> getClientSocket() const;
     //Get Event Type
@@ -26,6 +28,7 @@ public:
 
 private:
     int clientID;
+    int characterID;
     EventType type;
     EventData eventData;
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket;

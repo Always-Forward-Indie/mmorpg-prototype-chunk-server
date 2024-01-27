@@ -1,7 +1,7 @@
 #include "events/Event.hpp"
 
-Event::Event(EventType type, int clientID, const EventData data, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket)
-    : type(type), clientID(clientID), eventData(data), clientSocket(clientSocket)
+Event::Event(EventType type, int clientID, int characterID, const EventData data, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket)
+    : type(type), clientID(clientID), characterID(characterID), eventData(data), clientSocket(clientSocket)
 {
 }
 
@@ -9,6 +9,12 @@ Event::Event(EventType type, int clientID, const EventData data, std::shared_ptr
 int Event::getClientID() const
 {
     return clientID;
+}
+
+// Getter for characterID
+int Event::getCharacterID() const
+{
+    return characterID;
 }
 
 // Getter for data
