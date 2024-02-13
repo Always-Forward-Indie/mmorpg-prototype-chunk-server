@@ -1,13 +1,24 @@
 #include "utils/Config.hpp"
+#include <filesystem> // Include the filesystem header
+namespace fs = std::filesystem; // Alias for the filesystem namespace
 
     std::tuple<ChunkServerConfig> Config::parseConfig(const std::string& configFile) {
     ChunkServerConfig CSConfig;
 
+    // Get the current working directory
+    fs::path currentPath = fs::current_path();
+
+    // Construct the full path to the config.json file relative to the current directory
+    fs::path configPath = currentPath / configFile;
+
+    // Convert the full path to a string
+    std::string configPathStr = configPath.string();
+
     try {
         // Open the JSON configuration file
-        std::ifstream ifs(configFile);
+        std::ifstream ifs(configPathStr);
         if (!ifs.is_open()) {
-            throw std::runtime_error("Failed to open configuration file: " + configFile);
+            throw std::runtime_error("Failed to open configuration file: " + configPathStr);
         }
 
         // Parse the JSON data

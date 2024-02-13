@@ -11,7 +11,7 @@ int main() {
         // Initialize Logger
         Logger logger;
         // Get configs for connections to servers from config.json
-        auto configs = config.parseConfig("/home/shardanov/mmorpg-prototype-chunk-server/build/config.json");
+        auto configs = config.parseConfig("config.json");
 
         // Initialize EventQueue
         EventQueue eventQueue;
