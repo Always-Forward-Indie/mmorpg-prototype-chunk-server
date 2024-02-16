@@ -7,7 +7,7 @@
 
 class EventHandler {
 public:
-  EventHandler(NetworkManager& networkManager);
+  EventHandler(NetworkManager& networkManager, Logger& logger);
   void dispatchEvent(const Event& event, ClientData& clientData);
 
 private:
@@ -15,7 +15,9 @@ private:
     void handleGetConnectedCharactersEvent(const Event &event, ClientData &clientData);
     void handleMoveEvent(const Event& event, ClientData& clientData);
     void handleInteractEvent(const Event& event, ClientData& clientData);
+    void handleDisconnectClientEvent(const Event& event, ClientData& clientData);
+    void handlePingClientEvent(const Event& event, ClientData& clientData);
 
     NetworkManager& networkManager_;
-    // Other private handler methods
+    Logger& logger_;
 };

@@ -1,12 +1,14 @@
 #include "events/EventHandler.hpp"
 #include "events/Event.hpp"
 
-EventHandler::EventHandler(NetworkManager &networkManager)
-    : networkManager_(networkManager)
+EventHandler::EventHandler(NetworkManager &networkManager, Logger &logger)
+    : networkManager_(networkManager),
+          logger_(logger)
 {
 }
 
-//TODO - Use Logger to log instead of std::cout
+//TODO review getClientSocket - do we need it or we could use clientData to get it?
+//TODO review also getData and getClientID - do we need it or we could use clientData to get it?
 
 void EventHandler::handleJoinGameEvent(const Event &event, ClientData &clientData)
 {
@@ -256,6 +258,89 @@ void EventHandler::handleMoveEvent(const Event &event, ClientData &clientData)
     }
 }
 
+// disconnect the client
+void EventHandler::handleDisconnectClientEvent(const Event &event, ClientData &clientData)
+{
+    // Here we will disconnect the client
+    const auto data = event.getData();
+
+    // Extract init data
+    try
+    {
+        // Try to extract the data
+        if (std::holds_alternative<ClientDataStruct>(data))
+        {
+            ClientDataStruct passedClientData = std::get<ClientDataStruct>(data);
+            std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getClientSocket();
+
+            // Remove the client data
+            clientData.removeClientData(passedClientData.clientId);
+
+            //send the response to all clients
+            nlohmann::json response;
+            ResponseBuilder builder;
+            response = builder
+                           .setHeader("message", "Client disconnected!")
+                           .setHeader("hash", "")
+                           .setHeader("clientId", passedClientData.clientId)
+                           .setHeader("eventType", "disconnectClient")
+                           .setBody("", "")
+                           .build();
+            std::string responseData = networkManager_.generateResponseMessage("success", response);
+
+            // Send the response to the client
+            networkManager_.sendResponse(clientSocket, responseData);
+        }
+        else
+        {
+            logger_.log("Error with extracting data!");
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        logger_.log("Error here:" + std::string(ex.what()));
+    }
+}
+
+// ping the client
+void EventHandler::handlePingClientEvent(const Event &event, ClientData &clientData)
+{
+    // Here we will ping the client
+    const auto data = event.getData();
+
+    // Extract init data
+    try
+    {
+        // Try to extract the data
+        if (std::holds_alternative<ClientDataStruct>(data))
+        {
+            ClientDataStruct passedClientData = std::get<ClientDataStruct>(data);
+            std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getClientSocket();
+
+            //send the response to all clients
+            nlohmann::json response;
+            ResponseBuilder builder;
+            response = builder
+                           .setHeader("message", "Pong!")
+                           .setHeader("eventType", "pingClient")
+                           .setBody("", "")
+                           .build();
+            std::string responseData = networkManager_.generateResponseMessage("success", response);
+
+            // Send the response to the client
+            networkManager_.sendResponse(clientSocket, responseData);
+        }
+        else
+        {
+            logger_.log("Error with extracting data!");
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        logger_.log("Error here:" + std::string(ex.what()));
+    }
+}
+
 void EventHandler::handleInteractEvent(const Event &event, ClientData &clientData)
 {
     // Here we will update the interaction of the character in the object and send it back to the game server
@@ -278,6 +363,11 @@ void EventHandler::dispatchEvent(const Event &event, ClientData &clientData)
     case Event::CHARACTER_INTERACT:
         handleInteractEvent(event, clientData);
         break;
-        // Other cases...
+    case Event::DISCONNECT_CLIENT:
+        handleDisconnectClientEvent(event, clientData);
+        break;
+    case Event::PING_CLIENT:
+        handlePingClientEvent(event, clientData);
+        break;
     }
 }

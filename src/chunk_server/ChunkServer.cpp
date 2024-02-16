@@ -5,7 +5,7 @@ ChunkServer::ChunkServer(EventQueue& eventQueue, NetworkManager& networkManager,
       clientData_(),
       logger_(logger),
       eventQueue_(eventQueue),
-      eventHandler_(networkManager)
+      eventHandler_(networkManager, logger)
 {
     // Start accepting new connections from Game Server as Client
     networkManager_.startAccept();
@@ -29,4 +29,12 @@ void ChunkServer::startMainEventLoop()
 {
     // Start the main event loop in a new thread
     event_thread_ = std::thread(&ChunkServer::mainEventLoop, this);
+}
+
+// destructor
+ChunkServer::~ChunkServer()
+{
+    logger_.log("Shutting down Chunk server...", YELLOW);
+    // Stop the main event loop
+    event_thread_.join();
 }

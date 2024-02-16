@@ -1,4 +1,4 @@
-#include "chunk_server/CharacterManager.hpp"
+#include "services/CharacterManager.hpp"
 #include <pqxx/pqxx>
 #include <iostream>
 #include <vector>

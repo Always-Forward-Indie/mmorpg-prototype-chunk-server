@@ -15,6 +15,7 @@ public:
     void updateCharacterPositionData(const int &clientID, const PositionStruct &positionData);
     const ClientDataStruct *getClientData(const int &clientID) const;
     std::unordered_map<int, ClientDataStruct> getClientsDataMap() const;
+    void removeClientData(const int &clientID);
 
 private:
     std::unordered_map<int, ClientDataStruct> clientDataMap_;

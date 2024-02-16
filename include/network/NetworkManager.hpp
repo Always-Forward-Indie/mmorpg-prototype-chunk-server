@@ -12,12 +12,11 @@
 class NetworkManager {
 public:
     NetworkManager(EventQueue& eventQueue, std::tuple<ChunkServerConfig> &configs, Logger &logger);
+    ~NetworkManager();
     void startAccept();
     void startIOEventLoop();
     void sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::string& responseString);
     std::string generateResponseMessage(const std::string &status, const nlohmann::json &message);
-
-    // Other networking methods as needed...
 
 private:
     static constexpr size_t max_length = 1024; // Define the appropriate value
@@ -27,6 +26,7 @@ private:
 
     boost::asio::io_context io_context_;
     boost::asio::ip::tcp::acceptor acceptor_;
+    std::thread networkManagerThread_;
     std::tuple<ChunkServerConfig>& configs_;
     EventQueue& eventQueue_;
     Logger& logger_;

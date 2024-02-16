@@ -1,8 +1,17 @@
 #include <iostream>
+#include <csignal>
+#include <atomic>
 #include "utils/Config.hpp"
 #include "utils/Logger.hpp"
 #include "chunk_server/ChunkServer.hpp"
 #include "network/NetworkManager.hpp"
+
+std::atomic<bool> running(true);
+
+void signalHandler(int signal) {
+    running = false;
+}
+
 
 int main() {
     try {
@@ -22,11 +31,20 @@ int main() {
         // Initialize ChunkServer
         ChunkServer chunkServer(eventQueue, networkManager, logger);
 
+        //Start the IO Networking event loop
+        networkManager.startIOEventLoop();
+
         //Start the main event loop
         chunkServer.startMainEventLoop();
 
-        //Start the IO Networking event loop
-        networkManager.startIOEventLoop();
+        //TODO fix issue where the server does not stop on Ctrl+C
+        // Temporary commented out the signal handler
+        // Register signal handler for graceful shutdown
+        // signal(SIGINT, signalHandler);
+
+        // while (running) {
+        //     std::this_thread::sleep_for(std::chrono::seconds(1));
+        // }
 
         return 0;
     } catch (const std::exception& e) {

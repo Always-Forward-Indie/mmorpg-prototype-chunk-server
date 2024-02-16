@@ -14,6 +14,7 @@
 class ChunkServer {
 public:
     ChunkServer(EventQueue& eventQueue, NetworkManager& networkManager, Logger& logger);
+    ~ChunkServer();
     void startMainEventLoop();
     
 private:

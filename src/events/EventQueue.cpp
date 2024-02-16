@@ -10,8 +10,9 @@ void EventQueue::push(const Event &event)
 bool EventQueue::pop(Event &event)
 {
     std::unique_lock<std::mutex> lock(mtx);
+    // Wait until the queue is not empty (blocking the current thread)
     cv.wait(lock, [this]
-            { return !queue.empty(); }); // Wait until the queue is not empty
+            { return !queue.empty(); });
     event = queue.front();
     queue.pop();
     return true;

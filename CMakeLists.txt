@@ -13,7 +13,7 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
 set(SOURCE_FILES
     src/main.cpp
     src/chunk_server/ChunkServer.cpp
-    src/chunk_server/CharacterManager.cpp
+    src/services/CharacterManager.cpp
     src/network/NetworkManager.cpp
     src/data/ClientData.cpp
     src/events/Event.cpp
@@ -28,7 +28,7 @@ set(SOURCE_FILES
 # Define your project's header files
 set(HEADER_FILES
     include/chunk_server/ChunkServer.hpp
-    include/chunk_server/CharacterManager.hpp
+    include/services/CharacterManager.hpp
     include/network/NetworkManager.hpp
     include/data/DataStructs.hpp
     include/data/ClientData.hpp

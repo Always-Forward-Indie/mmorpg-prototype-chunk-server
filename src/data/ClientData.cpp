@@ -84,3 +84,12 @@ const ClientDataStruct *ClientData::getClientData(const int &clientID) const
     }
     return nullptr;
 }
+
+// remove client data
+void ClientData::removeClientData(const int& id) {
+    // Assuming that clientDataMap_ is an unordered_map with the key as the hash and the value as ClientDataStruct.
+    auto it = clientDataMap_.find(id);
+    if (it != clientDataMap_.end()) {
+        clientDataMap_.erase(it);
+    }
+}

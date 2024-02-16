@@ -58,11 +58,25 @@ void NetworkManager::startAccept()
             startAccept(); });
 }
 
-void NetworkManager::startIOEventLoop()
-{
-    logger_.log("Starting Chunk Server IO Context...", YELLOW);
-    io_context_.run();
-}
+    void NetworkManager::startIOEventLoop()
+    {
+        logger_.log("Starting Chunk Server IO Context...", YELLOW);
+
+        // Start io_service in a separate thread
+        networkManagerThread_ = std::thread([this]()
+                                { io_context_.run(); });
+
+    }
+
+    NetworkManager::~NetworkManager()
+    {
+        logger_.log("Network Manager destructor is called...", RED);
+        // Close the acceptor and all client sockets
+        acceptor_.close();
+        io_context_.stop();
+        networkManagerThread_.join();
+    }
+
 
 void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::array<char, max_length> &dataBuffer, size_t bytes_transferred)
 {
@@ -111,6 +125,30 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
             // Create a new event and push it to the queue
             Event characterMovementEvent(Event::CHARACTER_MOVEMENT, clientData.clientId, characterData.characterId, positionData, clientSocket);
             eventQueue_.push(characterMovementEvent);
+        }
+
+        // Check if the type of request is disconnectClient
+        if (eventType == "disconnectClient" && message.status == "success")
+        {
+            // Set the client data
+            //characterData.characterPosition = positionData;
+            //clientData.characterData = characterData;
+
+            // Create a new event and push it to the queue
+            Event disconnectClientEvent(Event::DISCONNECT_CLIENT, clientData.clientId, characterData.characterId, clientData, clientSocket);
+            eventQueue_.push(disconnectClientEvent);
+        }
+
+        // Check if the type of request is pingClient
+        if (eventType == "pingClient" && message.status == "success")
+        {
+            // Set the client data
+            //characterData.characterPosition = positionData;
+            //clientData.characterData = characterData;
+
+            // Create a new event and push it to the queue
+            Event pingClientEvent(Event::PING_CLIENT, clientData.clientId, characterData.characterId, clientData, clientSocket);
+            eventQueue_.push(pingClientEvent);
         }
     }
     catch (const nlohmann::json::parse_error &e)
