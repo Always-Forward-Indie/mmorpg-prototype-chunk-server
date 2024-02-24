@@ -6,6 +6,7 @@ struct PositionStruct
     float positionX = 0;
     float positionY = 0;
     float positionZ = 0;
+    float rotationZ = 0;
 };
 
 struct CharacterDataStruct

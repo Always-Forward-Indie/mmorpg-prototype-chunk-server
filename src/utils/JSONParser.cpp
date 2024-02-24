@@ -98,6 +98,13 @@ PositionStruct JSONParser::parsePositionData(const std::array<char, max_length> 
         positionData.positionZ = jsonData["body"]["characterPosZ"].get<float>();
     }
 
+    if (jsonData.contains("body") &&
+    jsonData["body"].is_object() &&
+    jsonData["body"].contains("characterRotZ") &&
+    jsonData["body"]["characterRotZ"].is_number_float() || jsonData["body"]["characterRotZ"].is_number_integer()) {
+        positionData.rotationZ = jsonData["body"]["characterRotZ"].get<float>();
+    }
+
     return positionData;
 }
 

@@ -67,6 +67,7 @@ void EventHandler::handleJoinGameEvent(const Event &event, ClientData &clientDat
                            .setBody("characterPosX", initData.characterData.characterPosition.positionX)
                            .setBody("characterPosY", initData.characterData.characterPosition.positionY)
                            .setBody("characterPosZ", initData.characterData.characterPosition.positionZ)
+                           .setBody("characterRotZ", initData.characterData.characterPosition.rotationZ)
                            .build();
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
@@ -147,6 +148,7 @@ void EventHandler::handleGetConnectedCharactersEvent(const Event &event, ClientD
                     {"characterPosX", clientDataItem.second.characterData.characterPosition.positionX},
                     {"characterPosY", clientDataItem.second.characterData.characterPosition.positionY},
                     {"characterPosZ", clientDataItem.second.characterData.characterPosition.positionZ},
+                    {"characterRotZ", clientDataItem.second.characterData.characterPosition.rotationZ}
                 });
             }
 
@@ -231,6 +233,7 @@ void EventHandler::handleMoveEvent(const Event &event, ClientData &clientData)
                         .setBody("characterPosX", characterPosition.positionX)
                         .setBody("characterPosY", characterPosition.positionY)
                         .setBody("characterPosZ", characterPosition.positionZ)
+                        .setBody("characterRotZ", characterPosition.rotationZ)
                         .build();
 
             // Prepare a response message
