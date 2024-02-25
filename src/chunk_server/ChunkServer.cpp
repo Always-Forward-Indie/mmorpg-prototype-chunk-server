@@ -13,15 +13,32 @@ ChunkServer::ChunkServer(EventQueue& eventQueue, NetworkManager& networkManager,
 
 void ChunkServer::mainEventLoop() {
     logger_.log("Starting Main Event Loop...", YELLOW);
+    constexpr int BATCH_SIZE = 10; // Process up to 10 events at a time
 
     while (true) {
-        Event event;
-        if (eventQueue_.pop(event)) {
-            eventHandler_.dispatchEvent(event, clientData_);
+        // Event event;
+        // if (eventQueue_.pop(event)) {
+        //     eventHandler_.dispatchEvent(event, clientData_);
+        // }
+
+        std::vector<Event> eventsBatch;
+        if (eventQueue_.popBatch(eventsBatch, BATCH_SIZE)) {
+            processBatch(eventsBatch);
         }
 
         // Optionally include a small delay or yield to prevent the loop from consuming too much CPU
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+// Implement asynchronous processing of event batches
+void ChunkServer::processBatch(const std::vector<Event>& eventsBatch) {
+    // Asynchronously process events in the batch
+    for (const auto& event : eventsBatch) {
+        // Asynchronously process each event using std::async or std::thread
+        std::async(std::launch::async | std::launch::deferred, [&]() {
+            eventHandler_.dispatchEvent(event, clientData_);
+        });
     }
 }
 

@@ -90,6 +90,11 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
         CharacterDataStruct characterData = jsonParser_.parseCharacterData(dataBuffer, bytes_transferred);
         PositionStruct positionData = jsonParser_.parsePositionData(dataBuffer, bytes_transferred);
         MessageStruct message = jsonParser_.parseMessage(dataBuffer, bytes_transferred);
+        // Create a new events batch
+        std::vector<Event> eventsBatch;
+
+        // Define a constant for the batch size
+        constexpr int BATCH_SIZE = 10;
 
         // Check if the type of request is joinGame
         if (eventType == "joinGame" && message.status == "success")
@@ -100,7 +105,17 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
 
             // Create a new event and push it to the queue
             Event joinGameEvent(Event::JOIN_GAME, clientData.clientId, characterData.characterId, clientData, clientSocket);
-            eventQueue_.push(joinGameEvent);
+            //eventQueue_.push(joinGameEvent);
+
+            // Add the event to the current batch
+            eventsBatch.push_back(joinGameEvent);
+
+            // If the batch size has been reached, push the batch to the event queue
+            if (eventsBatch.size() >= BATCH_SIZE) {
+                eventQueue_.pushBatch(eventsBatch);
+                // Clear the batch for the next set of events
+                eventsBatch.clear();
+            }
         }
 
         // Check if the type of request is getConnectedCharacters
@@ -112,7 +127,17 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
 
             // Create a new event and push it to the queue
             Event getConnectedCharactersEvent(Event::GET_CONNECTED_CHARACTERS, clientData.clientId, characterData.characterId, clientData, clientSocket);
-            eventQueue_.push(getConnectedCharactersEvent);
+            //eventQueue_.push(getConnectedCharactersEvent);
+
+            // Add the event to the current batch
+            eventsBatch.push_back(getConnectedCharactersEvent);
+
+            // If the batch size has been reached, push the batch to the event queue
+            if (eventsBatch.size() >= BATCH_SIZE) {
+                eventQueue_.pushBatch(eventsBatch);
+                // Clear the batch for the next set of events
+                eventsBatch.clear();
+            }
         }
 
         // Check if the type of request is moveCharacter
@@ -124,7 +149,17 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
 
             // Create a new event and push it to the queue
             Event characterMovementEvent(Event::CHARACTER_MOVEMENT, clientData.clientId, characterData.characterId, positionData, clientSocket);
-            eventQueue_.push(characterMovementEvent);
+            //eventQueue_.push(characterMovementEvent);
+
+            // Add the event to the current batch
+            eventsBatch.push_back(characterMovementEvent);
+
+            // If the batch size has been reached, push the batch to the event queue
+            if (eventsBatch.size() >= BATCH_SIZE) {
+                eventQueue_.pushBatch(eventsBatch);
+                // Clear the batch for the next set of events
+                eventsBatch.clear();
+            }
         }
 
         // Check if the type of request is disconnectClient
@@ -136,7 +171,17 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
 
             // Create a new event and push it to the queue
             Event disconnectClientEvent(Event::DISCONNECT_CLIENT, clientData.clientId, characterData.characterId, clientData, clientSocket);
-            eventQueue_.push(disconnectClientEvent);
+           // eventQueue_.push(disconnectClientEvent);
+
+            // Add the event to the current batch
+            eventsBatch.push_back(disconnectClientEvent);
+
+            // If the batch size has been reached, push the batch to the event queue
+            if (eventsBatch.size() >= BATCH_SIZE) {
+                eventQueue_.pushBatch(eventsBatch);
+                // Clear the batch for the next set of events
+                eventsBatch.clear();
+            }
         }
 
         // Check if the type of request is pingClient
@@ -148,7 +193,24 @@ void NetworkManager::handleClientData(std::shared_ptr<boost::asio::ip::tcp::sock
 
             // Create a new event and push it to the queue
             Event pingClientEvent(Event::PING_CLIENT, clientData.clientId, characterData.characterId, clientData, clientSocket);
-            eventQueue_.push(pingClientEvent);
+
+            //eventQueue_.push(pingClientEvent);
+
+            // Add the event to the current batch
+            eventsBatch.push_back(pingClientEvent);
+
+            // If the batch size has been reached, push the batch to the event queue
+            if (eventsBatch.size() >= BATCH_SIZE) {
+                eventQueue_.pushBatch(eventsBatch);
+                // Clear the batch for the next set of events
+                eventsBatch.clear();
+            }
+        }
+
+
+        // Push any remaining events in the batch to the event queue
+        if (!eventsBatch.empty()) {
+            eventQueue_.pushBatch(eventsBatch);
         }
     }
     catch (const nlohmann::json::parse_error &e)

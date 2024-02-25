@@ -15,8 +15,11 @@ class ChunkServer {
 public:
     ChunkServer(EventQueue& eventQueue, NetworkManager& networkManager, Logger& logger);
     ~ChunkServer();
+
     void startMainEventLoop();
-    
+
+    void processBatch(const std::vector<Event> &eventsBatch);
+
 private:
     //Events
     void mainEventLoop();

@@ -9,6 +9,9 @@ public:
     void push(const Event& event);
     bool pop(Event& event);
 
+    void pushBatch(const std::vector<Event> &events);
+    bool popBatch(std::vector<Event> &events, int batchSize);
+
 private:
     std::queue<Event> queue;
     std::mutex mtx;
