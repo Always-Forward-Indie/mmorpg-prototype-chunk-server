@@ -79,30 +79,30 @@ PositionStruct JSONParser::parsePositionData(const std::array<char, max_length> 
     // ... parse jsonData to PositionData ...
     if (jsonData.contains("body") && 
     jsonData["body"].is_object() && 
-    jsonData["body"].contains("characterPosX") && 
-    jsonData["body"]["characterPosX"].is_number_float() || jsonData["body"]["characterPosX"].is_number_integer()) {
-        positionData.positionX = jsonData["body"]["characterPosX"].get<float>();
+    jsonData["body"].contains("posX") && 
+    jsonData["body"]["posX"].is_number_float() || jsonData["body"]["posX"].is_number_integer()) {
+        positionData.positionX = jsonData["body"]["posX"].get<float>();
     }
 
     if (jsonData.contains("body") && 
     jsonData["body"].is_object() && 
-    jsonData["body"].contains("characterPosY") && 
-    jsonData["body"]["characterPosY"].is_number_float() || jsonData["body"]["characterPosY"].is_number_integer()) {
-        positionData.positionY = jsonData["body"]["characterPosY"].get<float>();
+    jsonData["body"].contains("posY") && 
+    jsonData["body"]["posY"].is_number_float() || jsonData["body"]["posY"].is_number_integer()) {
+        positionData.positionY = jsonData["body"]["posY"].get<float>();
     }
 
     if (jsonData.contains("body") && 
     jsonData["body"].is_object() && 
-    jsonData["body"].contains("characterPosZ") && 
-    jsonData["body"]["characterPosZ"].is_number_float() || jsonData["body"]["characterPosZ"].is_number_integer()) {
-        positionData.positionZ = jsonData["body"]["characterPosZ"].get<float>();
+    jsonData["body"].contains("posZ") && 
+    jsonData["body"]["posZ"].is_number_float() || jsonData["body"]["posZ"].is_number_integer()) {
+        positionData.positionZ = jsonData["body"]["posZ"].get<float>();
     }
 
     if (jsonData.contains("body") &&
     jsonData["body"].is_object() &&
-    jsonData["body"].contains("characterRotZ") &&
-    jsonData["body"]["characterRotZ"].is_number_float() || jsonData["body"]["characterRotZ"].is_number_integer()) {
-        positionData.rotationZ = jsonData["body"]["characterRotZ"].get<float>();
+    jsonData["body"].contains("rotZ") &&
+    jsonData["body"]["rotZ"].is_number_float() || jsonData["body"]["rotZ"].is_number_integer()) {
+        positionData.rotationZ = jsonData["body"]["rotZ"].get<float>();
     }
 
     return positionData;

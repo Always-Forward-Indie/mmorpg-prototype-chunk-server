@@ -64,10 +64,10 @@ void EventHandler::handleJoinGameEvent(const Event &event, ClientData &clientDat
                            .setBody("characterExp", initData.characterData.characterExperiencePoints)
                            .setBody("characterCurrentHealth", initData.characterData.characterCurrentHealth)
                            .setBody("characterCurrentMana", initData.characterData.characterCurrentMana)
-                           .setBody("characterPosX", initData.characterData.characterPosition.positionX)
-                           .setBody("characterPosY", initData.characterData.characterPosition.positionY)
-                           .setBody("characterPosZ", initData.characterData.characterPosition.positionZ)
-                           .setBody("characterRotZ", initData.characterData.characterPosition.rotationZ)
+                           .setBody("posX", initData.characterData.characterPosition.positionX)
+                           .setBody("posY", initData.characterData.characterPosition.positionY)
+                           .setBody("posZ", initData.characterData.characterPosition.positionZ)
+                           .setBody("rotZ", initData.characterData.characterPosition.rotationZ)
                            .build();
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
@@ -145,10 +145,10 @@ void EventHandler::handleGetConnectedCharactersEvent(const Event &event, ClientD
                     {"characterExp", clientDataItem.second.characterData.characterExperiencePoints},
                     {"characterCurrentHealth", clientDataItem.second.characterData.characterCurrentHealth},
                     {"characterCurrentMana", clientDataItem.second.characterData.characterCurrentMana},
-                    {"characterPosX", clientDataItem.second.characterData.characterPosition.positionX},
-                    {"characterPosY", clientDataItem.second.characterData.characterPosition.positionY},
-                    {"characterPosZ", clientDataItem.second.characterData.characterPosition.positionZ},
-                    {"characterRotZ", clientDataItem.second.characterData.characterPosition.rotationZ}
+                    {"posX", clientDataItem.second.characterData.characterPosition.positionX},
+                    {"posY", clientDataItem.second.characterData.characterPosition.positionY},
+                    {"posZ", clientDataItem.second.characterData.characterPosition.positionZ},
+                    {"rotZ", clientDataItem.second.characterData.characterPosition.rotationZ}
                 });
             }
 
@@ -230,10 +230,10 @@ void EventHandler::handleMoveEvent(const Event &event, ClientData &clientData)
                         .setHeader("clientId", clientID)
                         .setHeader("eventType", "moveCharacter")
                         .setBody("characterId", characterID)
-                        .setBody("characterPosX", characterPosition.positionX)
-                        .setBody("characterPosY", characterPosition.positionY)
-                        .setBody("characterPosZ", characterPosition.positionZ)
-                        .setBody("characterRotZ", characterPosition.rotationZ)
+                        .setBody("posX", characterPosition.positionX)
+                        .setBody("posY", characterPosition.positionY)
+                        .setBody("posZ", characterPosition.positionZ)
+                        .setBody("rotZ", characterPosition.rotationZ)
                         .build();
 
             // Prepare a response message
