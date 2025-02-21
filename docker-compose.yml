@@ -1,0 +1,19 @@
+services:
+  chunk-server:
+    build: .
+    ports:
+      - "27017:27017"
+    volumes:
+      - /usr/src/app/build
+    environment:
+      - ENV=development
+    #restart: unless-stopped
+    security_opt:
+      - seccomp=unconfined
+    command: ["/usr/src/app/MMOChunkServer"]
+    networks:
+      - mmo_network
+
+networks:
+  mmo_network:
+    external: true

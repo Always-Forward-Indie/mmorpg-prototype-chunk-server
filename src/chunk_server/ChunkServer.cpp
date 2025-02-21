@@ -33,12 +33,16 @@ void ChunkServer::mainEventLoop() {
 
 // Implement asynchronous processing of event batches
 void ChunkServer::processBatch(const std::vector<Event>& eventsBatch) {
-    // Asynchronously process events in the batch
+    std::vector<std::future<void>> futures;
+
     for (const auto& event : eventsBatch) {
-        // Asynchronously process each event using std::async or std::thread
-        std::async(std::launch::async | std::launch::deferred, [&]() {
+        futures.push_back(std::async(std::launch::async | std::launch::deferred, [&]() {
             eventHandler_.dispatchEvent(event, clientData_);
-        });
+        }));
+    }
+
+    for (auto& future : futures) {
+        future.get();
     }
 }
 

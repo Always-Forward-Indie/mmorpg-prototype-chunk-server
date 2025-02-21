@@ -3,3 +3,12 @@ Build project using cmake and terminal
 cd build
 cmake ..
 make
+
+#Docker Commands:
+
+docker-compose down
+docker-compose build --no-cache
+docker-compose up
+
+#Copy include lib files from container to local project
+bash copy_includes.sh

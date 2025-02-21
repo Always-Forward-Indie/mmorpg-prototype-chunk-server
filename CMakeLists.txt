@@ -4,7 +4,9 @@ project(MMOChunkServer)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
-# Set compiler flags for debug mode (need to remove when compiling for production)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Set compiler flags for debug mode (remove when compiling for production)
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
@@ -47,7 +49,12 @@ set(HEADER_FILES
 # Include directories for your project's headers
 include_directories(include)
 
+# Ensure libpqxx is correctly detected
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(libpqxx REQUIRED IMPORTED_TARGET libpqxx)
+
 # Create the executable
 add_executable(${PROJECT_NAME} ${SOURCE_FILES} ${HEADER_FILES})
-target_link_libraries(${PROJECT_NAME} pqxx)
-target_link_libraries(${PROJECT_NAME} pq)
+
+# Link against libpqxx and PostgreSQL
+target_link_libraries(${PROJECT_NAME} PkgConfig::libpqxx pq)
