@@ -1,19 +1,22 @@
 #pragma once
+
 #include <nlohmann/json.hpp>
-#include <array>
 #include "data/DataStructs.hpp"
 
-class JSONParser
-{
-private:
-    static constexpr size_t max_length = 1024;
-
+class JSONParser {
 public:
     JSONParser();
-    
-    CharacterDataStruct parseCharacterData(const std::array<char, max_length> &dataBuffer, size_t bytes_transferred);
-    PositionStruct parsePositionData(const std::array<char, max_length> &dataBuffer, size_t bytes_transferred);
-    ClientDataStruct parseClientData(const std::array<char, max_length> &dataBuffer, size_t bytes_transferred);
-    MessageStruct parseMessage(const std::array<char, max_length> &dataBuffer, size_t bytes_transferred);
-    std::string parseEventType(const std::array<char, max_length> &dataBuffer, size_t bytes_transferred);
+    ~JSONParser();
+
+    CharacterDataStruct parseCharacterData(const char* data, size_t length);
+    PositionStruct parsePositionData(const char* data, size_t length);
+    ClientDataStruct parseClientData(const char* data, size_t length);
+    MessageStruct parseMessage(const char* data, size_t length);
+    std::string parseEventType(const char* data, size_t length);
+    ChunkInfoStruct parseChunkInfo(const char *data, size_t length);
+    std::vector<SpawnZoneStruct> parseSpawnZonesList(const char *data, size_t length);
+    std::vector<MobDataStruct> parseMobsList(const char *data, size_t length);
+    std::vector<MobAttributeStruct> parseMobsAttributesList(const char *data, size_t length);
+    std::vector<CharacterAttributeStruct> parseCharacterAttributesList(const char *data, size_t length);
+    std::vector<CharacterDataStruct> parseCharactersList(const char *data, size_t length);
 };

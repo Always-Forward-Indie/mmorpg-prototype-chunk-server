@@ -2,7 +2,8 @@
 #include <filesystem> // Include the filesystem header
 namespace fs = std::filesystem; // Alias for the filesystem namespace
 
-    std::tuple<ChunkServerConfig> Config::parseConfig(const std::string& configFile) {
+    std::tuple<GameServerConfig, ChunkServerConfig> Config::parseConfig(const std::string& configFile) {
+    GameServerConfig GSConfig;
     ChunkServerConfig CSConfig;
 
     // Get the current working directory
@@ -25,6 +26,11 @@ namespace fs = std::filesystem; // Alias for the filesystem namespace
         nlohmann::json root;
         ifs >> root;
 
+        // Extract Game server connection details
+        GSConfig.host = root["game_server"]["host"].get<std::string>();
+        GSConfig.port = root["game_server"]["port"].get<short>();
+        GSConfig.max_clients = root["game_server"]["max_clients"].get<short>();
+
         // Extract Chunk server connection details
         CSConfig.host = root["chunk_server"]["host"].get<std::string>();
         CSConfig.port = root["chunk_server"]["port"].get<short>();
@@ -37,5 +43,5 @@ namespace fs = std::filesystem; // Alias for the filesystem namespace
     }
 
     // Construct and return the tuple with the extracted values
-    return std::make_tuple(CSConfig);
+    return std::make_tuple(GSConfig, CSConfig);
 }

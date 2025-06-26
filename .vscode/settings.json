@@ -89,6 +89,14 @@
         "valarray": "cpp",
         "variant": "cpp",
         "pqxx": "cpp",
-        "connection": "cpp"
+        "connection": "cpp",
+        "socket": "cpp",
+        "buffer": "cpp",
+        "executor": "cpp",
+        "internet": "cpp",
+        "io_context": "cpp",
+        "netfwd": "cpp",
+        "timer": "cpp",
+        "queue": "cpp"
     }
 }

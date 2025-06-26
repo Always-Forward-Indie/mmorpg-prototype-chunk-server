@@ -1,5 +1,4 @@
-{
-    "game_server": {
+{   "game_server": {
         "host": "game-server",
         "port": 27016,
         "max_clients": 3000

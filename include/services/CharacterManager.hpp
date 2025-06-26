@@ -1,19 +1,46 @@
+#pragma once
+
 #include <iostream>
 #include <vector>
-#include <data/ClientData.hpp>
+#include "data/DataStructs.hpp"
+#include <utils/Logger.hpp>
+#include <shared_mutex>
 
 class CharacterManager {
 public:
     // Constructor
-    CharacterManager();
+    CharacterManager(Logger& logger);
 
-    // Method to get a character
-    CharacterDataStruct getCharacterData(ClientData& clientData, int accountId, int characterId);
-    // Method to get a character position
-    PositionStruct getCharacterPosition(ClientData& clientData, int accountId, int characterId);
+    // Load characters list
+    void loadCharactersList(std::vector<CharacterDataStruct> charactersList);
 
-    //update character position in object
-    void setCharacterPosition(ClientData& clientData, int accountId, PositionStruct &position);
-    //update character data in object
-    void setCharacterData(ClientData& clientData, int accountId, CharacterDataStruct &characterData);
+    // Load character data
+    void loadCharacterData(CharacterDataStruct characterData);
+
+    // Load character Attributes
+    void loadCharacterAttributes(std::vector<CharacterAttributeStruct> characterAttributes);
+
+    // set character position
+    void setCharacterPosition(int characterID, PositionStruct position);
+
+    // Get characters list
+    std::vector<CharacterDataStruct> getCharactersList();
+
+    // Get basic character data by character ID
+    CharacterDataStruct getCharacterData(int characterID);
+
+    // Get character attributes by character ID
+    std::vector<CharacterAttributeStruct> getCharacterAttributes(int characterID);
+
+    // Get character position by character ID
+    PositionStruct getCharacterPosition(int characterID);
+
+
+private:
+    Logger& logger_;
+    // characters list
+    std::vector<CharacterDataStruct> charactersList_;
+
+    // Mutex for the characters list
+    mutable std::shared_mutex mutex_;
 };

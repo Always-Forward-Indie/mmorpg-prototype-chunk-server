@@ -4,13 +4,12 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - /usr/src/app/build
+      - ./src:/usr/src/app/src  # ✅ Mount only the `src` folder
+      - ./include:/usr/src/app/include  # ✅ Mount only the `include` folder
     environment:
       - ENV=development
-    #restart: unless-stopped
     security_opt:
       - seccomp=unconfined
-    command: ["/usr/src/app/MMOChunkServer"]
     networks:
       - mmo_network
 
