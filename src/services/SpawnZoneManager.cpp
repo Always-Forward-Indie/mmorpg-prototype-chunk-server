@@ -1,19 +1,18 @@
 #include "services/SpawnZoneManager.hpp"
-#include <algorithm>
 #include "utils/TimeUtils.hpp"
+#include <algorithm>
 
 SpawnZoneManager::SpawnZoneManager(
-    MobManager &mobManager, 
-    Logger &logger
-): mobManager_(mobManager),
-    logger_(logger)
+    MobManager &mobManager,
+    Logger &logger) : mobManager_(mobManager),
+                      logger_(logger)
 {
 }
 
-void SpawnZoneManager::loadMobSpawnZones(
-    //array for the spawn zones
-    std::vector<SpawnZoneStruct> selectSpawnZones
-)
+void
+SpawnZoneManager::loadMobSpawnZones(
+    // array for the spawn zones
+    std::vector<SpawnZoneStruct> selectSpawnZones)
 {
     try
     {
@@ -49,10 +48,10 @@ void SpawnZoneManager::loadMobSpawnZones(
 }
 
 // load mobs in the spawn zones
-void SpawnZoneManager::loadMobsInSpawnZones(
-    //array for the mobs
-    std::vector<MobDataStruct> selectMobs
-)
+void
+SpawnZoneManager::loadMobsInSpawnZones(
+    // array for the mobs
+    std::vector<MobDataStruct> selectMobs)
 {
     try
     {
@@ -63,7 +62,7 @@ void SpawnZoneManager::loadMobsInSpawnZones(
         }
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
-        //set the mobs to mobSpawnZones_
+        // set the mobs to mobSpawnZones_
         for (const auto &row : selectMobs)
         {
             MobDataStruct mobData;
@@ -78,7 +77,6 @@ void SpawnZoneManager::loadMobsInSpawnZones(
 
             mobSpawnZones_[mobData.zoneId].spawnedMobsList.push_back(mobData);
         }
-
     }
     catch (const std::exception &e)
     {
@@ -86,16 +84,17 @@ void SpawnZoneManager::loadMobsInSpawnZones(
     }
 }
 
-
 // get all spawn zones
-std::map<int, SpawnZoneStruct> SpawnZoneManager::getMobSpawnZones()
+std::map<int, SpawnZoneStruct>
+SpawnZoneManager::getMobSpawnZones()
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     return mobSpawnZones_;
 }
 
 // get spawn zone by id
-SpawnZoneStruct SpawnZoneManager::getMobSpawnZoneByID(int zoneId)
+SpawnZoneStruct
+SpawnZoneManager::getMobSpawnZoneByID(int zoneId)
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     auto zone = mobSpawnZones_.find(zoneId);
@@ -110,7 +109,8 @@ SpawnZoneStruct SpawnZoneManager::getMobSpawnZoneByID(int zoneId)
 }
 
 // get mobs in the zone
-std::vector<MobDataStruct> SpawnZoneManager::getMobsInZone(int zoneId)
+std::vector<MobDataStruct>
+SpawnZoneManager::getMobsInZone(int zoneId)
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     auto zone = mobSpawnZones_.find(zoneId);
@@ -125,9 +125,20 @@ std::vector<MobDataStruct> SpawnZoneManager::getMobsInZone(int zoneId)
 }
 
 // spawn count of mobs in spawn zone wiht random position in zone
-std::vector<MobDataStruct> SpawnZoneManager::spawnMobsInZone(int zoneId)
+std::vector<MobDataStruct>
+SpawnZoneManager::spawnMobsInZone(int zoneId)
 {
     std::vector<MobDataStruct> mobs;
+
+    // debug list of all spawn zones
+    {
+        std::shared_lock<std::shared_mutex> readLock(mutex_);
+        logger_.log("Current spawn zones in GS:");
+        for (const auto &zone : mobSpawnZones_)
+        {
+            logger_.log("Zone ID: " + std::to_string(zone.first) + ", Name: " + zone.second.zoneName);
+        }
+    }
 
     {
         std::shared_lock<std::shared_mutex> readLock(mutex_);
@@ -196,7 +207,8 @@ std::vector<MobDataStruct> SpawnZoneManager::spawnMobsInZone(int zoneId)
 }
 
 // // random movement of mobs in the zone
-void SpawnZoneManager::moveMobsInZone(int zoneId)
+void
+SpawnZoneManager::moveMobsInZone(int zoneId)
 {
     {
         std::shared_lock<std::shared_mutex> readLock(mutex_);
@@ -292,7 +304,7 @@ void SpawnZoneManager::moveMobsInZone(int zoneId)
             if (atBorder)
             {
                 float angleToCenter = atan2(zone->second.posY - mob.position.positionY,
-                                            zone->second.posX - mob.position.positionX);
+                    zone->second.posX - mob.position.positionX);
                 newAngle = angleToCenter + (randBorderAngle(rng) * (M_PI / 180.0f));
             }
 
@@ -372,7 +384,8 @@ void SpawnZoneManager::moveMobsInZone(int zoneId)
 }
 
 // detect that the mob is dead and decrease spawnedMobs
-void SpawnZoneManager::mobDied(int zoneId, std::string mobUID)
+void
+SpawnZoneManager::mobDied(int zoneId, std::string mobUID)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto zone = mobSpawnZones_.find(zoneId);
@@ -386,7 +399,8 @@ void SpawnZoneManager::mobDied(int zoneId, std::string mobUID)
     }
 }
 
-MobDataStruct SpawnZoneManager::getMobByUID(std::string mobUID)
+MobDataStruct
+SpawnZoneManager::getMobByUID(std::string mobUID)
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     for (const auto &zone : mobSpawnZones_)
@@ -402,13 +416,14 @@ MobDataStruct SpawnZoneManager::getMobByUID(std::string mobUID)
     return MobDataStruct();
 }
 
-void SpawnZoneManager::removeMobByUID(std::string mobUID)
+void
+SpawnZoneManager::removeMobByUID(std::string mobUID)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     for (auto &zone : mobSpawnZones_)
     {
         auto it = std::find_if(zone.second.spawnedMobsList.begin(), zone.second.spawnedMobsList.end(), [&mobUID](const MobDataStruct &mob)
-                               { return mob.uid == mobUID; });
+            { return mob.uid == mobUID; });
         if (it != zone.second.spawnedMobsList.end())
         {
             zone.second.spawnedMobsList.erase(it);

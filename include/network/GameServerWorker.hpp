@@ -1,20 +1,21 @@
 #pragma once
 
-#include <string>
-#include <vector>
-#include <thread>
-#include <memory>
-#include <array>
-#include <boost/asio.hpp>
-#include <nlohmann/json.hpp>
-#include "utils/Config.hpp"
-#include "utils/Logger.hpp"
 #include "events/EventQueue.hpp"
 #include "network/NetworkManager.hpp"
+#include "utils/Config.hpp"
 #include "utils/JSONParser.hpp"
+#include "utils/Logger.hpp"
+#include <array>
+#include <boost/asio.hpp>
+#include <memory>
+#include <nlohmann/json.hpp>
+#include <string>
+#include <thread>
+#include <vector>
 
-class GameServerWorker {
-private:
+class GameServerWorker
+{
+  private:
     boost::asio::io_context io_context_game_server_;
     boost::asio::executor_work_guard<boost::asio::io_context::executor_type> work_;
     std::shared_ptr<boost::asio::ip::tcp::socket> game_server_socket_;
@@ -26,15 +27,17 @@ private:
     static constexpr int MAX_RETRY_COUNT = 5;
     static constexpr int RETRY_TIMEOUT = 5;
     JSONParser jsonParser_;
-    GameServerConfig& gameServerConfig_;
-    ChunkServerConfig& chunkServerConfig_;
+    GameServerConfig &gameServerConfig_;
+    ChunkServerConfig &chunkServerConfig_;
+    std::string receiveBuffer_; // буфер для накопления данных
 
     // Process received data from the Game Server
-    void processGameServerData(const std::array<char, 1024>& buffer, std::size_t bytes_transferred);
+    void processGameServerData(const std::array<char, 1024> &buffer, std::size_t bytes_transferred);
 
-public:
+  public:
     GameServerWorker(EventQueue &eventQueue,
-                        std::tuple<GameServerConfig, ChunkServerConfig>& configs, Logger &logger);
+        std::tuple<GameServerConfig, ChunkServerConfig> &configs,
+        Logger &logger);
     ~GameServerWorker();
     void startIOEventLoop();
     void sendDataToGameServer(const std::string &data);

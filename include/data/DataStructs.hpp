@@ -1,6 +1,6 @@
 #pragma once
-#include <string>
 #include <boost/asio.hpp>
+#include <string>
 
 struct PositionStruct
 {
@@ -90,17 +90,18 @@ struct MobDataStruct
     bool isAggressive = false;
     bool isDead = false;
 
-    float speedMultiplier = 1.0f; 
+    float speedMultiplier = 1.0f;
     float nextMoveTime = 0.0f;
 
     // New movement attributes
     float movementDirectionX = 0.0f;
     float movementDirectionY = 0.0f;
 
-    float stepMultiplier = 0.0f; 
+    float stepMultiplier = 0.0f;
 
     // Define the equality operator
-    bool operator==(const MobDataStruct& other) const {
+    bool operator==(const MobDataStruct &other) const
+    {
         return uid == other.uid;
     }
 };
@@ -118,12 +119,14 @@ struct SpawnZoneStruct
     int spawnMobId = 0;
     int spawnCount = 0;
     int spawnedMobsCount = 0;
+    bool spawnEnabled = true; // Indicates if the spawn zone is enabled for spawning mobs
     std::vector<std::string> spawnedMobsUIDList;
     std::vector<MobDataStruct> spawnedMobsList;
     std::chrono::seconds respawnTime; // Represents respawn time in seconds
 };
 
-struct EventContext {
+struct EventContext
+{
     std::string eventType;
     ClientDataStruct clientData;
     CharacterDataStruct characterData;

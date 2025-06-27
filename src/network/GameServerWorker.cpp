@@ -4,7 +4,8 @@
 
 // Work with data from/to the Game Server
 GameServerWorker::GameServerWorker(EventQueue &eventQueue,
-                                     std::tuple<GameServerConfig, ChunkServerConfig>& configs, Logger &logger)
+    std::tuple<GameServerConfig, ChunkServerConfig> &configs,
+    Logger &logger)
     : io_context_game_server_(),
       work_(boost::asio::make_work_guard(io_context_game_server_)),
       game_server_socket_(std::make_shared<boost::asio::ip::tcp::socket>(io_context_game_server_)),
@@ -25,28 +26,36 @@ GameServerWorker::GameServerWorker(EventQueue &eventQueue,
     connect(endpoints, 0); // Start connection to the Game Server
 }
 
-void GameServerWorker::startIOEventLoop() {
+void
+GameServerWorker::startIOEventLoop()
+{
     logger_.log("Starting Game Server IO Context...", YELLOW);
     auto numThreads = std::max(1u, std::thread::hardware_concurrency());
-    for (size_t i = 0; i < numThreads; ++i) {
-        io_threads_.emplace_back([this]() { io_context_game_server_.run(); });
+    for (size_t i = 0; i < numThreads; ++i)
+    {
+        io_threads_.emplace_back([this]()
+            { io_context_game_server_.run(); });
     }
 }
 
-GameServerWorker::~GameServerWorker() {
+GameServerWorker::~GameServerWorker()
+{
     logger_.logError("Game Server destructor is called...", RED);
     work_.reset();
-    for (auto &thread : io_threads_) {
+    for (auto &thread : io_threads_)
+    {
         if (thread.joinable())
             thread.join();
     }
     if (game_server_socket_->is_open())
-    game_server_socket_->close();
+        game_server_socket_->close();
 }
 
-void GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endpoints, int currentRetryCount) {
-    boost::asio::async_connect(*game_server_socket_, endpoints,
-        [this, endpoints, currentRetryCount](const boost::system::error_code &ec, boost::asio::ip::tcp::endpoint) {
+void
+GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endpoints, int currentRetryCount)
+{
+    boost::asio::async_connect(*game_server_socket_, endpoints, [this, endpoints, currentRetryCount](const boost::system::error_code &ec, boost::asio::ip::tcp::endpoint)
+        {
             if (!ec) {
                 logger_.log("Connected to the Game Server!", GREEN);
                 
@@ -57,7 +66,7 @@ void GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endp
                 handshake["header"]["ip"] = chunkServerConfig_.host;
                 handshake["header"]["port"] = chunkServerConfig_.port;
                 // add delimiter string to the dump
-                std::string delimiter = "\r\n\r\n";
+                std::string delimiter = "\n";
                 std::string handshakeMessage = handshake.dump() += delimiter;
 
                 sendDataToGameServer(handshakeMessage);
@@ -80,14 +89,16 @@ void GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endp
                     logger_.logError("Max retry count reached. Exiting...");
                     exit(1);
                 }
-            }
-        });
+            } });
 }
 
-void GameServerWorker::sendDataToGameServer(const std::string &data) {
-    try {
-        boost::asio::async_write(*game_server_socket_, boost::asio::buffer(data),
-            [this, data](const boost::system::error_code &error, size_t bytes_transferred) {
+void
+GameServerWorker::sendDataToGameServer(const std::string &data)
+{
+    try
+    {
+        boost::asio::async_write(*game_server_socket_, boost::asio::buffer(data), [this, data](const boost::system::error_code &error, size_t bytes_transferred)
+            {
                 if (!error) {
                     logger_.log("Bytes sent: " + std::to_string(bytes_transferred), BLUE);
 
@@ -99,14 +110,17 @@ void GameServerWorker::sendDataToGameServer(const std::string &data) {
 
                 } else {
                     logger_.logError("Error in sending data to Game Server: " + error.message());
-                }
-            });
-    } catch (const std::exception &e) {
+                } });
+    }
+    catch (const std::exception &e)
+    {
         logger_.logError("Exception in sendDataToGameServer: " + std::string(e.what()));
     }
 }
 
-void GameServerWorker::processGameServerData(const std::array<char, 1024>& buffer, std::size_t bytes_transferred) {
+void
+GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, std::size_t bytes_transferred)
+{
     // Convert received data to string
     std::string receivedData(buffer.data(), bytes_transferred);
     logger_.log("Received data from Game Server: " + receivedData, YELLOW);
@@ -126,10 +140,10 @@ void GameServerWorker::processGameServerData(const std::array<char, 1024>& buffe
     // Position data
     PositionStruct positionData = jsonParser_.parsePositionData(buffer.data(), bytes_transferred);
 
-    //spawn zones
+    // spawn zones
     std::vector<SpawnZoneStruct> spawnZonesList = jsonParser_.parseSpawnZonesList(buffer.data(), bytes_transferred);
 
-    //mobs
+    // mobs
     std::vector<MobDataStruct> mobsList = jsonParser_.parseMobsList(buffer.data(), bytes_transferred);
     std::vector<MobAttributeStruct> mobsAttributesList = jsonParser_.parseMobsAttributesList(buffer.data(), bytes_transferred);
 
@@ -137,96 +151,121 @@ void GameServerWorker::processGameServerData(const std::array<char, 1024>& buffe
     constexpr int BATCH_SIZE = 10;
 
     // Update character data
-    //characterData.characterPosition = positionData;
-    //clientData.characterData = characterData;
+    // characterData.characterPosition = positionData;
+    // clientData.characterData = characterData;
 
-    //TODO - Analyze code for events and refactor it
-    if (eventType == "joinGame" && !clientData.hash.empty() && clientData.clientId != 0) {
+    // TODO - Analyze code for events and refactor it
+    if (eventType == "joinGame" && !clientData.hash.empty() && clientData.clientId != 0)
+    {
         // Update joined client data
         Event joinClientEvent(Event::JOIN_CLIENT_CHUNK, clientData.clientId, clientData, game_server_socket_);
         eventsBatch.push_back(joinClientEvent);
     }
 
-    if (eventType == "disconnectClient" && clientData.clientId != 0) {
+    if (eventType == "disconnectClient" && clientData.clientId != 0)
+    {
         // remove client data
         Event disconnectClientEvent(Event::DISCONNECT_CLIENT, clientData.clientId, clientData, game_server_socket_);
         eventsBatch.push_back(disconnectClientEvent);
     }
 
     // set chunk data
-    if (eventType == "setChunkData") {
+    if (eventType == "setChunkData")
+    {
         // set chunk data
         Event setChunkDataEvent(Event::SET_CHUNK_DATA, clientData.clientId, chunkInfo, game_server_socket_);
         eventsBatch.push_back(setChunkDataEvent);
     }
 
-    if (eventType == "setConnectedCharacters") {
+    // TODO do we need this?
+    if (eventType == "setConnectedCharacters")
+    {
         // set connected characters list
         Event setConnectedCharactersEvent(Event::SET_CONNECTED_CHARACTERS_LIST, clientData.clientId, charactersList, game_server_socket_);
         eventsBatch.push_back(setConnectedCharactersEvent);
     }
 
-    if (eventType == "setCharacterData") {
+    if (eventType == "setCharacterData")
+    {
         // set character data
         Event setCharacterDataEvent(Event::SET_CHARACTER_DATA, clientData.clientId, characterData, game_server_socket_);
         eventsBatch.push_back(setCharacterDataEvent);
     }
 
-    if (eventType == "setCharacterAttributes") {
+    if (eventType == "setCharacterAttributes")
+    {
         // set character attributes
         Event setCharacterAttributesEvent(Event::SET_CHARACTER_ATTRIBUTES, clientData.clientId, characterAttributesList, game_server_socket_);
         eventsBatch.push_back(setCharacterAttributesEvent);
     }
 
-    if (eventType == "setAllSpawnZonesList") {
+    if (eventType == "setSpawnZonesList")
+    {
         // set spawn zones list
         Event setSpawnZonesEvent(Event::SET_ALL_SPAWN_ZONES, clientData.clientId, spawnZonesList, game_server_socket_);
         eventsBatch.push_back(setSpawnZonesEvent);
     }
 
-    if (eventType == "setAllMobsList") {
+    if (eventType == "setMobsList")
+    {
         // set mobs list
         Event setMobsListEvent(Event::SET_ALL_MOBS_LIST, clientData.clientId, mobsList, game_server_socket_);
         eventsBatch.push_back(setMobsListEvent);
     }
 
-    if (eventType == "setAllMobsAttributes") {
+    // TODO do we need this?
+    if (eventType == "setAllMobsAttributes")
+    {
         // set mobs attributes
         Event setMobsAttributesEvent(Event::SET_ALL_MOBS_ATTRIBUTES, clientData.clientId, mobsAttributesList, game_server_socket_);
         eventsBatch.push_back(setMobsAttributesEvent);
     }
 
     // Push batched events to the event queue
-    if (!eventsBatch.empty()) {
+    if (!eventsBatch.empty())
+    {
         eventQueue_.pushBatch(eventsBatch);
     }
 }
 
-void GameServerWorker::receiveDataFromGameServer() {
+void
+GameServerWorker::receiveDataFromGameServer()
+{
     auto dataBufferGameServer = std::make_shared<std::array<char, 1024>>();
     game_server_socket_->async_read_some(boost::asio::buffer(*dataBufferGameServer),
-        [this, dataBufferGameServer](const boost::system::error_code &ec, std::size_t bytes_transferred) {
-            if (!ec) {
-                boost::system::error_code ecEndpoint;
-                boost::asio::ip::tcp::endpoint remoteEndpoint = game_server_socket_->remote_endpoint(ecEndpoint);
-                if (!ecEndpoint) {
-                    std::string ipAddress = remoteEndpoint.address().to_string();
-                    std::string portNumber = std::to_string(remoteEndpoint.port());
-                    logger_.log("Bytes received: " + std::to_string(bytes_transferred), YELLOW);
-                    logger_.log("Data received from Game Server - IP: " + ipAddress + " Port: " + portNumber, YELLOW);
+        [this, dataBufferGameServer](const boost::system::error_code &ec, std::size_t bytes_transferred)
+        {
+            if (!ec)
+            {
+                std::string received(dataBufferGameServer->data(), bytes_transferred);
+                receiveBuffer_ += received;
+
+                std::size_t newlinePos = 0;
+                while ((newlinePos = receiveBuffer_.find('\n')) != std::string::npos)
+                {
+                    std::string oneMessage = receiveBuffer_.substr(0, newlinePos);
+                    receiveBuffer_.erase(0, newlinePos + 1); // удаляем обработанное
+
+                    // безопасно копируем в std::array и передаём в старую логику
+                    std::array<char, 1024> tempBuf{};
+                    std::memcpy(tempBuf.data(), oneMessage.data(), std::min(oneMessage.size(), tempBuf.size()));
+                    processGameServerData(tempBuf, oneMessage.size());
                 }
-                // Process received data
-                processGameServerData(*dataBufferGameServer, bytes_transferred);
-                // Continue reading data from the Game Server
+
                 receiveDataFromGameServer();
-            } else {
+            }
+            else
+            {
                 logger_.logError("Error in receiving data from Game Server: " + ec.message());
             }
         });
 }
 
-void GameServerWorker::closeConnection() {
-    if (game_server_socket_->is_open()) {
+void
+GameServerWorker::closeConnection()
+{
+    if (game_server_socket_->is_open())
+    {
         game_server_socket_->close();
     }
 }
