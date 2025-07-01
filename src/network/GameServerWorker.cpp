@@ -158,7 +158,7 @@ GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, st
     if (eventType == "joinGame" && !clientData.hash.empty() && clientData.clientId != 0)
     {
         // Update joined client data
-        Event joinClientEvent(Event::JOIN_CLIENT_CHUNK, clientData.clientId, clientData, game_server_socket_);
+        Event joinClientEvent(Event::JOIN_CLIENT, clientData.clientId, clientData, game_server_socket_);
         eventsBatch.push_back(joinClientEvent);
     }
 
@@ -175,14 +175,6 @@ GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, st
         // set chunk data
         Event setChunkDataEvent(Event::SET_CHUNK_DATA, clientData.clientId, chunkInfo, game_server_socket_);
         eventsBatch.push_back(setChunkDataEvent);
-    }
-
-    // TODO do we need this?
-    if (eventType == "setConnectedCharacters")
-    {
-        // set connected characters list
-        Event setConnectedCharactersEvent(Event::SET_CONNECTED_CHARACTERS_LIST, clientData.clientId, charactersList, game_server_socket_);
-        eventsBatch.push_back(setConnectedCharactersEvent);
     }
 
     if (eventType == "setCharacterData")
@@ -213,8 +205,7 @@ GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, st
         eventsBatch.push_back(setMobsListEvent);
     }
 
-    // TODO do we need this?
-    if (eventType == "setAllMobsAttributes")
+    if (eventType == "setMobsAttributes")
     {
         // set mobs attributes
         Event setMobsAttributesEvent(Event::SET_ALL_MOBS_ATTRIBUTES, clientData.clientId, mobsAttributesList, game_server_socket_);

@@ -150,6 +150,74 @@ EventHandler::handleJoinClientEvent(const Event &event)
 }
 
 void
+EventHandler::handleGetConnectedClientsChunkEvent(const Event &event)
+{
+    // Retrieve the data from the event
+    const auto &data = event.getData();
+    int clientID = event.getClientID();
+    // get client socket
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
+
+    try
+    {
+        // get all connected clients
+        std::vector<ClientDataStruct> clientsList = gameServices_.getClientManager().getClientsList();
+
+        // Convert the clientsList to json
+        nlohmann::json clientsListJson = nlohmann::json::array();
+        for (const auto &client : clientsList)
+        {
+            nlohmann::json clientJson = {
+                {"clientId", client.clientId},
+                {"characterId", client.characterId},
+                {"status", client.socket ? "connected" : "disconnected"} // Indicate if the socket is connected or not
+            };
+            clientsListJson.push_back(clientJson);
+        }
+
+        // Prepare the response message
+        nlohmann::json response;
+        ResponseBuilder builder;
+
+        // Check if the authentication is not successful
+        if (clientID == 0)
+        {
+            // Add response data
+            response = builder
+                           .setHeader("message", "Getting connected clients failed!")
+                           .setHeader("hash", "")
+                           .setHeader("clientId", clientID)
+                           .setHeader("eventType", "getConnectedClients")
+                           .setBody("", "")
+                           .build();
+            // Prepare a response message
+            std::string responseData = networkManager_.generateResponseMessage("error", response);
+            // Send the response to the client
+            networkManager_.sendResponse(clientSocket, responseData);
+            return;
+        }
+
+        //  Add the message to the response
+        response = builder
+                       .setHeader("message", "Getting connected clients success!")
+                       .setHeader("hash", "")
+                       .setHeader("clientId", clientID)
+                       .setHeader("eventType", "getConnectedClients")
+                       .setBody("clientsList", clientsListJson)
+                       .build();
+        // Prepare a response message
+        std::string responseData = networkManager_.generateResponseMessage("success", response);
+
+        // Send the response to the client
+        networkManager_.sendResponse(clientSocket, responseData);
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        gameServices_.getLogger().log("Error here: " + std::string(ex.what()));
+    }
+}
+
+void
 EventHandler::handleMoveCharacterClientEvent(const Event &event)
 {
     // Retrieve the data from the event
@@ -688,7 +756,7 @@ EventHandler::handleSetAllMobsListEvent(const Event &event)
             std::vector<MobDataStruct> mobsList = std::get<std::vector<MobDataStruct>>(data);
 
             // set data to the mob manager
-            gameServices_.getMobManager().loadListOfAllMobs(mobsList);
+            gameServices_.getMobManager().setListOfMobs(mobsList);
 
             gameServices_.getLogger().log("Loaded all mobs data from the event handler!", GREEN);
         }
@@ -719,7 +787,7 @@ EventHandler::handleSetMobsAttributesEvent(const Event &event)
             std::vector<MobAttributeStruct> mobAttributesList = std::get<std::vector<MobAttributeStruct>>(data);
 
             // set data to the mob manager
-            gameServices_.getMobManager().loadListOfMobsAttributes(mobAttributesList);
+            gameServices_.getMobManager().setListOfMobsAttributes(mobAttributesList);
         }
         else
         {
@@ -937,56 +1005,58 @@ EventHandler::dispatchEvent(const Event &event)
 {
     switch (event.getType())
     {
-    case Event::PING_CLIENT:
-        handlePingClientEvent(event);
-        break;
     case Event::SET_CHUNK_DATA:
         handleInitChunkEvent(event);
+        break;
+
+    // Client Events
+    case Event::PING_CLIENT:
+        handlePingClientEvent(event);
         break;
     case Event::JOIN_CLIENT:
         handleJoinClientEvent(event);
         break;
-    case Event::JOIN_CLIENT_CHUNK:
-        handleJoinChunkEvent(event);
-        break;
-    case Event::GET_CONNECTED_CHARACTERS_CHUNK:
-        handleGetConnectedCharactersChunkEvent(event);
-        break;
-    case Event::MOVE_CHARACTER_CLIENT:
-        handleMoveCharacterClientEvent(event);
+    case Event::GET_CONNECTED_CLIENTS:
+        handleGetConnectedClientsChunkEvent(event);
         break;
     case Event::DISCONNECT_CLIENT:
         handleDisconnectClientEvent(event);
         break;
-    case Event::DISCONNECT_CLIENT_CHUNK:
-        handleDisconnectChunkEvent(event);
+
+    // Characters Events
+    case Event::GET_CONNECTED_CHARACTERS:
+        handleGetConnectedCharactersChunkEvent(event);
         break;
-    case Event::SPAWN_MOBS_IN_ZONE:
-        handleSpawnMobsInZoneEvent(event);
+    case Event::SET_CHARACTER_DATA:
+        handleSetCharacterDataEvent(event);
+        break;
+    case Event::MOVE_CHARACTER:
+        handleMoveCharacterClientEvent(event);
+        break;
+
+    // Spawn Zones Events
+    case Event::SET_ALL_SPAWN_ZONES:
+        handleSetAllSpawnZonesEvent(event);
         break;
     case Event::GET_SPAWN_ZONE_DATA:
         handleGetSpawnZoneDataEvent(event);
         break;
-    case Event::GET_MOB_DATA:
-        handleGetMobDataEvent(event);
-        break;
-    case Event::SPAWN_ZONE_MOVE_MOBS:
-        handleZoneMoveMobsEvent(event);
-        break;
+
+    // Mobs Events
     case Event::SET_ALL_MOBS_LIST:
         handleSetAllMobsListEvent(event);
         break;
     case Event::SET_ALL_MOBS_ATTRIBUTES:
         handleSetMobsAttributesEvent(event);
         break;
-    case Event::SET_ALL_SPAWN_ZONES:
-        handleSetAllSpawnZonesEvent(event);
+    case Event::GET_MOB_DATA:
+        handleGetMobDataEvent(event);
         break;
-    case Event::SET_CHARACTER_DATA:
-        handleSetCharacterDataEvent(event);
+    case Event::SPAWN_MOBS_IN_ZONE:
+        handleSpawnMobsInZoneEvent(event);
         break;
-    case Event::SET_CONNECTED_CHARACTERS_LIST:
-        handleSetCharactersListEvent(event);
+    case Event::SPAWN_ZONE_MOVE_MOBS:
+        handleZoneMoveMobsEvent(event);
         break;
     }
 }

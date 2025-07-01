@@ -1,15 +1,15 @@
 #include "services/MobManager.hpp"
 
-MobManager::MobManager(Logger& logger)
+MobManager::MobManager(Logger &logger)
     : logger_(logger)
 {
 }
 
-// Function to load mobs from the database and store them in memory
-void MobManager::loadListOfAllMobs(
-    //array for the mobs
-    std::vector<MobDataStruct> selectMobs
-)
+// Function to set mobs from the database and store them in memory
+void
+MobManager::setListOfMobs(
+    // array for the mobs
+    std::vector<MobDataStruct> selectMobs)
 {
     try
     {
@@ -20,7 +20,7 @@ void MobManager::loadListOfAllMobs(
         }
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
-        for (const auto& row : selectMobs)
+        for (const auto &row : selectMobs)
         {
             MobDataStruct mobData;
             mobData.id = row.id;
@@ -38,16 +38,16 @@ void MobManager::loadListOfAllMobs(
             mobs_[mobData.id] = mobData;
         }
     }
-    catch (const std::exception& e)
+    catch (const std::exception &e)
     {
         logger_.logError("Error loading mobs: " + std::string(e.what()));
     }
 }
 
-// load mob attributes
-void MobManager::loadListOfMobsAttributes(
-    std::vector<MobAttributeStruct> selectMobAttributes
-)
+// set mob attributes
+void
+MobManager::setListOfMobsAttributes(
+    std::vector<MobAttributeStruct> selectMobAttributes)
 {
     try
     {
@@ -58,7 +58,7 @@ void MobManager::loadListOfMobsAttributes(
         }
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
-        for (const auto& row : selectMobAttributes)
+        for (const auto &row : selectMobAttributes)
         {
             if (mobs_.find(row.mob_id) == mobs_.end())
             {
@@ -76,25 +76,27 @@ void MobManager::loadListOfMobsAttributes(
             mobs_[mobAttribute.mob_id].attributes.push_back(mobAttribute);
         }
     }
-    catch (const std::exception& e)
+    catch (const std::exception &e)
     {
         logger_.logError("Error loading mob attributes: " + std::string(e.what()));
     }
 }
 
 // Function to get all mobs from memory as map
-std::map<int, MobDataStruct> MobManager::getMobs() const
+std::map<int, MobDataStruct>
+MobManager::getMobs() const
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     return mobs_;
 }
 
 // Function to get all mobs from memory as vector
-std::vector<MobDataStruct> MobManager::getMobsAsVector() const
+std::vector<MobDataStruct>
+MobManager::getMobsAsVector() const
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     std::vector<MobDataStruct> mobs;
-    for (const auto& mob : mobs_)
+    for (const auto &mob : mobs_)
     {
         mobs.push_back(mob.second);
     }
@@ -102,7 +104,8 @@ std::vector<MobDataStruct> MobManager::getMobsAsVector() const
 }
 
 // Function to get a mob by ID
-MobDataStruct MobManager::getMobById(int mobId) const
+MobDataStruct
+MobManager::getMobById(int mobId) const
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     auto mob = mobs_.find(mobId);

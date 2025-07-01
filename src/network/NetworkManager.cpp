@@ -4,17 +4,16 @@
 
 NetworkManager::NetworkManager(
     GameServices &gameServices,
-    EventQueue &eventQueue, 
+    EventQueue &eventQueue,
     EventQueue &eventQueuePing,
-    std::tuple<GameServerConfig, 
-    ChunkServerConfig>& configs
-)
-    : acceptor_(io_context_), 
-    configs_(configs), 
-    jsonParser_(), 
-    eventQueue_(eventQueue),
-    eventQueuePing_(eventQueuePing),
-    gameServices_(gameServices)
+    std::tuple<GameServerConfig,
+        ChunkServerConfig> &configs)
+    : acceptor_(io_context_),
+      configs_(configs),
+      jsonParser_(),
+      eventQueue_(eventQueue),
+      eventQueuePing_(eventQueuePing),
+      gameServices_(gameServices)
 {
     boost::system::error_code ec;
 
@@ -39,9 +38,12 @@ NetworkManager::NetworkManager(
     gameServices_.getLogger().log("Chunk Server started on IP: " + customIP + ", Port: " + std::to_string(customPort), GREEN);
 }
 
-void NetworkManager::startAccept() {
+void
+NetworkManager::startAccept()
+{
     auto clientSocket = std::make_shared<boost::asio::ip::tcp::socket>(io_context_);
-    acceptor_.async_accept(*clientSocket, [this, clientSocket](const boost::system::error_code &error) {
+    acceptor_.async_accept(*clientSocket, [this, clientSocket](const boost::system::error_code &error)
+        {
         if (!error) {
             boost::asio::ip::tcp::endpoint remoteEndpoint = clientSocket->remote_endpoint();
             std::string clientIP = remoteEndpoint.address().to_string();
@@ -54,38 +56,45 @@ void NetworkManager::startAccept() {
         else{
             gameServices_.getLogger().log("Accept client connection error: " + error.message(), RED);
         }
-        startAccept();
-    });
+        startAccept(); });
 }
 
-
-void NetworkManager::startIOEventLoop() {
+void
+NetworkManager::startIOEventLoop()
+{
     gameServices_.getLogger().log("Starting Chunk Server IO Context...", YELLOW);
     auto numThreads = std::thread::hardware_concurrency();
-    for (size_t i = 0; i < numThreads; ++i) {
-        threadPool_.emplace_back([this]() { io_context_.run(); });
+    for (size_t i = 0; i < numThreads; ++i)
+    {
+        threadPool_.emplace_back([this]()
+            { io_context_.run(); });
     }
 }
 
-NetworkManager::~NetworkManager() {
+NetworkManager::~NetworkManager()
+{
     gameServices_.getLogger().log("Network Manager destructor is called...", RED);
     acceptor_.close();
     io_context_.stop();
-    for (auto &thread : threadPool_) {
+    for (auto &thread : threadPool_)
+    {
         if (thread.joinable())
             thread.join();
     }
 }
 
-void NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::string &responseString) {
-    if (!clientSocket || !clientSocket->is_open()) {
+void
+NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::string &responseString)
+{
+    if (!clientSocket || !clientSocket->is_open())
+    {
         gameServices_.getLogger().logError("Attempted write on closed or invalid socket.", RED);
-        
+
         return;
     }
 
-    boost::asio::async_write(*clientSocket, boost::asio::buffer(responseString),
-        [this, clientSocket](const boost::system::error_code &error, size_t bytes_transferred) {
+    boost::asio::async_write(*clientSocket, boost::asio::buffer(responseString), [this, clientSocket](const boost::system::error_code &error, size_t bytes_transferred)
+        {
             if (error) {
                 gameServices_.getLogger().logError("Error during async_write: " + error.message(), RED);
                 if (clientSocket->is_open()) {
@@ -102,12 +111,12 @@ void NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> 
                 if (!ec) {
                     gameServices_.getLogger().log("Data sent successfully to Client: " + remoteEndpoint.address().to_string() + ":" + std::to_string(remoteEndpoint.port()), BLUE);
                 }
-            }
-        });
+            } });
 }
 
-
-std::string NetworkManager::generateResponseMessage(const std::string &status, const nlohmann::json &message) {
+std::string
+NetworkManager::generateResponseMessage(const std::string &status, const nlohmann::json &message)
+{
     nlohmann::json response;
     std::string currentTimestamp = gameServices_.getLogger().getCurrentTimestamp();
     response["header"] = message["header"];
@@ -121,12 +130,14 @@ std::string NetworkManager::generateResponseMessage(const std::string &status, c
     return responseString + "\n";
 }
 
-void NetworkManager::setChunkServer(ChunkServer* chunkServer) { 
-    if (!chunkServer) {
+void
+NetworkManager::setChunkServer(ChunkServer *chunkServer)
+{
+    if (!chunkServer)
+    {
         throw std::runtime_error("Invalid ChunkServer pointer in NetworkManager!");
     }
-    chunkServer_ = chunkServer; 
-
+    chunkServer_ = chunkServer;
 
     eventDispatcher_ = std::make_unique<EventDispatcher>(eventQueue_, eventQueuePing_, chunkServer_, gameServices_);
     messageHandler_ = std::make_unique<MessageHandler>(jsonParser_);
