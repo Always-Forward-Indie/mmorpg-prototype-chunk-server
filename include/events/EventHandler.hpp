@@ -19,6 +19,7 @@ class EventHandler
   private:
     void handlePingClientEvent(const Event &event);
     void handleJoinClientEvent(const Event &event);
+    void handleJoinCharacterEvent(const Event &event);
     void handleGetConnectedClientsChunkEvent(const Event &event);
     void handleJoinChunkEvent(const Event &event);
     void handleLeaveClientEvent(const Event &event);

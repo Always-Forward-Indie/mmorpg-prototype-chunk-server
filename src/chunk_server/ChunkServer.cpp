@@ -2,29 +2,27 @@
 #include <unordered_set>
 
 ChunkServer::ChunkServer(GameServices &gameServices,
-                        EventHandler &eventHandler,
-                        EventQueue &eventQueueGameServer,
-                        EventQueue &eventQueueChunkServer,
-                        EventQueue &eventQueueGameServerPing,
-                        Scheduler &scheduler,
-                        GameServerWorker &gameServerWorker
-                    )
-    :
-      eventQueueGameServer_(eventQueueGameServer),
+    EventHandler &eventHandler,
+    EventQueue &eventQueueGameServer,
+    EventQueue &eventQueueChunkServer,
+    EventQueue &eventQueueGameServerPing,
+    Scheduler &scheduler,
+    GameServerWorker &gameServerWorker)
+    : eventQueueGameServer_(eventQueueGameServer),
       eventQueueChunkServer_(eventQueueChunkServer),
       eventQueueGameServerPing_(eventQueueGameServerPing),
       eventHandler_(eventHandler),
       scheduler_(scheduler),
       gameServices_(gameServices)
 {
-    
 }
 
-void ChunkServer::mainEventLoopCH()
+void
+ChunkServer::mainEventLoopCH()
 {
     gameServices_.getLogger().log("Add Tasks To Game Server Scheduler...", YELLOW);
     constexpr int BATCH_SIZE = 10;
-    
+
     // Task for spawning mobs in the zone
     Task spawnMobInZoneTask(
         [&]
@@ -48,7 +46,7 @@ void ChunkServer::mainEventLoopCH()
         1 // unique task ID
     );
 
-    scheduler_.scheduleTask(spawnMobInZoneTask); 
+    scheduler_.scheduleTask(spawnMobInZoneTask);
 
     // Task for moving mobs in the zone
     Task moveMobInZoneTask(
@@ -73,7 +71,7 @@ void ChunkServer::mainEventLoopCH()
         2 // unique task ID
     );
 
-    scheduler_.scheduleTask(moveMobInZoneTask); 
+    scheduler_.scheduleTask(moveMobInZoneTask);
 
     try
     {
@@ -93,9 +91,8 @@ void ChunkServer::mainEventLoopCH()
     }
 }
 
-
-
-void ChunkServer::mainEventLoopGS()
+void
+ChunkServer::mainEventLoopGS()
 {
     constexpr int BATCH_SIZE = 10;
     gameServices_.getLogger().log("Add Tasks To Chunk Server Scheduler...", YELLOW);
@@ -118,7 +115,8 @@ void ChunkServer::mainEventLoopGS()
     }
 }
 
-void ChunkServer::mainEventLoopPing()
+void
+ChunkServer::mainEventLoopPing()
 {
     constexpr int BATCH_SIZE = 1; // Ping обрабатывай сразу
 
@@ -141,11 +139,13 @@ void ChunkServer::mainEventLoopPing()
     }
 }
 
-void ChunkServer::processPingBatch(const std::vector<Event>& pingEvents)
+void
+ChunkServer::processPingBatch(const std::vector<Event> &pingEvents)
 {
-    for (const auto& event : pingEvents)
+    for (const auto &event : pingEvents)
     {
-        threadPool_.enqueueTask([this, event] {
+        threadPool_.enqueueTask([this, event]
+            {
             try
             {
                 eventHandler_.dispatchEvent(event);
@@ -153,31 +153,32 @@ void ChunkServer::processPingBatch(const std::vector<Event>& pingEvents)
             catch (const std::exception &e)
             {
                 gameServices_.getLogger().logError("Error processing PING_EVENT: " + std::string(e.what()));
-            }
-        });
+            } });
     }
 
     eventCondition.notify_all();
 }
 
-void ChunkServer::processBatch(const std::vector<Event>& eventsBatch)
+void
+ChunkServer::processBatch(const std::vector<Event> &eventsBatch)
 {
     std::vector<Event> priorityEvents;
     std::vector<Event> normalEvents;
 
     // Separate ping events from other events
-    for (const auto& event : eventsBatch)
+    for (const auto &event : eventsBatch)
     {
         // if (event.PING_CLIENT == Event::PING_CLIENT)
         //     priorityEvents.push_back(event);
         // else
-            normalEvents.push_back(event);
+        normalEvents.push_back(event);
     }
 
     // Process priority ping events first
-    for (const auto& event : priorityEvents)
+    for (const auto &event : priorityEvents)
     {
-        threadPool_.enqueueTask([this, event] {
+        threadPool_.enqueueTask([this, event]
+            {
             try
             {
                 eventHandler_.dispatchEvent(event);
@@ -185,14 +186,14 @@ void ChunkServer::processBatch(const std::vector<Event>& eventsBatch)
             catch (const std::exception &e)
             {
                 gameServices_.getLogger().logError("Error processing priority dispatchEvent: " + std::string(e.what()));
-            }
-        });
+            } });
     }
 
     // Process normal events
-    for (const auto& event : normalEvents)
+    for (const auto &event : normalEvents)
     {
-        threadPool_.enqueueTask([this, event] {
+        threadPool_.enqueueTask([this, event]
+            {
             try
             {
                 eventHandler_.dispatchEvent(event);
@@ -200,14 +201,14 @@ void ChunkServer::processBatch(const std::vector<Event>& eventsBatch)
             catch (const std::exception &e)
             {
                 gameServices_.getLogger().logError("Error in normal dispatchEvent: " + std::string(e.what()));
-            }
-        });
+            } });
     }
 
     eventCondition.notify_all();
 }
 
-void ChunkServer::startMainEventLoop()
+void
+ChunkServer::startMainEventLoop()
 {
     if (event_game_server_thread_.joinable() || event_chunk_server_thread_.joinable())
     {
@@ -220,7 +221,8 @@ void ChunkServer::startMainEventLoop()
     event_ping_thread_ = std::thread(&ChunkServer::mainEventLoopPing, this);
 }
 
-void ChunkServer::stop()
+void
+ChunkServer::stop()
 {
     running_ = false;
     scheduler_.stop();
@@ -229,9 +231,9 @@ void ChunkServer::stop()
 
 ChunkServer::~ChunkServer()
 {
-    gameServices_.getLogger().log("Shutting down Game Server...", YELLOW);
-    
-    stop();  
+    gameServices_.getLogger().log("Shutting down Chunk Server...", YELLOW);
+
+    stop();
 
     if (event_game_server_thread_.joinable())
         event_game_server_thread_.join();

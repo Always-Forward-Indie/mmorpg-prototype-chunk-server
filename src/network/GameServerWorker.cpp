@@ -150,25 +150,6 @@ GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, st
     std::vector<Event> eventsBatch;
     constexpr int BATCH_SIZE = 10;
 
-    // Update character data
-    // characterData.characterPosition = positionData;
-    // clientData.characterData = characterData;
-
-    // TODO - Analyze code for events and refactor it
-    if (eventType == "joinGame" && !clientData.hash.empty() && clientData.clientId != 0)
-    {
-        // Update joined client data
-        Event joinClientEvent(Event::JOIN_CLIENT, clientData.clientId, clientData, game_server_socket_);
-        eventsBatch.push_back(joinClientEvent);
-    }
-
-    if (eventType == "disconnectClient" && clientData.clientId != 0)
-    {
-        // remove client data
-        Event disconnectClientEvent(Event::DISCONNECT_CLIENT, clientData.clientId, clientData, game_server_socket_);
-        eventsBatch.push_back(disconnectClientEvent);
-    }
-
     // set chunk data
     if (eventType == "setChunkData")
     {
@@ -179,6 +160,8 @@ GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, st
 
     if (eventType == "setCharacterData")
     {
+        characterData.characterPosition = positionData; // Set character position from parsed data
+        characterData.clientId = clientData.clientId;   // Set client ID for the character
         // set character data
         Event setCharacterDataEvent(Event::SET_CHARACTER_DATA, clientData.clientId, characterData, game_server_socket_);
         eventsBatch.push_back(setCharacterDataEvent);

@@ -85,9 +85,6 @@ EventHandler::handleJoinClientEvent(const Event &event)
     // get client socket
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
 
-    // set client socket
-    gameServices_.getClientManager().setClientSocket(clientID, clientSocket);
-
     // Extract init data
     try
     {
@@ -108,7 +105,7 @@ EventHandler::handleJoinClientEvent(const Event &event)
                                .setHeader("message", "Authentication failed for user!")
                                .setHeader("hash", passedClientData.hash)
                                .setHeader("clientId", passedClientData.clientId)
-                               .setHeader("eventType", "joinGame")
+                               .setHeader("eventType", "joinGameClient")
                                .setBody("", "")
                                .build();
                 // Prepare a response message
@@ -118,12 +115,18 @@ EventHandler::handleJoinClientEvent(const Event &event)
                 return;
             }
 
+            // Set the current client data
+            gameServices_.getClientManager().loadClientData(passedClientData);
+
+            // set client socket
+            gameServices_.getClientManager().setClientSocket(clientID, clientSocket);
+
             // Add the message to the response
             response = builder
                            .setHeader("message", "Authentication success for user!")
                            .setHeader("hash", passedClientData.hash)
                            .setHeader("clientId", passedClientData.clientId)
-                           .setHeader("eventType", "joinGame")
+                           .setHeader("eventType", "joinGameClient")
                            .build();
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
@@ -218,7 +221,7 @@ EventHandler::handleGetConnectedClientsChunkEvent(const Event &event)
 }
 
 void
-EventHandler::handleMoveCharacterClientEvent(const Event &event)
+EventHandler::handleJoinCharacterEvent(const Event &event)
 {
     // Retrieve the data from the event
     const auto &data = event.getData();
@@ -233,42 +236,60 @@ EventHandler::handleMoveCharacterClientEvent(const Event &event)
         {
             CharacterDataStruct passedCharacterData = std::get<CharacterDataStruct>(data);
 
-            // set character position data
-            gameServices_.getCharacterManager().setCharacterPosition(passedCharacterData.characterId, passedCharacterData.characterPosition);
+            // debug character ID
+            gameServices_.getLogger().log("Passed Character ID: " + std::to_string(passedCharacterData.characterId));
+
+            // get character data
+            CharacterDataStruct characterData = gameServices_.getCharacterManager().getCharacterData(passedCharacterData.characterId);
+
+            // prepare character data in json format
+            nlohmann::json characterJson = {
+                {"id", characterData.characterId},
+                {"name", characterData.characterName},
+                {"class", characterData.characterClass},
+                {"race", characterData.characterRace},
+                {"level", characterData.characterLevel},
+                {"exp", {{"current", characterData.characterExperiencePoints}, {"nextLevel", characterData.expForNextLevel}}},
+                {"stats", {{"health", {{"current", characterData.characterCurrentHealth}, {"max", characterData.characterMaxHealth}}}, {"mana", {{"current", characterData.characterCurrentMana}, {"max", characterData.characterMaxMana}}}}},
+                {"position", {{"x", characterData.characterPosition.positionX}, {"y", characterData.characterPosition.positionY}, {"z", characterData.characterPosition.positionZ}, {"rotationZ", characterData.characterPosition.rotationZ}}},
+                {"attributes", nlohmann::json::array()}};
+
+            // add attributes to character json
+            for (const auto &attribute : characterData.attributes)
+            {
+                characterJson["attributes"].push_back({{"id", attribute.id},
+                    {"name", attribute.name},
+                    {"slug", attribute.slug},
+                    {"value", attribute.value}});
+            }
 
             // Prepare the response message
             nlohmann::json response;
             ResponseBuilder builder;
 
             // Check if the authentication is not successful
-            if (clientID == 0)
+            if (clientID == 0 || characterData.characterId == 0)
             {
-                // Add response data
                 response = builder
-                               .setHeader("message", "Movement failed for character!")
+                               .setHeader("message", "Authentication failed for character!")
                                .setHeader("hash", "")
                                .setHeader("clientId", clientID)
-                               .setHeader("eventType", "moveCharacter")
-                               .setBody("", "")
+                               .setHeader("eventType", "joinGameCharacter")
+                               .setBody("character", characterJson)
                                .build();
-                // Prepare a response message
+
                 std::string responseData = networkManager_.generateResponseMessage("error", response);
-                // Send the response to the client
                 networkManager_.sendResponse(clientSocket, responseData);
                 return;
             }
 
-            //  Add the message to the response
+            // Add the message to the response
             response = builder
-                           .setHeader("message", "Movement success for character!")
+                           .setHeader("message", "Authentication success for character!")
                            .setHeader("hash", "")
                            .setHeader("clientId", clientID)
-                           .setHeader("eventType", "moveCharacter")
-                           .setBody("characterId", passedCharacterData.characterId)
-                           .setBody("posX", passedCharacterData.characterPosition.positionX)
-                           .setBody("posY", passedCharacterData.characterPosition.positionY)
-                           .setBody("posZ", passedCharacterData.characterPosition.positionZ)
-                           .setBody("rotZ", passedCharacterData.characterPosition.rotationZ)
+                           .setHeader("eventType", "joinGameCharacter")
+                           .setBody("character", characterJson)
                            .build();
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
@@ -294,51 +315,129 @@ EventHandler::handleMoveCharacterClientEvent(const Event &event)
     }
 }
 
-// get connected characters list
 void
-EventHandler::handleGetConnectedCharactersChunkEvent(const Event &event)
+EventHandler::handleMoveCharacterClientEvent(const Event &event)
 {
-    // Retrieve the data from the event
     const auto &data = event.getData();
     int clientID = event.getClientID();
-    // get client socket
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
 
     try
     {
-        // get all connected characters
+        if (std::holds_alternative<CharacterDataStruct>(data))
+        {
+            CharacterDataStruct passedCharacterData = std::get<CharacterDataStruct>(data);
+
+            // Обновляем позицию персонажа на сервере
+            gameServices_.getCharacterManager().setCharacterPosition(
+                passedCharacterData.characterId, passedCharacterData.characterPosition);
+
+            // prepare character data in json format
+            nlohmann::json characterJson = {
+                {"id", passedCharacterData.characterId},
+                {"position", {{"x", passedCharacterData.characterPosition.positionX}, {"y", passedCharacterData.characterPosition.positionY}, {"z", passedCharacterData.characterPosition.positionZ}, {"rotationZ", passedCharacterData.characterPosition.rotationZ}}}};
+
+            // Проверка авторизации
+            if (clientID == 0)
+            {
+                nlohmann::json errorResponse = ResponseBuilder()
+                                                   .setHeader("message", "Movement failed for character!")
+                                                   .setHeader("hash", "")
+                                                   .setHeader("clientId", clientID)
+                                                   .setHeader("eventType", "moveCharacter")
+                                                   .setBody("character", characterJson)
+                                                   .build();
+
+                std::string responseData = networkManager_.generateResponseMessage("error", errorResponse);
+                networkManager_.sendResponse(clientSocket, responseData);
+                return;
+            }
+
+            // Формируем финальный ответ
+            nlohmann::json successResponse = ResponseBuilder()
+                                                 .setHeader("message", "Movement success for character!")
+                                                 .setHeader("hash", "")
+                                                 .setHeader("clientId", clientID)
+                                                 .setHeader("eventType", "moveCharacter")
+                                                 .setBody("character", characterJson)
+                                                 .build();
+
+            std::string responseData = networkManager_.generateResponseMessage("success", successResponse);
+
+            //  Get all existing clients data as array
+            std::vector<ClientDataStruct> clientDataMap = gameServices_.getClientManager().getClientsList();
+
+            // debug log client data map size
+            gameServices_.getLogger().log("Client data map size: " + std::to_string(clientDataMap.size()));
+
+            // Iterate through all exist clients to send data to them
+            for (const auto &clientDataItem : clientDataMap)
+            {
+                // debug log
+                gameServices_.getLogger().log("Sending move character response to client ID: " + std::to_string(clientDataItem.clientId));
+
+                networkManager_.sendResponse(clientDataItem.socket, responseData);
+            }
+        }
+        else
+        {
+            gameServices_.getLogger().log("Error with extracting data!");
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        gameServices_.getLogger().log("Error here: " + std::string(ex.what()));
+    }
+}
+
+// get connected characters list
+void
+EventHandler::handleGetConnectedCharactersChunkEvent(const Event &event)
+{
+    const auto &data = event.getData();
+    int clientID = event.getClientID();
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
+
+    try
+    {
         std::vector<CharacterDataStruct> charactersList = gameServices_.getCharacterManager().getCharactersList();
 
-        // TODO - FIX THIS CODE WITH JSON
-
-        // convert the charactersList to json
         nlohmann::json charactersListJson = nlohmann::json::array();
         for (const auto &character : charactersList)
         {
             nlohmann::json characterJson = {
-                {"characterId", character.characterId},
-                {"characterLevel", character.characterLevel},
-                {"characterExperiencePoints", character.characterExperiencePoints},
-                {"characterCurrentHealth", character.characterCurrentHealth},
-                {"characterCurrentMana", character.characterCurrentMana},
-                {"characterMaxHealth", character.characterMaxHealth},
-                {"characterMaxMana", character.characterMaxMana},
-                {"expForNextLevel", character.expForNextLevel},
-                {"characterName", character.characterName},
-                {"characterClass", character.characterClass},
-                {"characterRace", character.characterRace},
-                {"characterPosition", {{"positionX", character.characterPosition.positionX}, {"positionY", character.characterPosition.positionY}, {"positionZ", character.characterPosition.positionZ}, {"rotationZ", character.characterPosition.rotationZ}}}};
-            charactersListJson.push_back(characterJson);
+                {"id", character.characterId},
+                {"name", character.characterName},
+                {"class", character.characterClass},
+                {"race", character.characterRace},
+                {"level", character.characterLevel},
+                {"exp", {{"current", character.characterExperiencePoints}, {"nextLevel", character.expForNextLevel}}},
+                {"stats", {{"health", {{"current", character.characterCurrentHealth}, {"max", character.characterMaxHealth}}}, {"mana", {{"current", character.characterCurrentMana}, {"max", character.characterMaxMana}}}}},
+                {"position", {{"x", character.characterPosition.positionX}, {"y", character.characterPosition.positionY}, {"z", character.characterPosition.positionZ}, {"rotationZ", character.characterPosition.rotationZ}}}};
+
+            nlohmann::json attributesJson = nlohmann::json::array();
+            for (const auto &attribute : character.attributes)
+            {
+                attributesJson.push_back({{"id", attribute.id},
+                    {"name", attribute.name},
+                    {"slug", attribute.slug},
+                    {"value", attribute.value}});
+            }
+
+            characterJson["attributes"] = attributesJson;
+
+            nlohmann::json fullEntry = {
+                {"clientId", character.clientId},
+                {"character", characterJson}};
+
+            charactersListJson.push_back(fullEntry);
         }
 
-        // Prepare the response message
-        nlohmann::json response;
         ResponseBuilder builder;
+        nlohmann::json response;
 
-        // Check if the authentication is not successful
         if (clientID == 0)
         {
-            // Add response data
             response = builder
                            .setHeader("message", "Getting connected characters failed!")
                            .setHeader("hash", "")
@@ -346,30 +445,26 @@ EventHandler::handleGetConnectedCharactersChunkEvent(const Event &event)
                            .setHeader("eventType", "getConnectedCharacters")
                            .setBody("", "")
                            .build();
-            // Prepare a response message
+
             std::string responseData = networkManager_.generateResponseMessage("error", response);
-            // Send the response to the client
             networkManager_.sendResponse(clientSocket, responseData);
             return;
         }
 
-        //  Add the message to the response
         response = builder
                        .setHeader("message", "Getting connected characters success!")
                        .setHeader("hash", "")
                        .setHeader("clientId", clientID)
                        .setHeader("eventType", "getConnectedCharacters")
-                       .setBody("charactersList", charactersListJson)
+                       .setBody("characters", charactersListJson)
                        .build();
-        // Prepare a response message
-        std::string responseData = networkManager_.generateResponseMessage("success", response);
 
-        // Send the response to the client
+        std::string responseData = networkManager_.generateResponseMessage("success", response);
         networkManager_.sendResponse(clientSocket, responseData);
     }
     catch (const std::bad_variant_access &ex)
     {
-        gameServices_.getLogger().log("Error here: " + std::string(ex.what()));
+        gameServices_.getLogger().log("Error in handleGetConnectedCharactersChunkEvent: " + std::string(ex.what()));
     }
 }
 
@@ -388,6 +483,9 @@ EventHandler::handleDisconnectClientEvent(const Event &event)
         {
             ClientDataStruct passedClientData = std::get<ClientDataStruct>(data);
 
+            // debug log client ID
+            gameServices_.getLogger().log("Handling disconnect event for client ID: " + std::to_string(passedClientData.clientId) + " and character ID: " + std::to_string(passedClientData.characterId));
+
             if (passedClientData.clientId == 0)
             {
                 gameServices_.getLogger().log("Client ID is 0, so we will just remove client from our list!");
@@ -400,6 +498,9 @@ EventHandler::handleDisconnectClientEvent(const Event &event)
 
             // Remove the client data
             gameServices_.getClientManager().removeClientData(passedClientData.clientId);
+
+            // remove character data
+            gameServices_.getCharacterManager().removeCharacter(passedClientData.characterId);
 
             // send the response to all clients
             nlohmann::json response;
@@ -864,7 +965,7 @@ EventHandler::handleSetCharacterDataEvent(const Event &event)
             CharacterDataStruct characterData = std::get<CharacterDataStruct>(data);
 
             // set data to the mob manager
-            gameServices_.getCharacterManager().loadCharacterData(characterData);
+            gameServices_.getCharacterManager().addCharacter(characterData);
         }
         else
         {
@@ -964,7 +1065,7 @@ EventHandler::handleInitChunkEvent(const Event &event)
                 response = builder
                                .setHeader("message", "Init failed for chunk!")
                                .setHeader("chunkId", passedChunkData.id)
-                               .setHeader("eventType", "setChunkData")
+                               .setHeader("eventType", "chunkServerData")
                                .setBody("", "")
                                .build();
                 // Prepare a response message
@@ -978,7 +1079,7 @@ EventHandler::handleInitChunkEvent(const Event &event)
             response = builder
                            .setHeader("message", "Init success for chunk!")
                            .setHeader("chunkId", passedChunkData.id)
-                           .setHeader("eventType", "setChunkData")
+                           .setHeader("eventType", "chunkServerData")
                            .setBody("", "")
                            .build();
             // Prepare a response message
@@ -997,8 +1098,6 @@ EventHandler::handleInitChunkEvent(const Event &event)
         gameServices_.getLogger().log("Error here: " + std::string(ex.what()));
     }
 }
-
-// TODO - Analyze code for events and refactor it
 
 void
 EventHandler::dispatchEvent(const Event &event)
@@ -1024,6 +1123,8 @@ EventHandler::dispatchEvent(const Event &event)
         break;
 
     // Characters Events
+    case Event::JOIN_CHARACTER:
+        handleJoinCharacterEvent(event);
     case Event::GET_CONNECTED_CHARACTERS:
         handleGetConnectedCharactersChunkEvent(event);
         break;

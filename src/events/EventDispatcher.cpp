@@ -15,10 +15,13 @@ EventDispatcher::EventDispatcher(
 void
 EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
-    // TODO - Analyze code for events and refactor it
-    if (context.eventType == "joinGame")
+    if (context.eventType == "joinGameClient")
     {
-        handleJoinGame(context, socket);
+        handleJoinGameClient(context, socket);
+    }
+    else if (context.eventType == "joinGameCharacter")
+    {
+        handleJoinGameCharacter(context, socket);
     }
     else if (context.eventType == "moveCharacter")
     {
@@ -54,7 +57,7 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
 }
 
 void
-EventDispatcher::handleJoinGame(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+EventDispatcher::handleJoinGameClient(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
     Event joinEvent(Event::JOIN_CLIENT, context.clientData.clientId, context.clientData, socket);
     eventsBatch_.push_back(joinEvent);
@@ -66,9 +69,25 @@ EventDispatcher::handleJoinGame(const EventContext &context, std::shared_ptr<boo
 }
 
 void
+EventDispatcher::handleJoinGameCharacter(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    Event joinEvent(Event::JOIN_CHARACTER, context.clientData.clientId, context.characterData, socket);
+    eventsBatch_.push_back(joinEvent);
+    if (eventsBatch_.size() >= BATCH_SIZE)
+    {
+        eventQueue_.pushBatch(eventsBatch_);
+        eventsBatch_.clear();
+    }
+}
+
+void
 EventDispatcher::handleMoveCharacter(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
-    Event moveEvent(Event::MOVE_CHARACTER, context.clientData.clientId, context.characterData, socket);
+    // init new character data
+    CharacterDataStruct characterData = context.characterData;
+    characterData.characterPosition = context.positionData; // Set character position from context
+
+    Event moveEvent(Event::MOVE_CHARACTER, context.clientData.clientId, characterData, socket);
     eventsBatch_.push_back(moveEvent);
     if (eventsBatch_.size() >= BATCH_SIZE)
     {
@@ -80,7 +99,11 @@ EventDispatcher::handleMoveCharacter(const EventContext &context, std::shared_pt
 void
 EventDispatcher::handleDisconnect(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
-    Event disconnectEvent(Event::DISCONNECT_CLIENT, context.clientData.clientId, context.clientData, socket);
+    // init new client data
+    ClientDataStruct clientData = context.clientData;
+    clientData.characterId = context.characterData.characterId; // Set character ID from context
+
+    Event disconnectEvent(Event::DISCONNECT_CLIENT, context.clientData.clientId, clientData, socket);
 
     eventsBatch_.push_back(disconnectEvent);
 

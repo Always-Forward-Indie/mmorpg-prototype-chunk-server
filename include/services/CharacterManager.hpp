@@ -1,15 +1,22 @@
 #pragma once
 
-#include <iostream>
-#include <vector>
 #include "data/DataStructs.hpp"
-#include <utils/Logger.hpp>
+#include <iostream>
 #include <shared_mutex>
+#include <utils/Logger.hpp>
+#include <vector>
 
-class CharacterManager {
-public:
+class CharacterManager
+{
+  public:
     // Constructor
-    CharacterManager(Logger& logger);
+    CharacterManager(Logger &logger);
+
+    // add character to the list
+    void addCharacter(const CharacterDataStruct &characterData);
+
+    // Remove character by ID
+    void removeCharacter(int characterID);
 
     // Load characters list
     void loadCharactersList(std::vector<CharacterDataStruct> charactersList);
@@ -35,9 +42,8 @@ public:
     // Get character position by character ID
     PositionStruct getCharacterPosition(int characterID);
 
-
-private:
-    Logger& logger_;
+  private:
+    Logger &logger_;
     // characters list
     std::vector<CharacterDataStruct> charactersList_;
 

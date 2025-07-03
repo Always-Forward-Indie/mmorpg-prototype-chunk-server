@@ -39,13 +39,13 @@ ClientSession::doRead()
             {
                 // Append new data to our session-specific buffer.
                 accumulatedData_.append(dataBuffer_.data(), bytes_transferred);
-                std::string delimiter = "\r\n\r\n";
+                std::string delimiter = "\n";
                 size_t pos;
                 // Process all complete messages found.
                 while ((pos = accumulatedData_.find(delimiter)) != std::string::npos)
                 {
                     std::string message = accumulatedData_.substr(0, pos);
-                    gameServices_.getLogger().log("Received data from client: " + message, YELLOW);
+                    gameServices_.getLogger().log("Received data from Client: " + message, YELLOW);
                     processMessage(message);
                     accumulatedData_.erase(0, pos + delimiter.size());
                 }
@@ -104,10 +104,8 @@ ClientSession::handleClientDisconnect()
 
     // Create disconnect events
     Event disconnectEvent(Event::DISCONNECT_CLIENT, 0, clientData, socket_);
-    // Event disconnectEventChunk(Event::DISCONNECT_CLIENT_CHUNK, 0, clientData, socket_);
 
     eventsBatch.push_back(disconnectEvent);
-    // eventsBatch.push_back(disconnectEventChunk);
-
+    // Push the disconnect event to the event queue
     eventQueue_.pushBatch(eventsBatch);
 }

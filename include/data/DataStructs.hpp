@@ -50,6 +50,7 @@ struct MobAttributeStruct
 
 struct CharacterDataStruct
 {
+    int clientId = 0;
     int characterId = 0;
     int characterLevel = 0;
     int characterExperiencePoints = 0;
