@@ -618,106 +618,82 @@ EventHandler::handlePingClientEvent(const Event &event)
 void
 EventHandler::handleSpawnMobsInZoneEvent(const Event &event)
 {
-    // get the data from the event
     const auto &data = event.getData();
     int clientID = event.getClientID();
-    // get client socket
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
 
     try
     {
-        // Try to extract the data
         if (std::holds_alternative<SpawnZoneStruct>(data))
         {
             SpawnZoneStruct spawnZoneData = std::get<SpawnZoneStruct>(data);
 
-            // format the zone data to json
-            nlohmann::json spawnZoneDataJson;
-            // format the mob data to json using for loop
-            nlohmann::json mobsListJson;
+            // Build JSON for spawn zone
+            nlohmann::json zoneJson = {
+                {"id", spawnZoneData.zoneId},
+                {"name", spawnZoneData.zoneName},
+                {"bounds", {{"minX", spawnZoneData.posX}, {"maxX", spawnZoneData.sizeX}, {"minY", spawnZoneData.posY}, {"maxY", spawnZoneData.sizeY}, {"minZ", spawnZoneData.posZ}, {"maxZ", spawnZoneData.sizeZ}}},
+                {"spawnMobId", spawnZoneData.spawnMobId},
+                {"maxSpawnCount", spawnZoneData.spawnCount},
+                {"spawnedMobsCount", spawnZoneData.spawnedMobsList.size()},
+                {"respawnTime", spawnZoneData.respawnTime.count()},
+                {"spawnEnabled", true}};
 
-            spawnZoneDataJson["id"] = spawnZoneData.zoneId;
-            spawnZoneDataJson["name"] = spawnZoneData.zoneName;
-            spawnZoneDataJson["minX"] = spawnZoneData.posX;
-            spawnZoneDataJson["maxX"] = spawnZoneData.sizeX;
-            spawnZoneDataJson["minY"] = spawnZoneData.posY;
-            spawnZoneDataJson["maxY"] = spawnZoneData.sizeY;
-            spawnZoneDataJson["minZ"] = spawnZoneData.posZ;
-            spawnZoneDataJson["maxZ"] = spawnZoneData.sizeZ;
-            spawnZoneDataJson["spawnMobId"] = spawnZoneData.spawnMobId;
-            spawnZoneDataJson["maxSpawnCount"] = spawnZoneData.spawnCount;
-            spawnZoneDataJson["spawnedMobsCount"] = spawnZoneData.spawnedMobsList.size();
-            spawnZoneDataJson["respawnTime"] = spawnZoneData.respawnTime.count();
-            spawnZoneDataJson["spawnEnabled"] = true;
-
-            for (auto &mob : spawnZoneData.spawnedMobsList)
+            // Add mobs
+            nlohmann::json mobsArray = nlohmann::json::array();
+            for (const auto &mob : spawnZoneData.spawnedMobsList)
             {
-                nlohmann::json mobJson;
-                mobJson["id"] = mob.id;
-                mobJson["UID"] = mob.uid;
-                mobJson["zoneId"] = mob.zoneId;
-                mobJson["name"] = mob.name;
-                mobJson["race"] = mob.raceName;
-                mobJson["level"] = mob.level;
-                mobJson["currentHealth"] = mob.currentHealth;
-                mobJson["currentMana"] = mob.currentMana;
-                mobJson["maxHealth"] = mob.maxHealth;
-                mobJson["maxMana"] = mob.maxMana;
-                mobJson["isAggressive"] = mob.isAggressive;
-                mobJson["isDead"] = mob.isDead;
-                mobJson["posX"] = mob.position.positionX;
-                mobJson["posY"] = mob.position.positionY;
-                mobJson["posZ"] = mob.position.positionZ;
-                mobJson["rotZ"] = mob.position.rotationZ;
+                nlohmann::json mobJson = {
+                    {"id", mob.id},
+                    {"uid", mob.uid},
+                    {"zoneId", mob.zoneId},
+                    {"name", mob.name},
+                    {"race", mob.raceName},
+                    {"level", mob.level},
+                    {"isAggressive", mob.isAggressive},
+                    {"isDead", mob.isDead},
+                    {"stats", {{"health", {{"current", mob.currentHealth}, {"max", mob.maxHealth}}}, {"mana", {{"current", mob.currentMana}, {"max", mob.maxMana}}}}},
+                    {"isAggressive", mob.isAggressive},
+                    {"isDead", mob.isDead},
+                    {"position", {{"x", mob.position.positionX}, {"y", mob.position.positionY}, {"z", mob.position.positionZ}, {"rotationZ", mob.position.rotationZ}}},
+                    {"attributes", nlohmann::json::array()}};
 
-                for (auto &mobAttributeItem : mob.attributes)
+                for (const auto &attr : mob.attributes)
                 {
-                    nlohmann::json mobItemJson;
-                    mobItemJson["Id"] = mobAttributeItem.id;
-                    mobItemJson["name"] = mobAttributeItem.name;
-                    mobItemJson["slug"] = mobAttributeItem.slug;
-                    mobItemJson["value"] = mobAttributeItem.value;
-                    mobJson["attributesData"].push_back(mobItemJson);
+                    mobJson["attributes"].push_back({{"id", attr.id},
+                        {"name", attr.name},
+                        {"slug", attr.slug},
+                        {"value", attr.value}});
                 }
 
-                mobsListJson.push_back(mobJson);
+                mobsArray.push_back(mobJson);
             }
 
-            // Prepare the response message
+            // Build response
             nlohmann::json response;
             ResponseBuilder builder;
 
-            // Check if the authentication is not successful
             if (clientID == 0)
             {
-                // Add response data
-                response = builder
-                               .setHeader("message", "Spawning mobs failed!")
+                response = builder.setHeader("message", "Spawning mobs failed!")
                                .setHeader("hash", "")
                                .setHeader("clientId", clientID)
                                .setHeader("eventType", "spawnMobsInZone")
                                .setBody("", "")
                                .build();
-                // Prepare a response message
                 std::string responseData = networkManager_.generateResponseMessage("error", response);
-                // Send the response to the client
                 networkManager_.sendResponse(clientSocket, responseData);
                 return;
             }
 
-            // Add the message to the response
-            response = builder
-                           .setHeader("message", "Spawning mobs success!")
+            response = builder.setHeader("message", "Spawning mobs success!")
                            .setHeader("hash", "")
                            .setHeader("clientId", clientID)
                            .setHeader("eventType", "spawnMobsInZone")
-                           .setBody("spawnZoneData", spawnZoneDataJson)
-                           .setBody("mobsData", mobsListJson)
+                           .setBody("spawnZone", zoneJson)
+                           .setBody("mobs", mobsArray)
                            .build();
-            // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
-
-            // Send the response to the client
             networkManager_.sendResponse(clientSocket, responseData);
         }
         else
@@ -732,103 +708,69 @@ EventHandler::handleSpawnMobsInZoneEvent(const Event &event)
 }
 
 void
-EventHandler::handleGetSpawnZoneDataEvent(const Event &event)
-{
-    //  TODO - Implement this method
-}
-
-void
-EventHandler::handleGetMobDataEvent(const Event &event)
-{
-    //  TODO - Implement this method
-}
-
-void
 EventHandler::handleZoneMoveMobsEvent(const Event &event)
 {
-    // get the data from the event
     const auto &data = event.getData();
     int clientID = event.getClientID();
-    // get client socket
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
 
     try
     {
-        // Try to extract the data
         if (std::holds_alternative<std::vector<MobDataStruct>>(data))
         {
             std::vector<MobDataStruct> mobsList = std::get<std::vector<MobDataStruct>>(data);
 
-            // format the mob data to json using for loop
-            nlohmann::json mobsListJson;
+            nlohmann::json mobsArray = nlohmann::json::array();
 
-            // TODO - Review attributes, do we need all this data for mob? mb just coordinates?
-            for (auto &mob : mobsList)
+            for (const auto &mob : mobsList)
             {
-                nlohmann::json mobJson;
-                mobJson["id"] = mob.id;
-                mobJson["UID"] = mob.uid;
-                mobJson["zoneId"] = mob.zoneId;
-                mobJson["name"] = mob.name;
-                mobJson["race"] = mob.raceName;
-                mobJson["level"] = mob.level;
-                mobJson["currentHealth"] = mob.currentHealth;
-                mobJson["currentMana"] = mob.currentMana;
-                mobJson["maxHealth"] = mob.maxHealth;
-                mobJson["maxMana"] = mob.maxMana;
-                mobJson["posX"] = mob.position.positionX;
-                mobJson["posY"] = mob.position.positionY;
-                mobJson["posZ"] = mob.position.positionZ;
-                mobJson["rotZ"] = mob.position.rotationZ;
+                nlohmann::json mobJson = {
+                    {"id", mob.id},
+                    {"uid", mob.uid},
+                    {"zoneId", mob.zoneId},
+                    {"name", mob.name},
+                    {"race", mob.raceName},
+                    {"level", mob.level},
+                    {"isAggressive", mob.isAggressive},
+                    {"isDead", mob.isDead},
+                    {"stats", {{"health", {{"current", mob.currentHealth}, {"max", mob.maxHealth}}}, {"mana", {{"current", mob.currentMana}, {"max", mob.maxMana}}}}},
+                    {"position", {{"x", mob.position.positionX}, {"y", mob.position.positionY}, {"z", mob.position.positionZ}, {"rotationZ", mob.position.rotationZ}}},
+                    {"attributes", nlohmann::json::array()}};
 
-                for (auto &mobAttributeItem : mob.attributes)
+                for (const auto &attr : mob.attributes)
                 {
-                    nlohmann::json mobItemJson;
-                    mobItemJson["id"] = mobAttributeItem.id;
-                    mobItemJson["name"] = mobAttributeItem.name;
-                    mobItemJson["slug"] = mobAttributeItem.slug;
-                    mobItemJson["value"] = mobAttributeItem.value;
-                    mobJson["attributesData"].push_back(mobItemJson);
+                    mobJson["attributes"].push_back({{"id", attr.id},
+                        {"name", attr.name},
+                        {"slug", attr.slug},
+                        {"value", attr.value}});
                 }
 
-                mobsListJson.push_back(mobJson);
+                mobsArray.push_back(mobJson);
             }
 
-            // Prepare the response message
-            nlohmann::json response;
             ResponseBuilder builder;
+            nlohmann::json response;
 
-            // Check if the authentication is not successful
             if (clientID == 0)
             {
-                // Add response data
-                response = builder
-                               .setHeader("message", "Moving mobs failed!")
+                response = builder.setHeader("message", "Moving mobs failed!")
                                .setHeader("hash", "")
                                .setHeader("clientId", clientID)
                                .setHeader("eventType", "zoneMoveMobs")
                                .setBody("", "")
                                .build();
-                // Prepare a response message
                 std::string responseData = networkManager_.generateResponseMessage("error", response);
-                // Send the response to the client
                 networkManager_.sendResponse(clientSocket, responseData);
                 return;
             }
 
-            // Add the message to the response
-            response = builder
-                           .setHeader("message", "Moving mobs success!")
+            response = builder.setHeader("message", "Moving mobs success!")
                            .setHeader("hash", "")
                            .setHeader("clientId", clientID)
                            .setHeader("eventType", "zoneMoveMobs")
-                           .setBody("mobsData", mobsListJson)
+                           .setBody("mobs", mobsArray)
                            .build();
-
-            // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
-
-            // Send the response to the client
             networkManager_.sendResponse(clientSocket, responseData);
         }
         else
@@ -872,6 +814,64 @@ EventHandler::handleSetAllMobsListEvent(const Event &event)
     }
 }
 
+void
+EventHandler::handleGetSpawnZoneDataEvent(const Event &event)
+{
+    // set the data from the event
+    const auto &data = event.getData();
+}
+
+void
+EventHandler::handleGetMobDataEvent(const Event &event)
+{
+    // set the data from the event
+    const auto &data = event.getData();
+
+    // Extract init data
+    try
+    {
+        // Try to extract the data
+        if (std::holds_alternative<MobDataStruct>(data))
+        {
+            MobDataStruct mobData = std::get<MobDataStruct>(data);
+
+            // get mob data from the mob manager
+            MobDataStruct mobDataFromManager = gameServices_.getMobManager().getMobById(mobData.id);
+
+            // prepare mob data in json format
+            nlohmann::json mobJson = {
+                {"id", mobDataFromManager.id},
+                {"uid", mobDataFromManager.uid},
+                {"zoneId", mobDataFromManager.zoneId},
+                {"name", mobDataFromManager.name},
+            };
+
+            // send the response to the client
+            nlohmann::json response;
+            ResponseBuilder builder;
+            response = builder
+                           .setHeader("message", "Getting mob data success!")
+                           .setHeader("hash", "")
+                           .setHeader("clientId", event.getClientID())
+                           .setHeader("eventType", "getMobData")
+                           .setBody("mob", mobJson)
+                           .build();
+            std::string responseData = networkManager_.generateResponseMessage("success", response);
+
+            // Send the response to the client
+            gameServerWorker_.sendDataToGameServer(responseData);
+        }
+        else
+        {
+            gameServices_.getLogger().log("Error with extracting data!");
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        gameServices_.getLogger().log("Error here: " + std::string(ex.what()));
+    }
+}
+
 // set mob attributes
 void
 EventHandler::handleSetMobsAttributesEvent(const Event &event)
@@ -886,6 +886,15 @@ EventHandler::handleSetMobsAttributesEvent(const Event &event)
         if (std::holds_alternative<std::vector<MobAttributeStruct>>(data))
         {
             std::vector<MobAttributeStruct> mobAttributesList = std::get<std::vector<MobAttributeStruct>>(data);
+
+            // debug mob attributes
+            for (const auto &mobAttribute : mobAttributesList)
+            {
+                gameServices_.getLogger().log("Mob Attribute ID: " + std::to_string(mobAttribute.id) +
+                                              ", Name: " + mobAttribute.name +
+                                              ", Slug: " + mobAttribute.slug +
+                                              ", Value: " + std::to_string(mobAttribute.value));
+            }
 
             // set data to the mob manager
             gameServices_.getMobManager().setListOfMobsAttributes(mobAttributesList);

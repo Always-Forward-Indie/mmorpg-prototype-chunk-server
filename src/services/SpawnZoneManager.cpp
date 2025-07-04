@@ -206,7 +206,7 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     return mobs;
 }
 
-// // random movement of mobs in the zone
+// random movement of mobs in the zone
 void
 SpawnZoneManager::moveMobsInZone(int zoneId)
 {

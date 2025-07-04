@@ -470,7 +470,7 @@ JSONParser::parseMobsAttributesList(const char *data, size_t length)
     if (jsonData.contains("body") && jsonData["body"].is_object() &&
         jsonData["body"].contains("mobsAttributesList") && jsonData["body"]["mobsAttributesList"].is_array())
     {
-        for (const auto &attribute : jsonData["body"]["mobAttributesList"])
+        for (const auto &attribute : jsonData["body"]["mobsAttributesList"])
         {
             MobAttributeStruct attributeData;
             if (attribute.contains("id") && attribute["id"].is_number_integer())
