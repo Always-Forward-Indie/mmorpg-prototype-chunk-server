@@ -49,8 +49,15 @@ NetworkManager::startAccept()
             std::string clientIP = remoteEndpoint.address().to_string();
             std::string portNumber = std::to_string(remoteEndpoint.port());
             gameServices_.getLogger().log("New Client with IP: " + clientIP + " Port: " + portNumber + " - connected!", GREEN);
-            // Pass the shared pointer to the ClientSession
+            
+            // Create session and add to active sessions list
             auto session = std::make_shared<ClientSession>(clientSocket, chunkServer_, gameServices_, eventQueue_, eventQueuePing_, jsonParser_, *eventDispatcher_, *messageHandler_);
+            
+            // Setup cleanup callback safely
+            setupSessionCallback(session);
+            
+            // Start the session and add it to active sessions
+            addActiveSession(session);
             session->start();
         }
         else{
@@ -67,29 +74,59 @@ NetworkManager::startIOEventLoop()
     for (size_t i = 0; i < numThreads; ++i)
     {
         threadPool_.emplace_back([this]()
-            { io_context_.run(); });
+            { 
+                try {
+                    io_context_.run();
+                } catch (const std::exception& e) {
+                    gameServices_.getLogger().logError("IO Context error: " + std::string(e.what()));
+                } });
     }
 }
 
 NetworkManager::~NetworkManager()
 {
     gameServices_.getLogger().log("Network Manager destructor is called...", RED);
+
+    // Clean up all active sessions before shutdown
+    {
+        std::lock_guard<std::mutex> lock(sessionsMutex_);
+        gameServices_.getLogger().log("Cleaning up " + std::to_string(activeSessions_.size()) + " active sessions...", YELLOW);
+        activeSessions_.clear();
+    }
+
+    // Close the acceptor and stop the IO context
     acceptor_.close();
     io_context_.stop();
+
     for (auto &thread : threadPool_)
     {
         if (thread.joinable())
             thread.join();
     }
+
+    gameServices_.getLogger().log("Network Manager cleanup completed.", GREEN);
 }
 
 void
 NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::string &responseString)
 {
-    if (!clientSocket || !clientSocket->is_open())
+    if (!clientSocket)
     {
-        gameServices_.getLogger().logError("Attempted write on closed or invalid socket.", RED);
+        gameServices_.getLogger().logError("Attempted write on null socket.", RED);
+        return;
+    }
 
+    try
+    {
+        if (!clientSocket->is_open())
+        {
+            gameServices_.getLogger().logError("Attempted write on closed socket.", RED);
+            return;
+        }
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Exception while checking socket state: " + std::string(e.what()), RED);
         return;
     }
 
@@ -141,4 +178,86 @@ NetworkManager::setChunkServer(ChunkServer *chunkServer)
 
     eventDispatcher_ = std::make_unique<EventDispatcher>(eventQueue_, eventQueuePing_, chunkServer_, gameServices_);
     messageHandler_ = std::make_unique<MessageHandler>(jsonParser_);
+}
+
+// Session management methods to prevent memory leaks
+void
+NetworkManager::addActiveSession(std::shared_ptr<ClientSession> session)
+{
+    std::lock_guard<std::mutex> lock(sessionsMutex_);
+
+    // Prevent DoS attacks by limiting maximum concurrent sessions
+    constexpr size_t MAX_CONCURRENT_SESSIONS = 1000;
+    if (activeSessions_.size() >= MAX_CONCURRENT_SESSIONS)
+    {
+        gameServices_.getLogger().logError("Maximum concurrent sessions reached (" +
+                                               std::to_string(MAX_CONCURRENT_SESSIONS) + "), rejecting new connection",
+            RED);
+        return; // Don't add the session
+    }
+
+    activeSessions_.insert(session);
+    gameServices_.getLogger().log("Added session to active sessions. Total active: " + std::to_string(activeSessions_.size()), GREEN);
+}
+
+void
+NetworkManager::removeActiveSession(std::shared_ptr<ClientSession> session)
+{
+    std::lock_guard<std::mutex> lock(sessionsMutex_);
+    activeSessions_.erase(session);
+    gameServices_.getLogger().log("Removed session from active sessions. Total active: " + std::to_string(activeSessions_.size()), GREEN);
+}
+
+void
+NetworkManager::cleanupInactiveSessions()
+{
+    std::lock_guard<std::mutex> lock(sessionsMutex_);
+
+    size_t initialSize = activeSessions_.size();
+
+    // Remove expired sessions (those that only exist in our set)
+    for (auto it = activeSessions_.begin(); it != activeSessions_.end();)
+    {
+        bool shouldRemove = false;
+
+        if (it->use_count() <= 1) // Only our reference remains
+        {
+            shouldRemove = true;
+        }
+        else
+        {
+            // Also check if the session's socket is still valid using public method
+            if (!(*it)->isSocketOpen())
+            {
+                shouldRemove = true;
+            }
+        }
+
+        if (shouldRemove)
+        {
+            gameServices_.getLogger().log("Cleaning up inactive session", GREEN);
+            it = activeSessions_.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    size_t finalSize = activeSessions_.size();
+    if (initialSize > finalSize)
+    {
+        gameServices_.getLogger().log("Session cleanup: removed " + std::to_string(initialSize - finalSize) +
+                                          " inactive sessions. Active: " + std::to_string(finalSize),
+            GREEN);
+    }
+}
+
+void
+NetworkManager::setupSessionCallback(std::shared_ptr<ClientSession> session)
+{
+    // Use raw pointer for cleanup callback to avoid circular references
+    // This is safe because session lifetime is shorter than NetworkManager
+    session->setCleanupCallback([this](std::shared_ptr<ClientSession> s)
+        { removeActiveSession(s); });
 }

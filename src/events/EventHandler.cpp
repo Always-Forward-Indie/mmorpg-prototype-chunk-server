@@ -1,6 +1,5 @@
 #include "events/EventHandler.hpp"
 #include "events/Event.hpp"
-
 EventHandler::EventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
@@ -9,6 +8,28 @@ EventHandler::EventHandler(
       gameServerWorker_(gameServerWorker),
       gameServices_(gameServices)
 {
+}
+
+// Helper method to safely get client socket
+std::shared_ptr<boost::asio::ip::tcp::socket>
+EventHandler::getClientSocket(const Event &event)
+{
+    int clientID = event.getClientID();
+
+    // Always get socket from ClientManager, never from Event
+    // This prevents use-after-free issues with socket references in Events
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = nullptr;
+    try
+    {
+        clientSocket = gameServices_.getClientManager().getClientSocket(clientID);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error getting socket for client ID " + std::to_string(clientID) + ": " + e.what(), RED);
+        clientSocket = nullptr;
+    }
+
+    return clientSocket;
 }
 
 void
@@ -82,8 +103,8 @@ EventHandler::handleJoinClientEvent(const Event &event)
     // Retrieve the data from the event
     const auto data = event.getData();
     int clientID = event.getClientID();
-    // get client socket
-    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
+    // get client socket using safe method
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     // Extract init data
     try
@@ -110,8 +131,17 @@ EventHandler::handleJoinClientEvent(const Event &event)
                                .build();
                 // Prepare a response message
                 std::string responseData = networkManager_.generateResponseMessage("error", response);
-                // Send the response to the client
-                networkManager_.sendResponse(clientSocket, responseData);
+                if (clientSocket && clientSocket->is_open())
+                {
+                    try
+                    {
+                        networkManager_.sendResponse(clientSocket, responseData);
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError("Error sending error response in joinClient: " + std::string(ex.what()));
+                    }
+                }
                 return;
             }
 
@@ -131,14 +161,38 @@ EventHandler::handleJoinClientEvent(const Event &event)
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
 
-            //  Get all existing clients data as array
-            std::vector<ClientDataStruct> clientDataMap = gameServices_.getClientManager().getClientsList();
+            //  Get all existing clients data as array (this now automatically cleans up invalid clients)
+            std::vector<ClientDataStruct> clientDataMap;
+            try
+            {
+                clientDataMap = gameServices_.getClientManager().getClientsList();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error getting client list in handleJoinClientEvent: " + std::string(ex.what()));
+                return;
+            }
 
             // Iterate through all exist clients to send data to them
             for (const auto &clientDataItem : clientDataMap)
             {
-                // Send the response to the current item Client
-                networkManager_.sendResponse(clientDataItem.socket, responseData);
+                // Get socket for this client using ClientManager
+                auto itemSocket = gameServices_.getClientManager().getClientSocket(clientDataItem.clientId);
+
+                // Validate socket before using
+                if (itemSocket && itemSocket->is_open())
+                {
+                    try
+                    {
+                        // Send the response to the current item Client
+                        networkManager_.sendResponse(itemSocket, responseData);
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError("Error sending join notification to client " +
+                                                           std::to_string(clientDataItem.clientId) + ": " + ex.what());
+                    }
+                }
             }
         }
         else
@@ -158,22 +212,49 @@ EventHandler::handleGetConnectedClientsChunkEvent(const Event &event)
     // Retrieve the data from the event
     const auto &data = event.getData();
     int clientID = event.getClientID();
-    // get client socket
-    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
+    // get client socket using safe method
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
     {
-        // get all connected clients
-        std::vector<ClientDataStruct> clientsList = gameServices_.getClientManager().getClientsList();
+        // get all connected clients (this now automatically cleans up invalid clients)
+        std::vector<ClientDataStruct> clientsList;
+        try
+        {
+            clientsList = gameServices_.getClientManager().getClientsList();
+        }
+        catch (const std::exception &ex)
+        {
+            gameServices_.getLogger().logError("Error getting client list in handleGetConnectedClientsChunkEvent: " + std::string(ex.what()));
+
+            // Send error response
+            nlohmann::json errorResponse = ResponseBuilder()
+                                               .setHeader("message", "Getting connected clients failed!")
+                                               .setHeader("hash", "")
+                                               .setHeader("clientId", clientID)
+                                               .setHeader("eventType", "getConnectedClients")
+                                               .setBody("", "")
+                                               .build();
+            std::string responseData = networkManager_.generateResponseMessage("error", errorResponse);
+            if (clientSocket && clientSocket->is_open())
+            {
+                networkManager_.sendResponse(clientSocket, responseData);
+            }
+            return;
+        }
 
         // Convert the clientsList to json
         nlohmann::json clientsListJson = nlohmann::json::array();
         for (const auto &client : clientsList)
         {
+            // Check socket status using ClientManager
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
+            bool isConnected = clientSocket && clientSocket->is_open();
+
             nlohmann::json clientJson = {
                 {"clientId", client.clientId},
                 {"characterId", client.characterId},
-                {"status", client.socket ? "connected" : "disconnected"} // Indicate if the socket is connected or not
+                {"status", isConnected ? "connected" : "disconnected"} // Indicate if the socket is connected or not
             };
             clientsListJson.push_back(clientJson);
         }
@@ -196,7 +277,17 @@ EventHandler::handleGetConnectedClientsChunkEvent(const Event &event)
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("error", response);
             // Send the response to the client
-            networkManager_.sendResponse(clientSocket, responseData);
+            if (clientSocket && clientSocket->is_open())
+            {
+                try
+                {
+                    networkManager_.sendResponse(clientSocket, responseData);
+                }
+                catch (const std::exception &ex)
+                {
+                    gameServices_.getLogger().logError("Error sending error response in getConnectedClients: " + std::string(ex.what()));
+                }
+            }
             return;
         }
 
@@ -212,7 +303,17 @@ EventHandler::handleGetConnectedClientsChunkEvent(const Event &event)
         std::string responseData = networkManager_.generateResponseMessage("success", response);
 
         // Send the response to the client
-        networkManager_.sendResponse(clientSocket, responseData);
+        if (clientSocket && clientSocket->is_open())
+        {
+            try
+            {
+                networkManager_.sendResponse(clientSocket, responseData);
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error sending response in getConnectedClients: " + std::string(ex.what()));
+            }
+        }
     }
     catch (const std::bad_variant_access &ex)
     {
@@ -226,8 +327,8 @@ EventHandler::handleJoinCharacterEvent(const Event &event)
     // Retrieve the data from the event
     const auto &data = event.getData();
     int clientID = event.getClientID();
-    // get client socket
-    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
+    // get client socket using safe method
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
     {
@@ -279,7 +380,17 @@ EventHandler::handleJoinCharacterEvent(const Event &event)
                                .build();
 
                 std::string responseData = networkManager_.generateResponseMessage("error", response);
-                networkManager_.sendResponse(clientSocket, responseData);
+                if (clientSocket && clientSocket->is_open())
+                {
+                    try
+                    {
+                        networkManager_.sendResponse(clientSocket, responseData);
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError("Error sending error response in joinCharacter: " + std::string(ex.what()));
+                    }
+                }
                 return;
             }
 
@@ -294,14 +405,38 @@ EventHandler::handleJoinCharacterEvent(const Event &event)
             // Prepare a response message
             std::string responseData = networkManager_.generateResponseMessage("success", response);
 
-            //  Get all existing clients data as array
-            std::vector<ClientDataStruct> clientDataMap = gameServices_.getClientManager().getClientsList();
+            //  Get all existing clients data as array (this now automatically cleans up invalid clients)
+            std::vector<ClientDataStruct> clientDataMap;
+            try
+            {
+                clientDataMap = gameServices_.getClientManager().getClientsList();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error getting client list in handleJoinCharacterEvent: " + std::string(ex.what()));
+                return;
+            }
 
             // Iterate through all exist clients to send data to them
             for (const auto &clientDataItem : clientDataMap)
             {
-                // Send the response to the current item Client
-                networkManager_.sendResponse(clientDataItem.socket, responseData);
+                // Get socket for this client using ClientManager
+                auto itemSocket = gameServices_.getClientManager().getClientSocket(clientDataItem.clientId);
+
+                // Validate socket before using
+                if (itemSocket && itemSocket->is_open())
+                {
+                    try
+                    {
+                        // Send the response to the current item Client
+                        networkManager_.sendResponse(itemSocket, responseData);
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError("Error sending character join notification to client " +
+                                                           std::to_string(clientDataItem.clientId) + ": " + ex.what());
+                    }
+                }
             }
         }
         else
@@ -320,22 +455,23 @@ EventHandler::handleMoveCharacterClientEvent(const Event &event)
 {
     const auto &data = event.getData();
     int clientID = event.getClientID();
-    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
     {
-        if (std::holds_alternative<CharacterDataStruct>(data))
+        if (std::holds_alternative<MovementDataStruct>(data))
         {
-            CharacterDataStruct passedCharacterData = std::get<CharacterDataStruct>(data);
+            // Use const reference to avoid copying the struct
+            const MovementDataStruct &movementData = std::get<MovementDataStruct>(data);
 
             // Обновляем позицию персонажа на сервере
             gameServices_.getCharacterManager().setCharacterPosition(
-                passedCharacterData.characterId, passedCharacterData.characterPosition);
+                movementData.characterId, movementData.position);
 
-            // prepare character data in json format
+            // Create minimal character data for response (only essential movement data)
             nlohmann::json characterJson = {
-                {"id", passedCharacterData.characterId},
-                {"position", {{"x", passedCharacterData.characterPosition.positionX}, {"y", passedCharacterData.characterPosition.positionY}, {"z", passedCharacterData.characterPosition.positionZ}, {"rotationZ", passedCharacterData.characterPosition.rotationZ}}}};
+                {"id", movementData.characterId},
+                {"position", {{"x", movementData.position.positionX}, {"y", movementData.position.positionY}, {"z", movementData.position.positionZ}, {"rotationZ", movementData.position.rotationZ}}}};
 
             // Проверка авторизации
             if (clientID == 0)
@@ -349,11 +485,15 @@ EventHandler::handleMoveCharacterClientEvent(const Event &event)
                                                    .build();
 
                 std::string responseData = networkManager_.generateResponseMessage("error", errorResponse);
-                networkManager_.sendResponse(clientSocket, responseData);
+                if (clientSocket && clientSocket->is_open())
+                {
+                    networkManager_.sendResponse(clientSocket, responseData);
+                }
+
                 return;
             }
 
-            // Формируем финальный ответ
+            // Формируем финальный ответ один раз
             nlohmann::json successResponse = ResponseBuilder()
                                                  .setHeader("message", "Movement success for character!")
                                                  .setHeader("hash", "")
@@ -364,29 +504,67 @@ EventHandler::handleMoveCharacterClientEvent(const Event &event)
 
             std::string responseData = networkManager_.generateResponseMessage("success", successResponse);
 
-            //  Get all existing clients data as array
-            std::vector<ClientDataStruct> clientDataMap = gameServices_.getClientManager().getClientsList();
+            //  Get all existing clients data as array (this now automatically cleans up invalid clients)
+            std::vector<ClientDataStruct> clientDataMap;
+            try
+            {
+                clientDataMap = gameServices_.getClientManager().getClientsList();
+                // Reserve capacity to avoid reallocations during iteration
+                if (clientDataMap.capacity() > clientDataMap.size() * 2)
+                {
+                    clientDataMap.shrink_to_fit();
+                }
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error getting client list in handleMoveCharacterClientEvent: " + std::string(ex.what()));
+                return;
+            }
 
             // debug log client data map size
             gameServices_.getLogger().log("Client data map size: " + std::to_string(clientDataMap.size()));
 
-            // Iterate through all exist clients to send data to them
+            // Send response data to all clients using the pre-created response
             for (const auto &clientDataItem : clientDataMap)
             {
                 // debug log
                 gameServices_.getLogger().log("Sending move character response to client ID: " + std::to_string(clientDataItem.clientId));
 
-                networkManager_.sendResponse(clientDataItem.socket, responseData);
+                // Get socket for this client using ClientManager
+                auto itemSocket = gameServices_.getClientManager().getClientSocket(clientDataItem.clientId);
+
+                // Validate socket before using
+                if (itemSocket && itemSocket->is_open())
+                {
+                    try
+                    {
+                        // Reuse the same responseData string - no need to recreate for each client
+                        networkManager_.sendResponse(itemSocket, responseData);
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError("Error sending move character notification to client " +
+                                                           std::to_string(clientDataItem.clientId) + ": " + ex.what());
+                    }
+                }
+                else
+                {
+                    gameServices_.getLogger().logError("Invalid or closed socket for client ID: " + std::to_string(clientDataItem.clientId));
+                }
             }
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            gameServices_.getLogger().log("Error with extracting data in moveCharacter - variant doesn't contain MovementDataStruct or CharacterDataStruct!");
         }
     }
     catch (const std::bad_variant_access &ex)
     {
-        gameServices_.getLogger().log("Error here: " + std::string(ex.what()));
+        gameServices_.getLogger().log("Bad variant access in handleMoveCharacterClientEvent: " + std::string(ex.what()));
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("General error in handleMoveCharacterClientEvent: " + std::string(ex.what()));
     }
 }
 
@@ -396,7 +574,7 @@ EventHandler::handleGetConnectedCharactersChunkEvent(const Event &event)
 {
     const auto &data = event.getData();
     int clientID = event.getClientID();
-    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
     {
@@ -488,11 +666,26 @@ EventHandler::handleDisconnectClientEvent(const Event &event)
 
             if (passedClientData.clientId == 0)
             {
-                gameServices_.getLogger().log("Client ID is 0, so we will just remove client from our list!");
+                gameServices_.getLogger().log("Client ID is 0, handling graceful disconnect without specific client identification!");
 
-                // Remove the client data
-                gameServices_.getClientManager().removeClientDataBySocket(passedClientData.socket);
+                // Since we don't have a valid client ID or socket reference,
+                // we can't identify the specific client to remove.
+                // This usually happens when a client disconnects abruptly.
+                // We'll let the cleanup happen elsewhere (e.g., periodic cleanup or when sending fails).
 
+                gameServices_.getLogger().log("Disconnect event processed for unknown client.");
+                return;
+            }
+
+            // Get the list of clients BEFORE removing the disconnecting client
+            std::vector<ClientDataStruct> clientDataMap;
+            try
+            {
+                clientDataMap = gameServices_.getClientManager().getClientsList();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error getting client list in handleDisconnectClientEvent: " + std::string(ex.what()));
                 return;
             }
 
@@ -515,9 +708,27 @@ EventHandler::handleDisconnectClientEvent(const Event &event)
             std::string responseData = networkManager_.generateResponseMessage("success", response);
 
             // Send the response to the all existing clients in the clientDataMap
-            for (auto const &client : gameServices_.getClientManager().getClientsList())
+            for (auto const &client : clientDataMap)
             {
-                networkManager_.sendResponse(client.socket, responseData);
+                // Skip the disconnecting client and get socket using ClientManager
+                if (client.clientId != passedClientData.clientId)
+                {
+                    auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
+
+                    // Validate socket before using
+                    if (clientSocket && clientSocket->is_open())
+                    {
+                        try
+                        {
+                            networkManager_.sendResponse(clientSocket, responseData);
+                        }
+                        catch (const std::exception &ex)
+                        {
+                            gameServices_.getLogger().logError("Error sending disconnect notification to client " +
+                                                               std::to_string(client.clientId) + ": " + ex.what());
+                        }
+                    }
+                }
             }
         }
         else
@@ -576,10 +787,27 @@ EventHandler::handleDisconnectChunkEvent(const Event &event)
 void
 EventHandler::handlePingClientEvent(const Event &event)
 {
+    // Get the socket using safe method
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
+
+    try
+    {
+        if (!clientSocket->is_open())
+        {
+            gameServices_.getLogger().log("Skipping ping - socket is closed for client ID: " + std::to_string(event.getClientID()), GREEN);
+            return;
+        }
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().log("Skipping ping - socket validation failed for client ID: " + std::to_string(event.getClientID()) + " - " + e.what(), GREEN);
+        return;
+    }
+
     // Here we will ping the client
     const auto data = event.getData();
 
-    gameServices_.getLogger().log("Handling PING event!", YELLOW);
+    gameServices_.getLogger().log("Handling PING event for client ID: " + std::to_string(event.getClientID()), GREEN);
 
     // Extract init data
     try
@@ -599,19 +827,26 @@ EventHandler::handlePingClientEvent(const Event &event)
                            .build();
             std::string responseData = networkManager_.generateResponseMessage("success", response);
 
-            gameServices_.getLogger().log("Sending PING data to Client: " + responseData, YELLOW);
+            gameServices_.getLogger().log("Sending PING response to Client ID: " + std::to_string(event.getClientID()), GREEN);
 
-            // Send the response to the client
-            networkManager_.sendResponse(passedClientData.socket, responseData);
+            // Use the validated socket from the event, not from the data
+            try
+            {
+                networkManager_.sendResponse(clientSocket, responseData);
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error sending ping response to client ID " + std::to_string(event.getClientID()) + ": " + std::string(ex.what()));
+            }
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            gameServices_.getLogger().logError("Error extracting data from ping event for client ID: " + std::to_string(event.getClientID()));
         }
     }
     catch (const std::bad_variant_access &ex)
     {
-        gameServices_.getLogger().log("Error here:" + std::string(ex.what()));
+        gameServices_.getLogger().logError("Variant access error in ping event for client ID " + std::to_string(event.getClientID()) + ": " + std::string(ex.what()));
     }
 }
 
@@ -620,7 +855,7 @@ EventHandler::handleSpawnMobsInZoneEvent(const Event &event)
 {
     const auto &data = event.getData();
     int clientID = event.getClientID();
-    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
     {
@@ -712,13 +947,16 @@ EventHandler::handleZoneMoveMobsEvent(const Event &event)
 {
     const auto &data = event.getData();
     int clientID = event.getClientID();
-    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = event.getSocket();
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
     {
-        if (std::holds_alternative<std::vector<MobDataStruct>>(data))
+        // Check if the data is a zone ID (int) instead of a full vector
+        if (std::holds_alternative<int>(data))
         {
-            std::vector<MobDataStruct> mobsList = std::get<std::vector<MobDataStruct>>(data);
+            int zoneId = std::get<int>(data);
+            // Fetch mobs data from the manager instead of from Event
+            std::vector<MobDataStruct> mobsList = gameServices_.getSpawnZoneManager().getMobsInZone(zoneId);
 
             nlohmann::json mobsArray = nlohmann::json::array();
 

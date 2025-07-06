@@ -154,7 +154,7 @@ GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, st
     if (eventType == "setChunkData")
     {
         // set chunk data
-        Event setChunkDataEvent(Event::SET_CHUNK_DATA, clientData.clientId, chunkInfo, game_server_socket_);
+        Event setChunkDataEvent(Event::SET_CHUNK_DATA, clientData.clientId, chunkInfo);
         eventsBatch.push_back(setChunkDataEvent);
     }
 
@@ -163,35 +163,35 @@ GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, st
         characterData.characterPosition = positionData; // Set character position from parsed data
         characterData.clientId = clientData.clientId;   // Set client ID for the character
         // set character data
-        Event setCharacterDataEvent(Event::SET_CHARACTER_DATA, clientData.clientId, characterData, game_server_socket_);
+        Event setCharacterDataEvent(Event::SET_CHARACTER_DATA, clientData.clientId, characterData);
         eventsBatch.push_back(setCharacterDataEvent);
     }
 
     if (eventType == "setCharacterAttributes")
     {
         // set character attributes
-        Event setCharacterAttributesEvent(Event::SET_CHARACTER_ATTRIBUTES, clientData.clientId, characterAttributesList, game_server_socket_);
+        Event setCharacterAttributesEvent(Event::SET_CHARACTER_ATTRIBUTES, clientData.clientId, characterAttributesList);
         eventsBatch.push_back(setCharacterAttributesEvent);
     }
 
     if (eventType == "setSpawnZonesList")
     {
         // set spawn zones list
-        Event setSpawnZonesEvent(Event::SET_ALL_SPAWN_ZONES, clientData.clientId, spawnZonesList, game_server_socket_);
+        Event setSpawnZonesEvent(Event::SET_ALL_SPAWN_ZONES, clientData.clientId, spawnZonesList);
         eventsBatch.push_back(setSpawnZonesEvent);
     }
 
     if (eventType == "setMobsList")
     {
         // set mobs list
-        Event setMobsListEvent(Event::SET_ALL_MOBS_LIST, clientData.clientId, mobsList, game_server_socket_);
+        Event setMobsListEvent(Event::SET_ALL_MOBS_LIST, clientData.clientId, mobsList);
         eventsBatch.push_back(setMobsListEvent);
     }
 
     if (eventType == "setMobsAttributes")
     {
         // set mobs attributes
-        Event setMobsAttributesEvent(Event::SET_ALL_MOBS_ATTRIBUTES, clientData.clientId, mobsAttributesList, game_server_socket_);
+        Event setMobsAttributesEvent(Event::SET_ALL_MOBS_ATTRIBUTES, clientData.clientId, mobsAttributesList);
         eventsBatch.push_back(setMobsAttributesEvent);
     }
 

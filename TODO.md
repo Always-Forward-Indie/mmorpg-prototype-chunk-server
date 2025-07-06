@@ -1,1 +1,0 @@
-[ ] Work on spawn zones and mobs packets to make it work with client side

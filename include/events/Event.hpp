@@ -1,31 +1,11 @@
 #pragma once
 #include "data/DataStructs.hpp"
+#include "events/EventData.hpp"
 #include <boost/asio.hpp>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_map>
-#include <variant>
-
-// Define the types of data that can be sent in an event
-using EventData = std::variant<
-    int,
-    float,
-    std::string,
-    nlohmann::json,
-    PositionStruct,
-    CharacterDataStruct,
-    ClientDataStruct,
-    SpawnZoneStruct,
-    MobDataStruct,
-    ChunkInfoStruct,
-    std::vector<MobDataStruct>,
-    std::vector<SpawnZoneStruct>,
-    std::vector<MobAttributeStruct>,
-    std::vector<CharacterDataStruct>,
-    std::vector<CharacterAttributeStruct>,
-    std::vector<ClientDataStruct>
-    /* other types */>;
 
 class Event
 {
@@ -54,15 +34,29 @@ class Event
         SPAWN_ZONE_MOVE_MOBS,
         MOVE_MOB
     }; // Define more event types as needed
+
     Event() = default; // Default constructor
-    Event(EventType type, int clientID, const EventData data, std::shared_ptr<boost::asio::ip::tcp::socket> currentSocket);
+    Event(EventType type, int clientID, const EventData &data);
+
+    // Copy constructor with validation
+    Event(const Event &other);
+
+    // Move constructor
+    Event(Event &&other) noexcept;
+
+    // Copy assignment with validation
+    Event &operator=(const Event &other);
+
+    // Move assignment
+    Event &operator=(Event &&other) noexcept;
+
+    // Destructor with safety checks
+    ~Event();
 
     // Get Event Data
-    const EventData getData() const;
+    const EventData &getData() const;
     // Get Client ID
     int getClientID() const;
-    // Get Client Socket
-    std::shared_ptr<boost::asio::ip::tcp::socket> getSocket() const;
     // Get Event Type
     EventType getType() const;
 
@@ -70,5 +64,4 @@ class Event
     int clientID;
     EventType type;
     EventData eventData;
-    std::shared_ptr<boost::asio::ip::tcp::socket> currentSocket;
 };

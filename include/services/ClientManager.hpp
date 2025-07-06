@@ -1,15 +1,17 @@
 #pragma once
 
-#include <iostream>
-#include <vector>
 #include "data/DataStructs.hpp"
-#include <utils/Logger.hpp>
+#include <iostream>
 #include <shared_mutex>
+#include <unordered_map>
+#include <utils/Logger.hpp>
+#include <vector>
 
-class ClientManager {
-public:
+class ClientManager
+{
+  public:
     // Constructor
-    ClientManager(Logger& logger);
+    ClientManager(Logger &logger);
 
     // Load clients list
     void loadClientsList(std::vector<ClientDataStruct> clientsList);
@@ -23,12 +25,17 @@ public:
     // Get clients list
     std::vector<ClientDataStruct> getClientsList();
 
+    // Get clients list without cleanup (thread-safe read-only)
+    std::vector<ClientDataStruct> getClientsListReadOnly();
+
     // Get basic client data by client ID
     ClientDataStruct getClientData(int clientID);
 
     // Get Client Socket by client ID
     std::shared_ptr<boost::asio::ip::tcp::socket> getClientSocket(int clientID);
 
+    // Get client ID by socket
+    int getClientIdBySocket(std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
     // remove client by ID
     void removeClientData(int clientID);
@@ -36,12 +43,18 @@ public:
     // remove client by socket
     void removeClientDataBySocket(std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
+    // cleanup clients with invalid sockets
+    void cleanupInvalidClients();
 
-private:
+    // Force cleanup of all disconnected clients and shrink containers to prevent memory leaks
+    void forceCleanupMemory();
 
-    Logger& logger_;
+  private:
+    Logger &logger_;
     // clients list
     std::vector<ClientDataStruct> clientsList_;
+    // socket map - tracks socket references separately from client data
+    std::unordered_map<int, std::shared_ptr<boost::asio::ip::tcp::socket>> clientSockets_;
 
     // Mutex for clients list
     std::shared_mutex mutex_;

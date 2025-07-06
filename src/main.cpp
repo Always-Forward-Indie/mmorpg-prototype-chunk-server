@@ -1,25 +1,30 @@
-#include <iostream>
-#include <csignal>
-#include <atomic>
-#include <thread>
-#include "utils/Config.hpp"
-#include "utils/Logger.hpp"
-#include "utils/TimeConverter.hpp"
 #include "chunk_server/ChunkServer.hpp"
 #include "network/GameServerWorker.hpp"
 #include "network/NetworkManager.hpp"
-#include "utils/Scheduler.hpp"
 #include "services/CharacterManager.hpp"
 #include "services/GameServices.hpp"
+#include "utils/Config.hpp"
+#include "utils/Logger.hpp"
+#include "utils/Scheduler.hpp"
+#include "utils/TimeConverter.hpp"
+#include <atomic>
+#include <csignal>
+#include <iostream>
+#include <thread>
 
 std::atomic<bool> running(true);
 
-void signalHandler(int signal) {
+void
+signalHandler(int signal)
+{
     running = false;
 }
 
-int main() {
-    try {
+int
+main()
+{
+    try
+    {
         // Устанавливаем обработчик сигналов (Ctrl+C)
         std::signal(SIGINT, signalHandler);
         std::signal(SIGTERM, signalHandler);
@@ -52,7 +57,7 @@ int main() {
         EventHandler eventHandler(networkManager, gameServerWorker, gameServices);
 
         // Initialize GameServer
-        ChunkServer chunkServer(gameServices, eventHandler, eventQueueChunkServer, eventQueueGameServer, eventQueueChunkServerPing, scheduler, gameServerWorker);
+        ChunkServer chunkServer(gameServices, eventHandler, eventQueueChunkServer, eventQueueGameServer, eventQueueChunkServerPing, scheduler, gameServerWorker, networkManager);
 
         // Set the ChunkServer object in the NetworkManager
         networkManager.setChunkServer(&chunkServer);
@@ -70,17 +75,20 @@ int main() {
         chunkServer.startMainEventLoop();
 
         // Start Scheduler loop in a separate thread
-       scheduler.start();
+        scheduler.start();
 
         // wait for the signal to stop the server
-        while (running) {
+        while (running)
+        {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
         std::cout << "Shutting down gracefully..." << std::endl;
 
         return 0;
-    } catch (const std::exception &e) {
+    }
+    catch (const std::exception &e)
+    {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }

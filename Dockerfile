@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     cargo \
+    libasan8 \
     && rm -rf /var/lib/apt/lists/*
 
 # ✅ Install Rust (required for watchexec)
@@ -50,7 +51,9 @@ RUN ls -lh /usr/src/app/build/MMOChunkServer || (echo "❌ ERROR: Binary not bui
 RUN cp /root/.cargo/bin/watchexec /usr/local/bin/watchexec && chmod +x /usr/local/bin/watchexec
 
 # ✅ Strip unnecessary debug symbols to reduce size
-RUN strip /usr/src/app/build/MMOChunkServer || true
+#RUN strip /usr/src/app/build/MMOChunkServer || true
+
+ENV ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:symbolize=1
 
 # ✅ Ensure the binary is executable
 RUN chmod +x /usr/src/app/build/MMOChunkServer

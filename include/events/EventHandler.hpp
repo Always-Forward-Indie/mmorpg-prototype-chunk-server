@@ -17,6 +17,9 @@ class EventHandler
     void dispatchEvent(const Event &event);
 
   private:
+    // Helper method to safely get client socket
+    std::shared_ptr<boost::asio::ip::tcp::socket> getClientSocket(const Event &event);
+
     void handlePingClientEvent(const Event &event);
     void handleJoinClientEvent(const Event &event);
     void handleJoinCharacterEvent(const Event &event);

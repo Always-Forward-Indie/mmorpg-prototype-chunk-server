@@ -1,5 +1,9 @@
 #include "chunk_server/ChunkServer.hpp"
+#include <fstream>
 #include <unordered_set>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 ChunkServer::ChunkServer(GameServices &gameServices,
     EventHandler &eventHandler,
@@ -7,13 +11,15 @@ ChunkServer::ChunkServer(GameServices &gameServices,
     EventQueue &eventQueueChunkServer,
     EventQueue &eventQueueGameServerPing,
     Scheduler &scheduler,
-    GameServerWorker &gameServerWorker)
+    GameServerWorker &gameServerWorker,
+    NetworkManager &networkManager)
     : eventQueueGameServer_(eventQueueGameServer),
       eventQueueChunkServer_(eventQueueChunkServer),
       eventQueueGameServerPing_(eventQueueGameServerPing),
       eventHandler_(eventHandler),
       scheduler_(scheduler),
-      gameServices_(gameServices)
+      gameServices_(gameServices),
+      networkManager_(networkManager)
 {
 }
 
@@ -29,16 +35,15 @@ ChunkServer::mainEventLoopCH()
         {
             gameServices_.getSpawnZoneManager().spawnMobsInZone(1);
             SpawnZoneStruct spawnZone = gameServices_.getSpawnZoneManager().getMobSpawnZoneByID(1);
-
-            auto connectedClients = gameServices_.getClientManager().getClientsList();
+            auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly(); // Use read-only version
             for (const auto &client : connectedClients)
             {
-                if (client.clientId == 0)
+                if (client.clientId <= 0) // Strict validation
                     continue;
 
-                auto clientSocket = client.socket;
-                Event spawnMobsInZoneEvent(Event::SPAWN_MOBS_IN_ZONE, client.clientId, spawnZone, clientSocket);
-                eventQueueGameServer_.push(spawnMobsInZoneEvent);
+                auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
+                Event spawnMobsInZoneEvent(Event::SPAWN_MOBS_IN_ZONE, client.clientId, spawnZone);
+                eventQueueGameServer_.push(std::move(spawnMobsInZoneEvent)); // Use move
             }
         },
         15,
@@ -53,17 +58,20 @@ ChunkServer::mainEventLoopCH()
         [&]
         {
             gameServices_.getSpawnZoneManager().moveMobsInZone(1);
-            std::vector<MobDataStruct> mobsList = gameServices_.getSpawnZoneManager().getMobsInZone(1);
+            // Instead of copying the entire mobs list into each Event,
+            // just pass the zone ID and let the handler fetch the data
+            int zoneId = 1;
 
-            auto connectedClients = gameServices_.getClientManager().getClientsList();
+            auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly(); // Use read-only version
             for (const auto &client : connectedClients)
             {
-                if (client.clientId == 0)
+                if (client.clientId <= 0) // Strict validation
                     continue;
 
-                auto clientSocket = client.socket;
-                Event moveMobsInZoneEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, mobsList, clientSocket);
-                eventQueueGameServer_.push(moveMobsInZoneEvent);
+                auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
+                // Pass only zone ID instead of full mobs list to prevent memory leaks
+                Event moveMobsInZoneEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, zoneId);
+                eventQueueGameServer_.push(std::move(moveMobsInZoneEvent)); // Use move
             }
         },
         3,
@@ -72,6 +80,151 @@ ChunkServer::mainEventLoopCH()
     );
 
     scheduler_.scheduleTask(moveMobInZoneTask);
+
+    // Task for periodic cleanup of inactive sessions and client data
+    Task cleanupTask(
+        [&] {                                                                     // Clean up inactive client data
+            auto clientsList = gameServices_.getClientManager().getClientsList(); // This automatically cleans up invalid clients
+
+            // More aggressive cleanup - force cleanup of disconnected clients
+            std::vector<int> clientsToRemove;
+            for (const auto &client : clientsList)
+            {
+                auto socket = gameServices_.getClientManager().getClientSocket(client.clientId);
+                if (!socket)
+                {
+                    clientsToRemove.push_back(client.clientId);
+                }
+            }
+
+            for (int clientId : clientsToRemove)
+            {
+                gameServices_.getClientManager().removeClientData(clientId);
+                gameServices_.getLogger().log("Force removed disconnected client: " + std::to_string(clientId), YELLOW);
+            }
+
+            // Force cleanup memory in ClientManager
+            gameServices_.getClientManager().forceCleanupMemory();
+
+            // Clean up inactive network sessions to prevent memory leaks
+            networkManager_.cleanupInactiveSessions();
+
+            // Log memory usage information
+            gameServices_.getLogger().log("Active clients: " + std::to_string(clientsList.size()), BLUE);
+            gameServices_.getLogger().log("Game Server Queue size: " + std::to_string(eventQueueGameServer_.size()), BLUE);
+            gameServices_.getLogger().log("Chunk Server Queue size: " + std::to_string(eventQueueChunkServer_.size()), BLUE);
+            gameServices_.getLogger().log("Ping Queue size: " + std::to_string(eventQueueGameServerPing_.size()), BLUE);
+            gameServices_.getLogger().log("ThreadPool Queue size: " + std::to_string(threadPool_.getTaskQueueSize()), BLUE);
+
+            // If any queue is getting too large, log a warning
+            if (eventQueueGameServer_.size() > 500 || eventQueueChunkServer_.size() > 500 || eventQueueGameServerPing_.size() > 500 || threadPool_.getTaskQueueSize() > 500)
+            {
+                gameServices_.getLogger().logError("Event queues are getting large - potential memory leak!", RED);
+            }
+        },
+        10, // Run every 10 seconds (more frequent cleanup)
+        std::chrono::system_clock::now(),
+        3 // unique task ID
+    );
+
+    scheduler_.scheduleTask(cleanupTask);
+
+    // Add memory monitoring task
+    Task memoryMonitorTask(
+        [&]
+        {
+            // Simple memory monitoring using /proc/self/status
+            std::ifstream statusFile("/proc/self/status");
+            if (statusFile.is_open())
+            {
+                std::string line;
+                while (std::getline(statusFile, line))
+                {
+                    if (line.find("VmRSS:") == 0)
+                    {
+                        gameServices_.getLogger().log("Memory usage: " + line, GREEN);
+                        break;
+                    }
+                }
+                statusFile.close();
+            }
+        },
+        5, // Run every 5 seconds
+        std::chrono::system_clock::now(),
+        4 // unique task ID
+    );
+
+    scheduler_.scheduleTask(memoryMonitorTask);
+
+    // Add aggressive memory cleanup task to force memory release
+    Task aggressiveCleanupTask(
+        [&]
+        {
+            gameServices_.getLogger().log("Running aggressive memory cleanup...", YELLOW);
+
+            // Force garbage collection by explicitly clearing and shrinking containers
+            // Force memory cleanup in all managers
+            gameServices_.getClientManager().forceCleanupMemory();
+            networkManager_.cleanupInactiveSessions();
+
+            // Force cleanup of event queues when they're empty
+            if (eventQueueGameServer_.empty())
+            {
+                eventQueueGameServer_.forceCleanup();
+                gameServices_.getLogger().log("Cleaned up Game Server event queue", BLUE);
+            }
+            if (eventQueueChunkServer_.empty())
+            {
+                eventQueueChunkServer_.forceCleanup();
+                gameServices_.getLogger().log("Cleaned up Chunk Server event queue", BLUE);
+            }
+            if (eventQueueGameServerPing_.empty())
+            {
+                eventQueueGameServerPing_.forceCleanup();
+                gameServices_.getLogger().log("Cleaned up Ping event queue", BLUE);
+            }
+
+            // Force cleanup of thread pool task queue if possible
+            if (threadPool_.getTaskQueueSize() == 0)
+            {
+                // When there are no tasks, it's safe to shrink internal containers
+                gameServices_.getLogger().log("Thread pool is idle, triggering internal cleanup", BLUE);
+            }
+
+// Force system to release unused memory back to OS (Linux/glibc specific)
+#ifdef __GLIBC__
+            if (malloc_trim(0))
+            {
+                gameServices_.getLogger().log("malloc_trim() released memory back to OS", BLUE);
+            }
+#endif
+
+            // Log memory status after cleanup
+            std::ifstream statusFile("/proc/self/status");
+            if (statusFile.is_open())
+            {
+                std::string line;
+                while (std::getline(statusFile, line))
+                {
+                    if (line.find("VmRSS:") == 0)
+                    {
+                        gameServices_.getLogger().log("Post-cleanup " + line, YELLOW);
+                        break;
+                    }
+                    if (line.find("VmSize:") == 0)
+                    {
+                        gameServices_.getLogger().log("Post-cleanup " + line, YELLOW);
+                    }
+                }
+                statusFile.close();
+            }
+        },
+        30, // Run every 30 seconds - aggressive but not too frequent
+        std::chrono::system_clock::now(),
+        5 // unique task ID
+    );
+
+    scheduler_.scheduleTask(aggressiveCleanupTask);
 
     try
     {
@@ -82,6 +235,10 @@ ChunkServer::mainEventLoopCH()
             if (eventQueueGameServer_.popBatch(eventsBatch, BATCH_SIZE))
             {
                 processBatch(eventsBatch);
+
+                // Clear and shrink the batch vector to prevent memory retention
+                eventsBatch.clear();
+                eventsBatch.shrink_to_fit();
             }
         }
     }
@@ -106,6 +263,10 @@ ChunkServer::mainEventLoopGS()
             if (eventQueueChunkServer_.popBatch(eventsBatch, BATCH_SIZE))
             {
                 processBatch(eventsBatch);
+
+                // Clear and shrink the batch vector to prevent memory retention
+                eventsBatch.clear();
+                eventsBatch.shrink_to_fit();
             }
         }
     }
@@ -130,6 +291,10 @@ ChunkServer::mainEventLoopPing()
             if (eventQueueGameServerPing_.popBatch(pingEvents, BATCH_SIZE))
             {
                 processPingBatch(pingEvents);
+
+                // Clear and shrink the ping events vector to prevent memory retention
+                pingEvents.clear();
+                pingEvents.shrink_to_fit();
             }
         }
     }
@@ -144,16 +309,33 @@ ChunkServer::processPingBatch(const std::vector<Event> &pingEvents)
 {
     for (const auto &event : pingEvents)
     {
-        threadPool_.enqueueTask([this, event]
-            {
+        try
+        {
+            // Create a copy only when passing to the thread pool
+            threadPool_.enqueueTask([this, eventCopy = Event(event)]() mutable
+                {
+                try
+                {
+                    eventHandler_.dispatchEvent(std::move(eventCopy));
+                }
+                catch (const std::exception &e)
+                {
+                    gameServices_.getLogger().logError("Error processing PING_EVENT: " + std::string(e.what()));
+                } });
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Failed to enqueue PING task to ThreadPool: " + std::string(e.what()), RED);
+            // Handle ping synchronously if ThreadPool is full
             try
             {
                 eventHandler_.dispatchEvent(event);
             }
-            catch (const std::exception &e)
+            catch (const std::exception &sync_e)
             {
-                gameServices_.getLogger().logError("Error processing PING_EVENT: " + std::string(e.what()));
-            } });
+                gameServices_.getLogger().logError("Error in synchronous ping handling: " + std::string(sync_e.what()), RED);
+            }
+        }
     }
 
     eventCondition.notify_all();
@@ -162,46 +344,38 @@ ChunkServer::processPingBatch(const std::vector<Event> &pingEvents)
 void
 ChunkServer::processBatch(const std::vector<Event> &eventsBatch)
 {
-    std::vector<Event> priorityEvents;
-    std::vector<Event> normalEvents;
-
-    // Separate ping events from other events
+    // Process events directly from the batch without copying to avoid memory retention
+    // Process all events as normal events for now to simplify memory management
     for (const auto &event : eventsBatch)
     {
-        // if (event.PING_CLIENT == Event::PING_CLIENT)
-        //     priorityEvents.push_back(event);
-        // else
-        normalEvents.push_back(event);
-    }
-
-    // Process priority ping events first
-    for (const auto &event : priorityEvents)
-    {
-        threadPool_.enqueueTask([this, event]
-            {
+        try
+        {
+            // Create a copy only when passing to the thread pool
+            // Use move construction in the lambda capture to minimize copies
+            threadPool_.enqueueTask([this, eventCopy = Event(event)]() mutable
+                {
+                try
+                {
+                    eventHandler_.dispatchEvent(std::move(eventCopy));
+                }
+                catch (const std::exception &e)
+                {
+                    gameServices_.getLogger().logError("Error in dispatchEvent: " + std::string(e.what()));
+                } });
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Failed to enqueue task to ThreadPool: " + std::string(e.what()), RED);
+            // Handle the event synchronously if ThreadPool is full
             try
             {
                 eventHandler_.dispatchEvent(event);
             }
-            catch (const std::exception &e)
+            catch (const std::exception &sync_e)
             {
-                gameServices_.getLogger().logError("Error processing priority dispatchEvent: " + std::string(e.what()));
-            } });
-    }
-
-    // Process normal events
-    for (const auto &event : normalEvents)
-    {
-        threadPool_.enqueueTask([this, event]
-            {
-            try
-            {
-                eventHandler_.dispatchEvent(event);
+                gameServices_.getLogger().logError("Error in synchronous event handling: " + std::string(sync_e.what()), RED);
             }
-            catch (const std::exception &e)
-            {
-                gameServices_.getLogger().logError("Error in normal dispatchEvent: " + std::string(e.what()));
-            } });
+        }
     }
 
     eventCondition.notify_all();

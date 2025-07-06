@@ -10,6 +10,13 @@ struct PositionStruct
     float rotationZ = 0;
 };
 
+struct MovementDataStruct
+{
+    int clientId = 0;
+    int characterId = 0;
+    PositionStruct position;
+};
+
 struct MessageStruct
 {
     std::string status = "";
@@ -20,7 +27,6 @@ struct ChunkInfoStruct
 {
     int id = 0;
     std::string ip = "";
-    std::shared_ptr<boost::asio::ip::tcp::socket> socket;
     int port = 0;
     float posX = 0;
     float posY = 0;
@@ -70,7 +76,6 @@ struct ClientDataStruct
 {
     int clientId = 0;
     std::string hash = "";
-    std::shared_ptr<boost::asio::ip::tcp::socket> socket;
     int characterId = 0;
 };
 
