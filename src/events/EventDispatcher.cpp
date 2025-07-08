@@ -388,7 +388,8 @@ EventDispatcher::handleGetSpawnZones(const EventContext &context, std::shared_pt
         return;
     }
 
-    gameServices_.getSpawnZoneManager().spawnMobsInZone(1);
+    // Remove immediate spawn - let the scheduled task handle it after mob data is loaded
+    // gameServices_.getSpawnZoneManager().spawnMobsInZone(1);
     SpawnZoneStruct spawnZone = gameServices_.getSpawnZoneManager().getMobSpawnZoneByID(1);
 
     // Validate the socket parameter before creating the event

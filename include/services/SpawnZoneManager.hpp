@@ -1,17 +1,24 @@
 #pragma once
 
 #include "data/DataStructs.hpp"
+#include "services/MobManager.hpp"
 #include "utils/Logger.hpp"
 #include "utils/TimeConverter.hpp"
-#include "services/MobManager.hpp"
+#include <map>
 #include <random>
 #include <shared_mutex>
-#include <map>
+
+// Forward declaration to avoid circular dependency
+class MobInstanceManager;
 
 class SpawnZoneManager
 {
-public:
-    SpawnZoneManager(MobManager& mobManager, Logger& logger);
+  public:
+    SpawnZoneManager(MobManager &mobManager, Logger &logger);
+
+    // Set mob instance manager for registration of spawned mobs
+    void setMobInstanceManager(MobInstanceManager *mobInstanceManager);
+
     void loadMobSpawnZones(std::vector<SpawnZoneStruct> selectSpawnZones);
     void loadMobsInSpawnZones(std::vector<MobDataStruct> selectMobs);
 
@@ -20,20 +27,20 @@ public:
     std::vector<MobDataStruct> getMobsInZone(int zoneId);
 
     std::vector<MobDataStruct> spawnMobsInZone(int zoneId);
-    void moveMobsInZone(int zoneId);
-    void mobDied(int zoneId, std::string mobUID);
+    void mobDied(int zoneId, int mobUID);
 
-    MobDataStruct getMobByUID(std::string mobUID);
-    void removeMobByUID(std::string mobUID);
-    
-    void updateMobPosition(std::string mobUID, PositionStruct position);
-    void updateMobHealth(std::string mobUID, int health);
-    void updateMobMana(std::string mobUID, int mana);
+    // Deprecated: Use MobInstanceManager instead
+    // These methods are kept for backward compatibility and internal zone management
+    MobDataStruct getMobByUID(int mobUID); // Delegates to MobInstanceManager
 
+  private:
+    void removeMobByUID(int mobUID); // Internal method for zone cleanup
 
-private:
-    Logger& logger_;
-    MobManager& mobManager_;
+  private:
+    Logger &logger_;
+    MobManager &mobManager_;
+    MobInstanceManager *mobInstanceManager_; // Pointer to avoid circular dependency
+
     // Store the mob spawn zones in memory with zoneId as key
     std::map<int, SpawnZoneStruct> mobSpawnZones_;
 

@@ -1,12 +1,20 @@
 #include "services/SpawnZoneManager.hpp"
-#include "utils/TimeUtils.hpp"
+#include "services/MobInstanceManager.hpp"
+#include "utils/Generators.hpp"
 #include <algorithm>
 
 SpawnZoneManager::SpawnZoneManager(
     MobManager &mobManager,
     Logger &logger) : mobManager_(mobManager),
-                      logger_(logger)
+                      logger_(logger),
+                      mobInstanceManager_(nullptr)
 {
+}
+
+void
+SpawnZoneManager::setMobInstanceManager(MobInstanceManager *mobInstanceManager)
+{
+    mobInstanceManager_ = mobInstanceManager;
 }
 
 void
@@ -165,6 +173,22 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
         for (int i = zone->second.spawnedMobsCount; i < zone->second.spawnCount; i++)
         {
             MobDataStruct mob = mobManager_.getMobById(zone->second.spawnMobId);
+
+            // Debug: Log what we got from MobManager
+            logger_.log("[DEBUG] Template mob from MobManager - ID: " + std::to_string(mob.id) +
+                        ", isDead: " + (mob.isDead ? "true" : "false") +
+                        ", currentHealth: " + std::to_string(mob.currentHealth) +
+                        ", maxHealth: " + std::to_string(mob.maxHealth) +
+                        ", name: " + mob.name);
+
+            // CRITICAL CHECK: Don't spawn if mob template is invalid (not loaded yet)
+            if (mob.id == 0 || mob.name.empty())
+            {
+                logger_.log("[SPAWN_DELAY] Mob template ID " + std::to_string(zone->second.spawnMobId) +
+                            " not loaded yet, delaying spawn");
+                return mobs; // Exit early, try again later
+            }
+
             mob.zoneId = zoneId;
 
             // Центр зоны и размеры (правильные)
@@ -192,11 +216,23 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             mob.position.rotationZ = rotDist(gen);
 
             // Генерация уникального ID
-            mob.uid = std::to_string(mob.id) + "_" + std::to_string(Generators::generateUniqueTimeBasedKey(zoneId));
+            mob.uid = Generators::generateUniqueMobUID();
 
             // Добавляем моба в список
             mobSpawnZones_[zoneId].spawnedMobsUIDList.push_back(mob.uid);
             mobSpawnZones_[zoneId].spawnedMobsList.push_back(mob);
+
+            // Register mob instance in MobInstanceManager
+            if (mobInstanceManager_)
+            {
+                mobInstanceManager_->registerMobInstance(mob);
+            }
+
+            // Debug logging to verify mob is alive
+            logger_.log("[SPAWN_FIX] Spawned mob UID " + std::to_string(mob.uid) +
+                        " - isDead: " + (mob.isDead ? "true" : "false") +
+                        ", currentHealth: " + std::to_string(mob.currentHealth) +
+                        ", maxHealth: " + std::to_string(mob.maxHealth));
 
             mobs.push_back(mob);
             zone->second.spawnedMobsCount++;
@@ -206,186 +242,9 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     return mobs;
 }
 
-// random movement of mobs in the zone
-void
-SpawnZoneManager::moveMobsInZone(int zoneId)
-{
-    {
-        std::shared_lock<std::shared_mutex> readLock(mutex_);
-        auto zone = mobSpawnZones_.find(zoneId);
-        if (zone == mobSpawnZones_.end())
-            return;
-    }
-
-    std::unique_lock<std::shared_mutex> writeLock(mutex_);
-    auto zone = mobSpawnZones_.find(zoneId);
-    if (zone == mobSpawnZones_.end())
-        return;
-
-    static std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> randFactor(0.85f, 1.2f);
-    std::uniform_real_distribution<float> randCooldown(5.0f, 15.0f);
-    std::uniform_real_distribution<float> randAngle(0.0f, 360.0f);
-    std::uniform_real_distribution<float> randMoveTime(10.0f, 40.0f);
-    std::uniform_real_distribution<float> randSpeedTime(12.0f, 28.0f);
-    std::uniform_real_distribution<float> randBorderAngle(30.0f, 100.0f);
-    std::uniform_real_distribution<float> randStepMultiplier(1.2f, 3.0f);
-    std::uniform_real_distribution<float> randInitialDelay(0.0f, 5.0f);
-    std::uniform_real_distribution<float> randRotationJitter(-5.0f, 5.0f);
-    std::uniform_real_distribution<float> randBaseSpeed(80.0f, 140.0f);
-    std::uniform_real_distribution<float> randDirectionAdjust(0.2f, 0.6f);
-    std::uniform_int_distribution<int> randResetStep(5, 10);
-
-    float currentTime = getCurrentGameTime();
-    float minMoveDistance = 120.0f;
-    float minSeparationDistance = 140.0f;
-    float borderThreshold = std::max(zone->second.sizeX, zone->second.sizeY) * 0.25f;
-
-    float minX = zone->second.posX - (zone->second.sizeX / 2.0f);
-    float maxX = zone->second.posX + (zone->second.sizeX / 2.0f);
-    float minY = zone->second.posY - (zone->second.sizeY / 2.0f);
-    float maxY = zone->second.posY + (zone->second.sizeY / 2.0f);
-
-    for (auto &mob : zone->second.spawnedMobsList)
-    {
-        if (mob.nextMoveTime == 0.0f)
-        {
-            mob.nextMoveTime = currentTime + randInitialDelay(rng) + randMoveTime(rng);
-        }
-
-        if (currentTime < mob.nextMoveTime)
-        {
-            continue;
-        }
-
-        mob.nextMoveTime = currentTime + std::max(randSpeedTime(rng) / mob.speedMultiplier, 7.0f);
-
-        if (randFactor(rng) > 1.15f)
-        {
-            mob.nextMoveTime += randCooldown(rng) * 0.5f;
-        }
-
-        bool atBorder = (mob.position.positionX <= minX + borderThreshold ||
-                         mob.position.positionX >= maxX - borderThreshold ||
-                         mob.position.positionY <= minY + borderThreshold ||
-                         mob.position.positionY >= maxY - borderThreshold);
-
-        if (mob.stepMultiplier == 0.0f)
-        {
-            mob.stepMultiplier = randStepMultiplier(rng);
-        }
-
-        float baseSpeed = randBaseSpeed(rng);
-        float maxStepSize = std::min((zone->second.sizeX + zone->second.sizeY) * 0.08f, 450.0f);
-        float stepSize = std::clamp(baseSpeed * mob.stepMultiplier * randFactor(rng), minMoveDistance * 0.75f, maxStepSize);
-
-        if (currentTime - mob.nextMoveTime > 30.0f)
-        {
-            stepSize = std::min(stepSize * 1.25f, maxStepSize);
-        }
-
-        if (stepSize < minMoveDistance)
-        {
-            continue;
-        }
-
-        float newDirectionX = mob.movementDirectionX;
-        float newDirectionY = mob.movementDirectionY;
-        float newAngle = randAngle(rng) * (M_PI / 180.0f);
-        bool foundValidDirection = false;
-        int maxRetries = 4;
-
-        logger_.log("[DEBUG] Mob id: " + mob.uid +
-                    " Current Pos: (" + std::to_string(mob.position.positionX) + ", " +
-                    std::to_string(mob.position.positionY) + ")");
-
-        for (int i = 0; i < maxRetries; ++i)
-        {
-            if (atBorder)
-            {
-                float angleToCenter = atan2(zone->second.posY - mob.position.positionY,
-                    zone->second.posX - mob.position.positionX);
-                newAngle = angleToCenter + (randBorderAngle(rng) * (M_PI / 180.0f));
-            }
-
-            float tempDirectionX = cos(newAngle);
-            float tempDirectionY = sin(newAngle);
-            float testNewX = mob.position.positionX + (tempDirectionX * stepSize);
-            float testNewY = mob.position.positionY + (tempDirectionY * stepSize);
-
-            bool isTooClose = false;
-            for (const auto &otherMob : zone->second.spawnedMobsList)
-            {
-                if (&otherMob == &mob)
-                    continue;
-
-                float distance = sqrt(pow(testNewX - otherMob.position.positionX, 2) +
-                                      pow(testNewY - otherMob.position.positionY, 2));
-                if (distance < minSeparationDistance)
-                {
-                    isTooClose = true;
-                    break;
-                }
-            }
-
-            if (!isTooClose && testNewX >= minX && testNewX <= maxX && testNewY >= minY && testNewY <= maxY)
-            {
-                newDirectionX = tempDirectionX;
-                newDirectionY = tempDirectionY;
-                foundValidDirection = true;
-                break;
-            }
-        }
-
-        if (!foundValidDirection)
-        {
-            float adjustFactor = randDirectionAdjust(rng);
-            newDirectionX = (newDirectionX * adjustFactor) + (mob.movementDirectionX * (1.0f - adjustFactor));
-            newDirectionY = (newDirectionY * adjustFactor) + (mob.movementDirectionY * (1.0f - adjustFactor));
-        }
-
-        // **Финальная проверка перед изменением координат**
-        float newX = std::clamp(mob.position.positionX + (newDirectionX * stepSize), minX, maxX);
-        float newY = std::clamp(mob.position.positionY + (newDirectionY * stepSize), minY, maxY);
-
-        bool collisionDetected = false;
-        for (const auto &otherMob : zone->second.spawnedMobsList)
-        {
-            if (&otherMob == &mob)
-                continue;
-
-            float distance = sqrt(pow(newX - otherMob.position.positionX, 2) +
-                                  pow(newY - otherMob.position.positionY, 2));
-            if (distance < minSeparationDistance)
-            {
-                collisionDetected = true;
-                break;
-            }
-        }
-
-        if (!collisionDetected) // Только если нет коллизии, обновляем координаты
-        {
-            mob.movementDirectionX = newDirectionX;
-            mob.movementDirectionY = newDirectionY;
-            mob.position.positionX = newX;
-            mob.position.positionY = newY;
-            mob.position.rotationZ = atan2(newDirectionY, newDirectionX) * (180.0f / M_PI) + randRotationJitter(rng);
-        }
-        else
-        {
-            logger_.log("[WARNING] Mob id: " + mob.uid + " skipped move due to collision.");
-        }
-
-        logger_.log("[INFO] Mob id: " + mob.uid +
-                    " moved to (" + std::to_string(mob.position.positionX) + ", " + std::to_string(mob.position.positionY) +
-                    ") with rotation " + std::to_string(mob.position.rotationZ) +
-                    " | Next move in " + std::to_string(mob.nextMoveTime - currentTime) + " sec.");
-    }
-}
-
 // detect that the mob is dead and decrease spawnedMobs
 void
-SpawnZoneManager::mobDied(int zoneId, std::string mobUID)
+SpawnZoneManager::mobDied(int zoneId, int mobUID)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto zone = mobSpawnZones_.find(zoneId);
@@ -399,9 +258,16 @@ SpawnZoneManager::mobDied(int zoneId, std::string mobUID)
     }
 }
 
+// Delegate to MobInstanceManager for backward compatibility
 MobDataStruct
-SpawnZoneManager::getMobByUID(std::string mobUID)
+SpawnZoneManager::getMobByUID(int mobUID)
 {
+    if (mobInstanceManager_)
+    {
+        return mobInstanceManager_->getMobInstance(mobUID);
+    }
+
+    // Fallback to local search if MobInstanceManager not available
     std::shared_lock<std::shared_mutex> lock(mutex_);
     for (const auto &zone : mobSpawnZones_)
     {
@@ -416,8 +282,9 @@ SpawnZoneManager::getMobByUID(std::string mobUID)
     return MobDataStruct();
 }
 
+// Internal method for zone cleanup only
 void
-SpawnZoneManager::removeMobByUID(std::string mobUID)
+SpawnZoneManager::removeMobByUID(int mobUID)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     for (auto &zone : mobSpawnZones_)
@@ -427,7 +294,22 @@ SpawnZoneManager::removeMobByUID(std::string mobUID)
         if (it != zone.second.spawnedMobsList.end())
         {
             zone.second.spawnedMobsList.erase(it);
-            // Assuming mobUID is unique, no need to search for more instances
+
+            // Also remove from UID list
+            auto uidIt = std::find(zone.second.spawnedMobsUIDList.begin(), zone.second.spawnedMobsUIDList.end(), mobUID);
+            if (uidIt != zone.second.spawnedMobsUIDList.end())
+            {
+                zone.second.spawnedMobsUIDList.erase(uidIt);
+            }
+
+            // Unregister from MobInstanceManager
+            if (mobInstanceManager_)
+            {
+                mobInstanceManager_->unregisterMobInstance(mobUID);
+            }
+
+            logger_.log("[INFO] Removed mob UID " + std::to_string(mobUID) + " from zone");
+            return;
         }
     }
 }

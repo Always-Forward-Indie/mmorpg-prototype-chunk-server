@@ -82,7 +82,7 @@ struct ClientDataStruct
 struct MobDataStruct
 {
     int id = 0;
-    std::string uid = "";
+    int uid = 0; // Уникальный идентификатор экземпляра моба
     int zoneId = 0;
     std::string name = "";
     std::string raceName = "";
@@ -126,7 +126,7 @@ struct SpawnZoneStruct
     int spawnCount = 0;
     int spawnedMobsCount = 0;
     bool spawnEnabled = true; // Indicates if the spawn zone is enabled for spawning mobs
-    std::vector<std::string> spawnedMobsUIDList;
+    std::vector<int> spawnedMobsUIDList;
     std::vector<MobDataStruct> spawnedMobsList;
     std::chrono::seconds respawnTime; // Represents respawn time in seconds
 };
@@ -138,4 +138,67 @@ struct EventContext
     CharacterDataStruct characterData;
     PositionStruct positionData;
     MessageStruct messageStruct;
+};
+
+struct EventDataStruct
+{
+    std::string eventType;
+    ClientDataStruct clientData;
+    CharacterDataStruct characterData;
+    PositionStruct positionData;
+    MessageStruct messageStruct;
+};
+
+/**
+ * @brief Parameters for mob movement behavior
+ */
+struct MobMovementParams
+{
+    float minMoveDistance = 120.0f;
+    float minSeparationDistance = 140.0f;
+    float baseSpeedMin = 80.0f;
+    float baseSpeedMax = 140.0f;
+    float moveTimeMin = 10.0f;
+    float moveTimeMax = 40.0f;
+    float speedTimeMin = 12.0f;
+    float speedTimeMax = 28.0f;
+    float cooldownMin = 5.0f;
+    float cooldownMax = 15.0f;
+    float borderAngleMin = 30.0f;
+    float borderAngleMax = 100.0f;
+    float stepMultiplierMin = 1.2f;
+    float stepMultiplierMax = 3.0f;
+    float initialDelayMax = 5.0f;
+    float rotationJitterMin = -5.0f;
+    float rotationJitterMax = 5.0f;
+    float directionAdjustMin = 0.2f;
+    float directionAdjustMax = 0.6f;
+    float borderThresholdPercent = 0.25f;
+    float maxStepSizePercent = 0.08f;
+    float maxStepSizeAbsolute = 450.0f;
+    int maxRetries = 4;
+};
+
+/**
+ * @brief Movement data for individual mobs
+ */
+struct MobMovementData
+{
+    float nextMoveTime = 0.0f;
+    float movementDirectionX = 0.0f;
+    float movementDirectionY = 0.0f;
+    float speedMultiplier = 1.0f;
+    float stepMultiplier = 0.0f;
+    int resetStepCounter = 0;
+};
+
+/**
+ * @brief Result of movement calculation
+ */
+struct MobMovementResult
+{
+    PositionStruct newPosition;
+    float newDirectionX;
+    float newDirectionY;
+    bool validMovement;
 };

@@ -66,9 +66,12 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
             // Build JSON for spawn zone
             nlohmann::json zoneJson = spawnZoneToJson(spawnZoneData);
 
+            // Get current mobs data from MobInstanceManager instead of outdated spawnZoneData
+            std::vector<MobDataStruct> mobsList = gameServices_.getMobInstanceManager().getMobInstancesInZone(spawnZoneData.zoneId);
+
             // Add mobs
             nlohmann::json mobsArray = nlohmann::json::array();
-            for (const auto &mob : spawnZoneData.spawnedMobsList)
+            for (const auto &mob : mobsList)
             {
                 mobsArray.push_back(mobToJson(mob));
             }
@@ -115,8 +118,8 @@ MobEventHandler::handleZoneMoveMobsEvent(const Event &event)
         if (std::holds_alternative<int>(data))
         {
             int zoneId = std::get<int>(data);
-            // Fetch mobs data from the manager instead of from Event
-            std::vector<MobDataStruct> mobsList = gameServices_.getSpawnZoneManager().getMobsInZone(zoneId);
+            // Fetch current mob data from MobInstanceManager instead of SpawnZoneManager
+            std::vector<MobDataStruct> mobsList = gameServices_.getMobInstanceManager().getMobInstancesInZone(zoneId);
 
             nlohmann::json mobsArray = nlohmann::json::array();
 

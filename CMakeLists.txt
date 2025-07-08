@@ -26,6 +26,8 @@ set(SOURCE_FILES
     src/services/SpawnZoneManager.cpp
     src/services/SpawnManager.cpp
     src/services/MobManager.cpp
+    src/services/MobInstanceManager.cpp
+    src/services/MobMovementManager.cpp
     src/services/ClientManager.cpp
     src/network/GameServerWorker.cpp
     src/network/NetworkManager.cpp
@@ -40,6 +42,8 @@ set(SOURCE_FILES
     src/events/handlers/MobEventHandler.cpp
     src/events/handlers/ZoneEventHandler.cpp
     src/events/handlers/ChunkEventHandler.cpp
+    src/events/handlers/CombatEventHandler.cpp
+    src/data/AttackSystem.cpp
     src/utils/Scheduler.cpp
     src/utils/ThreadPool.cpp
     src/utils/JSONParser.cpp
@@ -61,6 +65,8 @@ set(HEADER_FILES
     include/services/SpawnZoneManager.hpp
     include/services/SpawnManager.hpp
     include/services/MobManager.hpp
+    include/services/MobInstanceManager.hpp
+    include/services/MobMovementManager.hpp
     include/services/ClientManager.hpp
     include/services/GameServices.hpp
     include/network/GameServerWorker.hpp
@@ -77,8 +83,12 @@ set(HEADER_FILES
     include/events/handlers/MobEventHandler.hpp
     include/events/handlers/ZoneEventHandler.hpp
     include/events/handlers/ChunkEventHandler.hpp
+    include/events/handlers/CombatEventHandler.hpp
     include/data/DataStructs.hpp
     include/data/SpecialStructs.hpp
+    include/data/CombatStructs.hpp
+    include/data/AttackSystem.hpp
+    include/data/AttackSystemExample.hpp
     include/utils/Scheduler.hpp
     include/utils/ThreadPool.hpp
     include/utils/JSONParser.hpp

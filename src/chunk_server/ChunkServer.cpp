@@ -33,8 +33,10 @@ ChunkServer::mainEventLoopCH()
     Task spawnMobInZoneTask(
         [&]
         {
-            gameServices_.getSpawnZoneManager().spawnMobsInZone(1);
-            SpawnZoneStruct spawnZone = gameServices_.getSpawnZoneManager().getMobSpawnZoneByID(1);
+            int zoneId = 1;
+
+            gameServices_.getSpawnZoneManager().spawnMobsInZone(zoneId);
+            SpawnZoneStruct spawnZone = gameServices_.getSpawnZoneManager().getMobSpawnZoneByID(zoneId);
             auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly(); // Use read-only version
             for (const auto &client : connectedClients)
             {
@@ -57,21 +59,32 @@ ChunkServer::mainEventLoopCH()
     Task moveMobInZoneTask(
         [&]
         {
-            gameServices_.getSpawnZoneManager().moveMobsInZone(1);
-            // Instead of copying the entire mobs list into each Event,
-            // just pass the zone ID and let the handler fetch the data
-            int zoneId = 1;
+            // Move mobs and check if any actually moved
+            bool anyMobMoved = gameServices_.getMobMovementManager().moveMobsInZone(1);
 
-            auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly(); // Use read-only version
-            for (const auto &client : connectedClients)
+            // Only send updates to clients if mobs actually moved
+            if (anyMobMoved)
             {
-                if (client.clientId <= 0) // Strict validation
-                    continue;
+                int zoneId = 1;
+                auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
 
-                auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
-                // Pass only zone ID instead of full mobs list to prevent memory leaks
-                Event moveMobsInZoneEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, zoneId);
-                eventQueueGameServer_.push(std::move(moveMobsInZoneEvent)); // Use move
+                for (const auto &client : connectedClients)
+                {
+                    if (client.clientId <= 0) // Strict validation
+                        continue;
+
+                    auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
+                    // Pass only zone ID instead of full mobs list to prevent memory leaks
+                    Event moveMobsInZoneEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, zoneId);
+                    eventQueueGameServer_.push(std::move(moveMobsInZoneEvent)); // Use move
+                }
+
+                gameServices_.getLogger().log("[INFO] Mobs moved in zone " + std::to_string(zoneId) +
+                                              ", sending updates to " + std::to_string(connectedClients.size()) + " clients");
+            }
+            else
+            {
+                gameServices_.getLogger().log("[DEBUG] No mobs moved in zone 1, skipping client updates");
             }
         },
         3,
@@ -80,6 +93,28 @@ ChunkServer::mainEventLoopCH()
     );
 
     scheduler_.scheduleTask(moveMobInZoneTask);
+
+    // Task for updating ongoing combat actions
+    Task combatUpdateTask(
+        [&]
+        {
+            // Update all ongoing combat actions - this will automatically complete
+            // or interrupt actions that have exceeded their duration
+            try
+            {
+                eventHandler_.getCombatEventHandler().updateOngoingActions();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error updating combat actions: " + std::string(ex.what()));
+            }
+        },
+        1, // Run every 1 second - frequent enough for responsive combat
+        std::chrono::system_clock::now(),
+        6 // unique task ID
+    );
+
+    scheduler_.scheduleTask(combatUpdateTask);
 
     // Task for periodic cleanup of inactive sessions and client data
     Task cleanupTask(

@@ -5,6 +5,7 @@
 #include "events/handlers/CharacterEventHandler.hpp"
 #include "events/handlers/ChunkEventHandler.hpp"
 #include "events/handlers/ClientEventHandler.hpp"
+#include "events/handlers/CombatEventHandler.hpp"
 #include "events/handlers/MobEventHandler.hpp"
 #include "events/handlers/ZoneEventHandler.hpp"
 #include "network/GameServerWorker.hpp"
@@ -46,6 +47,16 @@ class EventHandler
      */
     void dispatchEvent(const Event &event);
 
+    /**
+     * @brief Get reference to combat event handler for ongoing actions update
+     *
+     * This allows external systems (like the game loop scheduler) to call
+     * updateOngoingActions() to process timed combat events.
+     *
+     * @return Reference to the combat event handler
+     */
+    CombatEventHandler &getCombatEventHandler();
+
   private:
     // Specialized event handlers for different event categories
     std::unique_ptr<ClientEventHandler> clientEventHandler_;
@@ -53,6 +64,7 @@ class EventHandler
     std::unique_ptr<MobEventHandler> mobEventHandler_;
     std::unique_ptr<ZoneEventHandler> zoneEventHandler_;
     std::unique_ptr<ChunkEventHandler> chunkEventHandler_;
+    std::unique_ptr<CombatEventHandler> combatEventHandler_;
 
     // References for logging and error handling
     GameServices &gameServices_;

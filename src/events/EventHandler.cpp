@@ -12,6 +12,7 @@ EventHandler::EventHandler(
     mobEventHandler_ = std::make_unique<MobEventHandler>(networkManager, gameServerWorker, gameServices);
     zoneEventHandler_ = std::make_unique<ZoneEventHandler>(networkManager, gameServerWorker, gameServices);
     chunkEventHandler_ = std::make_unique<ChunkEventHandler>(networkManager, gameServerWorker, gameServices);
+    combatEventHandler_ = std::make_unique<CombatEventHandler>(networkManager, gameServerWorker, gameServices);
 }
 
 void
@@ -82,6 +83,52 @@ EventHandler::dispatchEvent(const Event &event)
             zoneEventHandler_->handleGetSpawnZoneDataEvent(event);
             break;
 
+        // Combat Events
+        case Event::INITIATE_COMBAT_ACTION:
+            combatEventHandler_->handleInitiateCombatAction(event);
+            break;
+        case Event::COMPLETE_COMBAT_ACTION:
+            combatEventHandler_->handleCompleteCombatAction(event);
+            break;
+        case Event::INTERRUPT_COMBAT_ACTION:
+            combatEventHandler_->handleInterruptCombatAction(event);
+            break;
+        case Event::COMBAT_ANIMATION:
+            combatEventHandler_->handleCombatAnimation(event);
+            break;
+        case Event::COMBAT_RESULT:
+            combatEventHandler_->handleCombatResult(event);
+            break;
+
+        // New Attack Events
+        case Event::PLAYER_ATTACK:
+            combatEventHandler_->handlePlayerAttack(event);
+            break;
+        case Event::AI_ATTACK:
+        {
+            // Extract character ID for AI attack
+            const auto &data = event.getData();
+            if (std::holds_alternative<int>(data))
+            {
+                int characterId = std::get<int>(data);
+                combatEventHandler_->handleAIAttack(characterId);
+            }
+            else
+            {
+                gameServices_.getLogger().logError("Invalid data for AI_ATTACK event");
+            }
+        }
+        break;
+        case Event::ATTACK_TARGET_SELECTION:
+            // TODO: Implement target selection event handling
+            break;
+        case Event::ATTACK_SEQUENCE_START:
+            // TODO: Implement attack sequence handling
+            break;
+        case Event::ATTACK_SEQUENCE_COMPLETE:
+            // TODO: Implement attack sequence completion
+            break;
+
         // Legacy events that might not have direct mapping
         case Event::LEAVE_GAME_CLIENT:
             clientEventHandler_->handleDisconnectClientEvent(event);
@@ -99,4 +146,10 @@ EventHandler::dispatchEvent(const Event &event)
     {
         gameServices_.getLogger().logError("Error dispatching event: " + std::string(ex.what()));
     }
+}
+
+CombatEventHandler &
+EventHandler::getCombatEventHandler()
+{
+    return *combatEventHandler_;
 }

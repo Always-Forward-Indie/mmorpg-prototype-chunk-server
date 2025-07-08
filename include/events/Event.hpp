@@ -32,7 +32,19 @@ class Event
         SET_ALL_MOBS_ATTRIBUTES,
         SPAWN_MOBS_IN_ZONE,
         SPAWN_ZONE_MOVE_MOBS,
-        MOVE_MOB
+        MOVE_MOB,
+        // Combat events
+        INITIATE_COMBAT_ACTION,
+        COMPLETE_COMBAT_ACTION,
+        INTERRUPT_COMBAT_ACTION,
+        COMBAT_ANIMATION,
+        COMBAT_RESULT,
+        // New attack events
+        PLAYER_ATTACK,
+        AI_ATTACK,
+        ATTACK_TARGET_SELECTION,
+        ATTACK_SEQUENCE_START,
+        ATTACK_SEQUENCE_COMPLETE
     }; // Define more event types as needed
 
     Event() = default; // Default constructor

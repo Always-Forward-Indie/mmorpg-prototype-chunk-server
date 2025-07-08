@@ -393,9 +393,9 @@ JSONParser::parseMobsList(const char *data, size_t length)
             {
                 mobData.id = mob["id"].get<int>();
             }
-            if (mob.contains("UID") && mob["UID"].is_string())
+            if (mob.contains("UID") && mob["UID"].is_number_integer())
             {
-                mobData.uid = mob["UID"].get<std::string>();
+                mobData.uid = mob["UID"].get<int>();
             }
             if (mob.contains("zoneId") && mob["zoneId"].is_number_integer())
             {
