@@ -166,7 +166,7 @@ ClientSession::processMessage(const std::string &message)
                 PositionStruct emptyPositionData{};
                 MessageStruct emptyMessageData{};
 
-                EventContext pingContext{eventType, clientData, emptyCharacterData, emptyPositionData, emptyMessageData};
+                EventContext pingContext{eventType, clientData, emptyCharacterData, emptyPositionData, emptyMessageData, message};
                 eventDispatcher_.dispatch(pingContext, socket_);
             }
             else
@@ -207,7 +207,7 @@ ClientSession::processMessage(const std::string &message)
         }
 
         // Create full context for non-ping events
-        EventContext context{fullEventType, clientData, characterData, positionData, messageStruct};
+        EventContext context{fullEventType, clientData, characterData, positionData, messageStruct, message};
         eventDispatcher_.dispatch(context, socket_);
     }
     catch (const nlohmann::json::parse_error &e)

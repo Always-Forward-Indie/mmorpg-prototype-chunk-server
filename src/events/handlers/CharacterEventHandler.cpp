@@ -56,6 +56,9 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
 
             gameServices_.getLogger().log("Passed Character ID: " + std::to_string(passedCharacterData.characterId));
 
+            // set client character ID
+            gameServices_.getClientManager().setClientCharacterId(clientID, passedCharacterData.characterId);
+
             // Get character data
             CharacterDataStruct characterData = gameServices_.getCharacterManager().getCharacterData(passedCharacterData.characterId);
 

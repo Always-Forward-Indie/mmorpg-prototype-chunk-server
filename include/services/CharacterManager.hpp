@@ -42,6 +42,9 @@ class CharacterManager
     // Get character position by character ID
     PositionStruct getCharacterPosition(int characterID);
 
+    // Update character health
+    void updateCharacterHealth(int characterID, int newHealth);
+
   private:
     Logger &logger_;
     // characters list

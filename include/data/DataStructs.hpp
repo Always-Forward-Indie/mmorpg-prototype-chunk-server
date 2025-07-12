@@ -1,5 +1,6 @@
 #pragma once
 #include <boost/asio.hpp>
+#include <nlohmann/json.hpp>
 #include <string>
 
 struct PositionStruct
@@ -20,7 +21,7 @@ struct MovementDataStruct
 struct MessageStruct
 {
     std::string status = "";
-    std::string message = "";
+    nlohmann::json message;
 };
 
 struct ChunkInfoStruct
@@ -138,6 +139,7 @@ struct EventContext
     CharacterDataStruct characterData;
     PositionStruct positionData;
     MessageStruct messageStruct;
+    std::string fullMessage; // For storing the complete JSON message
 };
 
 struct EventDataStruct

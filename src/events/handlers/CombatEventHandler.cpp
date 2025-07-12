@@ -29,7 +29,10 @@ CombatEventHandler::handleInitiateCombatAction(const Event &event)
         if (std::holds_alternative<CombatActionStruct>(data))
         {
             CombatActionStruct action = std::get<CombatActionStruct>(data);
-            action.casterId = clientID; // Ensure caster ID matches client
+
+            // Get client data to get character ID
+            auto clientData = gameServices_.getClientManager().getClientData(clientID);
+            action.casterId = clientData.characterId; // Ensure caster ID matches character ID
 
             // Validate the combat action
             if (!validateCombatAction(action))
@@ -316,49 +319,71 @@ CombatEventHandler::updateOngoingActions()
 bool
 CombatEventHandler::validateCombatAction(const CombatActionStruct &action)
 {
+    gameServices_.getLogger().log("validateCombatAction: Starting validation for action ID " + std::to_string(action.actionId), GREEN);
+
     // Validate target
     if (action.targetType != CombatTargetType::SELF && action.targetType != CombatTargetType::NONE)
     {
+        gameServices_.getLogger().log("validateCombatAction: Validating target " + std::to_string(action.targetId) + " of type " + std::to_string(static_cast<int>(action.targetType)), GREEN);
+
         if (!validateTarget(action.casterId, action.targetId, action.targetType, action.range, action.requiresLineOfSight))
         {
+            gameServices_.getLogger().logError("validateCombatAction: Target validation failed", RED);
             return false;
         }
+        gameServices_.getLogger().log("validateCombatAction: Target validation passed", GREEN);
     }
 
     // Validate resources
+    gameServices_.getLogger().log("validateCombatAction: Validating resources - type: " + std::to_string(static_cast<int>(action.resourceType)) + ", cost: " + std::to_string(action.resourceCost), GREEN);
     if (!validateResources(action.casterId, action.resourceType, action.resourceCost))
     {
+        gameServices_.getLogger().logError("validateCombatAction: Resource validation failed", RED);
         return false;
     }
+    gameServices_.getLogger().log("validateCombatAction: Resource validation passed", GREEN);
 
     // Check if caster is already performing an action
     if (ongoingActions_.find(action.casterId) != ongoingActions_.end())
     {
+        gameServices_.getLogger().logError("validateCombatAction: Caster is already performing an action", RED);
         return false;
     }
+    gameServices_.getLogger().log("validateCombatAction: No ongoing action found for caster", GREEN);
 
+    gameServices_.getLogger().log("validateCombatAction: All validation checks passed", GREEN);
     return true;
 }
 
 bool
 CombatEventHandler::validateTarget(int casterId, int targetId, CombatTargetType targetType, float range, bool requiresLOS)
 {
+    gameServices_.getLogger().log("validateTarget: Checking target " + std::to_string(targetId) + " for caster " + std::to_string(casterId), GREEN);
+
     if (targetId == 0)
+    {
+        gameServices_.getLogger().logError("validateTarget: Target ID is 0", RED);
         return false;
+    }
 
     // Check distance based on target type
     float distance = getDistanceToTarget(casterId, targetId, targetType);
+    gameServices_.getLogger().log("validateTarget: Distance to target: " + std::to_string(distance) + ", max range: " + std::to_string(range), GREEN);
+
     if (distance > range)
     {
+        gameServices_.getLogger().logError("validateTarget: Target is out of range", RED);
         return false;
     }
 
     // TODO: Implement line of sight check if required
     if (requiresLOS)
     {
+        gameServices_.getLogger().log("validateTarget: Line of sight check required (not implemented)", YELLOW);
         // Line of sight validation logic
     }
 
+    gameServices_.getLogger().log("validateTarget: Target validation passed", GREEN);
     return true;
 }
 
@@ -470,6 +495,16 @@ CombatEventHandler::getDistanceToTarget(int casterId, int targetId, CombatTarget
             return 9999.0f;
         }
 
+        // Log positions for debugging
+        gameServices_.getLogger().log("Caster position: (" + std::to_string(casterData.characterPosition.positionX) + ", " +
+                                          std::to_string(casterData.characterPosition.positionY) + ", " +
+                                          std::to_string(casterData.characterPosition.positionZ) + ")",
+            GREEN);
+        gameServices_.getLogger().log("Target position: (" + std::to_string(targetPosition.positionX) + ", " +
+                                          std::to_string(targetPosition.positionY) + ", " +
+                                          std::to_string(targetPosition.positionZ) + ")",
+            GREEN);
+
         float dx = casterData.characterPosition.positionX - targetPosition.positionX;
         float dy = casterData.characterPosition.positionY - targetPosition.positionY;
         float dz = casterData.characterPosition.positionZ - targetPosition.positionZ;
@@ -521,6 +556,35 @@ CombatEventHandler::completeCombatActionInternal(std::shared_ptr<CombatActionStr
     {
         int actualDamage = applyDamageToTarget(actionPtr->targetId, actionPtr->targetType, result.damageDealt);
         result.damageDealt = actualDamage;
+
+        // Update remaining health after damage application
+        try
+        {
+            if (actionPtr->targetType == CombatTargetType::MOB)
+            {
+                auto mobData = gameServices_.getMobInstanceManager().getMobInstance(actionPtr->targetId);
+                result.remainingHealth = mobData.currentHealth;
+                result.remainingMana = mobData.currentMana;
+            }
+            else if (actionPtr->targetType == CombatTargetType::PLAYER)
+            {
+                // Get updated health from CharacterManager after damage was applied
+                auto targetData = gameServices_.getCharacterManager().getCharacterData(actionPtr->targetId);
+                result.remainingHealth = targetData.characterCurrentHealth;
+                result.remainingMana = targetData.characterCurrentMana;
+
+                gameServices_.getLogger().log("Player remaining health from updated manager: " + std::to_string(result.remainingHealth), GREEN);
+            }
+
+            if (result.remainingHealth <= 0)
+            {
+                result.targetDied = true;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Error updating combat result after damage: " + std::string(e.what()), RED);
+        }
     }
 
     if (result.healingDone > 0)
@@ -534,10 +598,14 @@ CombatEventHandler::completeCombatActionInternal(std::shared_ptr<CombatActionStr
 
     actionPtr->state = CombatActionState::COMPLETED;
 
+    gameServices_.getLogger().log("Combat action completed - Final damage: " + std::to_string(result.damageDealt) +
+                                      ", Final remaining health: " + std::to_string(result.remainingHealth),
+        GREEN);
+
     // Broadcast result
     nlohmann::json resultResponse = ResponseBuilder()
                                         .setHeader("message", "Combat action completed!")
-                                        .setHeader("clientId", actionPtr->casterId)
+                                        .setHeader("characterId", actionPtr->casterId)
                                         .setHeader("eventType", "combatResult")
                                         .setBody("result", combatResultToJson(result))
                                         .build();
@@ -553,6 +621,7 @@ CombatEventHandler::calculateDamage(const CombatActionStruct &action, int caster
     result.casterId = casterId;
     result.targetId = targetId;
     result.actionId = action.actionId;
+    result.targetType = action.targetType;
     result.damageDealt = action.damage;
     result.healingDone = action.healing;
     result.isCritical = false; // TODO: Implement crit calculation
@@ -560,6 +629,52 @@ CombatEventHandler::calculateDamage(const CombatActionStruct &action, int caster
     result.isDodged = false;
     result.isResisted = false;
     result.targetDied = false;
+
+    // Get current target health and mana for result
+    try
+    {
+        if (action.targetType == CombatTargetType::MOB)
+        {
+            auto mobData = gameServices_.getMobInstanceManager().getMobInstance(targetId);
+            result.remainingHealth = mobData.currentHealth - result.damageDealt;
+            result.remainingMana = mobData.currentMana;
+
+            if (result.remainingHealth <= 0)
+            {
+                result.remainingHealth = 0;
+                result.targetDied = true;
+            }
+        }
+        else if (action.targetType == CombatTargetType::PLAYER)
+        {
+            auto targetData = gameServices_.getCharacterManager().getCharacterData(targetId);
+            result.remainingHealth = targetData.characterCurrentHealth - result.damageDealt;
+            result.remainingMana = targetData.characterCurrentMana;
+
+            if (result.remainingHealth <= 0)
+            {
+                result.remainingHealth = 0;
+                result.targetDied = true;
+            }
+        }
+        else
+        {
+            // Default values for other target types
+            result.remainingHealth = 100;
+            result.remainingMana = 50;
+        }
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error getting target stats for combat result: " + std::string(e.what()), RED);
+        result.remainingHealth = 0;
+        result.remainingMana = 0;
+    }
+
+    gameServices_.getLogger().log("Combat result calculated - Damage: " + std::to_string(result.damageDealt) +
+                                      ", Remaining Health: " + std::to_string(result.remainingHealth) +
+                                      ", Remaining Mana: " + std::to_string(result.remainingMana),
+        GREEN);
 
     // TODO: Apply damage modifiers, resistances, etc.
 
@@ -595,11 +710,15 @@ CombatEventHandler::applyDamageToTarget(int targetId, CombatTargetType targetTyp
         if (targetType == CombatTargetType::PLAYER)
         {
             auto targetData = gameServices_.getCharacterManager().getCharacterData(targetId);
-            int actualDamage = std::min(damage, targetData.characterCurrentHealth);
-            targetData.characterCurrentHealth -= actualDamage;
+            gameServices_.getLogger().log("applyDamageToTarget: Player " + std::to_string(targetId) + " health before damage: " + std::to_string(targetData.characterCurrentHealth), GREEN);
 
-            // Update character data
-            // gameServices_.getCharacterManager().updateCharacterHealth(targetId, targetData.characterCurrentHealth);
+            int actualDamage = std::min(damage, targetData.characterCurrentHealth);
+            int newHealth = targetData.characterCurrentHealth - actualDamage;
+
+            gameServices_.getLogger().log("applyDamageToTarget: Applied " + std::to_string(actualDamage) + " damage, health after: " + std::to_string(newHealth), GREEN);
+
+            // Update character health in manager
+            gameServices_.getCharacterManager().updateCharacterHealth(targetId, newHealth);
 
             return actualDamage;
         }
@@ -634,10 +753,10 @@ CombatEventHandler::applyHealing(int targetId, int healing)
         auto targetData = gameServices_.getCharacterManager().getCharacterData(targetId);
         int maxHealing = targetData.characterMaxHealth - targetData.characterCurrentHealth;
         int actualHealing = std::min(healing, maxHealing);
-        targetData.characterCurrentHealth += actualHealing;
+        int newHealth = targetData.characterCurrentHealth + actualHealing;
 
         // Update character data
-        // gameServices_.getCharacterManager().updateCharacterHealth(targetId, targetData.characterCurrentHealth);
+        gameServices_.getCharacterManager().updateCharacterHealth(targetId, newHealth);
 
         return actualHealing;
     }
@@ -658,10 +777,10 @@ CombatEventHandler::applyHealingToTarget(int targetId, CombatTargetType targetTy
             auto targetData = gameServices_.getCharacterManager().getCharacterData(targetId);
             int maxHealing = targetData.characterMaxHealth - targetData.characterCurrentHealth;
             int actualHealing = std::min(healing, maxHealing);
-            targetData.characterCurrentHealth += actualHealing;
+            int newHealth = targetData.characterCurrentHealth + actualHealing;
 
             // Update character data
-            // gameServices_.getCharacterManager().updateCharacterHealth(targetId, targetData.characterCurrentHealth);
+            gameServices_.getCharacterManager().updateCharacterHealth(targetId, newHealth);
 
             return actualHealing;
         }
@@ -692,11 +811,32 @@ CombatEventHandler::applyHealingToTarget(int targetId, CombatTargetType targetTy
 nlohmann::json
 CombatEventHandler::combatActionToJson(const CombatActionStruct &action)
 {
+    std::string targetTypeStr = "UNKNOWN";
+    switch (action.targetType)
+    {
+    case CombatTargetType::PLAYER:
+        targetTypeStr = "PLAYER";
+        break;
+    case CombatTargetType::MOB:
+        targetTypeStr = "MOB";
+        break;
+    case CombatTargetType::AREA:
+        targetTypeStr = "AREA";
+        break;
+    case CombatTargetType::SELF:
+        targetTypeStr = "SELF";
+        break;
+    case CombatTargetType::NONE:
+        targetTypeStr = "NONE";
+        break;
+    }
+
     return nlohmann::json{
         {"actionId", action.actionId},
         {"actionName", action.actionName},
         {"actionType", static_cast<int>(action.actionType)},
         {"targetType", static_cast<int>(action.targetType)},
+        {"targetTypeString", targetTypeStr}, // Human-readable target type
         {"casterId", action.casterId},
         {"targetId", action.targetId},
         {"targetPosition", {{"x", action.targetPosition.positionX}, {"y", action.targetPosition.positionY}, {"z", action.targetPosition.positionZ}}},
@@ -710,9 +850,31 @@ CombatEventHandler::combatActionToJson(const CombatActionStruct &action)
 nlohmann::json
 CombatEventHandler::combatResultToJson(const CombatResultStruct &result)
 {
+    std::string targetTypeStr = "UNKNOWN";
+    switch (result.targetType)
+    {
+    case CombatTargetType::PLAYER:
+        targetTypeStr = "PLAYER";
+        break;
+    case CombatTargetType::MOB:
+        targetTypeStr = "MOB";
+        break;
+    case CombatTargetType::AREA:
+        targetTypeStr = "AREA";
+        break;
+    case CombatTargetType::SELF:
+        targetTypeStr = "SELF";
+        break;
+    case CombatTargetType::NONE:
+        targetTypeStr = "NONE";
+        break;
+    }
+
     return nlohmann::json{
         {"casterId", result.casterId},
         {"targetId", result.targetId},
+        {"targetType", static_cast<int>(result.targetType)},
+        {"targetTypeString", targetTypeStr},
         {"actionId", result.actionId},
         {"damageDealt", result.damageDealt},
         {"healingDone", result.healingDone},
@@ -740,14 +902,15 @@ void
 CombatEventHandler::initializeActionDefinitions()
 {
     // Example action definitions - these would typically be loaded from database/config
+    gameServices_.getLogger().log("Initializing action definitions...", GREEN);
 
     CombatActionStruct basicAttack;
     basicAttack.actionId = 1;
     basicAttack.actionName = "Basic Attack";
     basicAttack.actionType = CombatActionType::BASIC_ATTACK;
-    basicAttack.targetType = CombatTargetType::MOB;
+    basicAttack.targetType = CombatTargetType::MOB; // This will be overridden dynamically
     basicAttack.castTime = 0.0f;
-    basicAttack.range = 3.0f;
+    basicAttack.range = 150.0f; // Increased range for testing
     basicAttack.damage = 10;
     basicAttack.resourceType = ResourceType::NONE;
     basicAttack.resourceCost = 0;
@@ -756,6 +919,7 @@ CombatEventHandler::initializeActionDefinitions()
     basicAttack.animationDuration = 1.0f;
     basicAttack.canBeInterrupted = false;
     actionDefinitions_[1] = basicAttack;
+    gameServices_.getLogger().log("Added action definition: " + basicAttack.actionName + " (ID: " + std::to_string(basicAttack.actionId) + ") - can target players and mobs", GREEN);
 
     CombatActionStruct fireball;
     fireball.actionId = 2;
@@ -772,6 +936,9 @@ CombatEventHandler::initializeActionDefinitions()
     fireball.animationDuration = 2.5f;
     fireball.canBeInterrupted = true;
     actionDefinitions_[2] = fireball;
+    gameServices_.getLogger().log("Added action definition: " + fireball.actionName + " (ID: " + std::to_string(fireball.actionId) + ")", GREEN);
+
+    gameServices_.getLogger().log("Action definitions initialized. Total actions: " + std::to_string(actionDefinitions_.size()), GREEN);
 }
 
 void
@@ -781,15 +948,40 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
     int clientID = event.getClientID();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
+    // Add logging to debug the issue
+    gameServices_.getLogger().log("handlePlayerAttack called for client ID: " + std::to_string(clientID), GREEN);
+
+    // Log the type of data we received
+    if (std::holds_alternative<nlohmann::json>(data))
+    {
+        gameServices_.getLogger().log("Received JSON data in handlePlayerAttack", GREEN);
+    }
+    else if (std::holds_alternative<std::string>(data))
+    {
+        gameServices_.getLogger().log("Received string data in handlePlayerAttack", YELLOW);
+    }
+    else if (std::holds_alternative<int>(data))
+    {
+        gameServices_.getLogger().log("Received int data in handlePlayerAttack", YELLOW);
+    }
+    else
+    {
+        gameServices_.getLogger().log("Received unknown data type in handlePlayerAttack", RED);
+    }
+
     try
     {
         // Extract attack request data from event
         if (std::holds_alternative<nlohmann::json>(data))
         {
             nlohmann::json attackRequest = std::get<nlohmann::json>(data);
+            gameServices_.getLogger().log("Attack request JSON: " + attackRequest.dump(), GREEN);
 
+            // get client data
+            auto clientData = gameServices_.getClientManager().getClientData(clientID);
             // Get attacker character data
-            auto attackerData = gameServices_.getCharacterManager().getCharacterData(clientID);
+            auto attackerData = gameServices_.getCharacterManager().getCharacterData(clientData.characterId);
+            gameServices_.getLogger().log("Got character data for client ID: " + std::to_string(clientID) + ", character ID: " + std::to_string(attackerData.characterId), GREEN);
             if (attackerData.characterId == 0)
             {
                 sendErrorResponse(clientSocket, "Character not found!", "playerAttack", clientID);
@@ -803,80 +995,151 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
                 actionId = attackRequest["actionId"];
             }
 
-            AttackAction *attackAction = attackSystem_->getAction(actionId);
-            if (!attackAction)
+            gameServices_.getLogger().log("Looking for action ID: " + std::to_string(actionId), GREEN);
+
+            // First check our local action definitions
+            auto actionIt = actionDefinitions_.find(actionId);
+            if (actionIt == actionDefinitions_.end())
             {
+                gameServices_.getLogger().logError("Attack action not found for ID: " + std::to_string(actionId), RED);
                 sendErrorResponse(clientSocket, "Invalid action ID!", "playerAttack", clientID);
                 return;
             }
 
-            // Check if can execute action
-            if (!attackSystem_->canExecuteAction(attackerData, *attackAction))
+            CombatActionStruct actionDef = actionIt->second;
+            gameServices_.getLogger().log("Found attack action: " + actionDef.actionName, GREEN);
+
+            // Check if can execute action (simplified for now)
+            // if (!attackSystem_->canExecuteAction(attackerData, *attackAction))
+            // {
+            //     sendErrorResponse(clientSocket, "Cannot execute action - insufficient resources or on cooldown!", "playerAttack", clientID);
+            //     return;
+            // }
+
+            // For now, just check basic cooldown
+            if (isOnCooldown(clientData.characterId, actionId))
             {
-                sendErrorResponse(clientSocket, "Cannot execute action - insufficient resources or on cooldown!", "playerAttack", clientID);
+                sendErrorResponse(clientSocket, "Action is on cooldown!", "playerAttack", clientID);
                 return;
             }
 
-            // Get available targets
-            std::vector<TargetCandidate> targets = getAvailableTargets(clientID, attackAction->targetCriteria);
+            // Get target ID and type from request
+            int targetId = 0;
+            CombatTargetType targetType = CombatTargetType::MOB; // Default
 
-            if (targets.empty())
-            {
-                sendErrorResponse(clientSocket, "No valid targets available!", "playerAttack", clientID);
-                return;
-            }
-
-            // Select target (either from request or use AI)
-            TargetCandidate *selectedTarget = nullptr;
             if (attackRequest.contains("targetId"))
             {
-                int requestedTargetId = attackRequest["targetId"];
-                for (auto &target : targets)
-                {
-                    if (target.targetId == requestedTargetId)
-                    {
-                        selectedTarget = &target;
-                        break;
-                    }
-                }
-                if (!selectedTarget)
-                {
-                    sendErrorResponse(clientSocket, "Requested target is not valid!", "playerAttack", clientID);
-                    return;
-                }
+                targetId = attackRequest["targetId"];
+                gameServices_.getLogger().log("Target ID from request: " + std::to_string(targetId), GREEN);
             }
             else
             {
-                // Use AI to select best target
-                AttackStrategy *strategy = attackSystem_->getActiveStrategy(clientID);
-                if (strategy)
+                sendErrorResponse(clientSocket, "No target specified!", "playerAttack", clientID);
+                return;
+            }
+
+            // Get target type from request
+            if (attackRequest.contains("targetType"))
+            {
+                std::string targetTypeStr = attackRequest["targetType"];
+                if (targetTypeStr == "Player")
                 {
-                    selectedTarget = attackSystem_->selectBestTarget(targets, strategy->targetStrategy, *strategy);
+                    targetType = CombatTargetType::PLAYER;
+                    gameServices_.getLogger().log("Target type from request: PLAYER", GREEN);
+                }
+                else if (targetTypeStr == "MOB")
+                {
+                    targetType = CombatTargetType::MOB;
+                    gameServices_.getLogger().log("Target type from request: MOB", GREEN);
                 }
                 else
                 {
-                    selectedTarget = attackSystem_->selectBestTarget(targets, TargetSelectionStrategy::NEAREST, AttackStrategy{});
+                    gameServices_.getLogger().logError("Unknown target type: " + targetTypeStr + ", defaulting to MOB", YELLOW);
+                    targetType = CombatTargetType::MOB;
                 }
-            }
-
-            if (!selectedTarget)
-            {
-                sendErrorResponse(clientSocket, "Could not select valid target!", "playerAttack", clientID);
-                return;
-            }
-
-            // Create combat action
-            CombatActionStruct combatAction = attackSystem_->createAttackAction(clientID, *attackAction, *selectedTarget);
-
-            // Calculate damage
-            if (selectedTarget->data)
-            {
-                combatAction.damage = attackSystem_->calculateDamage(*attackAction, attackerData, *selectedTarget->data);
             }
             else
             {
-                combatAction.damage = attackAction->baseDamage;
+                // Fallback to old logic for backward compatibility
+                if (targetId < 1000000)
+                {
+                    targetType = CombatTargetType::PLAYER;
+                    gameServices_.getLogger().log("Target type inferred as PLAYER (ID < 1000000)", YELLOW);
+                }
+                else
+                {
+                    targetType = CombatTargetType::MOB;
+                    gameServices_.getLogger().log("Target type inferred as MOB (ID >= 1000000)", YELLOW);
+                }
             }
+
+            // Create combat action using our action definition
+            CombatActionStruct combatAction;
+            combatAction.actionId = actionDef.actionId;
+            combatAction.actionName = actionDef.actionName;
+            combatAction.actionType = actionDef.actionType;
+            combatAction.targetType = targetType;           // Use the type from request
+            combatAction.casterId = clientData.characterId; // Use character ID, not client ID
+            combatAction.targetId = targetId;
+            combatAction.castTime = actionDef.castTime;
+            combatAction.range = actionDef.range;
+            combatAction.damage = actionDef.damage;
+            combatAction.healing = 0; // No healing for basic attack
+            combatAction.resourceType = actionDef.resourceType;
+            combatAction.resourceCost = actionDef.resourceCost;
+            combatAction.cooldownMs = actionDef.cooldownMs;
+            combatAction.animationName = actionDef.animationName;
+            combatAction.animationDuration = actionDef.animationDuration;
+            combatAction.canBeInterrupted = actionDef.canBeInterrupted;
+            combatAction.requiresLineOfSight = true;
+
+            // Set target position based on target type
+            if (combatAction.targetType == CombatTargetType::MOB)
+            {
+                try
+                {
+                    auto mobData = gameServices_.getMobInstanceManager().getMobInstance(targetId);
+                    combatAction.targetPosition = mobData.position;
+                    gameServices_.getLogger().log("Set target position for mob " + std::to_string(targetId) + ": (" +
+                                                      std::to_string(mobData.position.positionX) + ", " +
+                                                      std::to_string(mobData.position.positionY) + ", " +
+                                                      std::to_string(mobData.position.positionZ) + ")",
+                        GREEN);
+                }
+                catch (const std::exception &e)
+                {
+                    gameServices_.getLogger().logError("Failed to get mob position for target " + std::to_string(targetId) + ": " + e.what(), RED);
+                    sendErrorResponse(clientSocket, "Target mob not found!", "playerAttack", clientID);
+                    return;
+                }
+            }
+            else if (combatAction.targetType == CombatTargetType::PLAYER)
+            {
+                try
+                {
+                    auto targetData = gameServices_.getCharacterManager().getCharacterData(targetId);
+                    if (targetData.characterId == 0)
+                    {
+                        gameServices_.getLogger().logError("Target player " + std::to_string(targetId) + " not found", RED);
+                        sendErrorResponse(clientSocket, "Target player not found!", "playerAttack", clientID);
+                        return;
+                    }
+                    combatAction.targetPosition = targetData.characterPosition;
+                    gameServices_.getLogger().log("Set target position for player " + std::to_string(targetId) + ": (" +
+                                                      std::to_string(targetData.characterPosition.positionX) + ", " +
+                                                      std::to_string(targetData.characterPosition.positionY) + ", " +
+                                                      std::to_string(targetData.characterPosition.positionZ) + ")",
+                        GREEN);
+                }
+                catch (const std::exception &e)
+                {
+                    gameServices_.getLogger().logError("Failed to get player position for target " + std::to_string(targetId) + ": " + e.what(), RED);
+                    sendErrorResponse(clientSocket, "Target player not found!", "playerAttack", clientID);
+                    return;
+                }
+            }
+
+            gameServices_.getLogger().log("Created combat action for target: " + std::to_string(targetId), GREEN);
 
             // Initiate the combat action using existing logic
             EventData eventData = combatAction;
@@ -884,11 +1147,16 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
             handleInitiateCombatAction(combatEvent);
 
             Logger logger;
-            logger.log("Player " + std::to_string(clientID) + " initiated attack '" + attackAction->name + "' on target " + std::to_string(selectedTarget->targetId));
+            logger.log("Player (client " + std::to_string(clientID) + ", character " + std::to_string(clientData.characterId) + ") initiated attack '" + actionDef.actionName + "' on target " + std::to_string(targetId));
+        }
+        else
+        {
+            gameServices_.getLogger().logError("handlePlayerAttack: Event data is not JSON type!", RED);
         }
     }
     catch (const std::exception &e)
     {
+        gameServices_.getLogger().logError("Error processing player attack: " + std::string(e.what()), RED);
         sendErrorResponse(clientSocket, "Error processing player attack: " + std::string(e.what()), "playerAttack", clientID);
     }
 }

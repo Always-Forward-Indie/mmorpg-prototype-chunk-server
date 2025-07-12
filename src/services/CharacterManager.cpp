@@ -206,3 +206,19 @@ CharacterManager::setCharacterPosition(int characterID, PositionStruct position)
         }
     }
 }
+
+void
+CharacterManager::updateCharacterHealth(int characterID, int newHealth)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    for (auto &character : charactersList_)
+    {
+        if (character.characterId == characterID)
+        {
+            character.characterCurrentHealth = newHealth;
+            logger_.log("Updated character " + std::to_string(characterID) + " health to " + std::to_string(newHealth));
+            return;
+        }
+    }
+    logger_.logError("Character " + std::to_string(characterID) + " not found when updating health");
+}

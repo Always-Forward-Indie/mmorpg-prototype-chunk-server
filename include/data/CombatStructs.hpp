@@ -117,6 +117,7 @@ struct CombatResultStruct
     int casterId;
     int targetId;
     int actionId;
+    CombatTargetType targetType;
 
     int damageDealt;
     int healingDone;

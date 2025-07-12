@@ -19,6 +19,7 @@ class EventDispatcher
     void handlePing(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleGetSpawnZones(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleGetConnectedClients(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handlePlayerAttack(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;

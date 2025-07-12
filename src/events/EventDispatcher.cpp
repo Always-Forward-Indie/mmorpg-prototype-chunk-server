@@ -1,4 +1,5 @@
 #include "events/EventDispatcher.hpp"
+#include "utils/JSONParser.hpp"
 #include <boost/asio.hpp>
 
 EventDispatcher::EventDispatcher(
@@ -43,6 +44,10 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     else if (context.eventType == "getConnectedCharacters")
     {
         handleGetConnectedClients(context, socket);
+    }
+    else if (context.eventType == "PLAYER_ATTACK")
+    {
+        handlePlayerAttack(context, socket);
     }
     else
     {
@@ -468,5 +473,61 @@ EventDispatcher::handleGetConnectedClients(const EventContext &context, std::sha
     {
         // Log that we're skipping the event for a disconnected client
         gameServices_.getLogger().log("Skipping get connected clients event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+    }
+}
+
+void
+EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    // Validate the socket parameter before creating the event
+    std::shared_ptr<boost::asio::ip::tcp::socket> validSocket = nullptr;
+    if (socket)
+    {
+        try
+        {
+            if (socket->is_open())
+            {
+                validSocket = socket;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            // Socket is invalid, use nullptr
+            validSocket = nullptr;
+        }
+    }
+
+    // Only create and queue the event if we have a valid socket
+    if (validSocket)
+    {
+        try
+        {
+            // Use the full message to parse combat data
+            std::string fullMessage = context.fullMessage;
+            gameServices_.getLogger().log("EventDispatcher handlePlayerAttack - Full message: " + fullMessage, GREEN);
+
+            // Parse combat action data from the full message
+            JSONParser jsonParser;
+            nlohmann::json attackData = jsonParser.parseCombatActionData(fullMessage.c_str(), fullMessage.length());
+            gameServices_.getLogger().log("EventDispatcher handlePlayerAttack - Parsed attack data: " + attackData.dump(), GREEN);
+
+            Event playerAttackEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, attackData});
+            eventsBatch_.push_back(playerAttackEvent);
+
+            if (eventsBatch_.size() >= BATCH_SIZE)
+            {
+                eventQueue_.pushBatch(eventsBatch_);
+                eventsBatch_.clear();
+            }
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Error creating player attack event: " + std::string(e.what()), RED);
+        }
+    }
+    else
+    {
+        // Log that we're skipping the event for a disconnected client
+        gameServices_.getLogger().log("Skipping player attack event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
     }
 }

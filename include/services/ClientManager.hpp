@@ -22,6 +22,9 @@ class ClientManager
     // Set client socket
     void setClientSocket(int clientID, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
+    // set client character ID
+    void setClientCharacterId(int clientID, int characterId);
+
     // Get clients list
     std::vector<ClientDataStruct> getClientsList();
 

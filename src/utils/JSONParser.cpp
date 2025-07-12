@@ -232,6 +232,7 @@ JSONParser::parseMessage(const char *data, size_t length)
     {
         message.status = jsonData["header"]["status"].get<std::string>();
     }
+
     if (jsonData.contains("header") && jsonData["header"].is_object() &&
         jsonData["header"].contains("message") && jsonData["header"]["message"].is_string())
     {
@@ -498,4 +499,19 @@ JSONParser::parseMobsAttributesList(const char *data, size_t length)
     }
 
     return mobAttributesList;
+}
+
+// parse combat action data from message body
+nlohmann::json
+JSONParser::parseCombatActionData(const char *data, size_t length)
+{
+    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+
+    if (jsonData.contains("body") && jsonData["body"].is_object())
+    {
+        return jsonData["body"];
+    }
+
+    // Return empty JSON object if no body found
+    return nlohmann::json::object();
 }

@@ -143,6 +143,24 @@ ClientManager::setClientSocket(int clientID, std::shared_ptr<boost::asio::ip::tc
     clientSockets_[clientID] = socket;
 }
 
+// Set client character ID
+void
+ClientManager::setClientCharacterId(int clientID, int characterId)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    for (auto &client : clientsList_)
+    {
+        if (client.clientId == clientID)
+        {
+            client.characterId = characterId;
+            logger_.log("Set character ID " + std::to_string(characterId) + " for client ID: " + std::to_string(clientID));
+            return;
+        }
+    }
+    logger_.logError("Client ID " + std::to_string(clientID) + " not found when setting character ID");
+}
+
+// remove client by ID
 void
 ClientManager::removeClientData(int clientID)
 {
