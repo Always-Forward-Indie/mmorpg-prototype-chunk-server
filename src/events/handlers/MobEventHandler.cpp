@@ -17,6 +17,7 @@ MobEventHandler::mobToJson(const MobDataStruct &mobData)
         {"uid", mobData.uid},
         {"zoneId", mobData.zoneId},
         {"name", mobData.name},
+        {"slug", mobData.slug},
         {"race", mobData.raceName},
         {"level", mobData.level},
         {"isAggressive", mobData.isAggressive},

@@ -86,6 +86,7 @@ struct MobDataStruct
     int uid = 0; // Уникальный идентификатор экземпляра моба
     int zoneId = 0;
     std::string name = "";
+    std::string slug = "";
     std::string raceName = "";
     int level = 0;
     int currentHealth = 0;

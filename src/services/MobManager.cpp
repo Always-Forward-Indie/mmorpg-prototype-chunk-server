@@ -25,6 +25,7 @@ MobManager::setListOfMobs(
             MobDataStruct mobData;
             mobData.id = row.id;
             mobData.name = row.name;
+            mobData.slug = row.slug;
             mobData.level = row.level;
             mobData.raceName = row.raceName;
             mobData.currentHealth = row.currentHealth;

@@ -33,19 +33,41 @@ ChunkServer::mainEventLoopCH()
     Task spawnMobInZoneTask(
         [&]
         {
-            int zoneId = 1;
-
-            gameServices_.getSpawnZoneManager().spawnMobsInZone(zoneId);
-            SpawnZoneStruct spawnZone = gameServices_.getSpawnZoneManager().getMobSpawnZoneByID(zoneId);
-            auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly(); // Use read-only version
-            for (const auto &client : connectedClients)
+            // get all spawn zones
+            auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
+            if (spawnZones.empty())
             {
-                if (client.clientId <= 0) // Strict validation
-                    continue;
+                gameServices_.getLogger().logError("No spawn zones found, cannot spawn mobs!", RED);
+                return;
+            }
 
-                auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
-                Event spawnMobsInZoneEvent(Event::SPAWN_MOBS_IN_ZONE, client.clientId, spawnZone);
-                eventQueueGameServer_.push(std::move(spawnMobsInZoneEvent)); // Use move
+            // go through all spawn zones and spawn mobs
+            for (const auto &zone : spawnZones)
+            {
+                if (zone.second.spawnEnabled && zone.second.spawnMobId > 0)
+                {
+                    // Spawn mobs in this zone
+                    gameServices_.getSpawnZoneManager().spawnMobsInZone(zone.second.zoneId);
+                    gameServices_.getLogger().log("[INFO] Spawned mobs in zone: " + std::to_string(zone.second.zoneId) +
+                                                  ", count: " + std::to_string(zone.second.spawnedMobsCount));
+
+                    // send spawn zone updates to all connected clients
+                    auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
+                    for (const auto &client : connectedClients)
+                    {
+                        if (client.clientId <= 0) // Strict validation
+                            continue;
+
+                        auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
+                        Event spawnMobsInZoneEvent(Event::SPAWN_MOBS_IN_ZONE, client.clientId, zone.second);
+                        eventQueueGameServer_.push(std::move(spawnMobsInZoneEvent)); // Use move
+                    }
+                }
+                else
+                {
+                    gameServices_.getLogger().log("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
+                                                  " - spawn disabled or no mob ID set");
+                }
             }
         },
         15,
@@ -59,32 +81,53 @@ ChunkServer::mainEventLoopCH()
     Task moveMobInZoneTask(
         [&]
         {
-            // Move mobs and check if any actually moved
-            bool anyMobMoved = gameServices_.getMobMovementManager().moveMobsInZone(1);
-
-            // Only send updates to clients if mobs actually moved
-            if (anyMobMoved)
+            // get all spawn zones
+            auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
+            if (spawnZones.empty())
             {
-                int zoneId = 1;
-                auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
-
-                for (const auto &client : connectedClients)
-                {
-                    if (client.clientId <= 0) // Strict validation
-                        continue;
-
-                    auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
-                    // Pass only zone ID instead of full mobs list to prevent memory leaks
-                    Event moveMobsInZoneEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, zoneId);
-                    eventQueueGameServer_.push(std::move(moveMobsInZoneEvent)); // Use move
-                }
-
-                gameServices_.getLogger().log("[INFO] Mobs moved in zone " + std::to_string(zoneId) +
-                                              ", sending updates to " + std::to_string(connectedClients.size()) + " clients");
+                gameServices_.getLogger().logError("No spawn zones found, cannot move mobs!", RED);
+                return;
             }
-            else
+
+            // move mobs in all zones
+
+            for (const auto &zone : spawnZones)
             {
-                gameServices_.getLogger().log("[DEBUG] No mobs moved in zone 1, skipping client updates");
+                if (zone.second.spawnEnabled && zone.second.spawnedMobsCount > 0)
+                {
+                    // Move mobs in this zone
+                    bool anyMobMoved = gameServices_.getMobMovementManager().moveMobsInZone(zone.second.zoneId);
+                    gameServices_.getLogger().log("[INFO] Moved mobs in zone: " + std::to_string(zone.second.zoneId));
+
+                    if (anyMobMoved)
+                    {
+                        // send move mobs updates to all connected clients
+                        auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
+                        for (const auto &client : connectedClients)
+                        {
+                            if (client.clientId <= 0) // Strict validation
+                                continue;
+                            auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
+                            // Pass only zone ID instead of full mobs list to prevent memory leaks
+                            Event moveMobsInZoneEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, zone.second.zoneId);
+                            eventQueueGameServer_.push(std::move(moveMobsInZoneEvent)); // Use move
+                        }
+                    }
+                    else
+                    {
+                        gameServices_.getLogger().log("[DEBUG] No mobs moved in zone " + std::to_string(zone.second.zoneId));
+                    }
+                }
+                else if (zone.second.spawnedMobsCount > 0)
+                {
+                    gameServices_.getLogger().log("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
+                                                  " - movement disabled or no mobs to move");
+                }
+                else
+                {
+                    gameServices_.getLogger().log("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
+                                                  " - no mobs to move or movement disabled");
+                }
             }
         },
         3,

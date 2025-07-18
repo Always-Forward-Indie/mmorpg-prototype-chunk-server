@@ -406,6 +406,10 @@ JSONParser::parseMobsList(const char *data, size_t length)
             {
                 mobData.name = mob["name"].get<std::string>();
             }
+            if (mob.contains("slug") && mob["slug"].is_string())
+            {
+                mobData.slug = mob["slug"].get<std::string>();
+            }
             if (mob.contains("race") && mob["race"].is_string())
             {
                 mobData.raceName = mob["race"].get<std::string>();
