@@ -1,4 +1,5 @@
 #include "services/CharacterManager.hpp"
+#include <cmath>
 #include <iostream>
 #include <random>
 #include <vector>
@@ -221,4 +222,50 @@ CharacterManager::updateCharacterHealth(int characterID, int newHealth)
         }
     }
     logger_.logError("Character " + std::to_string(characterID) + " not found when updating health");
+}
+
+std::vector<CharacterDataStruct>
+CharacterManager::getCharactersInZone(float centerX, float centerY, float radius)
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    std::vector<CharacterDataStruct> charactersInZone;
+
+    for (const auto &character : charactersList_)
+    {
+        float distance = calculateDistance(
+            {centerX, centerY, 0.0f, 0.0f},
+            character.characterPosition);
+
+        if (distance <= radius)
+        {
+            charactersInZone.push_back(character);
+        }
+    }
+
+    return charactersInZone;
+}
+
+CharacterDataStruct
+CharacterManager::getCharacterById(int characterID)
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+
+    for (const auto &character : charactersList_)
+    {
+        if (character.characterId == characterID)
+        {
+            return character;
+        }
+    }
+
+    // Return empty struct if not found
+    return CharacterDataStruct{};
+}
+
+float
+CharacterManager::calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2)
+{
+    float dx = pos1.positionX - pos2.positionX;
+    float dy = pos1.positionY - pos2.positionY;
+    return std::sqrt(dx * dx + dy * dy);
 }

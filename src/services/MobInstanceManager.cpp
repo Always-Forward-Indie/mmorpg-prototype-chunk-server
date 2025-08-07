@@ -1,5 +1,7 @@
 #include "services/MobInstanceManager.hpp"
 #include <algorithm>
+#include <chrono>
+#include <unordered_map>
 
 MobInstanceManager::MobInstanceManager(Logger &logger)
     : logger_(logger)
@@ -99,10 +101,17 @@ MobInstanceManager::updateMobPosition(int mobUID, const PositionStruct &position
     if (it != mobInstances_.end())
     {
         it->second.position = position;
-        logger_.log("[DEBUG] Updated mob " + std::to_string(mobUID) + " position to (" +
-                    std::to_string(position.positionX) + ", " +
-                    std::to_string(position.positionY) + ", " +
-                    std::to_string(position.positionZ) + ")");
+        // Only log position updates very rarely to prevent spam
+        static std::unordered_map<int, float> lastLogTime;
+        float currentTime = std::chrono::duration<float>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (lastLogTime[mobUID] == 0 || (currentTime - lastLogTime[mobUID]) > 30.0f) // Log every 30 seconds max
+        {
+            logger_.log("[DEBUG] Updated mob " + std::to_string(mobUID) + " position to (" +
+                        std::to_string(position.positionX) + ", " +
+                        std::to_string(position.positionY) + ", " +
+                        std::to_string(position.positionZ) + ")");
+            lastLogTime[mobUID] = currentTime;
+        }
         return true;
     }
 

@@ -45,6 +45,15 @@ class CharacterManager
     // Update character health
     void updateCharacterHealth(int characterID, int newHealth);
 
+    // Get characters in a specific zone
+    std::vector<CharacterDataStruct> getCharactersInZone(float centerX, float centerY, float radius);
+
+    // Get character by ID (returns empty struct if not found)
+    CharacterDataStruct getCharacterById(int characterID);
+
+    // Calculate distance between two positions
+    float calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2);
+
   private:
     Logger &logger_;
     // characters list

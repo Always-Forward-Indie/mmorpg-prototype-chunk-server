@@ -121,6 +121,7 @@ struct CombatResultStruct
 
     int damageDealt;
     int healingDone;
+
     bool isCritical;
     bool isBlocked;
     bool isDodged;
@@ -130,6 +131,8 @@ struct CombatResultStruct
     int remainingMana;
 
     std::string effectsApplied; // JSON string of applied effects
+
+    bool isDamaged; // Indicates if the target was damaged
     bool targetDied;
 };
 

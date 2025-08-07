@@ -1,5 +1,7 @@
 #include "chunk_server/ChunkServer.hpp"
+#include <chrono>
 #include <fstream>
+#include <unordered_map>
 #include <unordered_set>
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -21,6 +23,8 @@ ChunkServer::ChunkServer(GameServices &gameServices,
       gameServices_(gameServices),
       networkManager_(networkManager)
 {
+    // Set EventQueue for MobMovementManager to send combat events
+    gameServices_.getMobMovementManager().setEventQueue(&eventQueueGameServer_);
 }
 
 void
@@ -97,7 +101,6 @@ ChunkServer::mainEventLoopCH()
                 {
                     // Move mobs in this zone
                     bool anyMobMoved = gameServices_.getMobMovementManager().moveMobsInZone(zone.second.zoneId);
-                    gameServices_.getLogger().log("[INFO] Moved mobs in zone: " + std::to_string(zone.second.zoneId));
 
                     if (anyMobMoved)
                     {
@@ -113,29 +116,130 @@ ChunkServer::mainEventLoopCH()
                             eventQueueGameServer_.push(std::move(moveMobsInZoneEvent)); // Use move
                         }
                     }
-                    else
-                    {
-                        gameServices_.getLogger().log("[DEBUG] No mobs moved in zone " + std::to_string(zone.second.zoneId));
-                    }
-                }
-                else if (zone.second.spawnedMobsCount > 0)
-                {
-                    gameServices_.getLogger().log("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
-                                                  " - movement disabled or no mobs to move");
-                }
-                else
-                {
-                    gameServices_.getLogger().log("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
-                                                  " - no mobs to move or movement disabled");
                 }
             }
         },
-        3,
+        1, // Increased frequency - every 1 second instead of 3
         std::chrono::system_clock::now(),
         2 // unique task ID
     );
 
     scheduler_.scheduleTask(moveMobInZoneTask);
+
+    // Task for aggressive mob movement (faster update for mobs with targets)
+    Task aggroMobMovementTask(
+        [&]
+        {
+            // Get all spawn zones
+            auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
+            if (spawnZones.empty())
+            {
+                return;
+            }
+
+            // Track individual mobs that need position updates
+            std::unordered_map<int, int> mobsToUpdate; // mobUID -> zoneId
+            static auto lastBroadcastTime = std::chrono::steady_clock::now();
+
+            // Check for mobs with active targets and move them more frequently
+            for (const auto &zone : spawnZones)
+            {
+                if (zone.second.spawnEnabled && zone.second.spawnedMobsCount > 0)
+                {
+                    auto mobsInZone = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
+                    int aggroMobsMovedCount = 0;
+
+                    for (const auto &mob : mobsInZone)
+                    {
+                        if (mob.isDead || mob.currentHealth <= 0)
+                            continue;
+
+                        auto movementData = gameServices_.getMobMovementManager().getMobMovementData(mob.uid);
+
+                        // If mob has a target or is returning to spawn, try to move it (respecting timing)
+                        if (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn)
+                        {
+                            // Move single mob (will respect timing constraints internally)
+                            bool moved = gameServices_.getMobMovementManager().moveSingleMob(mob.uid, zone.second.zoneId);
+
+                            if (moved)
+                            {
+                                aggroMobsMovedCount++;
+
+                                // Get updated mob position after movement
+                                auto updatedMob = gameServices_.getMobInstanceManager().getMobInstance(mob.uid);
+                                if (updatedMob.uid > 0) // Valid mob
+                                {
+                                    PositionStruct currentPos = updatedMob.position;
+                                    if (gameServices_.getMobMovementManager().shouldSendMobUpdate(mob.uid, currentPos))
+                                    {
+                                        mobsToUpdate[mob.uid] = zone.second.zoneId;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (aggroMobsMovedCount > 0)
+                    {
+                        // Removed excessive logging
+                    }
+                }
+            }
+
+            // Send position updates only for mobs that moved significantly
+            // And limit update frequency to avoid client spam
+            auto currentTime = std::chrono::steady_clock::now();
+            auto timeSinceLastBroadcast = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastBroadcastTime);
+
+            // Only send updates every 50ms minimum to avoid overwhelming clients
+            if (!mobsToUpdate.empty() && timeSinceLastBroadcast.count() >= 50)
+            {
+                // Group mobs by zone for efficient broadcasting
+                std::unordered_map<int, std::vector<int>> mobsByZone;
+                for (const auto &[mobUID, zoneId] : mobsToUpdate)
+                {
+                    mobsByZone[zoneId].push_back(mobUID);
+                }
+
+                for (const auto &[zoneId, mobUIDs] : mobsByZone)
+                {
+                    // Get actual mob data for the moved mobs
+                    std::vector<MobDataStruct> movedMobs;
+                    for (int mobUID : mobUIDs)
+                    {
+                        auto mobData = gameServices_.getMobInstanceManager().getMobInstance(mobUID);
+                        if (mobData.uid > 0) // Valid mob
+                        {
+                            movedMobs.push_back(mobData);
+                        }
+                    }
+
+                    if (!movedMobs.empty())
+                    {
+                        // Send zone update events to all connected clients with specific moved mobs
+                        auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
+                        for (const auto &client : connectedClients)
+                        {
+                            if (client.clientId <= 0)
+                                continue;
+
+                            // Send event with vector of moved mobs instead of just zoneId
+                            Event mobUpdateEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, movedMobs);
+                            eventQueueGameServer_.push(std::move(mobUpdateEvent));
+                        }
+                    }
+                }
+
+                lastBroadcastTime = currentTime;
+            }
+        },
+        0.05, // Very fast frequency - every 50ms for very smooth chase movement
+        std::chrono::system_clock::now(),
+        7 // unique task ID
+    );
+
+    scheduler_.scheduleTask(aggroMobMovementTask);
 
     // Task for updating ongoing combat actions
     Task combatUpdateTask(

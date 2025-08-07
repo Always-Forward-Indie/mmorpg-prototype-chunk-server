@@ -116,31 +116,42 @@ MobEventHandler::handleZoneMoveMobsEvent(const Event &event)
 
     try
     {
+        nlohmann::json mobsArray = nlohmann::json::array();
+
         if (std::holds_alternative<int>(data))
         {
+            // Legacy: zoneId - send all mobs in zone
             int zoneId = std::get<int>(data);
-            // Fetch current mob data from MobInstanceManager instead of SpawnZoneManager
             std::vector<MobDataStruct> mobsList = gameServices_.getMobInstanceManager().getMobInstancesInZone(zoneId);
-
-            nlohmann::json mobsArray = nlohmann::json::array();
 
             for (const auto &mob : mobsList)
             {
                 mobsArray.push_back(mobToJson(mob));
             }
+        }
+        else if (std::holds_alternative<std::vector<MobDataStruct>>(data))
+        {
+            // New: specific moved mobs - send only these mobs
+            const auto &movedMobs = std::get<std::vector<MobDataStruct>>(data);
 
-            if (clientID == 0)
+            for (const auto &mob : movedMobs)
             {
-                sendErrorResponse(clientSocket, "Moving mobs failed!", "zoneMoveMobs", clientID);
-                return;
+                mobsArray.push_back(mobToJson(mob));
             }
-
-            sendSuccessResponse(clientSocket, "Moving mobs success!", "zoneMoveMobs", clientID, "mobs", mobsArray);
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            sendErrorResponse(clientSocket, "Invalid data type for zone move mobs!", "zoneMoveMobs", clientID);
+            return;
         }
+
+        if (clientID == 0)
+        {
+            sendErrorResponse(clientSocket, "Moving mobs failed!", "zoneMoveMobs", clientID);
+            return;
+        }
+
+        sendSuccessResponse(clientSocket, "Moving mobs success!", "zoneMoveMobs", clientID, "mobs", mobsArray);
     }
     catch (const std::bad_variant_access &ex)
     {

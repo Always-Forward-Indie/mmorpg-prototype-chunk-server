@@ -27,6 +27,7 @@ class GameServices
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
         mobMovementManager_.setMobInstanceManager(&mobInstanceManager_);
         mobMovementManager_.setSpawnZoneManager(&spawnZoneManager_);
+        mobMovementManager_.setCharacterManager(&characterManager_);
     }
 
     Logger &getLogger()

@@ -557,6 +557,28 @@ CombatEventHandler::completeCombatActionInternal(std::shared_ptr<CombatActionStr
         int actualDamage = applyDamageToTarget(actionPtr->targetId, actionPtr->targetType, result.damageDealt);
         result.damageDealt = actualDamage;
 
+        // Handle mob aggro if player attacked a mob
+        if (actionPtr->targetType == CombatTargetType::MOB && actualDamage > 0)
+        {
+            // Get the attacker's character ID to trigger mob aggro
+            try
+            {
+                auto attackerData = gameServices_.getCharacterManager().getCharacterData(actionPtr->casterId);
+                if (attackerData.characterId > 0)
+                {
+                    // Trigger mob aggro on the attacker
+                    gameServices_.getMobMovementManager().handleMobAttacked(actionPtr->targetId, attackerData.characterId);
+                    gameServices_.getLogger().log("[AGGRO] Mob " + std::to_string(actionPtr->targetId) +
+                                                      " now targets player " + std::to_string(attackerData.characterId),
+                        YELLOW);
+                }
+            }
+            catch (const std::exception &e)
+            {
+                gameServices_.getLogger().logError("Error triggering mob aggro: " + std::string(e.what()), RED);
+            }
+        }
+
         // Update remaining health after damage application
         try
         {
@@ -625,14 +647,23 @@ CombatEventHandler::calculateDamage(const CombatActionStruct &action, int caster
     result.damageDealt = action.damage;
     result.healingDone = action.healing;
     result.isCritical = false; // TODO: Implement crit calculation
-    result.isBlocked = false;
-    result.isDodged = false;
-    result.isResisted = false;
+    result.isBlocked = false;  // TODO: Implement block calculation
+    result.isDodged = false;   // TODO: Implement dodge calculation
+    result.isResisted = false; // TODO: Implement resistance calculation
     result.targetDied = false;
 
     // Get current target health and mana for result
     try
     {
+        if (result.damageDealt > 0)
+        {
+            result.isDamaged = true;
+        }
+        else
+        {
+            result.isDamaged = false;
+        }
+
         if (action.targetType == CombatTargetType::MOB)
         {
             auto mobData = gameServices_.getMobInstanceManager().getMobInstance(targetId);
@@ -878,11 +909,13 @@ CombatEventHandler::combatResultToJson(const CombatResultStruct &result)
         {"actionId", result.actionId},
         {"damageDealt", result.damageDealt},
         {"healingDone", result.healingDone},
+        {"isResisted", result.isResisted},
         {"isCritical", result.isCritical},
         {"isBlocked", result.isBlocked},
         {"isDodged", result.isDodged},
         {"remainingHealth", result.remainingHealth},
         {"remainingMana", result.remainingMana},
+        {"isDamaged", result.isDamaged},
         {"targetDied", result.targetDied}};
 }
 

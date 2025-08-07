@@ -1,7 +1,10 @@
 #pragma once
 #include <boost/asio.hpp>
+#include <chrono>
+#include <cmath>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
 struct PositionStruct
 {
@@ -183,16 +186,61 @@ struct MobMovementParams
 };
 
 /**
+ * @brief AI behavior configuration for mobs
+ */
+struct MobAIConfig
+{
+    // Aggro and chase distances
+    float aggroRange = 400.0f;       // Дистанция агро (когда моб начинает преследовать)
+    float maxChaseDistance = 800.0f; // Максимальная дистанция преследования от цели
+
+    // Zone-based distance calculations
+    float returnToSpawnZoneDistance = 1000.0f; // Дистанция от границы зоны для возврата (сейчас не работает потому-что мы жестко ограничиваем передвижение без цели в рамках зоны)
+    float newTargetZoneDistance = 150.0f;      // Дистанция от границы зоны для поиска новых целей
+    float maxChaseFromZoneEdge = 1500.0f;      // Максимальное преследование от границы зоны
+
+    // Combat ranges
+    float attackRange = 150.0f;  // Дистанция атаки
+    float attackCooldown = 2.0f; // Кулдаун между атаками в секундах
+
+    // Chase behavior multipliers
+    float chaseDistanceMultiplier = 2.0f; // Множитель дистанции преследования от aggroRange
+
+    // Movement timing
+    float chaseMovementInterval = 0.3f;   // Интервал движения при преследовании (секунды)
+    float returnMovementInterval = 0.15f; // Интервал движения при возврате (секунды)
+
+    // Network optimization
+    float minimumMoveDistance = 50.0f; // Минимальное расстояние для отправки обновления
+};
+
+/**
  * @brief Movement data for individual mobs
  */
 struct MobMovementData
 {
     float nextMoveTime = 0.0f;
+    float lastMoveTime = 0.0f;
     float movementDirectionX = 0.0f;
     float movementDirectionY = 0.0f;
     float speedMultiplier = 1.0f;
     float stepMultiplier = 0.0f;
     int resetStepCounter = 0;
+
+    // AI behavior data
+    int targetPlayerId = 0;          // ID игрока, которого преследует моб
+    float lastAttackTime = 0.0f;     // Время последней атаки
+    bool isReturningToSpawn = false; // Возвращается ли моб в зону спавна
+    PositionStruct spawnPosition;    // Позиция спавна для возврата
+
+    // Network optimization
+    PositionStruct lastSentPosition; // Последняя отправленная позиция
+
+    // AI configuration (set from MobAIConfig)
+    float aggroRange = 400.0f;
+    float attackRange = 150.0f;
+    float attackCooldown = 2.0f;
+    float minimumMoveDistance = 50.0f;
 };
 
 /**
@@ -204,4 +252,89 @@ struct MobMovementResult
     float newDirectionX;
     float newDirectionY;
     bool validMovement;
+};
+
+/**
+ * @brief Zone boundary utilities for AABB calculations
+ */
+struct ZoneBounds
+{
+    float minX, maxX, minY, maxY;
+
+    // Constructor from SpawnZoneStruct
+    ZoneBounds(const SpawnZoneStruct &zone)
+    {
+        minX = zone.posX - (zone.sizeX / 2.0f);
+        maxX = zone.posX + (zone.sizeX / 2.0f);
+        minY = zone.posY - (zone.sizeY / 2.0f);
+        maxY = zone.posY + (zone.sizeY / 2.0f);
+    }
+
+    // Check if point is inside zone
+    bool isPointInside(const PositionStruct &pos) const
+    {
+        return (pos.positionX >= minX && pos.positionX <= maxX &&
+                pos.positionY >= minY && pos.positionY <= maxY);
+    }
+
+    // Calculate minimum distance from point to zone boundary
+    // Returns 0 if point is inside zone
+    float distanceToZone(const PositionStruct &pos) const
+    {
+        if (isPointInside(pos))
+        {
+            return 0.0f; // Point is inside zone
+        }
+
+        // Calculate distance to closest boundary
+        float dx = 0.0f;
+        float dy = 0.0f;
+
+        if (pos.positionX < minX)
+        {
+            dx = minX - pos.positionX;
+        }
+        else if (pos.positionX > maxX)
+        {
+            dx = pos.positionX - maxX;
+        }
+
+        if (pos.positionY < minY)
+        {
+            dy = minY - pos.positionY;
+        }
+        else if (pos.positionY > maxY)
+        {
+            dy = pos.positionY - maxY;
+        }
+
+        return std::sqrt(dx * dx + dy * dy);
+    }
+
+    // Calculate distance from zone boundary outward (for range calculations)
+    // Returns distance from zone edge + additional range
+    float distanceFromZoneEdge(const PositionStruct &pos, float additionalRange) const
+    {
+        float distToZone = distanceToZone(pos);
+        return distToZone > additionalRange ? (distToZone - additionalRange) : 0.0f;
+    }
+
+    // Get closest point on zone boundary to given position
+    PositionStruct getClosestPointOnBoundary(const PositionStruct &pos) const
+    {
+        PositionStruct closest = pos;
+
+        // Clamp to zone boundaries
+        if (closest.positionX < minX)
+            closest.positionX = minX;
+        else if (closest.positionX > maxX)
+            closest.positionX = maxX;
+
+        if (closest.positionY < minY)
+            closest.positionY = minY;
+        else if (closest.positionY > maxY)
+            closest.positionY = maxY;
+
+        return closest;
+    }
 };

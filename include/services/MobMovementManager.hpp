@@ -11,6 +11,8 @@
 // Forward declarations
 class MobInstanceManager;
 class SpawnZoneManager;
+class CharacterManager;
+class EventQueue;
 
 /**
  * @brief Manages mob movement within zones
@@ -54,10 +56,47 @@ class MobMovementManager
      */
     void setZoneMovementParams(int zoneId, const MobMovementParams &params);
 
+    /**
+     * @brief Set reference to CharacterManager for player tracking
+     */
+    void setCharacterManager(class CharacterManager *characterManager);
+
+    /**
+     * @brief Set reference to EventQueue for combat events
+     */
+    void setEventQueue(class EventQueue *eventQueue);
+
+    /**
+     * @brief Handle mob aggro and retaliation when attacked by player
+     */
+    void handleMobAttacked(int mobUID, int attackerPlayerId);
+
+    /**
+     * @brief Get movement data for specific mob (public version)
+     */
+    MobMovementData getMobMovementData(int mobUID) const;
+
+    /**
+     * @brief Check if mob movement should be sent to clients
+     */
+    bool shouldSendMobUpdate(int mobUID, const PositionStruct &currentPosition);
+
+    /**
+     * @brief Set AI configuration for mobs
+     */
+    void setAIConfig(const MobAIConfig &config);
+
+    /**
+     * @brief Get current AI configuration
+     */
+    const MobAIConfig &getAIConfig() const;
+
   private:
     Logger &logger_;
     MobInstanceManager *mobInstanceManager_;
     SpawnZoneManager *spawnZoneManager_;
+    class CharacterManager *characterManager_;
+    class EventQueue *eventQueue_;
 
     // Random number generator
     std::mt19937 rng_;
@@ -68,6 +107,9 @@ class MobMovementManager
 
     // Movement data per mob
     std::map<int, MobMovementData> mobMovementData_;
+
+    // AI configuration
+    MobAIConfig aiConfig_;
 
     /**
      * @brief Calculate new position for mob
@@ -89,17 +131,86 @@ class MobMovementManager
         float x, float y, const SpawnZoneStruct &zone, const std::vector<MobDataStruct> &otherMobs, const MobDataStruct &currentMob);
 
     /**
+     * @brief Check if position is valid for chase movement (no zone boundaries, only collision check)
+     */
+    bool isValidPositionForChase(
+        float x, float y, const std::vector<MobDataStruct> &otherMobs, const MobDataStruct &currentMob);
+
+    /**
      * @brief Get default movement parameters for zone
      */
     MobMovementParams getDefaultMovementParams();
 
     /**
-     * @brief Get movement data for specific mob
-     */
-    MobMovementData getMobMovementData(int mobUID);
-
-    /**
      * @brief Update movement data for specific mob
      */
     void updateMobMovementData(int mobUID, const MobMovementData &data);
+
+    /**
+     * @brief Get movement data for specific mob (internal use)
+     */
+    MobMovementData getMobMovementDataInternal(int mobUID);
+
+    /**
+     * @brief Check for nearby players and handle aggro
+     */
+    void handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct &zone, MobMovementData &movementData);
+
+    /**
+     * @brief Calculate movement towards target player
+     */
+    std::optional<MobMovementResult> calculateChaseMovement(
+        const MobDataStruct &mob,
+        const SpawnZoneStruct &zone,
+        const std::vector<MobDataStruct> &otherMobs,
+        int targetPlayerId);
+
+    /**
+     * @brief Calculate movement back to spawn zone
+     */
+    std::optional<MobMovementResult> calculateReturnToSpawnMovement(
+        const MobDataStruct &mob,
+        const SpawnZoneStruct &zone,
+        const std::vector<MobDataStruct> &otherMobs,
+        const PositionStruct &spawnPosition);
+
+    /**
+     * @brief Check if mob can attack target player
+     */
+    bool canAttackPlayer(const MobDataStruct &mob, int targetPlayerId, const MobMovementData &movementData);
+
+    /**
+     * @brief Execute mob attack on player
+     */
+    void executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData);
+
+    /**
+     * @brief Calculate distance between two positions
+     */
+    float calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2);
+
+    /**
+     * @brief Initialize movement data for a mob with AI config
+     */
+    void initializeMobMovementData(int mobUID);
+
+    /**
+     * @brief Calculate distance from mob to zone boundary (AABB-based)
+     */
+    float calculateDistanceFromZone(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
+
+    /**
+     * @brief Check if mob should return to spawn based on zone boundaries
+     */
+    bool shouldReturnToSpawn(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
+
+    /**
+     * @brief Check if mob can search for new targets based on zone boundaries
+     */
+    bool canSearchNewTargets(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
+
+    /**
+     * @brief Check if mob should stop chasing based on zone boundaries
+     */
+    bool shouldStopChasing(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
 };
