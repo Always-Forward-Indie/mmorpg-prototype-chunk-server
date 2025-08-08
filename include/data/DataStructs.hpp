@@ -215,6 +215,19 @@ struct MobAIConfig
 };
 
 /**
+ * @brief Combat state for mobs
+ */
+enum class MobCombatState
+{
+    PATROLLING = 0,       // Normal movement/patrolling
+    CHASING = 1,          // Chasing a target
+    PREPARING_ATTACK = 2, // Stopped and preparing to attack
+    ATTACKING = 3,        // Currently attacking
+    ATTACK_COOLDOWN = 4,  // Post-attack cooldown
+    RETURNING = 5         // Returning to spawn
+};
+
+/**
  * @brief Movement data for individual mobs
  */
 struct MobMovementData
@@ -232,6 +245,13 @@ struct MobMovementData
     float lastAttackTime = 0.0f;     // Время последней атаки
     bool isReturningToSpawn = false; // Возвращается ли моб в зону спавна
     PositionStruct spawnPosition;    // Позиция спавна для возврата
+
+    // Combat state system
+    MobCombatState combatState = MobCombatState::PATROLLING;
+    float stateChangeTime = 0.0f;    // Время последнего изменения состояния
+    float attackPrepareTime = 1.0f;  // Время подготовки к атаке (секунды)
+    float attackDuration = 3.f;      // Длительность атаки (секунды)
+    float postAttackCooldown = 1.0f; // Кулдаун после атаки (секунды)
 
     // Network optimization
     PositionStruct lastSentPosition; // Последняя отправленная позиция

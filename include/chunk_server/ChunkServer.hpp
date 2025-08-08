@@ -62,4 +62,7 @@ class ChunkServer
 
     GameServices &gameServices_;
     NetworkManager &networkManager_;
+
+    // Helper method for sending spawn events to all clients
+    void sendSpawnEventsToClients(const SpawnZoneStruct &zone);
 };

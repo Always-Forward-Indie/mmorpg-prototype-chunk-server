@@ -258,3 +258,43 @@ MobEventHandler::handleSetMobsAttributesEvent(const Event &event)
         gameServices_.getLogger().log("Error here: " + std::string(ex.what()));
     }
 }
+
+void
+MobEventHandler::handleMobDeathEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        // Event data should contain mobUID and zoneId
+        if (std::holds_alternative<std::pair<int, int>>(data))
+        {
+            auto mobDeathData = std::get<std::pair<int, int>>(data);
+            int mobUID = mobDeathData.first;
+            int zoneId = mobDeathData.second;
+
+            gameServices_.getLogger().log("[MOB_DEATH_EVENT] Broadcasting death notification for mob UID " +
+                                          std::to_string(mobUID) + " in zone " + std::to_string(zoneId));
+
+            // Build death notification response
+            nlohmann::json response = ResponseBuilder()
+                                          .setHeader("message", "Mob died")
+                                          .setHeader("hash", "")
+                                          .setHeader("eventType", "mobDeath")
+                                          .setBody("mobUID", mobUID)
+                                          .setBody("zoneId", zoneId)
+                                          .build();
+
+            std::string responseData = networkManager_.generateResponseMessage("success", response);
+            broadcastToAllClients(responseData);
+        }
+        else
+        {
+            gameServices_.getLogger().logError("Invalid data format for MOB_DEATH event");
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        gameServices_.getLogger().logError("Error processing mob death event: " + std::string(ex.what()));
+    }
+}

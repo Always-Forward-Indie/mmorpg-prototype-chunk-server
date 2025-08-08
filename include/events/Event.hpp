@@ -33,6 +33,7 @@ class Event
         SPAWN_MOBS_IN_ZONE,
         SPAWN_ZONE_MOVE_MOBS,
         MOVE_MOB,
+        MOB_DEATH, // Event to notify clients about mob death/removal
         // Combat events
         INITIATE_COMBAT_ACTION,
         COMPLETE_COMBAT_ACTION,

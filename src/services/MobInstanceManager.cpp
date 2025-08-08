@@ -125,23 +125,26 @@ MobInstanceManager::updateMobHealth(int mobUID, int health)
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
     auto it = mobInstances_.find(mobUID);
-    if (it != mobInstances_.end())
+    if (it == mobInstances_.end())
     {
-        it->second.currentHealth = health;
-        logger_.log("[DEBUG] Updated mob " + std::to_string(mobUID) + " health to " + std::to_string(health));
-
-        // Check if mob died
-        if (health <= 0)
-        {
-            it->second.isDead = true;
-            logger_.log("[INFO] Mob " + std::to_string(mobUID) + " has died");
-        }
-
-        return true;
+        logger_.logError("Failed to update health for mob UID: " + std::to_string(mobUID));
+        return false;
     }
 
-    logger_.logError("Failed to update health for mob UID: " + std::to_string(mobUID));
-    return false;
+    it->second.currentHealth = health;
+    logger_.log("[DEBUG] Updated mob " + std::to_string(mobUID) + " health to " + std::to_string(health));
+
+    // Check if mob died
+    if (health <= 0 && !it->second.isDead)
+    {
+        it->second.isDead = true;
+        logger_.log("[INFO] Mob " + std::to_string(mobUID) + " has died");
+
+        // Note: We don't send events from here anymore to avoid deadlock
+        // Death notifications will be handled by periodic cleanup tasks
+    }
+
+    return true;
 }
 
 bool
@@ -181,16 +184,18 @@ MobInstanceManager::markMobAsDead(int mobUID)
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
     auto it = mobInstances_.find(mobUID);
-    if (it != mobInstances_.end())
+    if (it == mobInstances_.end())
     {
-        it->second.isDead = true;
-        it->second.currentHealth = 0;
-        logger_.log("[INFO] Marked mob " + std::to_string(mobUID) + " as dead");
-        return true;
+        logger_.logError("Failed to mark mob as dead - UID not found: " + std::to_string(mobUID));
+        return false;
     }
 
-    logger_.logError("Failed to mark mob as dead - UID not found: " + std::to_string(mobUID));
-    return false;
+    bool wasAlive = !it->second.isDead;
+    it->second.isDead = true;
+    it->second.currentHealth = 0;
+    logger_.log("[INFO] Marked mob " + std::to_string(mobUID) + " as dead");
+
+    return true;
 }
 
 std::unordered_map<int, MobDataStruct>

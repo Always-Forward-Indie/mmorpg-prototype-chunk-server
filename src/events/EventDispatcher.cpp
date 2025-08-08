@@ -393,11 +393,7 @@ EventDispatcher::handleGetSpawnZones(const EventContext &context, std::shared_pt
         return;
     }
 
-    // Remove immediate spawn - let the scheduled task handle it after mob data is loaded
-    // gameServices_.getSpawnZoneManager().spawnMobsInZone(1);
-    SpawnZoneStruct spawnZone = gameServices_.getSpawnZoneManager().getMobSpawnZoneByID(1);
-
-    // Validate the socket parameter before creating the event
+    // Validate the socket parameter before creating events
     std::shared_ptr<boost::asio::ip::tcp::socket> validSocket = nullptr;
     if (socket)
     {
@@ -415,13 +411,31 @@ EventDispatcher::handleGetSpawnZones(const EventContext &context, std::shared_pt
         }
     }
 
-    // Only create and queue the event if we have a valid socket
+    // Only create and queue events if we have a valid socket
     if (validSocket)
     {
-        Event getSpawnZonesEvent(Event::SPAWN_MOBS_IN_ZONE, context.clientData.clientId, spawnZone);
-        eventsBatch_.push_back(getSpawnZonesEvent);
+        // Get ALL spawn zones instead of just zone ID 1
+        auto allSpawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
 
-        if (eventsBatch_.size() >= BATCH_SIZE)
+        gameServices_.getLogger().log("Sending " + std::to_string(allSpawnZones.size()) +
+                                          " spawn zones to client " + std::to_string(context.clientData.clientId),
+            BLUE);
+
+        // Send each spawn zone to the client
+        for (const auto &[zoneId, spawnZone] : allSpawnZones)
+        {
+            Event getSpawnZonesEvent(Event::SPAWN_MOBS_IN_ZONE, context.clientData.clientId, spawnZone);
+            eventsBatch_.push_back(getSpawnZonesEvent);
+
+            if (eventsBatch_.size() >= BATCH_SIZE)
+            {
+                eventQueue_.pushBatch(eventsBatch_);
+                eventsBatch_.clear();
+            }
+        }
+
+        // Flush any remaining events in batch
+        if (!eventsBatch_.empty())
         {
             eventQueue_.pushBatch(eventsBatch_);
             eventsBatch_.clear();

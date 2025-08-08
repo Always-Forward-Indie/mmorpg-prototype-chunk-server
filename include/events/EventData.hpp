@@ -62,6 +62,7 @@ using EventData = std::variant<
     AttackRequestStruct,
     AttackSequenceStruct,
     TargetSelectionStruct,
+    std::pair<int, int>, // For mob death events (mobUID, zoneId)
     std::vector<MobDataStruct>,
     std::vector<SpawnZoneStruct>,
     std::vector<MobAttributeStruct>,

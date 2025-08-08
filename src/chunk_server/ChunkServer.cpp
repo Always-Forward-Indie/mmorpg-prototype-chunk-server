@@ -28,10 +28,71 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 }
 
 void
+ChunkServer::sendSpawnEventsToClients(const SpawnZoneStruct &zone)
+{
+    auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
+    for (const auto &client : connectedClients)
+    {
+        if (client.clientId <= 0)
+            continue;
+
+        Event spawnMobsInZoneEvent(Event::SPAWN_MOBS_IN_ZONE, client.clientId, zone);
+        eventQueueGameServer_.push(std::move(spawnMobsInZoneEvent));
+    }
+}
+
+void
 ChunkServer::mainEventLoopCH()
 {
     gameServices_.getLogger().log("Add Tasks To Game Server Scheduler...", YELLOW);
     constexpr int BATCH_SIZE = 10;
+
+    // Perform initial mob spawn directly instead of using scheduler to avoid infinite loop
+    {
+        gameServices_.getLogger().log("Starting initial mob spawn for all zones...", YELLOW);
+
+        auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
+        if (spawnZones.empty())
+        {
+            gameServices_.getLogger().logError("No spawn zones found for initial spawn!", RED);
+        }
+        else
+        {
+            int totalInitialSpawns = 0;
+            for (const auto &zone : spawnZones)
+            {
+                gameServices_.getLogger().log("[DEBUG] Checking zone " + std::to_string(zone.second.zoneId) +
+                                              " - spawnEnabled: " + (zone.second.spawnEnabled ? "true" : "false") +
+                                              ", spawnMobId: " + std::to_string(zone.second.spawnMobId));
+
+                if (zone.second.spawnEnabled && zone.second.spawnMobId > 0)
+                {
+                    auto spawnedMobs = gameServices_.getSpawnZoneManager().spawnMobsInZone(zone.second.zoneId);
+                    if (!spawnedMobs.empty())
+                    {
+                        totalInitialSpawns += spawnedMobs.size();
+                        gameServices_.getLogger().log("[INITIAL_SPAWN] Zone " + std::to_string(zone.second.zoneId) +
+                                                      ": spawned " + std::to_string(spawnedMobs.size()) + " mobs");
+
+                        // Send initial spawn events to all connected clients
+                        sendSpawnEventsToClients(zone.second);
+                    }
+                    else
+                    {
+                        gameServices_.getLogger().log("[DEBUG] Zone " + std::to_string(zone.second.zoneId) +
+                                                      " - no mobs spawned (zone may be full or mob template not loaded)");
+                    }
+                }
+                else
+                {
+                    gameServices_.getLogger().log("[DEBUG] Zone " + std::to_string(zone.second.zoneId) +
+                                                  " - skipped (spawn disabled or no mob ID)");
+                }
+            }
+
+            gameServices_.getLogger().log("[INITIAL_SPAWN] Completed! Total mobs spawned: " + std::to_string(totalInitialSpawns), GREEN);
+        }
+    }
 
     // Task for spawning mobs in the zone
     Task spawnMobInZoneTask(
@@ -45,26 +106,47 @@ ChunkServer::mainEventLoopCH()
                 return;
             }
 
+            bool anyMobsSpawned = false;
+            int totalMobsSpawned = 0;
+
             // go through all spawn zones and spawn mobs
             for (const auto &zone : spawnZones)
             {
                 if (zone.second.spawnEnabled && zone.second.spawnMobId > 0)
                 {
-                    // Spawn mobs in this zone
-                    gameServices_.getSpawnZoneManager().spawnMobsInZone(zone.second.zoneId);
-                    gameServices_.getLogger().log("[INFO] Spawned mobs in zone: " + std::to_string(zone.second.zoneId) +
-                                                  ", count: " + std::to_string(zone.second.spawnedMobsCount));
+                    // Check if zone needs mobs before attempting spawn
+                    int currentMobCount = gameServices_.getMobInstanceManager().getAliveMobCountInZone(zone.second.zoneId);
 
-                    // send spawn zone updates to all connected clients
-                    auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
-                    for (const auto &client : connectedClients)
+                    if (currentMobCount < zone.second.spawnCount)
                     {
-                        if (client.clientId <= 0) // Strict validation
-                            continue;
+                        // Spawn mobs in this zone - only if needed
+                        auto spawnedMobs = gameServices_.getSpawnZoneManager().spawnMobsInZone(zone.second.zoneId);
 
-                        auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
-                        Event spawnMobsInZoneEvent(Event::SPAWN_MOBS_IN_ZONE, client.clientId, zone.second);
-                        eventQueueGameServer_.push(std::move(spawnMobsInZoneEvent)); // Use move
+                        if (!spawnedMobs.empty())
+                        {
+                            anyMobsSpawned = true;
+                            totalMobsSpawned += spawnedMobs.size();
+                            gameServices_.getLogger().log("[INFO] Spawned " + std::to_string(spawnedMobs.size()) +
+                                                          " mobs in zone: " + std::to_string(zone.second.zoneId) +
+                                                          " (total alive: " + std::to_string(currentMobCount + spawnedMobs.size()) + "/" +
+                                                          std::to_string(zone.second.spawnCount) + ")");
+
+                            // Send spawn zone updates to all connected clients - only when mobs actually spawned
+                            sendSpawnEventsToClients(zone.second);
+                        }
+                    }
+                    else
+                    {
+                        // Zone is full - log occasionally (not every time)
+                        static std::chrono::steady_clock::time_point lastFullZoneLog;
+                        auto now = std::chrono::steady_clock::now();
+                        if (std::chrono::duration_cast<std::chrono::minutes>(now - lastFullZoneLog).count() >= 5)
+                        {
+                            gameServices_.getLogger().log("[DEBUG] Zone " + std::to_string(zone.second.zoneId) +
+                                                          " is full (" + std::to_string(currentMobCount) + "/" +
+                                                          std::to_string(zone.second.spawnCount) + ")");
+                            lastFullZoneLog = now;
+                        }
                     }
                 }
                 else
@@ -73,13 +155,57 @@ ChunkServer::mainEventLoopCH()
                                                   " - spawn disabled or no mob ID set");
                 }
             }
+
+            // Log summary only if mobs were spawned
+            if (anyMobsSpawned)
+            {
+                gameServices_.getLogger().log("[SPAWN_SUMMARY] Total mobs spawned this cycle: " + std::to_string(totalMobsSpawned));
+            }
         },
-        15,
+        300, // Increased to 5 minutes (300 seconds) - less frequent safety checks
         std::chrono::system_clock::now(),
         1 // unique task ID
     );
 
     scheduler_.scheduleTask(spawnMobInZoneTask);
+
+    // Task for respawn-time based mob spawning (more frequent than safety check)
+    Task respawnMobTask(
+        [&]
+        {
+            auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
+            if (spawnZones.empty())
+                return;
+
+            for (const auto &zone : spawnZones)
+            {
+                if (!zone.second.spawnEnabled || zone.second.spawnMobId <= 0)
+                    continue;
+
+                int currentMobCount = gameServices_.getMobInstanceManager().getAliveMobCountInZone(zone.second.zoneId);
+
+                // Only spawn if zone is not full
+                if (currentMobCount < zone.second.spawnCount)
+                {
+                    auto spawnedMobs = gameServices_.getSpawnZoneManager().spawnMobsInZone(zone.second.zoneId);
+
+                    if (!spawnedMobs.empty())
+                    {
+                        gameServices_.getLogger().log("[RESPAWN] Zone " + std::to_string(zone.second.zoneId) +
+                                                      ": respawned " + std::to_string(spawnedMobs.size()) + " mobs");
+
+                        // Send respawn events to all connected clients
+                        sendSpawnEventsToClients(zone.second);
+                    }
+                }
+            }
+        },
+        30,                                                          // Every 30 seconds - more frequent than safety check but respects respawn times
+        std::chrono::system_clock::now() + std::chrono::seconds(10), // Start after initial spawn
+        8                                                            // unique task ID
+    );
+
+    scheduler_.scheduleTask(respawnMobTask);
 
     // Task for moving mobs in the zone
     Task moveMobInZoneTask(
@@ -104,16 +230,32 @@ ChunkServer::mainEventLoopCH()
 
                     if (anyMobMoved)
                     {
-                        // send move mobs updates to all connected clients
-                        auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
-                        for (const auto &client : connectedClients)
+                        // Get mobs that should send updates (moved significantly)
+                        auto movedMobs = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
+                        std::vector<MobDataStruct> mobsToSend;
+
+                        for (const auto &mob : movedMobs)
                         {
-                            if (client.clientId <= 0) // Strict validation
-                                continue;
-                            auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
-                            // Pass only zone ID instead of full mobs list to prevent memory leaks
-                            Event moveMobsInZoneEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, zone.second.zoneId);
-                            eventQueueGameServer_.push(std::move(moveMobsInZoneEvent)); // Use move
+                            if (gameServices_.getMobMovementManager().shouldSendMobUpdate(mob.uid, mob.position))
+                            {
+                                mobsToSend.push_back(mob);
+                            }
+                        }
+
+                        // Only send updates if there are mobs that moved significantly
+                        if (!mobsToSend.empty())
+                        {
+                            // send move mobs updates to all connected clients
+                            auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
+                            for (const auto &client : connectedClients)
+                            {
+                                if (client.clientId <= 0) // Strict validation
+                                    continue;
+                                auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
+                                // Send specific moved mobs instead of just zone ID
+                                Event moveMobsInZoneEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, mobsToSend);
+                                eventQueueGameServer_.push(std::move(moveMobsInZoneEvent)); // Use move
+                            }
                         }
                     }
                 }
@@ -310,6 +452,80 @@ ChunkServer::mainEventLoopCH()
     );
 
     scheduler_.scheduleTask(cleanupTask);
+
+    // Task for cleaning up dead mobs and triggering respawn
+    Task deadMobCleanupTask(
+        [&]
+        {
+            auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
+            if (spawnZones.empty())
+                return;
+
+            int totalDeadMobsRemoved = 0;
+            std::vector<std::pair<int, int>> deadMobsToNotify; // mobUID, zoneId pairs
+
+            for (const auto &zone : spawnZones)
+            {
+                if (!zone.second.spawnEnabled)
+                    continue;
+
+                // Get all mobs in zone from MobInstanceManager
+                auto mobsInZone = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
+                std::vector<int> deadMobUIDs;
+
+                // Find dead mobs
+                for (const auto &mob : mobsInZone)
+                {
+                    if (mob.isDead || mob.currentHealth <= 0)
+                    {
+                        deadMobUIDs.push_back(mob.uid);
+                        deadMobsToNotify.emplace_back(mob.uid, zone.second.zoneId);
+                    }
+                }
+
+                // Remove dead mobs and trigger respawn logic
+                for (int mobUID : deadMobUIDs)
+                {
+                    gameServices_.getSpawnZoneManager().mobDied(zone.second.zoneId, mobUID);
+                    totalDeadMobsRemoved++;
+                    gameServices_.getLogger().log("[CLEANUP] Removed dead mob UID " + std::to_string(mobUID) +
+                                                  " from zone " + std::to_string(zone.second.zoneId));
+                }
+            }
+
+            // Send death notifications AFTER cleanup is complete to avoid any potential deadlocks
+            if (!deadMobsToNotify.empty())
+            {
+                for (const auto &[mobUID, zoneId] : deadMobsToNotify)
+                {
+                    try
+                    {
+                        std::pair<int, int> mobDeathData = std::make_pair(mobUID, zoneId);
+                        Event deathEvent(Event::MOB_DEATH, 0, mobDeathData);
+                        eventQueueGameServer_.push(std::move(deathEvent));
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError("Failed to send death notification for mob " +
+                                                           std::to_string(mobUID) + ": " + ex.what());
+                    }
+                }
+                gameServices_.getLogger().log("[CLEANUP] Sent " + std::to_string(deadMobsToNotify.size()) +
+                                              " death notifications to clients");
+            }
+
+            if (totalDeadMobsRemoved > 0)
+            {
+                gameServices_.getLogger().log("[CLEANUP] Cleaned up " + std::to_string(totalDeadMobsRemoved) +
+                                              " dead mobs across all zones");
+            }
+        },
+        60,                                                          // Every 60 seconds - cleanup dead mobs to allow respawning
+        std::chrono::system_clock::now() + std::chrono::seconds(30), // Start after 30 seconds
+        9                                                            // unique task ID
+    );
+
+    scheduler_.scheduleTask(deadMobCleanupTask);
 
     // Add memory monitoring task
     Task memoryMonitorTask(

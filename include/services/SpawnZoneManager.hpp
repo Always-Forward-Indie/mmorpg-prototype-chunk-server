@@ -32,9 +32,10 @@ class SpawnZoneManager
     // Deprecated: Use MobInstanceManager instead
     // These methods are kept for backward compatibility and internal zone management
     MobDataStruct getMobByUID(int mobUID); // Delegates to MobInstanceManager
+    void removeMobByUID(int mobUID);       // Public method for zone cleanup
 
   private:
-    void removeMobByUID(int mobUID); // Internal method for zone cleanup
+    void removeMobByUIDInternal(int mobUID); // Internal method (assumes mutex is locked)
 
   private:
     Logger &logger_;

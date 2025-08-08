@@ -74,6 +74,9 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::SPAWN_ZONE_MOVE_MOBS:
             mobEventHandler_->handleZoneMoveMobsEvent(event);
             break;
+        case Event::MOB_DEATH:
+            mobEventHandler_->handleMobDeathEvent(event);
+            break;
 
         // Zone Events
         case Event::SET_ALL_SPAWN_ZONES:

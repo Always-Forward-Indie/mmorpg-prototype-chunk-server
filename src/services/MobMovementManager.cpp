@@ -136,6 +136,9 @@ MobMovementManager::moveMobsInZone(int zoneId)
             }
         }
 
+        // Update combat state for this mob
+        updateMobCombatState(const_cast<MobDataStruct &>(mob), movementData, currentTime);
+
         // Initialize movement timing if needed
         if (movementData.nextMoveTime == 0.0f)
         {
@@ -143,6 +146,13 @@ MobMovementManager::moveMobsInZone(int zoneId)
             std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
             movementData.nextMoveTime = currentTime + initialDelay(rng_) + moveTime(rng_);
             updateMobMovementData(mob.uid, movementData);
+        }
+
+        // Check if mob can perform actions (movement) based on combat state
+        if (!canPerformAction(movementData, currentTime))
+        {
+            // Mob is in a state where it shouldn't move (preparing attack, attacking, cooldown)
+            continue;
         }
 
         // Check if it's time to move - respect timing even for mobs with targets
@@ -297,8 +307,18 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
         movementData = getMobMovementData(mobUID);
     }
 
-    // Check if it's time to move this mob (respect timing constraints)
+    // Update combat state for this mob
     float currentTime = getCurrentGameTime();
+    updateMobCombatState(const_cast<MobDataStruct &>(mob), movementData, currentTime);
+
+    // Check if mob can perform actions (movement) based on combat state
+    if (!canPerformAction(movementData, currentTime))
+    {
+        // Mob is in a state where it shouldn't move (preparing attack, attacking, cooldown)
+        return false;
+    }
+
+    // Check if it's time to move this mob (respect timing constraints)
     bool hasTarget = (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn);
     bool timeToMove = (currentTime >= movementData.nextMoveTime);
 
@@ -608,10 +628,45 @@ MobMovementManager::shouldSendMobUpdate(int mobUID, const PositionStruct &curren
     {
         // Update last sent position
         it->second.lastSentPosition = currentPosition;
+
+        // Log movement updates for mobs in combat states
+        if (it->second.combatState != MobCombatState::PATROLLING)
+        {
+            const char *stateNames[] = {"PATROLLING", "CHASING", "PREPARING_ATTACK", "ATTACKING", "ATTACK_COOLDOWN", "RETURNING"};
+            int stateIndex = static_cast<int>(it->second.combatState);
+            if (stateIndex >= 0 && stateIndex < 6)
+            {
+                logger_.log("[MOVEMENT] Sending position update for mob " + std::to_string(mobUID) +
+                            " (state: " + stateNames[stateIndex] + ", distance moved: " +
+                            std::to_string(distance) + ")");
+            }
+        }
+
         return true;
     }
 
     return false;
+}
+
+void
+MobMovementManager::forceMobStateUpdate(int mobUID)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = mobMovementData_.find(mobUID);
+    if (it != mobMovementData_.end())
+    {
+        // Reset the last sent position to force next update
+        it->second.lastSentPosition.positionX = -999999.0f;
+        it->second.lastSentPosition.positionY = -999999.0f;
+
+        const char *stateNames[] = {"PATROLLING", "CHASING", "PREPARING_ATTACK", "ATTACKING", "ATTACK_COOLDOWN", "RETURNING"};
+        int stateIndex = static_cast<int>(it->second.combatState);
+        if (stateIndex >= 0 && stateIndex < 6)
+        {
+            logger_.log("[COMBAT] Forcing state update for mob " + std::to_string(mobUID) +
+                        " (state: " + stateNames[stateIndex] + ")");
+        }
+    }
 }
 
 MobMovementData
@@ -675,15 +730,7 @@ MobMovementManager::handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct 
     if (!characterManager_)
         return;
 
-    // 1) Если можем атаковать — атакуем
-    if (movementData.targetPlayerId > 0 &&
-        canAttackPlayer(mob, movementData.targetPlayerId, movementData))
-    {
-        executeMobAttack(mob, movementData.targetPlayerId, movementData);
-        return;
-    }
-
-    // 2) Если у моба есть цель — проверяем, валидна ли она
+    // 1) Проверяем валидность текущей цели (если есть)
     if (movementData.targetPlayerId > 0)
     {
         auto currentTarget = characterManager_->getCharacterById(movementData.targetPlayerId);
@@ -804,9 +851,9 @@ MobMovementManager::calculateChaseMovement(
         return std::nullopt;
     }
 
-    constexpr float ATTACK_BUFFER = 1.0f;
+    constexpr float ATTACK_BUFFER = 10.0f;
 
-    // 4) If within attack range → attack, no movement
+    // 4) If within attack range → stop movement (combat state system will handle attacks)
     static std::unordered_set<int> inRangeSet;
     if (distance <= aiConfig_.attackRange + ATTACK_BUFFER)
     {
@@ -814,18 +861,9 @@ MobMovementManager::calculateChaseMovement(
         {
             logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
                         " reached attack range of player " + std::to_string(targetPlayerId) +
-                        " (distance: " + std::to_string(distance) + ")");
+                        " (distance: " + std::to_string(distance) + ") - stopping movement");
         }
-        auto movementData = getMobMovementDataInternal(mob.uid);
-        if (canAttackPlayer(mob, targetPlayerId, movementData))
-        {
-            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
-                        " attacking player " + std::to_string(targetPlayerId));
-            MobDataStruct mobCopy = mob;
-            auto mdCopy = movementData;
-            executeMobAttack(mobCopy, targetPlayerId, mdCopy);
-            updateMobMovementData(mob.uid, mdCopy);
-        }
+        // Don't move, let combat state system handle the attack sequence
         return std::nullopt;
     }
     else
@@ -1098,8 +1136,172 @@ MobMovementManager::initializeMobMovementData(int mobUID)
         newData.attackCooldown = aiConfig_.attackCooldown;
         newData.minimumMoveDistance = aiConfig_.minimumMoveDistance;
 
+        // Initialize combat state
+        newData.combatState = MobCombatState::PATROLLING;
+        newData.stateChangeTime = getCurrentGameTime();
+
         mobMovementData_[mobUID] = newData;
     }
+}
+
+void
+MobMovementManager::updateMobCombatState(MobDataStruct &mob, MobMovementData &movementData, float currentTime)
+{
+    if (!characterManager_)
+        return;
+
+    float timeSinceStateChange = currentTime - movementData.stateChangeTime;
+
+    switch (movementData.combatState)
+    {
+    case MobCombatState::PATROLLING:
+        // Transition to chasing if target found
+        if (movementData.targetPlayerId > 0)
+        {
+            movementData.combatState = MobCombatState::CHASING;
+            movementData.stateChangeTime = currentTime;
+            updateMobMovementData(mob.uid, movementData); // Save state change
+            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " entering CHASING state");
+        }
+        break;
+
+    case MobCombatState::CHASING:
+        if (movementData.targetPlayerId == 0)
+        {
+            // Lost target, return to patrolling or returning
+            if (movementData.isReturningToSpawn)
+            {
+                movementData.combatState = MobCombatState::RETURNING;
+            }
+            else
+            {
+                movementData.combatState = MobCombatState::PATROLLING;
+            }
+            movementData.stateChangeTime = currentTime;
+            updateMobMovementData(mob.uid, movementData); // Save state change
+        }
+        else
+        {
+            // Check if in attack range
+            auto targetPlayer = characterManager_->getCharacterById(movementData.targetPlayerId);
+            if (targetPlayer.characterId > 0)
+            {
+                float distance = calculateDistance(mob.position, targetPlayer.characterPosition);
+                if (distance <= aiConfig_.attackRange)
+                {
+                    // Enter prepare attack state
+                    movementData.combatState = MobCombatState::PREPARING_ATTACK;
+                    movementData.stateChangeTime = currentTime;
+                    updateMobMovementData(mob.uid, movementData); // Save state change
+                    forceMobStateUpdate(mob.uid);                 // Force state update to clients
+                    // logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " preparing to attack (distance: " + std::to_string(distance) + ")");
+                }
+            }
+        }
+        break;
+
+    case MobCombatState::PREPARING_ATTACK:
+        if (timeSinceStateChange >= movementData.attackPrepareTime)
+        {
+            // Check if target is still in range and can attack
+            if (movementData.targetPlayerId > 0 && canAttackPlayer(mob, movementData.targetPlayerId, movementData))
+            {
+                movementData.combatState = MobCombatState::ATTACKING;
+                movementData.stateChangeTime = currentTime;
+                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " starting attack animation");
+
+                updateMobMovementData(mob.uid, movementData); // Save state change
+                forceMobStateUpdate(mob.uid);                 // Force state update to clients
+            }
+            else
+            {
+                // Target moved away or can't attack, return to chasing
+                movementData.combatState = MobCombatState::CHASING;
+                movementData.stateChangeTime = currentTime;
+                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target moved away, returning to chase");
+            }
+        }
+        break;
+
+    case MobCombatState::ATTACKING:
+        if (timeSinceStateChange >= movementData.attackDuration)
+        {
+            // Attack duration finished, execute the attack now
+            if (movementData.targetPlayerId > 0 && canAttackPlayer(mob, movementData.targetPlayerId, movementData))
+            {
+                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " executing attack after animation");
+                executeMobAttack(mob, movementData.targetPlayerId, movementData);
+            }
+            else
+            {
+                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attack missed - target moved away");
+            }
+
+            // Attack finished, enter cooldown
+            movementData.combatState = MobCombatState::ATTACK_COOLDOWN;
+            movementData.stateChangeTime = currentTime;
+            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attack finished, entering cooldown");
+            updateMobMovementData(mob.uid, movementData); // Save state change
+            forceMobStateUpdate(mob.uid);                 // Force state update to clients
+        }
+        break;
+
+    case MobCombatState::ATTACK_COOLDOWN:
+        if (timeSinceStateChange >= movementData.postAttackCooldown)
+        {
+            // Cooldown finished, return to chasing if target still exists
+            if (movementData.targetPlayerId > 0)
+            {
+                movementData.combatState = MobCombatState::CHASING;
+                movementData.stateChangeTime = currentTime;
+                updateMobMovementData(mob.uid, movementData); // Save state change
+                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " cooldown finished, resuming chase");
+            }
+            else if (movementData.isReturningToSpawn)
+            {
+                movementData.combatState = MobCombatState::RETURNING;
+                movementData.stateChangeTime = currentTime;
+                updateMobMovementData(mob.uid, movementData); // Save state change
+            }
+            else
+            {
+                movementData.combatState = MobCombatState::PATROLLING;
+                movementData.stateChangeTime = currentTime;
+                updateMobMovementData(mob.uid, movementData); // Save state change
+            }
+        }
+        break;
+
+    case MobCombatState::RETURNING:
+        if (!movementData.isReturningToSpawn)
+        {
+            // Finished returning, back to patrolling
+            movementData.combatState = MobCombatState::PATROLLING;
+            movementData.stateChangeTime = currentTime;
+            updateMobMovementData(mob.uid, movementData); // Save state change
+            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " finished returning, back to patrol");
+        }
+        break;
+    }
+}
+
+bool
+MobMovementManager::canPerformAction(const MobMovementData &movementData, float currentTime) const
+{
+    // Only allow movement during certain states
+    switch (movementData.combatState)
+    {
+    case MobCombatState::PATROLLING:
+    case MobCombatState::CHASING:
+    case MobCombatState::RETURNING:
+        return true;
+
+    case MobCombatState::PREPARING_ATTACK:
+    case MobCombatState::ATTACKING:
+    case MobCombatState::ATTACK_COOLDOWN:
+        return false; // No movement during attack phases
+    }
+    return false;
 }
 
 const MobAIConfig &

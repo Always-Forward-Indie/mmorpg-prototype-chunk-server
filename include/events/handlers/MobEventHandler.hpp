@@ -36,6 +36,15 @@ class MobEventHandler : public BaseEventHandler
     void handleZoneMoveMobsEvent(const Event &event);
 
     /**
+     * @brief Handle mob death event
+     *
+     * Sends notification to clients about mob death/removal
+     *
+     * @param event Event containing mob death data (mobUID and zoneId)
+     */
+    void handleMobDeathEvent(const Event &event);
+
+    /**
      * @brief Handle set all mobs list event
      *
      * Loads all mobs data into the mob manager

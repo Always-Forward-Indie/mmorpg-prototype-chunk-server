@@ -82,6 +82,11 @@ class MobMovementManager
     bool shouldSendMobUpdate(int mobUID, const PositionStruct &currentPosition);
 
     /**
+     * @brief Force sending mob state update (for combat state changes)
+     */
+    void forceMobStateUpdate(int mobUID);
+
+    /**
      * @brief Set AI configuration for mobs
      */
     void setAIConfig(const MobAIConfig &config);
@@ -193,6 +198,16 @@ class MobMovementManager
      * @brief Initialize movement data for a mob with AI config
      */
     void initializeMobMovementData(int mobUID);
+
+    /**
+     * @brief Update combat state for mob based on current situation
+     */
+    void updateMobCombatState(MobDataStruct &mob, MobMovementData &movementData, float currentTime);
+
+    /**
+     * @brief Check if mob can perform action based on current combat state
+     */
+    bool canPerformAction(const MobMovementData &movementData, float currentTime) const;
 
     /**
      * @brief Calculate distance from mob to zone boundary (AABB-based)

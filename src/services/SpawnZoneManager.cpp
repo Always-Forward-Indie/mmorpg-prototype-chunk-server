@@ -45,6 +45,13 @@ SpawnZoneManager::loadMobSpawnZones(
             spawnZone.spawnMobId = row.spawnMobId;
             spawnZone.spawnCount = row.spawnCount;
             spawnZone.respawnTime = row.respawnTime;
+            spawnZone.spawnEnabled = true;  // Enable spawning by default
+            spawnZone.spawnedMobsCount = 0; // Start with 0 spawned mobs
+
+            logger_.log("[LOAD_ZONE] Loaded zone " + std::to_string(spawnZone.zoneId) +
+                        " '" + spawnZone.zoneName + "' - spawnMobId: " + std::to_string(spawnZone.spawnMobId) +
+                        ", spawnCount: " + std::to_string(spawnZone.spawnCount) +
+                        ", spawnEnabled: " + (spawnZone.spawnEnabled ? "true" : "false"));
 
             mobSpawnZones_[spawnZone.zoneId] = spawnZone;
         }
@@ -138,15 +145,7 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
 {
     std::vector<MobDataStruct> mobs;
 
-    // debug list of all spawn zones
-    {
-        std::shared_lock<std::shared_mutex> readLock(mutex_);
-        logger_.log("Current spawn zones in GS:");
-        for (const auto &zone : mobSpawnZones_)
-        {
-            logger_.log("Zone ID: " + std::to_string(zone.first) + ", Name: " + zone.second.zoneName);
-        }
-    }
+    logger_.log("[SPAWN_DEBUG] Attempting to spawn mobs in zone " + std::to_string(zoneId));
 
     {
         std::shared_lock<std::shared_mutex> readLock(mutex_);
@@ -156,6 +155,10 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             logger_.logError("Spawn zone " + std::to_string(zoneId) + " not found in GS");
             return mobs;
         }
+
+        logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " found - spawnedMobsCount: " +
+                    std::to_string(zone->second.spawnedMobsCount) + ", spawnCount: " +
+                    std::to_string(zone->second.spawnCount));
     }
 
     std::random_device rd;
@@ -168,9 +171,36 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     if (zone == mobSpawnZones_.end())
         return mobs;
 
-    if (zone->second.spawnedMobsCount < zone->second.spawnCount)
+    logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " - checking spawn conditions");
+
+    // Get current alive mob count from MobInstanceManager (more accurate than spawnedMobsCount)
+    int currentAliveMobs = 0;
+    if (mobInstanceManager_)
     {
-        for (int i = zone->second.spawnedMobsCount; i < zone->second.spawnCount; i++)
+        currentAliveMobs = mobInstanceManager_->getAliveMobCountInZone(zoneId);
+    }
+    else
+    {
+        // Fallback to counting alive mobs manually
+        for (const auto &mob : zone->second.spawnedMobsList)
+        {
+            if (!mob.isDead && mob.currentHealth > 0)
+            {
+                currentAliveMobs++;
+            }
+        }
+    }
+
+    logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " - currentAliveMobs=" +
+                std::to_string(currentAliveMobs) + ", spawnCount=" + std::to_string(zone->second.spawnCount) +
+                ", spawnedMobsCount=" + std::to_string(zone->second.spawnedMobsCount) + " (legacy)");
+
+    if (currentAliveMobs < zone->second.spawnCount)
+    {
+        int mobsToSpawn = zone->second.spawnCount - currentAliveMobs;
+        logger_.log("[SPAWN_DEBUG] Need to spawn " + std::to_string(mobsToSpawn) + " mobs in zone " + std::to_string(zoneId));
+
+        for (int i = 0; i < mobsToSpawn; i++)
         {
             MobDataStruct mob = mobManager_.getMobById(zone->second.spawnMobId);
 
@@ -238,6 +268,11 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             zone->second.spawnedMobsCount++;
         }
     }
+    else
+    {
+        logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " has enough alive mobs (" +
+                    std::to_string(currentAliveMobs) + "/" + std::to_string(zone->second.spawnCount) + ") - no spawning needed");
+    }
 
     return mobs;
 }
@@ -246,15 +281,30 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
 void
 SpawnZoneManager::mobDied(int zoneId, int mobUID)
 {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    auto zone = mobSpawnZones_.find(zoneId);
-    if (zone != mobSpawnZones_.end())
     {
-        // remove mob from the list of spawned mobs
-        removeMobByUID(mobUID);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        auto zone = mobSpawnZones_.find(zoneId);
+        if (zone != mobSpawnZones_.end())
+        {
+            // remove mob from the list of spawned mobs (internal version without mutex)
+            removeMobByUIDInternal(mobUID);
 
-        // decrease spawnedMobsCount
-        zone->second.spawnedMobsCount--;
+            // decrease spawnedMobsCount
+            zone->second.spawnedMobsCount--;
+
+            logger_.log("[MOB_DEATH] Mob UID " + std::to_string(mobUID) + " died in zone " +
+                        std::to_string(zoneId) + ". Alive count: " + std::to_string(zone->second.spawnedMobsCount) +
+                        "/" + std::to_string(zone->second.spawnCount));
+
+            // Note: New mobs will be spawned by the periodic respawn task
+            // based on the actual alive mob count, not this legacy counter
+        }
+    } // Release SpawnZoneManager mutex before calling MobInstanceManager
+
+    // Unregister from MobInstanceManager outside of lock to avoid deadlock
+    if (mobInstanceManager_)
+    {
+        mobInstanceManager_->unregisterMobInstance(mobUID);
     }
 }
 
@@ -282,11 +332,10 @@ SpawnZoneManager::getMobByUID(int mobUID)
     return MobDataStruct();
 }
 
-// Internal method for zone cleanup only
+// Internal method for zone cleanup only (assumes mutex is already locked)
 void
-SpawnZoneManager::removeMobByUID(int mobUID)
+SpawnZoneManager::removeMobByUIDInternal(int mobUID)
 {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
     for (auto &zone : mobSpawnZones_)
     {
         auto it = std::find_if(zone.second.spawnedMobsList.begin(), zone.second.spawnedMobsList.end(), [&mobUID](const MobDataStruct &mob)
@@ -302,14 +351,22 @@ SpawnZoneManager::removeMobByUID(int mobUID)
                 zone.second.spawnedMobsUIDList.erase(uidIt);
             }
 
-            // Unregister from MobInstanceManager
-            if (mobInstanceManager_)
-            {
-                mobInstanceManager_->unregisterMobInstance(mobUID);
-            }
-
             logger_.log("[INFO] Removed mob UID " + std::to_string(mobUID) + " from zone");
             return;
         }
+    }
+}
+
+// Public method that takes mutex lock
+void
+SpawnZoneManager::removeMobByUID(int mobUID)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    removeMobByUIDInternal(mobUID);
+
+    // Unregister from MobInstanceManager outside of internal mutex to avoid deadlock
+    if (mobInstanceManager_)
+    {
+        mobInstanceManager_->unregisterMobInstance(mobUID);
     }
 }
