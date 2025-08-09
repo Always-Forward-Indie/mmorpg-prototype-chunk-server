@@ -557,25 +557,34 @@ CombatEventHandler::completeCombatActionInternal(std::shared_ptr<CombatActionStr
         int actualDamage = applyDamageToTarget(actionPtr->targetId, actionPtr->targetType, result.damageDealt);
         result.damageDealt = actualDamage;
 
-        // Handle mob aggro if player attacked a mob
+        // Handle mob aggro if player attacked a mob and damage was actually applied
         if (actionPtr->targetType == CombatTargetType::MOB && actualDamage > 0)
         {
-            // Get the attacker's character ID to trigger mob aggro
-            try
+            // First check if the mob is still alive before setting aggro
+            bool mobIsAlive = gameServices_.getMobInstanceManager().isMobAlive(actionPtr->targetId);
+            if (mobIsAlive)
             {
-                auto attackerData = gameServices_.getCharacterManager().getCharacterData(actionPtr->casterId);
-                if (attackerData.characterId > 0)
+                // Get the attacker's character ID to trigger mob aggro
+                try
                 {
-                    // Trigger mob aggro on the attacker
-                    gameServices_.getMobMovementManager().handleMobAttacked(actionPtr->targetId, attackerData.characterId);
-                    gameServices_.getLogger().log("[AGGRO] Mob " + std::to_string(actionPtr->targetId) +
-                                                      " now targets player " + std::to_string(attackerData.characterId),
-                        YELLOW);
+                    auto attackerData = gameServices_.getCharacterManager().getCharacterData(actionPtr->casterId);
+                    if (attackerData.characterId > 0)
+                    {
+                        // Trigger mob aggro on the attacker
+                        gameServices_.getMobMovementManager().handleMobAttacked(actionPtr->targetId, attackerData.characterId);
+                        gameServices_.getLogger().log("[AGGRO] Mob " + std::to_string(actionPtr->targetId) +
+                                                          " now targets player " + std::to_string(attackerData.characterId),
+                            YELLOW);
+                    }
+                }
+                catch (const std::exception &e)
+                {
+                    gameServices_.getLogger().logError("Error triggering mob aggro: " + std::string(e.what()), RED);
                 }
             }
-            catch (const std::exception &e)
+            else
             {
-                gameServices_.getLogger().logError("Error triggering mob aggro: " + std::string(e.what()), RED);
+                gameServices_.getLogger().log("[COMBAT] Mob " + std::to_string(actionPtr->targetId) + " died, skipping aggro", GREEN);
             }
         }
 
@@ -758,8 +767,21 @@ CombatEventHandler::applyDamageToTarget(int targetId, CombatTargetType targetTyp
             auto mobData = gameServices_.getMobInstanceManager().getMobInstance(targetId);
             int actualDamage = std::min(damage, mobData.currentHealth);
 
-            // Update mob health using MobInstanceManager
-            gameServices_.getMobInstanceManager().updateMobHealth(targetId, mobData.currentHealth - actualDamage);
+            // Update mob health using MobInstanceManager and get result
+            auto updateResult = gameServices_.getMobInstanceManager().updateMobHealth(targetId, mobData.currentHealth - actualDamage);
+
+            // Return early if update failed or mob was already dead
+            if (!updateResult.success)
+            {
+                gameServices_.getLogger().logError("Failed to update mob health for UID: " + std::to_string(targetId));
+                return 0;
+            }
+
+            if (updateResult.wasAlreadyDead)
+            {
+                gameServices_.getLogger().log("Attempted to damage already dead mob " + std::to_string(targetId) + ", ignoring", YELLOW);
+                return 0;
+            }
 
             return actualDamage;
         }
@@ -821,8 +843,20 @@ CombatEventHandler::applyHealingToTarget(int targetId, CombatTargetType targetTy
             int maxHealing = mobData.maxHealth - mobData.currentHealth;
             int actualHealing = std::min(healing, maxHealing);
 
-            // Update mob health using MobInstanceManager
-            gameServices_.getMobInstanceManager().updateMobHealth(targetId, mobData.currentHealth + actualHealing);
+            // Update mob health using MobInstanceManager and get result
+            auto updateResult = gameServices_.getMobInstanceManager().updateMobHealth(targetId, mobData.currentHealth + actualHealing);
+
+            if (!updateResult.success)
+            {
+                gameServices_.getLogger().logError("Failed to update mob health for healing: " + std::to_string(targetId));
+                return 0;
+            }
+
+            if (updateResult.wasAlreadyDead)
+            {
+                gameServices_.getLogger().log("Attempted to heal dead mob " + std::to_string(targetId) + ", ignoring", YELLOW);
+                return 0;
+            }
 
             return actualHealing;
         }

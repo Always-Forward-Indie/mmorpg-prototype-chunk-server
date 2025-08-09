@@ -32,7 +32,7 @@ class GameServerWorker
     std::string receiveBuffer_; // буфер для накопления данных
 
     // Process received data from the Game Server
-    void processGameServerData(const std::array<char, 1024> &buffer, std::size_t bytes_transferred);
+    void processGameServerData(const std::array<char, 4096> &buffer, std::size_t bytes_transferred);
 
   public:
     GameServerWorker(EventQueue &eventQueue,

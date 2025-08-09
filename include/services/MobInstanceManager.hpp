@@ -2,9 +2,24 @@
 
 #include "data/DataStructs.hpp"
 #include "utils/Logger.hpp"
+#include <functional>
 #include <map>
 #include <shared_mutex>
 #include <unordered_map>
+
+// Forward declarations
+class LootManager;
+class EventQueue;
+
+/**
+ * @brief Result of mob health update operation
+ */
+struct MobHealthUpdateResult
+{
+    bool success;        // Operation successful
+    bool mobDied;        // Mob died from this update
+    bool wasAlreadyDead; // Mob was already dead
+};
 
 /**
  * @brief Manages living mob instances in the game world
@@ -62,9 +77,9 @@ class MobInstanceManager
      *
      * @param mobUID Unique identifier of the mob instance
      * @param health New health value
-     * @return true if successful, false if mob not found
+     * @return MobHealthUpdateResult with operation details
      */
-    bool updateMobHealth(int mobUID, int health);
+    MobHealthUpdateResult updateMobHealth(int mobUID, int health);
 
     /**
      * @brief Update mob mana
@@ -106,8 +121,18 @@ class MobInstanceManager
      */
     int getAliveMobCountInZone(int zoneId) const;
 
+    /**
+     * @brief Set event queue for mob death events
+     *
+     * @param eventQueue Event queue to send MOB_LOOT_GENERATION events
+     */
+    void setEventQueue(EventQueue *eventQueue);
+
   private:
     Logger &logger_;
+
+    // Event queue for sending mob death events
+    EventQueue *eventQueue_;
 
     // Store active mob instances by UID
     std::unordered_map<int, MobDataStruct> mobInstances_;

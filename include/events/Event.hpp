@@ -30,10 +30,19 @@ class Event
         SET_ALL_SPAWN_ZONES,
         SET_ALL_MOBS_LIST,
         SET_ALL_MOBS_ATTRIBUTES,
+        SET_ALL_ITEMS_LIST,
+        SET_MOB_LOOT_INFO,
         SPAWN_MOBS_IN_ZONE,
         SPAWN_ZONE_MOVE_MOBS,
         MOVE_MOB,
-        MOB_DEATH, // Event to notify clients about mob death/removal
+        MOB_DEATH,           // Event to notify clients about mob death/removal
+        MOB_LOOT_GENERATION, // Event to generate loot when mob dies
+        // Item and loot events
+        ITEM_DROP,
+        ITEM_PICKUP,
+        GET_NEARBY_ITEMS,
+        INVENTORY_UPDATE,
+        GET_PLAYER_INVENTORY,
         // Combat events
         INITIATE_COMBAT_ACTION,
         COMPLETE_COMBAT_ACTION,

@@ -25,6 +25,18 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 {
     // Set EventQueue for MobMovementManager to send combat events
     gameServices_.getMobMovementManager().setEventQueue(&eventQueueGameServer_);
+
+    // Set EventQueue for MobInstanceManager to send loot generation events
+    gameServices_.getMobInstanceManager().setEventQueue(&eventQueueChunkServer_);
+
+    // Set EventQueue for LootManager to send item drop events to clients
+    gameServices_.getLootManager().setEventQueue(&eventQueueGameServer_);
+
+    // Set InventoryManager for LootManager to add items to player inventories
+    gameServices_.getLootManager().setInventoryManager(&gameServices_.getInventoryManager());
+
+    // Set EventQueue for InventoryManager to send inventory update events to clients
+    gameServices_.getInventoryManager().setEventQueue(&eventQueueGameServer_);
 }
 
 void
@@ -473,13 +485,16 @@ ChunkServer::mainEventLoopCH()
                 auto mobsInZone = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
                 std::vector<int> deadMobUIDs;
 
-                // Find dead mobs
+                // Find dead mobs and generate loot
                 for (const auto &mob : mobsInZone)
                 {
                     if (mob.isDead || mob.currentHealth <= 0)
                     {
                         deadMobUIDs.push_back(mob.uid);
                         deadMobsToNotify.emplace_back(mob.uid, zone.second.zoneId);
+
+                        // Note: Loot generation is now handled immediately in MobInstanceManager::updateMobHealth()
+                        // when mob dies, not during cleanup task
                     }
                 }
 

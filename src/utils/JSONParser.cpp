@@ -519,3 +519,123 @@ JSONParser::parseCombatActionData(const char *data, size_t length)
     // Return empty JSON object if no body found
     return nlohmann::json::object();
 }
+
+// parse items list
+std::vector<ItemDataStruct>
+JSONParser::parseItemsList(const char *data, size_t length)
+{
+    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    std::vector<ItemDataStruct> itemsList;
+
+    if (jsonData.contains("body") && jsonData["body"].is_object() &&
+        jsonData["body"].contains("itemsList") && jsonData["body"]["itemsList"].is_array())
+    {
+        for (const auto &item : jsonData["body"]["itemsList"])
+        {
+            ItemDataStruct itemData;
+            if (item.contains("id") && item["id"].is_number_integer())
+            {
+                itemData.id = item["id"].get<int>();
+            }
+            if (item.contains("name") && item["name"].is_string())
+            {
+                itemData.name = item["name"].get<std::string>();
+            }
+            if (item.contains("slug") && item["slug"].is_string())
+            {
+                itemData.slug = item["slug"].get<std::string>();
+            }
+            if (item.contains("description") && item["description"].is_string())
+            {
+                itemData.description = item["description"].get<std::string>();
+            }
+            if (item.contains("isQuestItem") && item["isQuestItem"].is_boolean())
+            {
+                itemData.isQuestItem = item["isQuestItem"].get<bool>();
+            }
+            if (item.contains("itemType") && item["itemType"].is_number_integer())
+            {
+                itemData.itemType = item["itemType"].get<int>();
+            }
+            if (item.contains("itemTypeName") && item["itemTypeName"].is_string())
+            {
+                itemData.itemTypeName = item["itemTypeName"].get<std::string>();
+            }
+            if (item.contains("itemTypeSlug") && item["itemTypeSlug"].is_string())
+            {
+                itemData.itemTypeSlug = item["itemTypeSlug"].get<std::string>();
+            }
+
+            // Parse attributes
+            if (item.contains("attributes") && item["attributes"].is_array())
+            {
+                for (const auto &attribute : item["attributes"])
+                {
+                    ItemAttributeStruct itemAttribute;
+                    if (attribute.contains("id") && attribute["id"].is_number_integer())
+                    {
+                        itemAttribute.id = attribute["id"].get<int>();
+                    }
+                    if (attribute.contains("item_id") && attribute["item_id"].is_number_integer())
+                    {
+                        itemAttribute.item_id = attribute["item_id"].get<int>();
+                    }
+                    if (attribute.contains("name") && attribute["name"].is_string())
+                    {
+                        itemAttribute.name = attribute["name"].get<std::string>();
+                    }
+                    if (attribute.contains("slug") && attribute["slug"].is_string())
+                    {
+                        itemAttribute.slug = attribute["slug"].get<std::string>();
+                    }
+                    if (attribute.contains("value") && attribute["value"].is_number_integer())
+                    {
+                        itemAttribute.value = attribute["value"].get<int>();
+                    }
+                    itemData.attributes.push_back(itemAttribute);
+                }
+            }
+
+            itemsList.push_back(itemData);
+        }
+    }
+
+    return itemsList;
+}
+
+// parse mob loot info
+std::vector<MobLootInfoStruct>
+JSONParser::parseMobLootInfo(const char *data, size_t length)
+{
+    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    std::vector<MobLootInfoStruct> mobLootInfo;
+
+    if (jsonData.contains("body") && jsonData["body"].is_object() &&
+        jsonData["body"].contains("mobLootInfo") && jsonData["body"]["mobLootInfo"].is_array())
+    {
+        for (const auto &loot : jsonData["body"]["mobLootInfo"])
+        {
+            MobLootInfoStruct lootData;
+            if (loot.contains("id") && loot["id"].is_number_integer())
+            {
+                lootData.id = loot["id"].get<int>();
+            }
+            if (loot.contains("mobId") && loot["mobId"].is_number_integer())
+            {
+                lootData.mobId = loot["mobId"].get<int>();
+            }
+            if (loot.contains("itemId") && loot["itemId"].is_number_integer())
+            {
+                lootData.itemId = loot["itemId"].get<int>();
+            }
+            if (loot.contains("dropChance") && loot["dropChance"].is_number())
+            {
+                lootData.dropChance = loot["dropChance"].get<float>();
+            }
+
+            mobLootInfo.push_back(lootData);
+        }
+    }
+
+    return mobLootInfo;
+}

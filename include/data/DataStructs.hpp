@@ -58,6 +58,63 @@ struct MobAttributeStruct
     int value = 0;
 };
 
+struct ItemAttributeStruct
+{
+    int id = 0;
+    int item_id = 0;
+    std::string name = "";
+    std::string slug = "";
+    int value = 0;
+};
+
+struct ItemDataStruct
+{
+    int id = 0;
+    std::string name = "";
+    std::string slug = "";
+    std::string description = "";
+    bool isQuestItem = false;
+    int itemType = 0;
+    std::string itemTypeName = "";
+    std::string itemTypeSlug = "";
+    std::vector<ItemAttributeStruct> attributes;
+};
+
+struct MobLootInfoStruct
+{
+    int id = 0;
+    int mobId = 0;
+    int itemId = 0;
+    float dropChance = 0.0f;
+};
+
+struct DroppedItemStruct
+{
+    int uid = 0; // Unique instance ID for the dropped item
+    int itemId = 0;
+    int quantity = 1;
+    PositionStruct position;
+    std::chrono::steady_clock::time_point dropTime;
+    int droppedByMobUID = 0; // UID of the mob that dropped it
+    bool canBePickedUp = true;
+};
+
+struct PlayerInventoryItemStruct
+{
+    int id = 0;
+    int characterId = 0;
+    int itemId = 0;
+    int quantity = 1;
+};
+
+// Item pickup request structure
+struct ItemPickupRequestStruct
+{
+    int characterId = 0;
+    int droppedItemUID = 0;
+    PositionStruct playerPosition;
+};
+
 struct CharacterDataStruct
 {
     int clientId = 0;

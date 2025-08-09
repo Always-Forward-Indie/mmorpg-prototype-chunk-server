@@ -119,7 +119,7 @@ GameServerWorker::sendDataToGameServer(const std::string &data)
 }
 
 void
-GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, std::size_t bytes_transferred)
+GameServerWorker::processGameServerData(const std::array<char, 4096> &buffer, std::size_t bytes_transferred)
 {
     // Convert received data to string
     std::string receivedData(buffer.data(), bytes_transferred);
@@ -195,6 +195,22 @@ GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, st
         eventsBatch.push_back(setMobsAttributesEvent);
     }
 
+    if (eventType == "getItemsList")
+    {
+        // Parse items list from the Game Server
+        std::vector<ItemDataStruct> itemsList = jsonParser_.parseItemsList(buffer.data(), bytes_transferred);
+        Event setItemsListEvent(Event::SET_ALL_ITEMS_LIST, clientData.clientId, itemsList);
+        eventsBatch.push_back(setItemsListEvent);
+    }
+
+    if (eventType == "getMobLootInfo")
+    {
+        // Parse mob loot info from the Game Server
+        std::vector<MobLootInfoStruct> mobLootInfo = jsonParser_.parseMobLootInfo(buffer.data(), bytes_transferred);
+        Event setMobLootInfoEvent(Event::SET_MOB_LOOT_INFO, clientData.clientId, mobLootInfo);
+        eventsBatch.push_back(setMobLootInfoEvent);
+    }
+
     // Push batched events to the event queue
     if (!eventsBatch.empty())
     {
@@ -205,7 +221,7 @@ GameServerWorker::processGameServerData(const std::array<char, 1024> &buffer, st
 void
 GameServerWorker::receiveDataFromGameServer()
 {
-    auto dataBufferGameServer = std::make_shared<std::array<char, 1024>>();
+    auto dataBufferGameServer = std::make_shared<std::array<char, 4096>>();
     game_server_socket_->async_read_some(boost::asio::buffer(*dataBufferGameServer),
         [this, dataBufferGameServer](const boost::system::error_code &ec, std::size_t bytes_transferred)
         {
@@ -220,10 +236,18 @@ GameServerWorker::receiveDataFromGameServer()
                     std::string oneMessage = receiveBuffer_.substr(0, newlinePos);
                     receiveBuffer_.erase(0, newlinePos + 1); // удаляем обработанное
 
+                    // Проверяем размер сообщения
+                    if (oneMessage.size() > 4096)
+                    {
+                        logger_.logError("Message too large: " + std::to_string(oneMessage.size()) + " bytes. Truncating to 4096 bytes.");
+                        logger_.logError("Message preview: " + oneMessage.substr(0, 100) + "...");
+                    }
+
                     // безопасно копируем в std::array и передаём в старую логику
-                    std::array<char, 1024> tempBuf{};
-                    std::memcpy(tempBuf.data(), oneMessage.data(), std::min(oneMessage.size(), tempBuf.size()));
-                    processGameServerData(tempBuf, oneMessage.size());
+                    std::array<char, 4096> tempBuf{};
+                    std::size_t copySize = std::min(oneMessage.size(), tempBuf.size());
+                    std::memcpy(tempBuf.data(), oneMessage.data(), copySize);
+                    processGameServerData(tempBuf, copySize);
                 }
 
                 receiveDataFromGameServer();

@@ -1179,22 +1179,59 @@ MobMovementManager::updateMobCombatState(MobDataStruct &mob, MobMovementData &mo
             }
             movementData.stateChangeTime = currentTime;
             updateMobMovementData(mob.uid, movementData); // Save state change
+            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " lost target, returning to patrol");
         }
         else
         {
-            // Check if in attack range
+            // Check if target is still valid and alive
             auto targetPlayer = characterManager_->getCharacterById(movementData.targetPlayerId);
-            if (targetPlayer.characterId > 0)
+            if (targetPlayer.characterId == 0)
             {
-                float distance = calculateDistance(mob.position, targetPlayer.characterPosition);
-                if (distance <= aiConfig_.attackRange)
+                // Target no longer exists, clear target and return to patrolling
+                movementData.targetPlayerId = 0;
+                movementData.combatState = MobCombatState::PATROLLING;
+                movementData.stateChangeTime = currentTime;
+                updateMobMovementData(mob.uid, movementData);
+                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target no longer exists, returning to patrol");
+            }
+            else
+            {
+                // Check if we've been chasing too long (add timeout to prevent infinite chase)
+                float timeSinceChasing = currentTime - movementData.stateChangeTime;
+                const float maxChaseTime = 30.0f; // 30 seconds timeout
+                if (timeSinceChasing > maxChaseTime)
                 {
-                    // Enter prepare attack state
-                    movementData.combatState = MobCombatState::PREPARING_ATTACK;
+                    // Chase timeout, give up and return to spawn
+                    movementData.targetPlayerId = 0;
+                    movementData.combatState = MobCombatState::RETURNING;
                     movementData.stateChangeTime = currentTime;
-                    updateMobMovementData(mob.uid, movementData); // Save state change
-                    forceMobStateUpdate(mob.uid);                 // Force state update to clients
-                    // logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " preparing to attack (distance: " + std::to_string(distance) + ")");
+                    movementData.isReturningToSpawn = true;
+                    updateMobMovementData(mob.uid, movementData);
+                    logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " chase timeout, returning to spawn");
+                }
+                else
+                {
+                    // Check if in attack range
+                    float distance = calculateDistance(mob.position, targetPlayer.characterPosition);
+                    if (distance <= aiConfig_.attackRange)
+                    {
+                        // Enter prepare attack state
+                        movementData.combatState = MobCombatState::PREPARING_ATTACK;
+                        movementData.stateChangeTime = currentTime;
+                        updateMobMovementData(mob.uid, movementData); // Save state change
+                        forceMobStateUpdate(mob.uid);                 // Force state update to clients
+                        // logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " preparing to attack (distance: " + std::to_string(distance) + ")");
+                    }
+                    else if (distance > aiConfig_.aggroRange * aiConfig_.chaseDistanceMultiplier)
+                    {
+                        // Target moved too far away, give up chase and return to spawn
+                        movementData.targetPlayerId = 0;
+                        movementData.combatState = MobCombatState::RETURNING;
+                        movementData.stateChangeTime = currentTime;
+                        movementData.isReturningToSpawn = true;
+                        updateMobMovementData(mob.uid, movementData);
+                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target too far away (distance: " + std::to_string(distance) + "), returning to spawn");
+                    }
                 }
             }
         }
@@ -1215,10 +1252,32 @@ MobMovementManager::updateMobCombatState(MobDataStruct &mob, MobMovementData &mo
             }
             else
             {
-                // Target moved away or can't attack, return to chasing
-                movementData.combatState = MobCombatState::CHASING;
-                movementData.stateChangeTime = currentTime;
-                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target moved away, returning to chase");
+                // Target moved away or can't attack, check if we should continue chasing
+                float timeSinceLastChase = currentTime - movementData.stateChangeTime;
+
+                // If been trying to attack for too long, give up and return to spawn
+                if (timeSinceLastChase > 10.0f) // 10 seconds timeout
+                {
+                    movementData.targetPlayerId = 0;
+                    movementData.combatState = MobCombatState::RETURNING;
+                    movementData.stateChangeTime = currentTime;
+                    movementData.isReturningToSpawn = true;
+                    logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attack timeout, returning to spawn");
+                }
+                else
+                {
+                    // Return to chasing, but limit log spam
+                    movementData.combatState = MobCombatState::CHASING;
+                    movementData.stateChangeTime = currentTime;
+
+                    // Only log occasionally to avoid spam
+                    static std::map<int, float> lastLogTime;
+                    if (currentTime - lastLogTime[mob.uid] > 2.0f) // Log max once per 2 seconds per mob
+                    {
+                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target moved away, returning to chase");
+                        lastLogTime[mob.uid] = currentTime;
+                    }
+                }
             }
         }
         break;

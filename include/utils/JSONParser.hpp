@@ -20,6 +20,8 @@ class JSONParser
     std::vector<MobAttributeStruct> parseMobsAttributesList(const char *data, size_t length);
     std::vector<CharacterAttributeStruct> parseCharacterAttributesList(const char *data, size_t length);
     std::vector<CharacterDataStruct> parseCharactersList(const char *data, size_t length);
+    std::vector<ItemDataStruct> parseItemsList(const char *data, size_t length);
+    std::vector<MobLootInfoStruct> parseMobLootInfo(const char *data, size_t length);
 
     // Combat system parsers
     nlohmann::json parseCombatActionData(const char *data, size_t length);

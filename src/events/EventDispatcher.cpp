@@ -49,6 +49,14 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handlePlayerAttack(context, socket);
     }
+    else if (context.eventType == "pickupDroppedItem")
+    {
+        handlePickupDroppedItem(context, socket);
+    }
+    else if (context.eventType == "getPlayerInventory")
+    {
+        handleGetPlayerInventory(context, socket);
+    }
     else
     {
         gameServices_.getLogger().logError("Unknown event type: " + context.eventType, RED);
@@ -543,5 +551,81 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
     {
         // Log that we're skipping the event for a disconnected client
         gameServices_.getLogger().log("Skipping player attack event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+    }
+}
+
+void
+EventDispatcher::handlePickupDroppedItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    // Validate client socket is still connected
+    if (socket && socket->is_open() && context.clientData.clientId != 0)
+    {
+        try
+        {
+            // Parse pickup data from the full message
+            std::string fullMessage = context.fullMessage;
+            gameServices_.getLogger().log("EventDispatcher handlePickupDroppedItem - Full message: " + fullMessage, GREEN);
+
+            // Parse JSON to extract pickup data
+            nlohmann::json j = nlohmann::json::parse(fullMessage);
+            nlohmann::json pickupData = j["body"];
+
+            gameServices_.getLogger().log("EventDispatcher handlePickupDroppedItem - Parsed pickup data: " + pickupData.dump(), GREEN);
+
+            // Create ItemPickupRequestStruct
+            ItemPickupRequestStruct pickupRequest;
+            pickupRequest.characterId = context.clientData.characterId;
+            pickupRequest.droppedItemUID = pickupData["droppedItemUID"];
+            pickupRequest.playerPosition = context.positionData;
+
+            gameServices_.getLogger().log("EventDispatcher handlePickupDroppedItem - Character ID: " + std::to_string(pickupRequest.characterId) +
+                                              ", Item UID: " + std::to_string(pickupRequest.droppedItemUID) +
+                                              ", Position: " + std::to_string(pickupRequest.playerPosition.positionX) + "," +
+                                              std::to_string(pickupRequest.playerPosition.positionY),
+                GREEN);
+
+            // Create pickup event
+            Event pickupEvent(Event::ITEM_PICKUP, context.clientData.clientId, pickupRequest);
+            eventsBatch_.push_back(pickupEvent);
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Error creating item pickup event: " + std::string(e.what()), RED);
+        }
+    }
+    else
+    {
+        // Log that we're skipping the event for a disconnected client
+        gameServices_.getLogger().log("Skipping item pickup event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+    }
+}
+
+void
+EventDispatcher::handleGetPlayerInventory(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    // Check if character is valid
+    if (context.clientData.characterId > 0)
+    {
+        gameServices_.getLogger().log("EventDispatcher handleGetPlayerInventory - Character ID: " + std::to_string(context.clientData.characterId), GREEN);
+
+        try
+        {
+            // Create request data
+            nlohmann::json requestData;
+            requestData["characterId"] = context.clientData.characterId;
+
+            // Create get player inventory event
+            Event getInventoryEvent(Event::GET_PLAYER_INVENTORY, context.clientData.clientId, requestData);
+            eventsBatch_.push_back(getInventoryEvent);
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Error creating get player inventory event: " + std::string(e.what()), RED);
+        }
+    }
+    else
+    {
+        // Log that we're skipping the event for a disconnected client
+        gameServices_.getLogger().log("Skipping get player inventory event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
     }
 }

@@ -2,6 +2,9 @@
 #include "services/CharacterManager.hpp"
 #include "services/ChunkManager.hpp"
 #include "services/ClientManager.hpp"
+#include "services/InventoryManager.hpp"
+#include "services/ItemManager.hpp"
+#include "services/LootManager.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
@@ -16,12 +19,15 @@ class GameServices
     GameServices(Logger &logger)
         : logger_(logger),
           mobManager_(logger_),
+          itemManager_(logger_),
           mobInstanceManager_(logger_),
           mobMovementManager_(logger_),
           spawnZoneManager_(mobManager_, logger_),
           characterManager_(logger_),
           clientManager_(logger_),
-          chunkManager_(logger_)
+          chunkManager_(logger_),
+          lootManager_(itemManager_, logger_),
+          inventoryManager_(itemManager_, logger_)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
@@ -37,6 +43,10 @@ class GameServices
     MobManager &getMobManager()
     {
         return mobManager_;
+    }
+    ItemManager &getItemManager()
+    {
+        return itemManager_;
     }
     MobInstanceManager &getMobInstanceManager()
     {
@@ -62,14 +72,25 @@ class GameServices
     {
         return chunkManager_;
     }
+    LootManager &getLootManager()
+    {
+        return lootManager_;
+    }
+    InventoryManager &getInventoryManager()
+    {
+        return inventoryManager_;
+    }
 
   private:
     Logger &logger_;
     MobManager mobManager_;
+    ItemManager itemManager_;
     MobInstanceManager mobInstanceManager_;
     MobMovementManager mobMovementManager_;
     SpawnZoneManager spawnZoneManager_;
     CharacterManager characterManager_;
     ClientManager clientManager_;
     ChunkManager chunkManager_;
+    LootManager lootManager_;
+    InventoryManager inventoryManager_;
 };

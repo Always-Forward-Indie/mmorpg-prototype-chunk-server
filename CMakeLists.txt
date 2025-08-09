@@ -28,6 +28,9 @@ set(SOURCE_FILES
     src/services/MobManager.cpp
     src/services/MobInstanceManager.cpp
     src/services/MobMovementManager.cpp
+    src/services/ItemManager.cpp
+    src/services/LootManager.cpp
+    src/services/InventoryManager.cpp
     src/services/ClientManager.cpp
     src/network/GameServerWorker.cpp
     src/network/NetworkManager.cpp
@@ -43,6 +46,7 @@ set(SOURCE_FILES
     src/events/handlers/ZoneEventHandler.cpp
     src/events/handlers/ChunkEventHandler.cpp
     src/events/handlers/CombatEventHandler.cpp
+    src/events/handlers/ItemEventHandler.cpp
     src/data/AttackSystem.cpp
     src/utils/Scheduler.cpp
     src/utils/ThreadPool.cpp
@@ -67,6 +71,9 @@ set(HEADER_FILES
     include/services/MobManager.hpp
     include/services/MobInstanceManager.hpp
     include/services/MobMovementManager.hpp
+    include/services/ItemManager.hpp
+    include/services/LootManager.hpp
+    include/services/InventoryManager.hpp
     include/services/ClientManager.hpp
     include/services/GameServices.hpp
     include/network/GameServerWorker.hpp
@@ -84,6 +91,7 @@ set(HEADER_FILES
     include/events/handlers/ZoneEventHandler.hpp
     include/events/handlers/ChunkEventHandler.hpp
     include/events/handlers/CombatEventHandler.hpp
+    include/events/handlers/ItemEventHandler.hpp
     include/data/DataStructs.hpp
     include/data/SpecialStructs.hpp
     include/data/CombatStructs.hpp

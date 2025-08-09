@@ -13,6 +13,7 @@ EventHandler::EventHandler(
     zoneEventHandler_ = std::make_unique<ZoneEventHandler>(networkManager, gameServerWorker, gameServices);
     chunkEventHandler_ = std::make_unique<ChunkEventHandler>(networkManager, gameServerWorker, gameServices);
     combatEventHandler_ = std::make_unique<CombatEventHandler>(networkManager, gameServerWorker, gameServices);
+    itemEventHandler_ = std::make_unique<ItemEventHandler>(networkManager, gameServerWorker, gameServices);
 }
 
 void
@@ -76,6 +77,29 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::MOB_DEATH:
             mobEventHandler_->handleMobDeathEvent(event);
+            break;
+        case Event::MOB_LOOT_GENERATION:
+            itemEventHandler_->handleMobLootGenerationEvent(event);
+            break;
+
+        // Item Events
+        case Event::SET_ALL_ITEMS_LIST:
+            itemEventHandler_->handleSetItemsListEvent(event);
+            break;
+        case Event::SET_MOB_LOOT_INFO:
+            itemEventHandler_->handleSetMobLootInfoEvent(event);
+            break;
+        case Event::ITEM_DROP:
+            itemEventHandler_->handleItemDropEvent(event);
+            break;
+        case Event::ITEM_PICKUP:
+            itemEventHandler_->handleItemPickupEvent(event);
+            break;
+        case Event::GET_NEARBY_ITEMS:
+            itemEventHandler_->handleGetNearbyItemsEvent(event);
+            break;
+        case Event::GET_PLAYER_INVENTORY:
+            itemEventHandler_->handleGetPlayerInventoryEvent(event);
             break;
 
         // Zone Events

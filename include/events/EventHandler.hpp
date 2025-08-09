@@ -6,6 +6,7 @@
 #include "events/handlers/ChunkEventHandler.hpp"
 #include "events/handlers/ClientEventHandler.hpp"
 #include "events/handlers/CombatEventHandler.hpp"
+#include "events/handlers/ItemEventHandler.hpp"
 #include "events/handlers/MobEventHandler.hpp"
 #include "events/handlers/ZoneEventHandler.hpp"
 #include "network/GameServerWorker.hpp"
@@ -65,6 +66,7 @@ class EventHandler
     std::unique_ptr<ZoneEventHandler> zoneEventHandler_;
     std::unique_ptr<ChunkEventHandler> chunkEventHandler_;
     std::unique_ptr<CombatEventHandler> combatEventHandler_;
+    std::unique_ptr<ItemEventHandler> itemEventHandler_;
 
     // References for logging and error handling
     GameServices &gameServices_;

@@ -1,11 +1,19 @@
 #include "services/MobInstanceManager.hpp"
+#include "events/Event.hpp"
+#include "events/EventQueue.hpp"
 #include <algorithm>
 #include <chrono>
 #include <unordered_map>
 
 MobInstanceManager::MobInstanceManager(Logger &logger)
-    : logger_(logger)
+    : logger_(logger), eventQueue_(nullptr)
 {
+}
+
+void
+MobInstanceManager::setEventQueue(EventQueue *eventQueue)
+{
+    eventQueue_ = eventQueue;
 }
 
 bool
@@ -119,7 +127,7 @@ MobInstanceManager::updateMobPosition(int mobUID, const PositionStruct &position
     return false;
 }
 
-bool
+MobHealthUpdateResult
 MobInstanceManager::updateMobHealth(int mobUID, int health)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -128,23 +136,52 @@ MobInstanceManager::updateMobHealth(int mobUID, int health)
     if (it == mobInstances_.end())
     {
         logger_.logError("Failed to update health for mob UID: " + std::to_string(mobUID));
-        return false;
+        return {false, false, false};
+    }
+
+    bool wasAlreadyDead = it->second.isDead;
+
+    // Don't process any health updates on already dead mobs
+    if (wasAlreadyDead)
+    {
+        logger_.log("[WARNING] Attempted to update health on already dead mob " + std::to_string(mobUID));
+        return {false, false, true};
     }
 
     it->second.currentHealth = health;
     logger_.log("[DEBUG] Updated mob " + std::to_string(mobUID) + " health to " + std::to_string(health));
 
+    bool mobDied = false;
     // Check if mob died
-    if (health <= 0 && !it->second.isDead)
+    if (health <= 0)
     {
         it->second.isDead = true;
+        mobDied = true;
         logger_.log("[INFO] Mob " + std::to_string(mobUID) + " has died");
 
-        // Note: We don't send events from here anymore to avoid deadlock
-        // Death notifications will be handled by periodic cleanup tasks
+        // Send event for loot generation
+        if (eventQueue_)
+        {
+            logger_.log("[DEBUG] Sending loot generation event for mob ID " + std::to_string(it->second.id) +
+                        " (UID " + std::to_string(mobUID) + ") at position (" +
+                        std::to_string(it->second.position.positionX) + ", " +
+                        std::to_string(it->second.position.positionY) + ")");
+
+            // Create event data
+            nlohmann::json mobLootData;
+            mobLootData["mobId"] = it->second.id;
+            mobLootData["mobUID"] = mobUID;
+            mobLootData["positionX"] = it->second.position.positionX;
+            mobLootData["positionY"] = it->second.position.positionY;
+            mobLootData["positionZ"] = it->second.position.positionZ;
+            mobLootData["zoneId"] = it->second.zoneId;
+
+            Event lootEvent(Event::MOB_LOOT_GENERATION, 0, mobLootData);
+            eventQueue_->push(std::move(lootEvent));
+        }
     }
 
-    return true;
+    return {true, mobDied, wasAlreadyDead};
 }
 
 bool
