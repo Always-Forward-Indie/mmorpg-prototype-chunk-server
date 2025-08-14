@@ -49,6 +49,7 @@ enum class CombatActionState : int
  */
 enum class InterruptionReason : int
 {
+    NONE = 0,              // No interruption occurred
     PLAYER_CANCELLED = 1,  // Player manually cancelled
     MOVEMENT = 2,          // Player moved during cast
     DAMAGE_TAKEN = 3,      // Took damage that interrupts
@@ -147,4 +148,28 @@ struct CombatAnimationStruct
     PositionStruct position;
     PositionStruct targetPosition; // For projectiles/directional anims
     bool isLooping;                // For channeled abilities
+};
+
+/**
+ * @brief Simplified combat action for network packets
+ */
+struct CombatActionPacket
+{
+    int actionId;                // Action ID (0 for basic attack, etc.)
+    std::string actionName;      // Action name
+    CombatActionType actionType; // Type of action
+    CombatTargetType targetType; // Type of target
+    int casterId;                // Who is performing the action
+    int targetId;                // Who/what is being targeted
+};
+
+/**
+ * @brief Simplified animation packet for network
+ */
+struct CombatAnimationPacket
+{
+    int characterId;
+    std::string animationName;
+    float duration;
+    bool isLooping;
 };

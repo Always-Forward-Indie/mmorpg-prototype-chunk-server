@@ -78,6 +78,9 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::MOB_DEATH:
             mobEventHandler_->handleMobDeathEvent(event);
             break;
+        case Event::MOB_TARGET_LOST:
+            mobEventHandler_->handleMobTargetLostEvent(event);
+            break;
         case Event::MOB_LOOT_GENERATION:
             itemEventHandler_->handleMobLootGenerationEvent(event);
             break;

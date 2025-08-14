@@ -124,6 +124,26 @@ CombatEventHandler::handleInitiateCombatAction(const Event &event)
 
             broadcastToAllClients(responseData);
         }
+        else if (std::holds_alternative<CombatActionPacket>(data))
+        {
+            // Handle simplified combat action packet (usually from mobs)
+            CombatActionPacket actionPacket = std::get<CombatActionPacket>(data);
+
+            // For simplified packets, just broadcast the initiation without full processing
+            nlohmann::json actionResponse = ResponseBuilder()
+                                                .setHeader("message", "Combat action initiated!")
+                                                .setHeader("clientId", clientID)
+                                                .setHeader("eventType", "initiateCombatAction")
+                                                .setBody("action", combatActionPacketToJson(actionPacket))
+                                                .build();
+
+            std::string responseData = networkManager_.generateResponseMessage("success", actionResponse);
+            broadcastToAllClients(responseData);
+
+            gameServices_.getLogger().log("[COMBAT] Simplified combat action broadcasted - " +
+                                          actionPacket.actionName + " from " + std::to_string(actionPacket.casterId) +
+                                          " to " + std::to_string(actionPacket.targetId));
+        }
         else
         {
             gameServices_.getLogger().log("Error with extracting combat action data!");
@@ -244,6 +264,26 @@ CombatEventHandler::handleCombatAnimation(const Event &event)
 
             std::string responseData = networkManager_.generateResponseMessage("success", animationResponse);
             broadcastToAllClients(responseData);
+        }
+        else if (std::holds_alternative<CombatAnimationPacket>(data))
+        {
+            // Handle simplified combat animation packet (usually from mobs)
+            CombatAnimationPacket animationPacket = std::get<CombatAnimationPacket>(data);
+
+            // Broadcast animation to all clients
+            nlohmann::json animationResponse = ResponseBuilder()
+                                                   .setHeader("message", "Combat animation sync!")
+                                                   .setHeader("clientId", clientID)
+                                                   .setHeader("eventType", "combatAnimation")
+                                                   .setBody("animation", combatAnimationPacketToJson(animationPacket))
+                                                   .build();
+
+            std::string responseData = networkManager_.generateResponseMessage("success", animationResponse);
+            broadcastToAllClients(responseData);
+
+            gameServices_.getLogger().log("[COMBAT] Simplified animation broadcasted - " +
+                                          animationPacket.animationName + " from character " +
+                                          std::to_string(animationPacket.characterId));
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -965,6 +1005,49 @@ CombatEventHandler::combatAnimationToJson(const CombatAnimationStruct &animation
         {"isLooping", animation.isLooping}};
 }
 
+nlohmann::json
+CombatEventHandler::combatActionPacketToJson(const CombatActionPacket &actionPacket)
+{
+    std::string targetTypeStr = "UNKNOWN";
+    switch (actionPacket.targetType)
+    {
+    case CombatTargetType::PLAYER:
+        targetTypeStr = "PLAYER";
+        break;
+    case CombatTargetType::MOB:
+        targetTypeStr = "MOB";
+        break;
+    case CombatTargetType::AREA:
+        targetTypeStr = "AREA";
+        break;
+    case CombatTargetType::SELF:
+        targetTypeStr = "SELF";
+        break;
+    case CombatTargetType::NONE:
+        targetTypeStr = "NONE";
+        break;
+    }
+
+    return nlohmann::json{
+        {"actionId", actionPacket.actionId},
+        {"actionName", actionPacket.actionName},
+        {"actionType", static_cast<int>(actionPacket.actionType)},
+        {"targetType", static_cast<int>(actionPacket.targetType)},
+        {"targetTypeString", targetTypeStr},
+        {"casterId", actionPacket.casterId},
+        {"targetId", actionPacket.targetId}};
+}
+
+nlohmann::json
+CombatEventHandler::combatAnimationPacketToJson(const CombatAnimationPacket &animationPacket)
+{
+    return nlohmann::json{
+        {"characterId", animationPacket.characterId},
+        {"animationName", animationPacket.animationName},
+        {"duration", animationPacket.duration},
+        {"isLooping", animationPacket.isLooping}};
+}
+
 void
 CombatEventHandler::initializeActionDefinitions()
 {
@@ -1208,10 +1291,130 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
 
             gameServices_.getLogger().log("Created combat action for target: " + std::to_string(targetId), GREEN);
 
-            // Initiate the combat action using existing logic
-            EventData eventData = combatAction;
-            Event combatEvent(Event::INITIATE_COMBAT_ACTION, clientID, eventData);
-            handleInitiateCombatAction(combatEvent);
+            // Instead of using the full combat action system, send simplified packets for players too
+
+            // 1. Send simplified combat action packet to notify combat start
+            CombatActionPacket actionPacket;
+            actionPacket.actionId = actionDef.actionId;
+            actionPacket.actionName = actionDef.actionName;
+            actionPacket.actionType = actionDef.actionType;
+            actionPacket.targetType = targetType;
+            actionPacket.casterId = clientData.characterId;
+            actionPacket.targetId = targetId;
+
+            nlohmann::json actionResponse = ResponseBuilder()
+                                                .setHeader("message", "Combat action initiated!")
+                                                .setHeader("clientId", clientID)
+                                                .setHeader("eventType", "initiateCombatAction")
+                                                .setBody("action", combatActionPacketToJson(actionPacket))
+                                                .build();
+
+            std::string actionResponseData = networkManager_.generateResponseMessage("success", actionResponse);
+            broadcastToAllClients(actionResponseData);
+
+            // 2. Send simplified combat animation packet
+            CombatAnimationPacket animationPacket;
+            animationPacket.characterId = clientData.characterId;
+            animationPacket.animationName = actionDef.animationName;
+            animationPacket.duration = actionDef.animationDuration;
+            animationPacket.isLooping = false;
+
+            nlohmann::json animationResponse = ResponseBuilder()
+                                                   .setHeader("message", "Combat animation started!")
+                                                   .setHeader("clientId", clientID)
+                                                   .setHeader("eventType", "combatAnimation")
+                                                   .setBody("animation", combatAnimationPacketToJson(animationPacket))
+                                                   .build();
+
+            std::string animationResponseData = networkManager_.generateResponseMessage("success", animationResponse);
+            broadcastToAllClients(animationResponseData);
+
+            // 3. For instant actions (like basic attack), immediately calculate and apply damage
+            if (actionDef.castTime <= 0)
+            {
+                // Validate the action first
+                if (!validateTarget(clientData.characterId, targetId, targetType, actionDef.range, true))
+                {
+                    sendErrorResponse(clientSocket, "Target validation failed!", "playerAttack", clientID);
+                    return;
+                }
+
+                // Check cooldown
+                if (isOnCooldown(clientData.characterId, actionDef.actionId))
+                {
+                    sendErrorResponse(clientSocket, "Action is on cooldown!", "playerAttack", clientID);
+                    return;
+                }
+
+                // Set cooldown
+                setCooldown(clientData.characterId, actionDef.actionId, actionDef.cooldownMs);
+
+                // Calculate and apply damage
+                CombatResultStruct result;
+                result.casterId = clientData.characterId;
+                result.targetId = targetId;
+                result.actionId = actionDef.actionId;
+                result.targetType = targetType;
+                result.damageDealt = actionDef.damage;
+                result.healingDone = 0;
+                result.isCritical = false;
+                result.isBlocked = false;
+                result.isDodged = false;
+                result.isResisted = false;
+                result.isDamaged = (result.damageDealt > 0);
+                result.targetDied = false;
+
+                // Apply damage and get actual damage dealt
+                int actualDamage = applyDamageToTarget(targetId, targetType, result.damageDealt);
+                result.damageDealt = actualDamage;
+
+                // Get remaining health and mana after damage
+                try
+                {
+                    if (targetType == CombatTargetType::MOB)
+                    {
+                        auto mobData = gameServices_.getMobInstanceManager().getMobInstance(targetId);
+                        result.remainingHealth = mobData.currentHealth;
+                        result.remainingMana = mobData.currentMana;
+
+                        // Handle mob aggro if damage was dealt
+                        if (actualDamage > 0)
+                        {
+                            gameServices_.getMobMovementManager().handleMobAttacked(targetId, clientData.characterId);
+                        }
+                    }
+                    else if (targetType == CombatTargetType::PLAYER)
+                    {
+                        auto targetData = gameServices_.getCharacterManager().getCharacterData(targetId);
+                        result.remainingHealth = targetData.characterCurrentHealth;
+                        result.remainingMana = targetData.characterCurrentMana;
+                    }
+
+                    if (result.remainingHealth <= 0)
+                    {
+                        result.targetDied = true;
+                    }
+                }
+                catch (const std::exception &e)
+                {
+                    gameServices_.getLogger().logError("Error getting target stats after damage: " + std::string(e.what()));
+                }
+
+                // Send combat result
+                nlohmann::json resultResponse = ResponseBuilder()
+                                                    .setHeader("message", "Combat action completed!")
+                                                    .setHeader("clientId", clientID)
+                                                    .setHeader("eventType", "combatResult")
+                                                    .setBody("result", combatResultToJson(result))
+                                                    .build();
+
+                std::string resultResponseData = networkManager_.generateResponseMessage("success", resultResponse);
+                broadcastToAllClients(resultResponseData);
+
+                gameServices_.getLogger().log("[COMBAT] Player attack completed - Damage: " + std::to_string(actualDamage) +
+                                                  ", Target health: " + std::to_string(result.remainingHealth),
+                    GREEN);
+            }
 
             Logger logger;
             logger.log("Player (client " + std::to_string(clientID) + ", character " + std::to_string(clientData.characterId) + ") initiated attack '" + actionDef.actionName + "' on target " + std::to_string(targetId));

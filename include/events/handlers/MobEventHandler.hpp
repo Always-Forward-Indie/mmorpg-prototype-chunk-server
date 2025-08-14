@@ -45,6 +45,15 @@ class MobEventHandler : public BaseEventHandler
     void handleMobDeathEvent(const Event &event);
 
     /**
+     * @brief Handle mob target lost event
+     *
+     * Sends notification to clients when mob loses target
+     *
+     * @param event Event containing mob target lost data
+     */
+    void handleMobTargetLostEvent(const Event &event);
+
+    /**
      * @brief Handle set all mobs list event
      *
      * Loads all mobs data into the mob manager

@@ -59,6 +59,8 @@ using EventData = std::variant<
     CombatActionStruct,
     CombatResultStruct,
     CombatAnimationStruct,
+    CombatActionPacket,
+    CombatAnimationPacket,
     AttackRequestStruct,
     AttackSequenceStruct,
     TargetSelectionStruct,

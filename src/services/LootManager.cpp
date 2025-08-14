@@ -64,10 +64,20 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
                 droppedItem.quantity = 1; // Could be configurable later
                 droppedItem.position = position;
 
-                // Add some random offset to prevent items from stacking exactly
-                std::uniform_real_distribution<float> offsetDist(-20.0f, 20.0f);
-                droppedItem.position.positionX += offsetDist(randomGenerator_);
-                droppedItem.position.positionY += offsetDist(randomGenerator_);
+                // Add random circular offset around the mob's death position
+                const float MAX_DROP_RADIUS = 50.0f; // Maximum radius for item drops
+                std::uniform_real_distribution<float> radiusDist(15.0f, MAX_DROP_RADIUS);
+                std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * M_PI);
+
+                float dropRadius = radiusDist(randomGenerator_);
+                float dropAngle = angleDist(randomGenerator_);
+
+                // Calculate offset using polar coordinates for more natural distribution
+                float offsetX = dropRadius * std::cos(dropAngle);
+                float offsetY = dropRadius * std::sin(dropAngle);
+
+                droppedItem.position.positionX += offsetX;
+                droppedItem.position.positionY += offsetY;
 
                 droppedItem.dropTime = std::chrono::steady_clock::now();
                 droppedItem.droppedByMobUID = mobUID;

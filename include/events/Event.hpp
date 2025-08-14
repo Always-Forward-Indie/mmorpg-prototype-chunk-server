@@ -36,6 +36,7 @@ class Event
         SPAWN_ZONE_MOVE_MOBS,
         MOVE_MOB,
         MOB_DEATH,           // Event to notify clients about mob death/removal
+        MOB_TARGET_LOST,     // Event to notify clients when mob loses target
         MOB_LOOT_GENERATION, // Event to generate loot when mob dies
         // Item and loot events
         ITEM_DROP,

@@ -250,6 +250,16 @@ class CombatEventHandler : public BaseEventHandler
     nlohmann::json combatAnimationToJson(const CombatAnimationStruct &animation);
 
     /**
+     * @brief Convert simplified combat action packet to JSON
+     */
+    nlohmann::json combatActionPacketToJson(const CombatActionPacket &actionPacket);
+
+    /**
+     * @brief Convert simplified combat animation packet to JSON
+     */
+    nlohmann::json combatAnimationPacketToJson(const CombatAnimationPacket &animationPacket);
+
+    /**
      * @brief Interrupt all actions for a character
      *
      * Used when character dies, gets stunned, etc.

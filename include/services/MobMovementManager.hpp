@@ -190,6 +190,21 @@ class MobMovementManager
     void executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData);
 
     /**
+     * @brief Send initiate combat action event for mob attack
+     */
+    void sendMobInitiateCombatAction(const MobDataStruct &mob, int targetPlayerId);
+
+    /**
+     * @brief Send combat animation event for mob attack
+     */
+    void sendMobCombatAnimation(const MobDataStruct &mob, int targetPlayerId);
+
+    /**
+     * @brief Send mob target lost event to clients
+     */
+    void sendMobTargetLost(const MobDataStruct &mob, int lostTargetPlayerId);
+
+    /**
      * @brief Calculate distance between two positions
      */
     float calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2);

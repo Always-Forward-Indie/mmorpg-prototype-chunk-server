@@ -298,3 +298,54 @@ MobEventHandler::handleMobDeathEvent(const Event &event)
         gameServices_.getLogger().logError("Error processing mob death event: " + std::string(ex.what()));
     }
 }
+
+void
+MobEventHandler::handleMobTargetLostEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        // Event data should contain JSON with mob target lost information
+        if (std::holds_alternative<nlohmann::json>(data))
+        {
+            auto targetLostData = std::get<nlohmann::json>(data);
+
+            int mobUID = targetLostData["mobUID"];
+            int mobId = targetLostData["mobId"];
+            int lostTargetPlayerId = targetLostData["lostTargetPlayerId"];
+
+            gameServices_.getLogger().log("[MOB_TARGET_LOST_EVENT] Broadcasting target lost notification for mob UID " +
+                                          std::to_string(mobUID) + " (lost target player " + std::to_string(lostTargetPlayerId) + ")");
+
+            // Build target lost notification response
+            nlohmann::json response = ResponseBuilder()
+                                          .setHeader("message", "Mob lost target")
+                                          .setHeader("hash", "")
+                                          .setHeader("eventType", "mobTargetLost")
+                                          .setBody("mobUID", mobUID)
+                                          .setBody("mobId", mobId)
+                                          .setBody("lostTargetPlayerId", lostTargetPlayerId)
+                                          .setBody("positionX", targetLostData["positionX"])
+                                          .setBody("positionY", targetLostData["positionY"])
+                                          .setBody("positionZ", targetLostData["positionZ"])
+                                          .setBody("rotationZ", targetLostData["rotationZ"])
+                                          .build();
+
+            std::string responseData = networkManager_.generateResponseMessage("success", response);
+            broadcastToAllClients(responseData);
+        }
+        else
+        {
+            gameServices_.getLogger().logError("Invalid data format for MOB_TARGET_LOST event");
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        gameServices_.getLogger().logError("Error processing mob target lost event: " + std::string(ex.what()));
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("Error processing mob target lost event: " + std::string(ex.what()));
+    }
+}

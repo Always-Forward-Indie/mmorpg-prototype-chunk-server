@@ -742,9 +742,13 @@ MobMovementManager::handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct 
             // Если цель слишком далеко, сбрасываем и начинаем возвращение
             if (distanceToTarget > maxChaseDistance)
             {
+                int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
                 movementData.targetPlayerId = 0;
                 movementData.isReturningToSpawn = true;
                 updateMobMovementData(mob.uid, movementData);
+
+                // Send target lost event to clients
+                sendMobTargetLost(mob, lostTargetId);
 
                 logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
                             " lost target (distance " + std::to_string(distanceToTarget) +
@@ -755,9 +759,13 @@ MobMovementManager::handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct 
         else
         {
             // Цель исчезла — сразу возвращаемся
+            int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
             movementData.targetPlayerId = 0;
             movementData.isReturningToSpawn = true;
             updateMobMovementData(mob.uid, movementData);
+
+            // Send target lost event to clients
+            sendMobTargetLost(mob, lostTargetId);
 
             logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
                         " target died, returning to spawn");
@@ -830,9 +838,14 @@ MobMovementManager::calculateChaseMovement(
     if (distance > maxChaseDistance)
     {
         auto updated = getMobMovementDataInternal(mob.uid);
+        int lostTargetId = updated.targetPlayerId; // Save target ID before clearing
         updated.targetPlayerId = 0;
         updated.isReturningToSpawn = true;
         updateMobMovementData(mob.uid, updated);
+
+        // Send target lost event to clients
+        sendMobTargetLost(mob, lostTargetId);
+
         logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
                     " lost target (too far: " + std::to_string(distance) +
                     "/" + std::to_string(maxChaseDistance) + "), returning to spawn");
@@ -843,9 +856,14 @@ MobMovementManager::calculateChaseMovement(
     if (shouldStopChasing(mob.position, zone))
     {
         auto updated = getMobMovementDataInternal(mob.uid);
+        int lostTargetId = updated.targetPlayerId; // Save target ID before clearing
         updated.targetPlayerId = 0;
         updated.isReturningToSpawn = true;
         updateMobMovementData(mob.uid, updated);
+
+        // Send target lost event to clients
+        sendMobTargetLost(mob, lostTargetId);
+
         logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
                     " too far from spawn zone, returning");
         return std::nullopt;
@@ -1106,6 +1124,86 @@ MobMovementManager::executeMobAttack(const MobDataStruct &mob, int targetPlayerI
     }
 }
 
+void
+MobMovementManager::sendMobInitiateCombatAction(const MobDataStruct &mob, int targetPlayerId)
+{
+    if (!eventQueue_)
+    {
+        logger_.logError("EventQueue not set - cannot send initiate combat action");
+        return;
+    }
+
+    // Create simplified combat action packet for network
+    CombatActionPacket actionPacket;
+    actionPacket.actionId = 0; // Basic mob attack
+    actionPacket.actionName = "Mob Basic Attack";
+    actionPacket.actionType = CombatActionType::BASIC_ATTACK;
+    actionPacket.targetType = CombatTargetType::PLAYER;
+    actionPacket.casterId = mob.uid;
+    actionPacket.targetId = targetPlayerId;
+
+    // Create and send event - broadcast to all clients
+    EventData eventData = actionPacket;
+    Event combatEvent(Event::INITIATE_COMBAT_ACTION, 0, eventData); // clientID = 0 means broadcast
+    eventQueue_->push(combatEvent);
+
+    logger_.log("[COMBAT] Initiate combat action event sent - Mob " + std::to_string(mob.uid) +
+                " targeting player " + std::to_string(targetPlayerId));
+}
+
+void
+MobMovementManager::sendMobCombatAnimation(const MobDataStruct &mob, int targetPlayerId)
+{
+    if (!eventQueue_)
+    {
+        logger_.logError("EventQueue not set - cannot send combat animation");
+        return;
+    }
+
+    // Create simplified combat animation packet for network
+    CombatAnimationPacket animationPacket;
+    animationPacket.characterId = mob.uid;
+    animationPacket.animationName = "mob_attack_basic";
+    animationPacket.duration = 1.0f;
+    animationPacket.isLooping = false;
+
+    // Create and send event - broadcast to all clients
+    EventData eventData = animationPacket;
+    Event animationEvent(Event::COMBAT_ANIMATION, 0, eventData); // clientID = 0 means broadcast
+    eventQueue_->push(animationEvent);
+
+    logger_.log("[COMBAT] Combat animation event sent - Mob " + std::to_string(mob.uid) +
+                " playing attack animation");
+}
+
+void
+MobMovementManager::sendMobTargetLost(const MobDataStruct &mob, int lostTargetPlayerId)
+{
+    if (!eventQueue_)
+    {
+        logger_.logError("EventQueue not set - cannot send mob target lost event");
+        return;
+    }
+
+    // Create mob target lost packet for network
+    nlohmann::json targetLostData;
+    targetLostData["mobUID"] = mob.uid;
+    targetLostData["mobId"] = mob.id;
+    targetLostData["lostTargetPlayerId"] = lostTargetPlayerId;
+    targetLostData["positionX"] = mob.position.positionX;
+    targetLostData["positionY"] = mob.position.positionY;
+    targetLostData["positionZ"] = mob.position.positionZ;
+    targetLostData["rotationZ"] = mob.position.rotationZ;
+
+    // Create and send event - broadcast to all clients in area
+    EventData eventData = targetLostData;
+    Event targetLostEvent(Event::MOB_TARGET_LOST, 0, eventData); // clientID = 0 means broadcast
+    eventQueue_->push(targetLostEvent);
+
+    logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " lost target player " +
+                std::to_string(lostTargetPlayerId) + " - target lost event sent");
+}
+
 float
 MobMovementManager::calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2)
 {
@@ -1188,10 +1286,15 @@ MobMovementManager::updateMobCombatState(MobDataStruct &mob, MobMovementData &mo
             if (targetPlayer.characterId == 0)
             {
                 // Target no longer exists, clear target and return to patrolling
+                int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
                 movementData.targetPlayerId = 0;
                 movementData.combatState = MobCombatState::PATROLLING;
                 movementData.stateChangeTime = currentTime;
                 updateMobMovementData(mob.uid, movementData);
+
+                // Send target lost event to clients
+                sendMobTargetLost(mob, lostTargetId);
+
                 logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target no longer exists, returning to patrol");
             }
             else
@@ -1202,11 +1305,16 @@ MobMovementManager::updateMobCombatState(MobDataStruct &mob, MobMovementData &mo
                 if (timeSinceChasing > maxChaseTime)
                 {
                     // Chase timeout, give up and return to spawn
+                    int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
                     movementData.targetPlayerId = 0;
                     movementData.combatState = MobCombatState::RETURNING;
                     movementData.stateChangeTime = currentTime;
                     movementData.isReturningToSpawn = true;
                     updateMobMovementData(mob.uid, movementData);
+
+                    // Send target lost event to clients
+                    sendMobTargetLost(mob, lostTargetId);
+
                     logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " chase timeout, returning to spawn");
                 }
                 else
@@ -1215,21 +1323,29 @@ MobMovementManager::updateMobCombatState(MobDataStruct &mob, MobMovementData &mo
                     float distance = calculateDistance(mob.position, targetPlayer.characterPosition);
                     if (distance <= aiConfig_.attackRange)
                     {
+                        // Send initiate combat action event - mob enters combat
+                        sendMobInitiateCombatAction(mob, movementData.targetPlayerId);
+
                         // Enter prepare attack state
                         movementData.combatState = MobCombatState::PREPARING_ATTACK;
                         movementData.stateChangeTime = currentTime;
                         updateMobMovementData(mob.uid, movementData); // Save state change
                         forceMobStateUpdate(mob.uid);                 // Force state update to clients
-                        // logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " preparing to attack (distance: " + std::to_string(distance) + ")");
+                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " initiated combat, preparing to attack player " + std::to_string(movementData.targetPlayerId) + " (distance: " + std::to_string(distance) + ")");
                     }
                     else if (distance > aiConfig_.aggroRange * aiConfig_.chaseDistanceMultiplier)
                     {
                         // Target moved too far away, give up chase and return to spawn
+                        int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
                         movementData.targetPlayerId = 0;
                         movementData.combatState = MobCombatState::RETURNING;
                         movementData.stateChangeTime = currentTime;
                         movementData.isReturningToSpawn = true;
                         updateMobMovementData(mob.uid, movementData);
+
+                        // Send target lost event to clients
+                        sendMobTargetLost(mob, lostTargetId);
+
                         logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target too far away (distance: " + std::to_string(distance) + "), returning to spawn");
                     }
                 }
@@ -1243,6 +1359,9 @@ MobMovementManager::updateMobCombatState(MobDataStruct &mob, MobMovementData &mo
             // Check if target is still in range and can attack
             if (movementData.targetPlayerId > 0 && canAttackPlayer(mob, movementData.targetPlayerId, movementData))
             {
+                // Send combat animation event when starting attack animation
+                sendMobCombatAnimation(mob, movementData.targetPlayerId);
+
                 movementData.combatState = MobCombatState::ATTACKING;
                 movementData.stateChangeTime = currentTime;
                 logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " starting attack animation");
@@ -1258,10 +1377,15 @@ MobMovementManager::updateMobCombatState(MobDataStruct &mob, MobMovementData &mo
                 // If been trying to attack for too long, give up and return to spawn
                 if (timeSinceLastChase > 10.0f) // 10 seconds timeout
                 {
+                    int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
                     movementData.targetPlayerId = 0;
                     movementData.combatState = MobCombatState::RETURNING;
                     movementData.stateChangeTime = currentTime;
                     movementData.isReturningToSpawn = true;
+
+                    // Send target lost event to clients
+                    sendMobTargetLost(mob, lostTargetId);
+
                     logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attack timeout, returning to spawn");
                 }
                 else
