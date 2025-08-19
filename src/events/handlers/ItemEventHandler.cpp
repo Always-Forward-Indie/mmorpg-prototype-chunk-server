@@ -134,6 +134,7 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
 
             gameServices_.getLogger().log("[ITEM_PICKUP_EVENT] Processing pickup request - Character: " +
                                           std::to_string(pickupRequest.characterId) +
+                                          ", Player ID (verified): " + std::to_string(pickupRequest.playerId) +
                                           ", Item UID: " + std::to_string(pickupRequest.droppedItemUID));
 
             // Try to pickup the item
@@ -290,6 +291,22 @@ ItemEventHandler::itemToJson(const ItemDataStruct &itemData)
         {"itemType", itemData.itemType},
         {"itemTypeName", itemData.itemTypeName},
         {"itemTypeSlug", itemData.itemTypeSlug},
+        {"isContainer", itemData.isContainer},
+        {"isDurable", itemData.isDurable},
+        {"isTradable", itemData.isTradable},
+        {"isEquippable", itemData.isEquippable},
+        {"weight", itemData.weight},
+        {"rarityId", itemData.rarityId},
+        {"rarityName", itemData.rarityName},
+        {"raritySlug", itemData.raritySlug},
+        {"stackMax", itemData.stackMax},
+        {"durabilityMax", itemData.durabilityMax},
+        {"vendorPriceBuy", itemData.vendorPriceBuy},
+        {"vendorPriceSell", itemData.vendorPriceSell},
+        {"equipSlot", itemData.equipSlot},
+        {"equipSlotName", itemData.equipSlotName},
+        {"equipSlotSlug", itemData.equipSlotSlug},
+        {"levelRequirement", itemData.levelRequirement},
         {"attributes", nlohmann::json::array()}};
 
     // Add attributes
@@ -297,6 +314,7 @@ ItemEventHandler::itemToJson(const ItemDataStruct &itemData)
     {
         nlohmann::json attributeJson = {
             {"id", attribute.id},
+            {"item_id", attribute.item_id},
             {"name", attribute.name},
             {"slug", attribute.slug},
             {"value", attribute.value}};
@@ -354,6 +372,8 @@ void
 ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
 {
     const auto &data = event.getData();
+    int clientID = event.getClientID();
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
     {
@@ -366,56 +386,81 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
             {
                 int characterId = requestData["characterId"];
 
+                gameServices_.getLogger().log("[INVENTORY] Processing inventory request for character " + std::to_string(characterId));
+
+                // Get client data to extract hash
+                ClientDataStruct clientData = gameServices_.getClientManager().getClientData(clientID);
+
                 // Get player's inventory
                 auto inventory = gameServices_.getInventoryManager().getPlayerInventory(characterId);
 
+                gameServices_.getLogger().log("[INVENTORY] Found " + std::to_string(inventory.size()) + " items in inventory");
+
                 // Build response
-                nlohmann::json inventoryResponse;
-                inventoryResponse["characterId"] = characterId;
-                inventoryResponse["items"] = nlohmann::json::array();
+                nlohmann::json itemsArray = nlohmann::json::array();
 
                 for (const auto &item : inventory)
                 {
-                    nlohmann::json itemJson;
-                    itemJson["itemId"] = item.itemId;
-                    itemJson["quantity"] = item.quantity;
+                    gameServices_.getLogger().log("[INVENTORY] Processing item ID " + std::to_string(item.itemId) + " quantity " + std::to_string(item.quantity));
 
-                    // Get item data for additional info
-                    auto itemData = gameServices_.getItemManager().getItemById(item.itemId);
-                    if (itemData.id > 0) // Check if item was found
-                    {
-                        itemJson["name"] = itemData.name;
-                        itemJson["description"] = itemData.description;
-                        itemJson["itemType"] = itemData.itemTypeName;
-                        itemJson["attributes"] = nlohmann::json::array();
-
-                        for (const auto &attr : itemData.attributes)
-                        {
-                            nlohmann::json attrJson;
-                            attrJson["name"] = attr.name;
-                            attrJson["value"] = attr.value;
-                            itemJson["attributes"].push_back(attrJson);
-                        }
-                    }
-
-                    inventoryResponse["items"].push_back(itemJson);
+                    // Use InventoryManager's method to get full item data
+                    nlohmann::json itemJson = gameServices_.getInventoryManager().inventoryItemToJson(item);
+                    itemsArray.push_back(itemJson);
                 }
 
-                // Send response to client using networkManager
-                std::string response = networkManager_.generateResponseMessage("success", inventoryResponse);
+                gameServices_.getLogger().log("[INVENTORY] Built inventory response with " + std::to_string(itemsArray.size()) + " items");
 
-                gameServices_.getLogger().log("[INVENTORY] Sending inventory to client for character " +
+                // Create response using ResponseBuilder
+                nlohmann::json response = ResponseBuilder()
+                                              .setHeader("message", "Inventory retrieved successfully!")
+                                              .setHeader("hash", clientData.hash)
+                                              .setHeader("clientId", clientID)
+                                              .setHeader("eventType", "getPlayerInventory")
+                                              .setBody("characterId", characterId)
+                                              .setBody("items", itemsArray)
+                                              .build();
+
+                std::string responseData = networkManager_.generateResponseMessage("success", response);
+                networkManager_.sendResponse(clientSocket, responseData);
+
+                gameServices_.getLogger().log("[INVENTORY] Sent inventory to client for character " +
                                               std::to_string(characterId) + " (" +
                                               std::to_string(inventory.size()) + " items)");
             }
             else
             {
                 gameServices_.getLogger().logError("[INVENTORY] characterId not found in GET_PLAYER_INVENTORY request");
+
+                // Get client data for hash
+                ClientDataStruct clientData = gameServices_.getClientManager().getClientData(clientID);
+
+                nlohmann::json errorResponse = ResponseBuilder()
+                                                   .setHeader("message", "characterId not found in request!")
+                                                   .setHeader("hash", clientData.hash)
+                                                   .setHeader("clientId", clientID)
+                                                   .setHeader("eventType", "getPlayerInventory")
+                                                   .build();
+
+                std::string responseData = networkManager_.generateResponseMessage("error", errorResponse);
+                networkManager_.sendResponse(clientSocket, responseData);
             }
         }
         else
         {
             gameServices_.getLogger().logError("Error with extracting get player inventory data!");
+
+            // Get client data for hash
+            ClientDataStruct clientData = gameServices_.getClientManager().getClientData(clientID);
+
+            nlohmann::json errorResponse = ResponseBuilder()
+                                               .setHeader("message", "Invalid request data format!")
+                                               .setHeader("hash", clientData.hash)
+                                               .setHeader("clientId", clientID)
+                                               .setHeader("eventType", "getPlayerInventory")
+                                               .build();
+
+            std::string responseData = networkManager_.generateResponseMessage("error", errorResponse);
+            networkManager_.sendResponse(clientSocket, responseData);
         }
     }
     catch (const std::exception &ex)

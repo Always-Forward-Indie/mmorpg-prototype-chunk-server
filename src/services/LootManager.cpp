@@ -167,24 +167,38 @@ LootManager::getDroppedItemsNearPosition(const PositionStruct &position, float r
 bool
 LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruct &playerPosition)
 {
-    std::unique_lock<std::shared_mutex> lock(droppedItemsMutex_);
+    // First, retrieve the dropped item data (with minimal locking)
+    DroppedItemStruct droppedItem;
+    bool found = false;
 
-    auto it = droppedItems_.find(itemUID);
-    if (it == droppedItems_.end())
     {
-        logger_.logError("Attempted to pickup non-existent dropped item UID: " + std::to_string(itemUID));
+        std::shared_lock<std::shared_mutex> lock(droppedItemsMutex_);
+
+        auto it = droppedItems_.find(itemUID);
+        if (it == droppedItems_.end())
+        {
+            logger_.logError("Attempted to pickup non-existent dropped item UID: " + std::to_string(itemUID));
+            return false;
+        }
+
+        if (!it->second.canBePickedUp)
+        {
+            logger_.logError("Attempted to pickup item that cannot be picked up, UID: " + std::to_string(itemUID));
+            return false;
+        }
+
+        droppedItem = it->second;
+        found = true;
+    }
+
+    if (!found)
+    {
         return false;
     }
 
-    if (!it->second.canBePickedUp)
-    {
-        logger_.logError("Attempted to pickup item that cannot be picked up, UID: " + std::to_string(itemUID));
-        return false;
-    }
-
-    // Validate distance - player must be within pickup range
+    // Validate distance - player must be within pickup range (no locks needed)
     const float MAX_PICKUP_DISTANCE = 100.0f; // Maximum distance for item pickup
-    float distance = calculateDistance(playerPosition, it->second.position);
+    float distance = calculateDistance(playerPosition, droppedItem.position);
 
     if (distance > MAX_PICKUP_DISTANCE)
     {
@@ -194,31 +208,16 @@ LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruc
         return false;
     }
 
-    // Get item info for logging
-    ItemDataStruct itemInfo = itemManager_.getItemById(it->second.itemId);
+    // Get item info for logging (no locks needed for ItemManager read operations)
+    ItemDataStruct itemInfo = itemManager_.getItemById(droppedItem.itemId);
 
-    logger_.log("[LOOT] Character " + std::to_string(characterId) + " picked up " +
-                itemInfo.name + " (UID: " + std::to_string(itemUID) + ") from distance " +
-                std::to_string(distance));
-
-    // Store item data before removing from dropped items
-    DroppedItemStruct droppedItem = it->second;
-
-    // Remove from dropped items
-    droppedItems_.erase(it);
-
-    // Add item to player's inventory
+    // Add item to player's inventory (InventoryManager handles its own locking)
+    bool addedToInventory = false;
     if (inventoryManager_)
     {
-        bool addedToInventory = inventoryManager_->addItemToInventory(characterId, droppedItem.itemId, droppedItem.quantity);
+        addedToInventory = inventoryManager_->addItemToInventory(characterId, droppedItem.itemId, droppedItem.quantity);
 
-        if (addedToInventory)
-        {
-            logger_.log("[LOOT] Successfully added item " + std::to_string(droppedItem.itemId) +
-                        " (quantity: " + std::to_string(droppedItem.quantity) +
-                        ") to character " + std::to_string(characterId) + " inventory");
-        }
-        else
+        if (!addedToInventory)
         {
             logger_.logError("[LOOT] Failed to add item " + std::to_string(droppedItem.itemId) +
                              " to character " + std::to_string(characterId) + " inventory");
@@ -229,6 +228,38 @@ LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruc
     {
         logger_.logError("[LOOT] InventoryManager not set - cannot add item to inventory");
         return false;
+    }
+
+    // Only now remove from dropped items (with exclusive lock)
+    {
+        std::unique_lock<std::shared_mutex> lock(droppedItemsMutex_);
+
+        // Double-check that the item is still there
+        auto it = droppedItems_.find(itemUID);
+        if (it != droppedItems_.end())
+        {
+            droppedItems_.erase(it);
+
+            logger_.log("[LOOT] Character " + std::to_string(characterId) + " picked up " +
+                        itemInfo.name + " (UID: " + std::to_string(itemUID) + ") from distance " +
+                        std::to_string(distance));
+
+            logger_.log("[LOOT] Successfully added item " + std::to_string(droppedItem.itemId) +
+                        " (quantity: " + std::to_string(droppedItem.quantity) +
+                        ") to character " + std::to_string(characterId) + " inventory");
+        }
+        else
+        {
+            // Item was picked up by someone else in the meantime
+            logger_.logError("[LOOT] Item UID " + std::to_string(itemUID) + " was already picked up by another player");
+
+            // We need to remove the item from inventory since it was already taken
+            if (inventoryManager_)
+            {
+                inventoryManager_->removeItemFromInventory(characterId, droppedItem.itemId, droppedItem.quantity);
+            }
+            return false;
+        }
     }
 
     return true;

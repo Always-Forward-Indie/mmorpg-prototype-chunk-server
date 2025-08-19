@@ -206,6 +206,21 @@ ClientSession::processMessage(const std::string &message)
             }
         }
 
+        // Populate character ID from ClientManager if client ID is valid
+        if (clientData.clientId != 0)
+        {
+            try
+            {
+                ClientDataStruct serverClientData = gameServices_.getClientManager().getClientData(clientData.clientId);
+                clientData.characterId = serverClientData.characterId;
+                gameServices_.getLogger().log("Character ID " + std::to_string(clientData.characterId) + " resolved for client " + std::to_string(clientData.clientId) + " for event: " + fullEventType, GREEN);
+            }
+            catch (const std::exception &e)
+            {
+                gameServices_.getLogger().logError("Error looking up character ID for client " + std::to_string(clientData.clientId) + ": " + std::string(e.what()), RED);
+            }
+        }
+
         // Create full context for non-ping events
         EventContext context{fullEventType, clientData, characterData, positionData, messageStruct, message};
         eventDispatcher_.dispatch(context, socket_);

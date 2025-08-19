@@ -60,18 +60,19 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
     // Send inventory update event to notify clients
     if (eventQueue_)
     {
-        // Get updated inventory and convert to JSON
-        auto updatedInventory = getPlayerInventory(characterId);
+        // Get updated inventory and convert to JSON (use direct access since we already have the lock)
         nlohmann::json inventoryJson;
         inventoryJson["characterId"] = characterId;
         inventoryJson["items"] = nlohmann::json::array();
 
-        for (const auto &item : updatedInventory)
+        // Direct access to avoid recursive locking
+        auto it = playerInventories_.find(characterId);
+        if (it != playerInventories_.end())
         {
-            nlohmann::json itemJson;
-            itemJson["itemId"] = item.itemId;
-            itemJson["quantity"] = item.quantity;
-            inventoryJson["items"].push_back(itemJson);
+            for (const auto &item : it->second)
+            {
+                inventoryJson["items"].push_back(inventoryItemToJson(item));
+            }
         }
 
         Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
@@ -130,18 +131,19 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
     // Send inventory update event to notify clients
     if (eventQueue_)
     {
-        // Get updated inventory and convert to JSON
-        auto updatedInventory = getPlayerInventory(characterId);
+        // Get updated inventory and convert to JSON (use direct access since we already have the lock)
         nlohmann::json inventoryJson;
         inventoryJson["characterId"] = characterId;
         inventoryJson["items"] = nlohmann::json::array();
 
-        for (const auto &item : updatedInventory)
+        // Direct access to avoid recursive locking
+        auto it = playerInventories_.find(characterId);
+        if (it != playerInventories_.end())
         {
-            nlohmann::json itemJson;
-            itemJson["itemId"] = item.itemId;
-            itemJson["quantity"] = item.quantity;
-            inventoryJson["items"].push_back(itemJson);
+            for (const auto &item : it->second)
+            {
+                inventoryJson["items"].push_back(inventoryItemToJson(item));
+            }
         }
 
         Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
@@ -231,4 +233,69 @@ InventoryManager::findInventoryItem(int characterId, int itemId) const
     const auto &inventory = it->second;
     return std::find_if(inventory.begin(), inventory.end(), [itemId](const PlayerInventoryItemStruct &item)
         { return item.itemId == itemId; });
+}
+
+nlohmann::json
+InventoryManager::inventoryItemToJson(const PlayerInventoryItemStruct &item) const
+{
+    nlohmann::json itemJson;
+
+    // Basic inventory data
+    itemJson["id"] = item.id;
+    itemJson["characterId"] = item.characterId;
+    itemJson["itemId"] = item.itemId;
+    itemJson["quantity"] = item.quantity;
+
+    // Get full item data
+    auto itemData = itemManager_.getItemById(item.itemId);
+    if (itemData.id > 0) // Check if item was found
+    {
+        // Add all ItemDataStruct fields
+        itemJson["name"] = itemData.name;
+        itemJson["slug"] = itemData.slug;
+        itemJson["description"] = itemData.description;
+        itemJson["isQuestItem"] = itemData.isQuestItem;
+        itemJson["itemType"] = itemData.itemType;
+        itemJson["itemTypeName"] = itemData.itemTypeName;
+        itemJson["itemTypeSlug"] = itemData.itemTypeSlug;
+        itemJson["isContainer"] = itemData.isContainer;
+        itemJson["isDurable"] = itemData.isDurable;
+        itemJson["isTradable"] = itemData.isTradable;
+        itemJson["weight"] = itemData.weight;
+        itemJson["rarityId"] = itemData.rarityId;
+        itemJson["rarityName"] = itemData.rarityName;
+        itemJson["raritySlug"] = itemData.raritySlug;
+        itemJson["stackMax"] = itemData.stackMax;
+        itemJson["durabilityMax"] = itemData.durabilityMax;
+        itemJson["durabilityCurrent"] = itemData.durabilityMax;
+        itemJson["vendorPriceBuy"] = itemData.vendorPriceBuy;
+        itemJson["vendorPriceSell"] = itemData.vendorPriceSell;
+        itemJson["equipSlot"] = itemData.equipSlot;
+        itemJson["equipSlotName"] = itemData.equipSlotName;
+        itemJson["equipSlotSlug"] = itemData.equipSlotSlug;
+        itemJson["levelRequirement"] = itemData.levelRequirement;
+
+        // Add attributes
+        itemJson["attributes"] = nlohmann::json::array();
+        for (const auto &attribute : itemData.attributes)
+        {
+            nlohmann::json attributeJson = {
+                {"id", attribute.id},
+                {"name", attribute.name},
+                {"slug", attribute.slug},
+                {"value", attribute.value}};
+            itemJson["attributes"].push_back(attributeJson);
+        }
+    }
+    else
+    {
+        logger_.logError("[INVENTORY] Item data not found for ID " + std::to_string(item.itemId));
+        // Set default values for missing item data
+        itemJson["name"] = "Unknown Item";
+        itemJson["slug"] = "unknown";
+        itemJson["description"] = "Item data not found";
+        itemJson["attributes"] = nlohmann::json::array();
+    }
+
+    return itemJson;
 }

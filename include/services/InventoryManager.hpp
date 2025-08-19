@@ -3,6 +3,7 @@
 #include "services/ItemManager.hpp"
 #include "utils/Logger.hpp"
 #include <map>
+#include <nlohmann/json.hpp>
 #include <shared_mutex>
 
 // Forward declaration
@@ -73,6 +74,13 @@ class InventoryManager
      * @return Number of different item types
      */
     int getInventoryItemCount(int characterId) const;
+
+    /**
+     * @brief Convert inventory item to full JSON with complete item data
+     * @param item Player inventory item
+     * @return JSON representation with full item data
+     */
+    nlohmann::json inventoryItemToJson(const PlayerInventoryItemStruct &item) const;
 
   private:
     ItemManager &itemManager_;

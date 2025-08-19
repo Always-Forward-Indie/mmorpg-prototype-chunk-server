@@ -49,7 +49,7 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handlePlayerAttack(context, socket);
     }
-    else if (context.eventType == "pickupDroppedItem")
+    else if (context.eventType == "itemPickup")
     {
         handlePickupDroppedItem(context, socket);
     }
@@ -575,10 +575,32 @@ EventDispatcher::handlePickupDroppedItem(const EventContext &context, std::share
             // Create ItemPickupRequestStruct
             ItemPickupRequestStruct pickupRequest;
             pickupRequest.characterId = context.clientData.characterId;
-            pickupRequest.droppedItemUID = pickupData["droppedItemUID"];
+            pickupRequest.droppedItemUID = pickupData["itemUID"];
             pickupRequest.playerPosition = context.positionData;
 
+            // Parse playerId from client message for security verification
+            if (pickupData.contains("characterId") && pickupData["characterId"].is_number_integer())
+            {
+                pickupRequest.playerId = pickupData["characterId"];
+            }
+            else
+            {
+                gameServices_.getLogger().logError("EventDispatcher handlePickupDroppedItem - Missing characterId in client request", RED);
+                return;
+            }
+
+            // Security check: verify that client-provided playerId matches server-side characterId
+            if (pickupRequest.playerId != pickupRequest.characterId)
+            {
+                gameServices_.getLogger().logError("EventDispatcher handlePickupDroppedItem - Security violation: client playerId (" +
+                                                       std::to_string(pickupRequest.playerId) + ") does not match server characterId (" +
+                                                       std::to_string(pickupRequest.characterId) + ")",
+                    RED);
+                return;
+            }
+
             gameServices_.getLogger().log("EventDispatcher handlePickupDroppedItem - Character ID: " + std::to_string(pickupRequest.characterId) +
+                                              ", Player ID (verified): " + std::to_string(pickupRequest.playerId) +
                                               ", Item UID: " + std::to_string(pickupRequest.droppedItemUID) +
                                               ", Position: " + std::to_string(pickupRequest.playerPosition.positionX) + "," +
                                               std::to_string(pickupRequest.playerPosition.positionY),
@@ -604,15 +626,15 @@ void
 EventDispatcher::handleGetPlayerInventory(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
     // Check if character is valid
-    if (context.clientData.characterId > 0)
+    if (context.characterData.characterId > 0)
     {
-        gameServices_.getLogger().log("EventDispatcher handleGetPlayerInventory - Character ID: " + std::to_string(context.clientData.characterId), GREEN);
+        gameServices_.getLogger().log("EventDispatcher handleGetPlayerInventory - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
 
         try
         {
             // Create request data
             nlohmann::json requestData;
-            requestData["characterId"] = context.clientData.characterId;
+            requestData["characterId"] = context.characterData.characterId;
 
             // Create get player inventory event
             Event getInventoryEvent(Event::GET_PLAYER_INVENTORY, context.clientData.clientId, requestData);
@@ -625,7 +647,7 @@ EventDispatcher::handleGetPlayerInventory(const EventContext &context, std::shar
     }
     else
     {
-        // Log that we're skipping the event for a disconnected client
-        gameServices_.getLogger().log("Skipping get player inventory event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+        // Log that we're skipping the event for invalid character
+        gameServices_.getLogger().log("Skipping get player inventory event for invalid character ID: " + std::to_string(context.characterData.characterId) + " (client ID: " + std::to_string(context.clientData.clientId) + ")", GREEN);
     }
 }

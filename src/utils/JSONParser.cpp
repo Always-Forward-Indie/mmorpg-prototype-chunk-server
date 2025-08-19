@@ -565,6 +565,70 @@ JSONParser::parseItemsList(const char *data, size_t length)
             {
                 itemData.itemTypeSlug = item["itemTypeSlug"].get<std::string>();
             }
+            if (item.contains("isContainer") && item["isContainer"].is_boolean())
+            {
+                itemData.isContainer = item["isContainer"].get<bool>();
+            }
+            if (item.contains("isDurable") && item["isDurable"].is_boolean())
+            {
+                itemData.isDurable = item["isDurable"].get<bool>();
+            }
+            if (item.contains("isTradable") && item["isTradable"].is_boolean())
+            {
+                itemData.isTradable = item["isTradable"].get<bool>();
+            }
+            if (item.contains("isEquippable") && item["isEquippable"].is_boolean())
+            {
+                itemData.isEquippable = item["isEquippable"].get<bool>();
+            }
+            if (item.contains("weight") && item["weight"].is_number())
+            {
+                itemData.weight = item["weight"].get<float>();
+            }
+            if (item.contains("rarityId") && item["rarityId"].is_number_integer())
+            {
+                itemData.rarityId = item["rarityId"].get<int>();
+            }
+            if (item.contains("rarityName") && item["rarityName"].is_string())
+            {
+                itemData.rarityName = item["rarityName"].get<std::string>();
+            }
+            if (item.contains("raritySlug") && item["raritySlug"].is_string())
+            {
+                itemData.raritySlug = item["raritySlug"].get<std::string>();
+            }
+            if (item.contains("stackMax") && item["stackMax"].is_number_integer())
+            {
+                itemData.stackMax = item["stackMax"].get<int>();
+            }
+            if (item.contains("durabilityMax") && item["durabilityMax"].is_number_integer())
+            {
+                itemData.durabilityMax = item["durabilityMax"].get<int>();
+            }
+            if (item.contains("vendorPriceBuy") && item["vendorPriceBuy"].is_number_integer())
+            {
+                itemData.vendorPriceBuy = item["vendorPriceBuy"].get<int>();
+            }
+            if (item.contains("vendorPriceSell") && item["vendorPriceSell"].is_number_integer())
+            {
+                itemData.vendorPriceSell = item["vendorPriceSell"].get<int>();
+            }
+            if (item.contains("equipSlot") && item["equipSlot"].is_number_integer())
+            {
+                itemData.equipSlot = item["equipSlot"].get<int>();
+            }
+            if (item.contains("equipSlotName") && item["equipSlotName"].is_string())
+            {
+                itemData.equipSlotName = item["equipSlotName"].get<std::string>();
+            }
+            if (item.contains("equipSlotSlug") && item["equipSlotSlug"].is_string())
+            {
+                itemData.equipSlotSlug = item["equipSlotSlug"].get<std::string>();
+            }
+            if (item.contains("levelRequirement") && item["levelRequirement"].is_number_integer())
+            {
+                itemData.levelRequirement = item["levelRequirement"].get<int>();
+            }
 
             // Parse attributes
             if (item.contains("attributes") && item["attributes"].is_array())
