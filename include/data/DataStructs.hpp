@@ -81,6 +81,7 @@ struct ItemDataStruct
     bool isDurable = false;
     bool isTradable = true;
     bool isEquippable = false;
+    bool isHarvest = false; // Flag to indicate this item can only be obtained through harvesting
     float weight = 0.0f;
     int rarityId = 1;
     std::string rarityName = "";
@@ -102,6 +103,76 @@ struct MobLootInfoStruct
     int mobId = 0;
     int itemId = 0;
     float dropChance = 0.0f;
+    bool isHarvestOnly = false; // Flag to indicate this loot only drops from harvesting
+};
+
+// Structure for tracking harvestable corpses
+struct HarvestableCorpseStruct
+{
+    int mobUID = 0;                                  // Unique mob instance UID that died
+    int mobId = 0;                                   // Template mob ID
+    PositionStruct position;                         // Position of the corpse
+    std::chrono::steady_clock::time_point deathTime; // When the mob died
+    bool hasBeenHarvested = false;                   // Track if corpse has been harvested
+    int harvestedByCharacterId = 0;                  // Track who harvested it (0 = no one)
+    int currentHarvesterCharacterId = 0;             // Track who is currently harvesting (0 = no one)
+    float interactionRadius = 150.0f;                // How close player needs to be
+};
+
+// Structure for storing loot generated for a corpse
+struct CorpseLootStruct
+{
+    int corpseUID = 0;                                   // UID of the corpse this loot belongs to
+    std::vector<std::pair<int, int>> availableLoot;      // Vector of (itemId, quantity) pairs
+    std::chrono::steady_clock::time_point generatedTime; // When loot was generated
+    bool hasRemainingLoot() const
+    {
+        return !availableLoot.empty();
+    }
+};
+
+// Structure for client request to pickup specific items from corpse loot
+struct CorpseLootPickupRequestStruct
+{
+    int characterId = 0;                             // Server-side character ID from session
+    int playerId = 0;                                // Client-side player ID for verification
+    int corpseUID = 0;                               // UID of the corpse to pickup from
+    std::vector<std::pair<int, int>> requestedItems; // Vector of (itemId, quantity) pairs to pickup
+};
+
+// Structure for client request to get list of available loot in a corpse
+struct CorpseLootInspectRequestStruct
+{
+    int characterId = 0; // Server-side character ID from session
+    int playerId = 0;    // Client-side player ID for verification
+    int corpseUID = 0;   // UID of the corpse to inspect
+};
+
+// Structure for harvest request from client
+struct HarvestRequestStruct
+{
+    int characterId = 0; // Server-side character ID from session
+    int playerId = 0;    // Client-side player ID for verification
+    int corpseUID = 0;   // UID of the corpse to harvest
+};
+
+// Structure for harvest progress tracking
+struct HarvestProgressStruct
+{
+    int characterId = 0;
+    int corpseUID = 0;
+    std::chrono::steady_clock::time_point startTime;
+    float harvestDuration = 3.0f; // Harvest time in seconds
+    bool isActive = false;
+    PositionStruct startPosition;  // Position where harvest started
+    float maxMoveDistance = 50.0f; // Max distance player can move while harvesting
+};
+
+// Structure for harvest completion event
+struct HarvestCompleteStruct
+{
+    int playerId = 0; // Player who completed the harvest
+    int corpseId = 0; // Corpse that was harvested
 };
 
 struct DroppedItemStruct

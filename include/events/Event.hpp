@@ -44,6 +44,15 @@ class Event
         GET_NEARBY_ITEMS,
         INVENTORY_UPDATE,
         GET_PLAYER_INVENTORY,
+        // Harvest system events
+        HARVEST_START_REQUEST,   // Client requests to start harvesting
+        HARVEST_START_RESPONSE,  // Server response with harvest info
+        HARVEST_PROGRESS_UPDATE, // Server updates harvest progress
+        HARVEST_COMPLETE,        // Harvest completed successfully
+        HARVEST_CANCELLED,       // Harvest was cancelled/interrupted
+        GET_NEARBY_CORPSES,      // Get harvestable corpses near player
+        CORPSE_LOOT_PICKUP,      // Client requests to pickup specific items from corpse loot
+        CORPSE_LOOT_INSPECT,     // Client requests to inspect available loot in corpse
         // Combat events
         INITIATE_COMBAT_ACTION,
         COMPLETE_COMBAT_ACTION,

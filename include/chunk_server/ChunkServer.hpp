@@ -41,6 +41,11 @@ class ChunkServer
     void mainEventLoopCH();
     void mainEventLoopPing();
 
+    NetworkManager &getNetworkManager()
+    {
+        return networkManager_;
+    }
+
   private:
     std::atomic<bool> running_{true};
 

@@ -69,6 +69,12 @@ using EventData = std::variant<
     DroppedItemStruct,
     PlayerInventoryItemStruct,
     ItemPickupRequestStruct,
+    HarvestRequestStruct,
+    HarvestProgressStruct,
+    HarvestCompleteStruct,
+    HarvestableCorpseStruct,
+    CorpseLootPickupRequestStruct,
+    CorpseLootInspectRequestStruct,
     std::pair<int, int>, // For mob death events (mobUID, zoneId)
     std::vector<MobDataStruct>,
     std::vector<SpawnZoneStruct>,
@@ -78,5 +84,7 @@ using EventData = std::variant<
     std::vector<ItemDataStruct>,
     std::vector<MobLootInfoStruct>,
     std::vector<DroppedItemStruct>,
+    std::vector<HarvestableCorpseStruct>,
+    std::vector<HarvestProgressStruct>,
     std::vector<ClientDataStruct>,
     std::vector<TargetCandidate>>;

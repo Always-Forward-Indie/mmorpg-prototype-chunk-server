@@ -2,6 +2,7 @@
 #include "services/CharacterManager.hpp"
 #include "services/ChunkManager.hpp"
 #include "services/ClientManager.hpp"
+#include "services/HarvestManager.hpp"
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
 #include "services/LootManager.hpp"
@@ -27,13 +28,17 @@ class GameServices
           clientManager_(logger_),
           chunkManager_(logger_),
           lootManager_(itemManager_, logger_),
-          inventoryManager_(itemManager_, logger_)
+          inventoryManager_(itemManager_, logger_),
+          harvestManager_(itemManager_, logger_)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
         mobMovementManager_.setMobInstanceManager(&mobInstanceManager_);
         mobMovementManager_.setSpawnZoneManager(&spawnZoneManager_);
         mobMovementManager_.setCharacterManager(&characterManager_);
+
+        // Set up harvest manager dependencies
+        harvestManager_.setInventoryManager(&inventoryManager_);
     }
 
     Logger &getLogger()
@@ -80,6 +85,10 @@ class GameServices
     {
         return inventoryManager_;
     }
+    HarvestManager &getHarvestManager()
+    {
+        return harvestManager_;
+    }
 
   private:
     Logger &logger_;
@@ -93,4 +102,5 @@ class GameServices
     ChunkManager chunkManager_;
     LootManager lootManager_;
     InventoryManager inventoryManager_;
+    HarvestManager harvestManager_;
 };

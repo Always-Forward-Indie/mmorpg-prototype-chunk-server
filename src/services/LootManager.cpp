@@ -49,6 +49,17 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
 
         for (const auto &lootEntry : lootTable)
         {
+            // Get item info to check if it's a harvest-only item
+            ItemDataStruct itemInfo = itemManager_.getItemById(lootEntry.itemId);
+
+            // Skip items that are harvest-only (can only be obtained through harvesting)
+            if (itemInfo.isHarvest)
+            {
+                logger_.log("[LOOT] Skipping harvest-only item " + itemInfo.name + " (ID: " +
+                            std::to_string(lootEntry.itemId) + ") from regular drop");
+                continue;
+            }
+
             float randomRoll = distribution(randomGenerator_);
 
             logger_.log("[LOOT] Item " + std::to_string(lootEntry.itemId) +
@@ -91,8 +102,7 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
 
                 droppedItems.push_back(droppedItem);
 
-                // Get item info for logging
-                ItemDataStruct itemInfo = itemManager_.getItemById(lootEntry.itemId);
+                // Use already retrieved item info for logging
                 logger_.log("[LOOT] DROPPED: " + itemInfo.name + " (ID: " +
                             std::to_string(lootEntry.itemId) + ", UID: " +
                             std::to_string(droppedItem.uid) + ") at position (" +

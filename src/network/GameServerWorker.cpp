@@ -119,7 +119,7 @@ GameServerWorker::sendDataToGameServer(const std::string &data)
 }
 
 void
-GameServerWorker::processGameServerData(const std::array<char, 4096> &buffer, std::size_t bytes_transferred)
+GameServerWorker::processGameServerData(const std::array<char, 12096> &buffer, std::size_t bytes_transferred)
 {
     // Convert received data to string
     std::string receivedData(buffer.data(), bytes_transferred);
@@ -221,7 +221,7 @@ GameServerWorker::processGameServerData(const std::array<char, 4096> &buffer, st
 void
 GameServerWorker::receiveDataFromGameServer()
 {
-    auto dataBufferGameServer = std::make_shared<std::array<char, 4096>>();
+    auto dataBufferGameServer = std::make_shared<std::array<char, 12096>>();
     game_server_socket_->async_read_some(boost::asio::buffer(*dataBufferGameServer),
         [this, dataBufferGameServer](const boost::system::error_code &ec, std::size_t bytes_transferred)
         {
@@ -237,14 +237,14 @@ GameServerWorker::receiveDataFromGameServer()
                     receiveBuffer_.erase(0, newlinePos + 1); // удаляем обработанное
 
                     // Проверяем размер сообщения
-                    if (oneMessage.size() > 4096)
+                    if (oneMessage.size() > 12096)
                     {
-                        logger_.logError("Message too large: " + std::to_string(oneMessage.size()) + " bytes. Truncating to 4096 bytes.");
+                        logger_.logError("Message too large: " + std::to_string(oneMessage.size()) + " bytes. Truncating to 12096 bytes.");
                         logger_.logError("Message preview: " + oneMessage.substr(0, 100) + "...");
                     }
 
                     // безопасно копируем в std::array и передаём в старую логику
-                    std::array<char, 4096> tempBuf{};
+                    std::array<char, 12096> tempBuf{};
                     std::size_t copySize = std::min(oneMessage.size(), tempBuf.size());
                     std::memcpy(tempBuf.data(), oneMessage.data(), copySize);
                     processGameServerData(tempBuf, copySize);

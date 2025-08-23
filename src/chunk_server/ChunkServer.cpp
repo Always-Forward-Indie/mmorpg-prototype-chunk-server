@@ -37,6 +37,12 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 
     // Set EventQueue for InventoryManager to send inventory update events to clients
     gameServices_.getInventoryManager().setEventQueue(&eventQueueGameServer_);
+
+    // Set EventQueue for HarvestManager to send harvest events to clients
+    gameServices_.getHarvestManager().setEventQueue(&eventQueueGameServer_);
+
+    // Set manager references for HarvestManager to broadcast harvest events
+    gameServices_.getHarvestManager().setManagerReferences(&gameServices_.getClientManager(), &networkManager_);
 }
 
 void
@@ -464,6 +470,30 @@ ChunkServer::mainEventLoopCH()
     );
 
     scheduler_.scheduleTask(cleanupTask);
+
+    // Task for updating harvest progress and completing harvests
+    Task harvestUpdateTask(
+        [&]
+        {
+            try
+            {
+                // Update harvest progress and complete any ready harvests
+                gameServices_.getHarvestManager().updateHarvestProgress();
+
+                // Clean up old corpses that can no longer be harvested
+                gameServices_.getHarvestManager().cleanupOldCorpses(600); // 10 minutes
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error updating harvest progress: " + std::string(ex.what()));
+            }
+        },
+        1, // Run every 1 second for responsive harvest updates
+        std::chrono::system_clock::now(),
+        7 // unique task ID
+    );
+
+    scheduler_.scheduleTask(harvestUpdateTask);
 
     // Task for cleaning up dead mobs and triggering respawn
     Task deadMobCleanupTask(

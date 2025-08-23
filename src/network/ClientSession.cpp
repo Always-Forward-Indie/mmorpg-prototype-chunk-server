@@ -212,8 +212,42 @@ ClientSession::processMessage(const std::string &message)
             try
             {
                 ClientDataStruct serverClientData = gameServices_.getClientManager().getClientData(clientData.clientId);
-                clientData.characterId = serverClientData.characterId;
-                gameServices_.getLogger().log("Character ID " + std::to_string(clientData.characterId) + " resolved for client " + std::to_string(clientData.clientId) + " for event: " + fullEventType, GREEN);
+
+                // For join events, get character ID from message body instead of stored data
+                if (fullEventType == "joinGameClient" || fullEventType == "joinGameCharacter")
+                {
+                    try
+                    {
+                        nlohmann::json msgJson = nlohmann::json::parse(message);
+                        if (msgJson.contains("body") && msgJson["body"].contains("id"))
+                        {
+                            int messageCharacterId = msgJson["body"]["id"];
+                            clientData.characterId = messageCharacterId;
+                            characterData.characterId = messageCharacterId;
+                            gameServices_.getLogger().log("Character ID " + std::to_string(messageCharacterId) + " extracted from message for client " + std::to_string(clientData.clientId) + " for event: " + fullEventType, GREEN);
+                        }
+                        else
+                        {
+                            clientData.characterId = serverClientData.characterId;
+                            characterData.characterId = serverClientData.characterId;
+                            gameServices_.getLogger().log("Character ID " + std::to_string(clientData.characterId) + " resolved from stored data for client " + std::to_string(clientData.clientId) + " for event: " + fullEventType, GREEN);
+                        }
+                    }
+                    catch (const std::exception &parseEx)
+                    {
+                        // Fallback to stored data if parsing fails
+                        clientData.characterId = serverClientData.characterId;
+                        characterData.characterId = serverClientData.characterId;
+                        gameServices_.getLogger().logError("Failed to parse character ID from message, using stored data: " + std::string(parseEx.what()), RED);
+                    }
+                }
+                else
+                {
+                    // For other events, use stored character ID
+                    clientData.characterId = serverClientData.characterId;
+                    characterData.characterId = serverClientData.characterId;
+                    gameServices_.getLogger().log("Character ID " + std::to_string(clientData.characterId) + " resolved for client " + std::to_string(clientData.clientId) + " for event: " + fullEventType, GREEN);
+                }
             }
             catch (const std::exception &e)
             {

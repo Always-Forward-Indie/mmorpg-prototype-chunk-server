@@ -581,6 +581,10 @@ JSONParser::parseItemsList(const char *data, size_t length)
             {
                 itemData.isEquippable = item["isEquippable"].get<bool>();
             }
+            if (item.contains("isHarvest") && item["isHarvest"].is_boolean())
+            {
+                itemData.isHarvest = item["isHarvest"].get<bool>();
+            }
             if (item.contains("weight") && item["weight"].is_number())
             {
                 itemData.weight = item["weight"].get<float>();

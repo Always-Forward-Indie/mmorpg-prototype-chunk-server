@@ -356,6 +356,11 @@ ItemEventHandler::handleMobLootGenerationEvent(const Event &event)
 
             // Generate loot using LootManager
             gameServices_.getLootManager().generateLootOnMobDeath(mobId, mobUID, position);
+
+            // Register corpse for harvesting
+            gameServices_.getHarvestManager().registerCorpse(mobUID, mobId, position);
+            gameServices_.getLogger().log("[HARVEST] Registered corpse for harvesting - mob ID " +
+                                          std::to_string(mobId) + " (UID " + std::to_string(mobUID) + ")");
         }
         else
         {

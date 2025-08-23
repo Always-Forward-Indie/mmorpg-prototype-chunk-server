@@ -57,6 +57,26 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleGetPlayerInventory(context, socket);
     }
+    else if (context.eventType == "harvestStart")
+    {
+        handleHarvestStart(context, socket);
+    }
+    else if (context.eventType == "harvestCancel")
+    {
+        handleHarvestCancel(context, socket);
+    }
+    else if (context.eventType == "getNearbyCorpses")
+    {
+        handleGetNearbyCorpses(context, socket);
+    }
+    else if (context.eventType == "corpseLootPickup")
+    {
+        handleCorpseLootPickup(context, socket);
+    }
+    else if (context.eventType == "corpseLootInspect")
+    {
+        handleCorpseLootInspect(context, socket);
+    }
     else
     {
         gameServices_.getLogger().logError("Unknown event type: " + context.eventType, RED);
@@ -649,5 +669,270 @@ EventDispatcher::handleGetPlayerInventory(const EventContext &context, std::shar
     {
         // Log that we're skipping the event for invalid character
         gameServices_.getLogger().log("Skipping get player inventory event for invalid character ID: " + std::to_string(context.characterData.characterId) + " (client ID: " + std::to_string(context.clientData.clientId) + ")", GREEN);
+    }
+}
+
+void
+EventDispatcher::handleHarvestStart(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    gameServices_.getLogger().log("EventDispatcher::handleHarvestStart called", GREEN);
+    gameServices_.getLogger().log("Character ID in context: " + std::to_string(context.characterData.characterId), GREEN);
+    gameServices_.getLogger().log("Client ID in context: " + std::to_string(context.clientData.clientId), GREEN);
+
+    // Check if character is valid
+    if (context.characterData.characterId > 0)
+    {
+        gameServices_.getLogger().log("EventDispatcher handleHarvestStart - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+
+        try
+        {
+            // Parse harvest request from message
+            auto messageJson = nlohmann::json::parse(context.fullMessage);
+
+            if (!messageJson.contains("body") || !messageJson["body"].contains("corpseUID"))
+            {
+                gameServices_.getLogger().logError("Missing corpseUID in harvest start request", RED);
+                return;
+            }
+
+            int corpseUID = messageJson["body"]["corpseUID"];
+
+            // Create harvest request data
+            HarvestRequestStruct harvestRequest;
+            harvestRequest.characterId = context.characterData.characterId;
+            harvestRequest.playerId = context.clientData.clientId;
+            harvestRequest.corpseUID = corpseUID;
+
+            // Create harvest start event
+            Event harvestEvent(Event::HARVEST_START_REQUEST, context.clientData.clientId, harvestRequest);
+            eventsBatch_.push_back(harvestEvent);
+            gameServices_.getLogger().log("Added HARVEST_START_REQUEST event to batch. Batch size: " + std::to_string(eventsBatch_.size()), GREEN);
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Error creating harvest start event: " + std::string(e.what()), RED);
+        }
+    }
+    else
+    {
+        gameServices_.getLogger().logError("Invalid character ID for harvest start: " + std::to_string(context.characterData.characterId), RED);
+    }
+}
+
+void
+EventDispatcher::handleHarvestCancel(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    // Check if character is valid
+    if (context.characterData.characterId > 0)
+    {
+        gameServices_.getLogger().log("EventDispatcher handleHarvestCancel - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+
+        try
+        {
+            // Create harvest cancel event
+            Event harvestCancelEvent(Event::HARVEST_CANCELLED, context.clientData.clientId, context.characterData);
+            eventsBatch_.push_back(harvestCancelEvent);
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Error creating harvest cancel event: " + std::string(e.what()), RED);
+        }
+    }
+}
+
+void
+EventDispatcher::handleGetNearbyCorpses(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    // Check if character is valid
+    if (context.characterData.characterId > 0)
+    {
+        gameServices_.getLogger().log("EventDispatcher handleGetNearbyCorpses - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+
+        try
+        {
+            // Create get nearby corpses event
+            Event nearbyCorpsesEvent(Event::GET_NEARBY_CORPSES, context.clientData.clientId, context.characterData);
+            eventsBatch_.push_back(nearbyCorpsesEvent);
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Error creating get nearby corpses event: " + std::string(e.what()), RED);
+        }
+    }
+}
+
+void
+EventDispatcher::handleCorpseLootPickup(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    // Check if character is valid
+    if (context.characterData.characterId > 0)
+    {
+        gameServices_.getLogger().log("EventDispatcher handleCorpseLootPickup - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+
+        try
+        {
+            // Parse pickup data from the full message
+            std::string fullMessage = context.fullMessage;
+            gameServices_.getLogger().log("EventDispatcher handleCorpseLootPickup - Full message: " + fullMessage, GREEN);
+
+            // Parse JSON to extract pickup data
+            nlohmann::json j = nlohmann::json::parse(fullMessage);
+            nlohmann::json bodyData = j["body"];
+
+            gameServices_.getLogger().log("EventDispatcher handleCorpseLootPickup - Parsed body data: " + bodyData.dump(), GREEN);
+
+            // Create CorpseLootPickupRequestStruct
+            CorpseLootPickupRequestStruct pickupRequest;
+            pickupRequest.characterId = context.characterData.characterId;
+
+            // Parse playerId from client message for security verification
+            if (bodyData.contains("playerId") && bodyData["playerId"].is_number_integer())
+            {
+                pickupRequest.playerId = bodyData["playerId"];
+            }
+            else
+            {
+                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootPickup - Missing playerId in client request", RED);
+                return;
+            }
+
+            // Security check: verify that client-provided playerId matches server-side characterId
+            if (pickupRequest.playerId != pickupRequest.characterId)
+            {
+                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootPickup - Security violation: client playerId (" +
+                                                       std::to_string(pickupRequest.playerId) + ") does not match server characterId (" +
+                                                       std::to_string(pickupRequest.characterId) + ")",
+                    RED);
+                return;
+            }
+
+            // Parse corpse UID
+            if (bodyData.contains("corpseUID") && bodyData["corpseUID"].is_number_integer())
+            {
+                pickupRequest.corpseUID = bodyData["corpseUID"];
+            }
+            else
+            {
+                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootPickup - Missing or invalid corpseUID in client request", RED);
+                return;
+            }
+
+            // Parse requested items array
+            if (bodyData.contains("requestedItems") && bodyData["requestedItems"].is_array())
+            {
+                for (const auto &item : bodyData["requestedItems"])
+                {
+                    if (item.contains("itemId") && item["itemId"].is_number_integer() &&
+                        item.contains("quantity") && item["quantity"].is_number_integer())
+                    {
+                        int itemId = item["itemId"];
+                        int quantity = item["quantity"];
+
+                        if (quantity > 0)
+                        {
+                            pickupRequest.requestedItems.emplace_back(itemId, quantity);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootPickup - Missing or invalid requestedItems in client request", RED);
+                return;
+            }
+
+            // Validate that there are items to pickup
+            if (pickupRequest.requestedItems.empty())
+            {
+                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootPickup - No valid items requested for pickup", RED);
+                return;
+            }
+
+            // Create and queue the event
+            Event pickupEvent(Event::CORPSE_LOOT_PICKUP, context.clientData.clientId, pickupRequest);
+            eventsBatch_.push_back(pickupEvent);
+
+            gameServices_.getLogger().log("Created corpse loot pickup event for player " +
+                                              std::to_string(pickupRequest.characterId) +
+                                              " requesting " + std::to_string(pickupRequest.requestedItems.size()) +
+                                              " items from corpse " + std::to_string(pickupRequest.corpseUID),
+                GREEN);
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Error creating corpse loot pickup event: " + std::string(e.what()), RED);
+        }
+    }
+}
+
+void
+EventDispatcher::handleCorpseLootInspect(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    // Check if character is valid
+    if (context.characterData.characterId > 0)
+    {
+        gameServices_.getLogger().log("EventDispatcher handleCorpseLootInspect - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+
+        try
+        {
+            // Parse inspect data from the full message
+            std::string fullMessage = context.fullMessage;
+            gameServices_.getLogger().log("EventDispatcher handleCorpseLootInspect - Full message: " + fullMessage, GREEN);
+
+            // Parse JSON to extract inspect data
+            nlohmann::json j = nlohmann::json::parse(fullMessage);
+            nlohmann::json bodyData = j["body"];
+
+            gameServices_.getLogger().log("EventDispatcher handleCorpseLootInspect - Parsed body data: " + bodyData.dump(), GREEN);
+
+            // Create CorpseLootInspectRequestStruct
+            CorpseLootInspectRequestStruct inspectRequest;
+            inspectRequest.characterId = context.characterData.characterId;
+
+            // Parse playerId from client message for security verification
+            if (bodyData.contains("playerId") && bodyData["playerId"].is_number_integer())
+            {
+                inspectRequest.playerId = bodyData["playerId"];
+            }
+            else
+            {
+                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootInspect - Missing playerId in client request", RED);
+                return;
+            }
+
+            // Security check: verify that client-provided playerId matches server-side characterId
+            if (inspectRequest.playerId != inspectRequest.characterId)
+            {
+                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootInspect - Security violation: client playerId (" +
+                                                       std::to_string(inspectRequest.playerId) + ") does not match server characterId (" +
+                                                       std::to_string(inspectRequest.characterId) + ")",
+                    RED);
+                return;
+            }
+
+            // Parse corpse UID
+            if (bodyData.contains("corpseUID") && bodyData["corpseUID"].is_number_integer())
+            {
+                inspectRequest.corpseUID = bodyData["corpseUID"];
+            }
+            else
+            {
+                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootInspect - Missing or invalid corpseUID in client request", RED);
+                return;
+            }
+
+            // Create and queue the event
+            Event inspectEvent(Event::CORPSE_LOOT_INSPECT, context.clientData.clientId, inspectRequest);
+            eventsBatch_.push_back(inspectEvent);
+
+            gameServices_.getLogger().log("Created corpse loot inspect event for player " +
+                                              std::to_string(inspectRequest.characterId) +
+                                              " to inspect corpse " + std::to_string(inspectRequest.corpseUID),
+                GREEN);
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Error creating corpse loot inspect event: " + std::string(e.what()), RED);
+        }
     }
 }
