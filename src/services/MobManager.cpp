@@ -83,6 +83,53 @@ MobManager::setListOfMobsAttributes(
     }
 }
 
+void
+MobManager::setListOfMobsSkills(std::vector<std::pair<int, std::vector<SkillStruct>>> mobSkillsMapping)
+{
+    try
+    {
+        logger_.log("[DEBUG] setListOfMobsSkills called with " + std::to_string(mobSkillsMapping.size()) + " mob types");
+
+        if (mobSkillsMapping.empty())
+        {
+            logger_.logError("No mob skills mapping found");
+            return;
+        }
+
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+
+        // Привязываем скилы к конкретным мобам
+        for (const auto &mobSkills : mobSkillsMapping)
+        {
+            int mobId = mobSkills.first;
+            const auto &skills = mobSkills.second;
+
+            logger_.log("[DEBUG] Processing skills for mob ID " + std::to_string(mobId) + " - " + std::to_string(skills.size()) + " skills");
+
+            if (mobs_.find(mobId) == mobs_.end())
+            {
+                logger_.logError("Mob ID " + std::to_string(mobId) + " not found for skills assignment");
+                continue;
+            }
+
+            mobs_[mobId].skills = skills;
+            logger_.log("Loaded " + std::to_string(skills.size()) + " skills for mob ID " + std::to_string(mobId));
+
+            // Логируем каждый скил
+            for (const auto &skill : skills)
+            {
+                logger_.log("[DEBUG] - Skill: " + skill.skillName + " (" + skill.skillSlug + ")");
+            }
+        }
+
+        logger_.log("Completed loading skills for " + std::to_string(mobSkillsMapping.size()) + " mobs");
+    }
+    catch (const std::exception &e)
+    {
+        logger_.logError("Error loading mob skills: " + std::string(e.what()));
+    }
+}
+
 // Function to get all mobs from memory as map
 std::map<int, MobDataStruct>
 MobManager::getMobs() const
@@ -112,10 +159,43 @@ MobManager::getMobById(int mobId) const
     auto mob = mobs_.find(mobId);
     if (mob != mobs_.end())
     {
+        logger_.log("[DEBUG] getMobById(" + std::to_string(mobId) + ") - found mob with " +
+                    std::to_string(mob->second.skills.size()) + " skills");
         return mob->second;
     }
     else
     {
+        logger_.logError("[DEBUG] getMobById(" + std::to_string(mobId) + ") - mob not found!");
         return MobDataStruct();
     }
+}
+
+MobDataStruct
+MobManager::getMobByUid(int mobUid) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    for (const auto &[id, mobData] : mobs_)
+    {
+        if (mobData.uid == mobUid)
+        {
+            return mobData;
+        }
+    }
+    return MobDataStruct(); // Return empty struct if not found
+}
+
+void
+MobManager::updateMobMana(const int mobUid, int newMana)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    for (auto &[id, mobData] : mobs_)
+    {
+        if (mobData.uid == mobUid)
+        {
+            mobData.currentMana = newMana;
+            logger_.log("Updated mob " + std::to_string(mobUid) + " mana to " + std::to_string(newMana));
+            return;
+        }
+    }
+    logger_.logError("Mob " + std::to_string(mobUid) + " not found when updating mana");
 }

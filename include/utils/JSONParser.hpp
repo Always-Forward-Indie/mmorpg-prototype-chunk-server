@@ -18,6 +18,7 @@ class JSONParser
     std::vector<SpawnZoneStruct> parseSpawnZonesList(const char *data, size_t length);
     std::vector<MobDataStruct> parseMobsList(const char *data, size_t length);
     std::vector<MobAttributeStruct> parseMobsAttributesList(const char *data, size_t length);
+    std::vector<std::pair<int, std::vector<SkillStruct>>> parseMobsSkillsMapping(const char *data, size_t length);
     std::vector<CharacterAttributeStruct> parseCharacterAttributesList(const char *data, size_t length);
     std::vector<CharacterDataStruct> parseCharactersList(const char *data, size_t length);
     std::vector<ItemDataStruct> parseItemsList(const char *data, size_t length);

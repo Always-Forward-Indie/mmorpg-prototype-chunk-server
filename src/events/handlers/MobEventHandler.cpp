@@ -349,3 +349,31 @@ MobEventHandler::handleMobTargetLostEvent(const Event &event)
         gameServices_.getLogger().logError("Error processing mob target lost event: " + std::string(ex.what()));
     }
 }
+
+void
+MobEventHandler::handleSetMobsSkillsEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        if (std::holds_alternative<std::vector<std::pair<int, std::vector<SkillStruct>>>>(data))
+        {
+            auto mobSkillsMapping = std::get<std::vector<std::pair<int, std::vector<SkillStruct>>>>(data);
+            gameServices_.getMobManager().setListOfMobsSkills(mobSkillsMapping);
+            gameServices_.getLogger().log("Loaded mob skills data from the event handler!", GREEN);
+        }
+        else
+        {
+            gameServices_.getLogger().logError("Invalid data format for SET_ALL_MOBS_SKILLS event");
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        gameServices_.getLogger().logError("Error processing mob skills event: " + std::string(ex.what()));
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("Error processing mob skills event: " + std::string(ex.what()));
+    }
+}

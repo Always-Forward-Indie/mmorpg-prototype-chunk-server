@@ -43,6 +43,9 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 
     // Set manager references for HarvestManager to broadcast harvest events
     gameServices_.getHarvestManager().setManagerReferences(&gameServices_.getClientManager(), &networkManager_);
+
+    // Set CombatSystem for MobMovementManager to handle mob attacks
+    gameServices_.getMobMovementManager().setCombatSystem(eventHandler_.getCombatEventHandler().getCombatSystem());
 }
 
 void

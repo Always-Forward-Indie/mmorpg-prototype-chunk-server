@@ -106,6 +106,69 @@ JSONParser::parseCharacterData(const char *data, size_t length)
         }
     }
 
+    // get character skills
+    if (jsonData.contains("body") && jsonData["body"].is_object() &&
+        jsonData["body"].contains("skillsData") && jsonData["body"]["skillsData"].is_array())
+    {
+        for (const auto &skill : jsonData["body"]["skillsData"])
+        {
+            SkillStruct skillData;
+            if (skill.contains("skillName") && skill["skillName"].is_string())
+            {
+                skillData.skillName = skill["skillName"].get<std::string>();
+            }
+            if (skill.contains("skillSlug") && skill["skillSlug"].is_string())
+            {
+                skillData.skillSlug = skill["skillSlug"].get<std::string>();
+            }
+            if (skill.contains("scaleStat") && skill["scaleStat"].is_string())
+            {
+                skillData.scaleStat = skill["scaleStat"].get<std::string>();
+            }
+            if (skill.contains("school") && skill["school"].is_string())
+            {
+                skillData.school = skill["school"].get<std::string>();
+            }
+            if (skill.contains("skillEffectType") && skill["skillEffectType"].is_string())
+            {
+                skillData.skillEffectType = skill["skillEffectType"].get<std::string>();
+            }
+            if (skill.contains("skillLevel") && skill["skillLevel"].is_number_integer())
+            {
+                skillData.skillLevel = skill["skillLevel"].get<int>();
+            }
+            if (skill.contains("coeff") && (skill["coeff"].is_number_float() || skill["coeff"].is_number_integer()))
+            {
+                skillData.coeff = skill["coeff"].get<float>();
+            }
+            if (skill.contains("flatAdd") && (skill["flatAdd"].is_number_float() || skill["flatAdd"].is_number_integer()))
+            {
+                skillData.flatAdd = skill["flatAdd"].get<float>();
+            }
+            if (skill.contains("cooldownMs") && skill["cooldownMs"].is_number_integer())
+            {
+                skillData.cooldownMs = skill["cooldownMs"].get<int>();
+            }
+            if (skill.contains("gcdMs") && skill["gcdMs"].is_number_integer())
+            {
+                skillData.gcdMs = skill["gcdMs"].get<int>();
+            }
+            if (skill.contains("castMs") && skill["castMs"].is_number_integer())
+            {
+                skillData.castMs = skill["castMs"].get<int>();
+            }
+            if (skill.contains("costMp") && skill["costMp"].is_number_integer())
+            {
+                skillData.costMp = skill["costMp"].get<int>();
+            }
+            if (skill.contains("maxRange") && (skill["maxRange"].is_number_float() || skill["maxRange"].is_number_integer()))
+            {
+                skillData.maxRange = skill["maxRange"].get<float>();
+            }
+            characterData.skills.push_back(skillData);
+        }
+    }
+
     return characterData;
 }
 
@@ -706,4 +769,97 @@ JSONParser::parseMobLootInfo(const char *data, size_t length)
     }
 
     return mobLootInfo;
+}
+
+std::vector<std::pair<int, std::vector<SkillStruct>>>
+JSONParser::parseMobsSkillsMapping(const char *data, size_t length)
+{
+    std::vector<std::pair<int, std::vector<SkillStruct>>> mobsSkillsMapping;
+
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+
+        if (jsonData.contains("body") && jsonData["body"].is_object() &&
+            jsonData["body"].contains("mobsSkills") && jsonData["body"]["mobsSkills"].is_array())
+        {
+            for (const auto &mobSkillsData : jsonData["body"]["mobsSkills"])
+            {
+                if (mobSkillsData.contains("mobId") && mobSkillsData["mobId"].is_number_integer() &&
+                    mobSkillsData.contains("skills") && mobSkillsData["skills"].is_array())
+                {
+                    int mobId = mobSkillsData["mobId"].get<int>();
+                    std::vector<SkillStruct> skills;
+
+                    for (const auto &skillData : mobSkillsData["skills"])
+                    {
+                        SkillStruct skill;
+
+                        if (skillData.contains("skillName") && skillData["skillName"].is_string())
+                        {
+                            skill.skillName = skillData["skillName"].get<std::string>();
+                        }
+                        if (skillData.contains("skillSlug") && skillData["skillSlug"].is_string())
+                        {
+                            skill.skillSlug = skillData["skillSlug"].get<std::string>();
+                        }
+                        if (skillData.contains("scaleStat") && skillData["scaleStat"].is_string())
+                        {
+                            skill.scaleStat = skillData["scaleStat"].get<std::string>();
+                        }
+                        if (skillData.contains("school") && skillData["school"].is_string())
+                        {
+                            skill.school = skillData["school"].get<std::string>();
+                        }
+                        if (skillData.contains("skillEffectType") && skillData["skillEffectType"].is_string())
+                        {
+                            skill.skillEffectType = skillData["skillEffectType"].get<std::string>();
+                        }
+                        if (skillData.contains("skillLevel") && skillData["skillLevel"].is_number_integer())
+                        {
+                            skill.skillLevel = skillData["skillLevel"].get<int>();
+                        }
+                        if (skillData.contains("coeff") && skillData["coeff"].is_number())
+                        {
+                            skill.coeff = skillData["coeff"].get<float>();
+                        }
+                        if (skillData.contains("flatAdd") && skillData["flatAdd"].is_number())
+                        {
+                            skill.flatAdd = skillData["flatAdd"].get<float>();
+                        }
+                        if (skillData.contains("cooldownMs") && skillData["cooldownMs"].is_number_integer())
+                        {
+                            skill.cooldownMs = skillData["cooldownMs"].get<int>();
+                        }
+                        if (skillData.contains("gcdMs") && skillData["gcdMs"].is_number_integer())
+                        {
+                            skill.gcdMs = skillData["gcdMs"].get<int>();
+                        }
+                        if (skillData.contains("castMs") && skillData["castMs"].is_number_integer())
+                        {
+                            skill.castMs = skillData["castMs"].get<int>();
+                        }
+                        if (skillData.contains("costMp") && skillData["costMp"].is_number_integer())
+                        {
+                            skill.costMp = skillData["costMp"].get<int>();
+                        }
+                        if (skillData.contains("maxRange") && skillData["maxRange"].is_number())
+                        {
+                            skill.maxRange = skillData["maxRange"].get<float>();
+                        }
+
+                        skills.push_back(skill);
+                    }
+
+                    mobsSkillsMapping.push_back(std::make_pair(mobId, skills));
+                }
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        // Handle parsing error
+    }
+
+    return mobsSkillsMapping;
 }

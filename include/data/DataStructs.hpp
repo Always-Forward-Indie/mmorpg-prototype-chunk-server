@@ -1,4 +1,5 @@
 #pragma once
+#include "SkillStructs.hpp"
 #include <boost/asio.hpp>
 #include <chrono>
 #include <cmath>
@@ -219,6 +220,7 @@ struct CharacterDataStruct
     std::string characterRace = "";
     PositionStruct characterPosition;
     std::vector<CharacterAttributeStruct> attributes;
+    std::vector<SkillStruct> skills;
 };
 
 struct ClientDataStruct
@@ -242,6 +244,7 @@ struct MobDataStruct
     int maxHealth = 0;
     int maxMana = 0;
     std::vector<MobAttributeStruct> attributes;
+    std::vector<SkillStruct> skills;
     PositionStruct position;
     bool isAggressive = false;
     bool isDead = false;

@@ -28,6 +28,11 @@ set(SOURCE_FILES
     src/services/MobManager.cpp
     src/services/MobInstanceManager.cpp
     src/services/MobMovementManager.cpp
+    src/services/CombatCalculator.cpp
+    src/services/SkillManager.cpp
+    src/services/SkillSystem.cpp
+    src/services/CombatSystem.cpp
+    src/services/CombatResponseBuilder.cpp
     src/services/ItemManager.cpp
     src/services/LootManager.cpp
     src/services/InventoryManager.cpp
@@ -73,6 +78,11 @@ set(HEADER_FILES
     include/services/MobManager.hpp
     include/services/MobInstanceManager.hpp
     include/services/MobMovementManager.hpp
+    include/services/CombatCalculator.hpp
+    include/services/SkillManager.hpp
+    include/services/SkillSystem.hpp
+    include/services/CombatSystem.hpp
+    include/services/CombatResponseBuilder.hpp
     include/services/ItemManager.hpp
     include/services/LootManager.hpp
     include/services/InventoryManager.hpp
@@ -97,10 +107,10 @@ set(HEADER_FILES
     include/events/handlers/ItemEventHandler.hpp
     include/events/handlers/HarvestEventHandler.hpp
     include/data/DataStructs.hpp
+    include/data/SkillStructs.hpp
     include/data/SpecialStructs.hpp
     include/data/CombatStructs.hpp
     include/data/AttackSystem.hpp
-    include/data/AttackSystemExample.hpp
     include/utils/Scheduler.hpp
     include/utils/ThreadPool.hpp
     include/utils/JSONParser.hpp

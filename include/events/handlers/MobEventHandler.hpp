@@ -80,6 +80,15 @@ class MobEventHandler : public BaseEventHandler
      */
     void handleSetMobsAttributesEvent(const Event &event);
 
+    /**
+     * @brief Handle set mobs skills event
+     *
+     * Loads mob skills into the mob manager
+     *
+     * @param event Event containing mob skills mapping
+     */
+    void handleSetMobsSkillsEvent(const Event &event);
+
   private:
     /**
      * @brief Convert mob data to JSON format

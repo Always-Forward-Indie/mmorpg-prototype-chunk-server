@@ -9,6 +9,7 @@
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
+#include "services/SkillManager.hpp"
 #include "services/SpawnZoneManager.hpp"
 #include "utils/Logger.hpp"
 
@@ -29,7 +30,8 @@ class GameServices
           chunkManager_(logger_),
           lootManager_(itemManager_, logger_),
           inventoryManager_(itemManager_, logger_),
-          harvestManager_(itemManager_, logger_)
+          harvestManager_(itemManager_, logger_),
+          skillManager_(this)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
@@ -89,6 +91,10 @@ class GameServices
     {
         return harvestManager_;
     }
+    SkillManager &getSkillManager()
+    {
+        return skillManager_;
+    }
 
   private:
     Logger &logger_;
@@ -103,4 +109,5 @@ class GameServices
     LootManager lootManager_;
     InventoryManager inventoryManager_;
     HarvestManager harvestManager_;
+    SkillManager skillManager_;
 };

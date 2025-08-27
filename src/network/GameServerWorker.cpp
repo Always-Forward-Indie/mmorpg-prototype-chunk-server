@@ -146,6 +146,7 @@ GameServerWorker::processGameServerData(const std::array<char, 12096> &buffer, s
     // mobs
     std::vector<MobDataStruct> mobsList = jsonParser_.parseMobsList(buffer.data(), bytes_transferred);
     std::vector<MobAttributeStruct> mobsAttributesList = jsonParser_.parseMobsAttributesList(buffer.data(), bytes_transferred);
+    std::vector<std::pair<int, std::vector<SkillStruct>>> mobsSkillsMapping = jsonParser_.parseMobsSkillsMapping(buffer.data(), bytes_transferred);
 
     std::vector<Event> eventsBatch;
     constexpr int BATCH_SIZE = 10;
@@ -193,6 +194,13 @@ GameServerWorker::processGameServerData(const std::array<char, 12096> &buffer, s
         // set mobs attributes
         Event setMobsAttributesEvent(Event::SET_ALL_MOBS_ATTRIBUTES, clientData.clientId, mobsAttributesList);
         eventsBatch.push_back(setMobsAttributesEvent);
+    }
+
+    if (eventType == "setMobsSkills")
+    {
+        // set mobs skills
+        Event setMobsSkillsEvent(Event::SET_ALL_MOBS_SKILLS, clientData.clientId, mobsSkillsMapping);
+        eventsBatch.push_back(setMobsSkillsEvent);
     }
 
     if (eventType == "getItemsList")

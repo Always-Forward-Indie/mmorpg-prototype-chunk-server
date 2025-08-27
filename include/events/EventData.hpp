@@ -87,4 +87,6 @@ using EventData = std::variant<
     std::vector<HarvestableCorpseStruct>,
     std::vector<HarvestProgressStruct>,
     std::vector<ClientDataStruct>,
-    std::vector<TargetCandidate>>;
+    std::vector<TargetCandidate>,
+    std::vector<std::pair<int, std::vector<SkillStruct>>> // For mob skills mapping (mobId -> skills)
+    >;

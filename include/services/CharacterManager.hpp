@@ -27,6 +27,9 @@ class CharacterManager
     // Load character Attributes
     void loadCharacterAttributes(std::vector<CharacterAttributeStruct> characterAttributes);
 
+    // Load character Skills
+    void loadCharacterSkills(std::vector<SkillStruct> characterSkills);
+
     // set character position
     void setCharacterPosition(int characterID, PositionStruct position);
 
@@ -39,11 +42,17 @@ class CharacterManager
     // Get character attributes by character ID
     std::vector<CharacterAttributeStruct> getCharacterAttributes(int characterID);
 
+    // Get character skills by character ID
+    std::vector<SkillStruct> getCharacterSkills(int characterID);
+
     // Get character position by character ID
     PositionStruct getCharacterPosition(int characterID);
 
     // Update character health
     void updateCharacterHealth(int characterID, int newHealth);
+
+    // Update character mana
+    void updateCharacterMana(int characterID, int newMana);
 
     // Get characters in a specific zone
     std::vector<CharacterDataStruct> getCharactersInZone(float centerX, float centerY, float radius);

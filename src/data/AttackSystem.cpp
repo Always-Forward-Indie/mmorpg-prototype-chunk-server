@@ -476,23 +476,33 @@ AttackSystem::calculateDamage(
     float variance = (dist_(gen_) - 0.5f) * 2.0f * action.damageVariance;
     baseDamage *= (1.0f + variance);
 
-    // Apply attacker modifiers (use character attributes if available)
+    // Apply attacker modifiers using new attribute system
     float attackerModifier = 1.0f;
     for (const auto &attr : attacker.attributes)
     {
-        if (attr.slug == "strength")
+        if (attr.slug == "physical_attack" && action.damageType == "physical")
         {
-            attackerModifier += attr.value * 0.01f; // 1% per strength point
+            attackerModifier += attr.value * 0.01f; // 1% per attack point
+            break;
+        }
+        else if (attr.slug == "magical_attack" && action.damageType == "magical")
+        {
+            attackerModifier += attr.value * 0.01f;
             break;
         }
     }
     baseDamage *= attackerModifier;
 
-    // Apply target defense
+    // Apply target defense using new attribute system
     float defense = 0.0f;
     for (const auto &attr : target.attributes)
     {
-        if (attr.slug == "defense")
+        if (attr.slug == "physical_defense" && action.damageType == "physical")
+        {
+            defense = static_cast<float>(attr.value);
+            break;
+        }
+        else if (attr.slug == "magical_defense" && action.damageType == "magical")
         {
             defense = static_cast<float>(attr.value);
             break;
@@ -588,14 +598,14 @@ AttackSystem::calculateThreatLevel(const CharacterDataStruct &character)
     // Base threat from level
     threat += character.characterLevel * 10.0f;
 
-    // Threat from attributes
+    // Threat from attributes using new attribute system
     for (const auto &attr : character.attributes)
     {
-        if (attr.slug == "strength")
+        if (attr.slug == "physical_attack")
         {
             threat += attr.value * 2.0f;
         }
-        else if (attr.slug == "magic")
+        else if (attr.slug == "magical_attack")
         {
             threat += attr.value * 1.5f;
         }
@@ -628,26 +638,31 @@ AttackSystem::calculateThreatLevel(const CharacterDataStruct &character)
 CombatRole
 AttackSystem::determineCombatRole(const CharacterDataStruct &character)
 {
-    // Simple role determination based on attributes
-    int magic = 0, strength = 0, defense = 0;
+    // Role determination based on new attribute system
+    int magical_attack = 0, physical_attack = 0, physical_defense = 0, magical_defense = 0;
 
     for (const auto &attr : character.attributes)
     {
-        if (attr.slug == "magic")
+        if (attr.slug == "magical_attack")
         {
-            magic = attr.value;
+            magical_attack = attr.value;
         }
-        else if (attr.slug == "strength")
+        else if (attr.slug == "physical_attack")
         {
-            strength = attr.value;
+            physical_attack = attr.value;
         }
-        else if (attr.slug == "defense")
+        else if (attr.slug == "physical_defense")
         {
-            defense = attr.value;
+            physical_defense = attr.value;
+        }
+        else if (attr.slug == "magical_defense")
+        {
+            magical_defense = attr.value;
         }
     }
 
-    if (magic > strength && magic > defense)
+    // Determine role based on stats
+    if (magical_attack > physical_attack && magical_attack > physical_defense && magical_attack > magical_defense)
     {
         if (character.characterCurrentMana > character.characterMaxMana * 0.5f)
         {
@@ -658,11 +673,11 @@ AttackSystem::determineCombatRole(const CharacterDataStruct &character)
             return CombatRole::DPS; // High magic = damage dealer
         }
     }
-    else if (defense > strength && defense > magic)
+    else if ((physical_defense + magical_defense) > (physical_attack + magical_attack))
     {
         return CombatRole::TANK;
     }
-    else if (strength > magic && strength > defense)
+    else if (physical_attack > magical_attack && physical_attack > physical_defense)
     {
         return CombatRole::DPS;
     }

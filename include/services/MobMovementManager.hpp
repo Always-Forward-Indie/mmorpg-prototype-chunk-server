@@ -67,6 +67,11 @@ class MobMovementManager
     void setEventQueue(class EventQueue *eventQueue);
 
     /**
+     * @brief Set reference to CombatSystem for new combat integration
+     */
+    void setCombatSystem(class CombatSystem *combatSystem);
+
+    /**
      * @brief Handle mob aggro and retaliation when attacked by player
      */
     void handleMobAttacked(int mobUID, int attackerPlayerId);
@@ -102,6 +107,7 @@ class MobMovementManager
     SpawnZoneManager *spawnZoneManager_;
     class CharacterManager *characterManager_;
     class EventQueue *eventQueue_;
+    class CombatSystem *combatSystem_;
 
     // Random number generator
     std::mt19937 rng_;
@@ -185,19 +191,14 @@ class MobMovementManager
     bool canAttackPlayer(const MobDataStruct &mob, int targetPlayerId, const MobMovementData &movementData);
 
     /**
-     * @brief Execute mob attack on player
+     * @brief Check if target player is alive and valid
+     */
+    bool isTargetAlive(int targetPlayerId);
+
+    /**
+     * @brief Execute mob attack on player (integrated with CombatSystem)
      */
     void executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData);
-
-    /**
-     * @brief Send initiate combat action event for mob attack
-     */
-    void sendMobInitiateCombatAction(const MobDataStruct &mob, int targetPlayerId);
-
-    /**
-     * @brief Send combat animation event for mob attack
-     */
-    void sendMobCombatAnimation(const MobDataStruct &mob, int targetPlayerId);
 
     /**
      * @brief Send mob target lost event to clients

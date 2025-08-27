@@ -1,4 +1,6 @@
 #include "events/EventHandler.hpp"
+#include "services/CombatResponseBuilder.hpp"
+#include "services/CombatSystem.hpp"
 
 EventHandler::EventHandler(
     NetworkManager &networkManager,
@@ -68,6 +70,9 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::SET_ALL_MOBS_ATTRIBUTES:
             mobEventHandler_->handleSetMobsAttributesEvent(event);
+            break;
+        case Event::SET_ALL_MOBS_SKILLS:
+            mobEventHandler_->handleSetMobsSkillsEvent(event);
             break;
         case Event::GET_MOB_DATA:
             mobEventHandler_->handleGetMobDataEvent(event);

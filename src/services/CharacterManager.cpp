@@ -2,6 +2,7 @@
 #include <cmath>
 #include <iostream>
 #include <random>
+#include <unordered_map>
 #include <vector>
 
 CharacterManager::CharacterManager(Logger &logger)
@@ -66,6 +67,40 @@ CharacterManager::loadCharacterAttributes(std::vector<CharacterAttributeStruct> 
     }
 }
 
+void
+CharacterManager::loadCharacterSkills(std::vector<SkillStruct> characterSkills)
+{
+    try
+    {
+        if (characterSkills.empty())
+        {
+            logger_.logError("No character skills found in GS");
+            return;
+        }
+
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+
+        // Группируем скилы по персонажам
+        std::unordered_map<int, std::vector<SkillStruct>> skillsByCharacter;
+
+        // Нужно как-то связать скилы с персонажами
+        // Поскольку SkillStruct не содержит characterId,
+        // нужно передавать дополнительную информацию или изменить структуру
+        // Пока что добавим скилы всем персонажам (для примера)
+
+        for (auto &character : charactersList_)
+        {
+            character.skills = characterSkills;
+        }
+
+        logger_.log("Loaded " + std::to_string(characterSkills.size()) + " skills for characters");
+    }
+    catch (const std::exception &e)
+    {
+        logger_.logError("Error loading character skills: " + std::string(e.what()));
+    }
+}
+
 // load character data
 void
 CharacterManager::loadCharacterData(CharacterDataStruct characterData)
@@ -96,6 +131,7 @@ CharacterManager::loadCharacterData(CharacterDataStruct characterData)
                 character.characterRace = characterData.characterRace;
                 character.characterPosition = characterData.characterPosition;
                 character.attributes = characterData.attributes;
+                character.skills = characterData.skills;
             }
         }
     }
@@ -180,6 +216,21 @@ CharacterManager::getCharacterAttributes(int characterID)
     return std::vector<CharacterAttributeStruct>();
 }
 
+std::vector<SkillStruct>
+CharacterManager::getCharacterSkills(int characterID)
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    for (const auto &character : charactersList_)
+    {
+        if (character.characterId == characterID)
+        {
+            return character.skills;
+        }
+    }
+
+    return std::vector<SkillStruct>();
+}
+
 PositionStruct
 CharacterManager::getCharacterPosition(int characterID)
 {
@@ -222,6 +273,22 @@ CharacterManager::updateCharacterHealth(int characterID, int newHealth)
         }
     }
     logger_.logError("Character " + std::to_string(characterID) + " not found when updating health");
+}
+
+void
+CharacterManager::updateCharacterMana(int characterID, int newMana)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    for (auto &character : charactersList_)
+    {
+        if (character.characterId == characterID)
+        {
+            character.characterCurrentMana = newMana;
+            logger_.log("Updated character " + std::to_string(characterID) + " mana to " + std::to_string(newMana));
+            return;
+        }
+    }
+    logger_.logError("Character " + std::to_string(characterID) + " not found when updating mana");
 }
 
 std::vector<CharacterDataStruct>

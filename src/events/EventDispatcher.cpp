@@ -45,7 +45,7 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleGetConnectedClients(context, socket);
     }
-    else if (context.eventType == "PLAYER_ATTACK")
+    else if (context.eventType == "playerAttack")
     {
         handlePlayerAttack(context, socket);
     }
@@ -548,12 +548,12 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
             std::string fullMessage = context.fullMessage;
             gameServices_.getLogger().log("EventDispatcher handlePlayerAttack - Full message: " + fullMessage, GREEN);
 
-            // Parse combat action data from the full message
+            // Parse the complete JSON message instead of just the body
             JSONParser jsonParser;
-            nlohmann::json attackData = jsonParser.parseCombatActionData(fullMessage.c_str(), fullMessage.length());
-            gameServices_.getLogger().log("EventDispatcher handlePlayerAttack - Parsed attack data: " + attackData.dump(), GREEN);
+            nlohmann::json fullData = nlohmann::json::parse(fullMessage);
+            gameServices_.getLogger().log("EventDispatcher handlePlayerAttack - Parsed full data: " + fullData.dump(), GREEN);
 
-            Event playerAttackEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, attackData});
+            Event playerAttackEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, fullData});
             eventsBatch_.push_back(playerAttackEvent);
 
             if (eventsBatch_.size() >= BATCH_SIZE)

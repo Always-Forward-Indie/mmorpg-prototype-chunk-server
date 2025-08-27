@@ -130,7 +130,8 @@ struct AttackAction
     // Damage and effects
     int baseDamage = 0;
     int baseHealing = 0;
-    float damageVariance = 0.1f; // ±10% damage variance
+    float damageVariance = 0.1f;         // ±10% damage variance
+    std::string damageType = "physical"; // "physical" or "magical"
 
     // Target selection
     TargetCriteria targetCriteria;
