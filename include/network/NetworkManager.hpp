@@ -29,6 +29,7 @@ class NetworkManager
     void startIOEventLoop();
     void sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::string &responseString);
     std::string generateResponseMessage(const std::string &status, const nlohmann::json &message);
+    std::string generateResponseMessage(const std::string &status, const nlohmann::json &message, const TimestampStruct &timestamps);
     void setChunkServer(ChunkServer *ChunkServer);
 
     // Session management methods to prevent memory leaks

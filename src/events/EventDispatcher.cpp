@@ -212,7 +212,7 @@ EventDispatcher::handleJoinGameCharacter(const EventContext &context, std::share
         try
         {
             // Create event safely using in_place construction to avoid variant copying
-            Event joinCharacterEvent(Event::JOIN_CHARACTER, context.clientData.clientId, EventData{std::in_place_type<CharacterDataStruct>, characterData});
+            Event joinCharacterEvent(Event::JOIN_CHARACTER, context.clientData.clientId, EventData{std::in_place_type<CharacterDataStruct>, characterData}, context.timestamps);
             eventsBatch_.push_back(joinCharacterEvent); // Copy instead of move to avoid corruption
             if (eventsBatch_.size() >= BATCH_SIZE)
             {
@@ -240,6 +240,7 @@ EventDispatcher::handleMoveCharacter(const EventContext &context, std::shared_pt
     movementData.clientId = context.clientData.clientId;
     movementData.characterId = context.characterData.characterId;
     movementData.position = context.positionData;
+    movementData.timestamps = context.timestamps; // Add timestamps for lag compensation
 
     // Log character data for debugging
     gameServices_.getLogger().log("Creating MOVE_CHARACTER event with movement data:", GREEN);
@@ -278,7 +279,7 @@ EventDispatcher::handleMoveCharacter(const EventContext &context, std::shared_pt
         try
         {
             // Create event safely using emplace construction with lightweight movement data
-            Event moveEvent(Event::MOVE_CHARACTER, context.clientData.clientId, EventData{std::in_place_type<MovementDataStruct>, std::move(movementData)});
+            Event moveEvent(Event::MOVE_CHARACTER, context.clientData.clientId, EventData{std::in_place_type<MovementDataStruct>, std::move(movementData)}, context.timestamps);
 
             // Reserve space in batch to avoid reallocations
             if (eventsBatch_.capacity() < BATCH_SIZE)
@@ -397,7 +398,7 @@ EventDispatcher::handlePing(const EventContext &context, std::shared_ptr<boost::
 
         try
         {
-            Event pingEvent(Event::PING_CLIENT, context.clientData.clientId, std::move(clientData));
+            Event pingEvent(Event::PING_CLIENT, context.clientData.clientId, std::move(clientData), context.timestamps);
             eventQueuePing_.push(pingEvent);
         }
         catch (const std::exception &e)
@@ -452,7 +453,7 @@ EventDispatcher::handleGetSpawnZones(const EventContext &context, std::shared_pt
         // Send each spawn zone to the client
         for (const auto &[zoneId, spawnZone] : allSpawnZones)
         {
-            Event getSpawnZonesEvent(Event::SPAWN_MOBS_IN_ZONE, context.clientData.clientId, spawnZone);
+            Event getSpawnZonesEvent(Event::SPAWN_MOBS_IN_ZONE, context.clientData.clientId, spawnZone, context.timestamps);
             eventsBatch_.push_back(getSpawnZonesEvent);
 
             if (eventsBatch_.size() >= BATCH_SIZE)
@@ -502,7 +503,7 @@ EventDispatcher::handleGetConnectedClients(const EventContext &context, std::sha
     {
         // Pass a simple request instead of full client list to prevent memory leaks
         std::string requestType = "getConnectedClients";
-        Event getConnectedClientsEvent(Event::GET_CONNECTED_CHARACTERS, context.clientData.clientId, requestType);
+        Event getConnectedClientsEvent(Event::GET_CONNECTED_CHARACTERS, context.clientData.clientId, requestType, context.timestamps);
         eventsBatch_.push_back(getConnectedClientsEvent);
 
         if (eventsBatch_.size() >= BATCH_SIZE)
@@ -553,7 +554,7 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
             nlohmann::json fullData = nlohmann::json::parse(fullMessage);
             gameServices_.getLogger().log("EventDispatcher handlePlayerAttack - Parsed full data: " + fullData.dump(), GREEN);
 
-            Event playerAttackEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, fullData});
+            Event playerAttackEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, fullData}, context.timestamps);
             eventsBatch_.push_back(playerAttackEvent);
 
             if (eventsBatch_.size() >= BATCH_SIZE)
@@ -627,7 +628,7 @@ EventDispatcher::handlePickupDroppedItem(const EventContext &context, std::share
                 GREEN);
 
             // Create pickup event
-            Event pickupEvent(Event::ITEM_PICKUP, context.clientData.clientId, pickupRequest);
+            Event pickupEvent(Event::ITEM_PICKUP, context.clientData.clientId, pickupRequest, context.timestamps);
             eventsBatch_.push_back(pickupEvent);
         }
         catch (const std::exception &e)
@@ -657,7 +658,7 @@ EventDispatcher::handleGetPlayerInventory(const EventContext &context, std::shar
             requestData["characterId"] = context.characterData.characterId;
 
             // Create get player inventory event
-            Event getInventoryEvent(Event::GET_PLAYER_INVENTORY, context.clientData.clientId, requestData);
+            Event getInventoryEvent(Event::GET_PLAYER_INVENTORY, context.clientData.clientId, requestData, context.timestamps);
             eventsBatch_.push_back(getInventoryEvent);
         }
         catch (const std::exception &e)
@@ -704,7 +705,7 @@ EventDispatcher::handleHarvestStart(const EventContext &context, std::shared_ptr
             harvestRequest.corpseUID = corpseUID;
 
             // Create harvest start event
-            Event harvestEvent(Event::HARVEST_START_REQUEST, context.clientData.clientId, harvestRequest);
+            Event harvestEvent(Event::HARVEST_START_REQUEST, context.clientData.clientId, harvestRequest, context.timestamps);
             eventsBatch_.push_back(harvestEvent);
             gameServices_.getLogger().log("Added HARVEST_START_REQUEST event to batch. Batch size: " + std::to_string(eventsBatch_.size()), GREEN);
         }
@@ -730,7 +731,7 @@ EventDispatcher::handleHarvestCancel(const EventContext &context, std::shared_pt
         try
         {
             // Create harvest cancel event
-            Event harvestCancelEvent(Event::HARVEST_CANCELLED, context.clientData.clientId, context.characterData);
+            Event harvestCancelEvent(Event::HARVEST_CANCELLED, context.clientData.clientId, context.characterData, context.timestamps);
             eventsBatch_.push_back(harvestCancelEvent);
         }
         catch (const std::exception &e)
@@ -751,7 +752,7 @@ EventDispatcher::handleGetNearbyCorpses(const EventContext &context, std::shared
         try
         {
             // Create get nearby corpses event
-            Event nearbyCorpsesEvent(Event::GET_NEARBY_CORPSES, context.clientData.clientId, context.characterData);
+            Event nearbyCorpsesEvent(Event::GET_NEARBY_CORPSES, context.clientData.clientId, context.characterData, context.timestamps);
             eventsBatch_.push_back(nearbyCorpsesEvent);
         }
         catch (const std::exception &e)
@@ -849,7 +850,7 @@ EventDispatcher::handleCorpseLootPickup(const EventContext &context, std::shared
             }
 
             // Create and queue the event
-            Event pickupEvent(Event::CORPSE_LOOT_PICKUP, context.clientData.clientId, pickupRequest);
+            Event pickupEvent(Event::CORPSE_LOOT_PICKUP, context.clientData.clientId, pickupRequest, context.timestamps);
             eventsBatch_.push_back(pickupEvent);
 
             gameServices_.getLogger().log("Created corpse loot pickup event for player " +
@@ -922,7 +923,7 @@ EventDispatcher::handleCorpseLootInspect(const EventContext &context, std::share
             }
 
             // Create and queue the event
-            Event inspectEvent(Event::CORPSE_LOOT_INSPECT, context.clientData.clientId, inspectRequest);
+            Event inspectEvent(Event::CORPSE_LOOT_INSPECT, context.clientData.clientId, inspectRequest, context.timestamps);
             eventsBatch_.push_back(inspectEvent);
 
             gameServices_.getLogger().log("Created corpse loot inspect event for player " +

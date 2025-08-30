@@ -45,6 +45,59 @@ class BaseEventHandler
     std::shared_ptr<boost::asio::ip::tcp::socket> getClientSocket(const Event &event);
 
     /**
+     * @brief Send error response to client with timestamps
+     *
+     * @param clientSocket Client socket to send response to
+     * @param message Error message
+     * @param eventType Type of event that failed
+     * @param clientId Client ID
+     * @param timestamps Lag compensation timestamps
+     * @param hash Authentication hash (optional)
+     */
+    void sendErrorResponseWithTimestamps(
+        std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+        const std::string &message,
+        const std::string &eventType,
+        int clientId,
+        const TimestampStruct &timestamps,
+        const std::string &hash = "");
+
+    /**
+     * @brief Send success response to client with timestamps
+     *
+     * @param clientSocket Client socket to send response to
+     * @param message Success message
+     * @param eventType Type of event that succeeded
+     * @param clientId Client ID
+     * @param timestamps Lag compensation timestamps
+     * @param bodyKey Key for response body (optional)
+     * @param bodyValue Value for response body (optional)
+     * @param hash Authentication hash (optional)
+     */
+    void sendSuccessResponseWithTimestamps(
+        std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+        const std::string &message,
+        const std::string &eventType,
+        int clientId,
+        const TimestampStruct &timestamps,
+        const std::string &bodyKey = "",
+        const nlohmann::json &bodyValue = nlohmann::json{},
+        const std::string &hash = "");
+
+    /**
+     * @brief Broadcast message to all connected clients with timestamps
+     *
+     * @param responseData JSON response data to broadcast
+     * @param timestamps Lag compensation timestamps
+     * @param excludeClientId Client ID to exclude from broadcast (optional)
+     */
+    void broadcastToAllClientsWithTimestamps(
+        const std::string &status,
+        const nlohmann::json &response,
+        const TimestampStruct &timestamps,
+        int excludeClientId = -1);
+
+    /**
      * @brief Send error response to client
      *
      * @param clientSocket Client socket to send response to

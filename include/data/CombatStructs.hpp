@@ -108,6 +108,8 @@ struct CombatActionStruct
     // Animation data
     std::string animationName; // Animation to play
     float animationDuration;   // Animation duration
+
+    TimestampStruct timestamps; // Lag compensation timestamps
 };
 
 /**
@@ -135,6 +137,8 @@ struct CombatResultStruct
 
     bool isDamaged; // Indicates if the target was damaged
     bool targetDied;
+
+    TimestampStruct timestamps; // Lag compensation timestamps
 };
 
 /**
@@ -161,6 +165,7 @@ struct CombatActionPacket
     CombatTargetType targetType; // Type of target
     int casterId;                // Who is performing the action
     int targetId;                // Who/what is being targeted
+    TimestampStruct timestamps;  // Lag compensation timestamps
 };
 
 /**

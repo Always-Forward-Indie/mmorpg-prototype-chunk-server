@@ -70,6 +70,7 @@ class Event
 
     Event() = default; // Default constructor
     Event(EventType type, int clientID, const EventData &data);
+    Event(EventType type, int clientID, const EventData &data, const TimestampStruct &timestamps);
 
     // Copy constructor with validation
     Event(const Event &other);
@@ -92,9 +93,12 @@ class Event
     int getClientID() const;
     // Get Event Type
     EventType getType() const;
+    // Get timestamps
+    const TimestampStruct &getTimestamps() const;
 
   private:
     int clientID;
     EventType type;
     EventData eventData;
+    TimestampStruct timestamps_;
 };

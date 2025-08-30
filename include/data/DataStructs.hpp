@@ -7,6 +7,18 @@
 #include <string>
 #include <vector>
 
+/**
+ * @brief Timestamp structure for lag compensation
+ * Contains timing information for client-server communication and request synchronization
+ */
+struct TimestampStruct
+{
+    long long serverRecvMs = 0;     // When server received the packet (milliseconds since epoch)
+    long long serverSendMs = 0;     // When server sends the response (milliseconds since epoch)
+    long long clientSendMsEcho = 0; // Echo of client timestamp from original request (milliseconds since epoch)
+    std::string requestId = "";     // Echo of client requestId for packet synchronization (format: sync_timestamp_session_sequence_hash)
+};
+
 struct PositionStruct
 {
     float positionX = 0;
@@ -20,12 +32,14 @@ struct MovementDataStruct
     int clientId = 0;
     int characterId = 0;
     PositionStruct position;
+    TimestampStruct timestamps; // Lag compensation timestamps
 };
 
 struct MessageStruct
 {
     std::string status = "";
     nlohmann::json message;
+    TimestampStruct timestamps; // Lag compensation timestamps
 };
 
 struct ChunkInfoStruct
@@ -139,22 +153,25 @@ struct CorpseLootPickupRequestStruct
     int playerId = 0;                                // Client-side player ID for verification
     int corpseUID = 0;                               // UID of the corpse to pickup from
     std::vector<std::pair<int, int>> requestedItems; // Vector of (itemId, quantity) pairs to pickup
+    TimestampStruct timestamps;                      // Lag compensation timestamps
 };
 
 // Structure for client request to get list of available loot in a corpse
 struct CorpseLootInspectRequestStruct
 {
-    int characterId = 0; // Server-side character ID from session
-    int playerId = 0;    // Client-side player ID for verification
-    int corpseUID = 0;   // UID of the corpse to inspect
+    int characterId = 0;        // Server-side character ID from session
+    int playerId = 0;           // Client-side player ID for verification
+    int corpseUID = 0;          // UID of the corpse to inspect
+    TimestampStruct timestamps; // Lag compensation timestamps
 };
 
 // Structure for harvest request from client
 struct HarvestRequestStruct
 {
-    int characterId = 0; // Server-side character ID from session
-    int playerId = 0;    // Client-side player ID for verification
-    int corpseUID = 0;   // UID of the corpse to harvest
+    int characterId = 0;        // Server-side character ID from session
+    int playerId = 0;           // Client-side player ID for verification
+    int corpseUID = 0;          // UID of the corpse to harvest
+    TimestampStruct timestamps; // Lag compensation timestamps
 };
 
 // Structure for harvest progress tracking
@@ -202,6 +219,7 @@ struct ItemPickupRequestStruct
     int playerId = 0;    // Client-side player ID for verification
     int droppedItemUID = 0;
     PositionStruct playerPosition;
+    TimestampStruct timestamps; // Lag compensation timestamps
 };
 
 struct CharacterDataStruct
@@ -228,6 +246,7 @@ struct ClientDataStruct
     int clientId = 0;
     std::string hash = "";
     int characterId = 0;
+    TimestampStruct timestamps; // Lag compensation timestamps
 };
 
 struct MobDataStruct
@@ -291,7 +310,8 @@ struct EventContext
     CharacterDataStruct characterData;
     PositionStruct positionData;
     MessageStruct messageStruct;
-    std::string fullMessage; // For storing the complete JSON message
+    std::string fullMessage;    // For storing the complete JSON message
+    TimestampStruct timestamps; // Lag compensation timestamps
 };
 
 struct EventDataStruct

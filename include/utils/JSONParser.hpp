@@ -26,4 +26,12 @@ class JSONParser
 
     // Combat system parsers
     nlohmann::json parseCombatActionData(const char *data, size_t length);
+
+    // Timestamp parsing for lag compensation
+    TimestampStruct parseTimestamps(const char *data, size_t length);
+    TimestampStruct parseTimestamps(const nlohmann::json &jsonData);
+
+    // RequestId parsing for packet synchronization
+    std::string parseRequestId(const char *data, size_t length);
+    std::string parseRequestId(const nlohmann::json &jsonData);
 };

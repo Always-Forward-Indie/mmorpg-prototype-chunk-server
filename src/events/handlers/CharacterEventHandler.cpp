@@ -1,5 +1,6 @@
 #include "events/handlers/CharacterEventHandler.hpp"
 #include "events/EventData.hpp"
+#include "utils/TimestampUtils.hpp"
 
 CharacterEventHandler::CharacterEventHandler(
     NetworkManager &networkManager,
@@ -46,6 +47,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
 {
     const auto &data = event.getData();
     int clientID = event.getClientID();
+    const auto &timestamps = event.getTimestamps();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
@@ -68,7 +70,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             // Validate authentication
             if (!validateCharacterAuthentication(clientID, characterData.characterId))
             {
-                sendErrorResponse(clientSocket, "Authentication failed for character!", "joinGameCharacter", clientID);
+                sendErrorResponseWithTimestamps(clientSocket, "Authentication failed for character!", "joinGameCharacter", clientID, timestamps);
                 return;
             }
 
@@ -78,11 +80,11 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                                                    .setHeader("hash", "")
                                                    .setHeader("clientId", clientID)
                                                    .setHeader("eventType", "joinGameCharacter")
+                                                   .setTimestamps(timestamps)
                                                    .setBody("character", characterJson)
                                                    .build();
 
-            std::string responseData = networkManager_.generateResponseMessage("success", broadcastResponse);
-            broadcastToAllClients(responseData); // This includes the sender, so no need for separate sendSuccessResponse
+            broadcastToAllClientsWithTimestamps("success", broadcastResponse, timestamps); // This includes the sender
         }
         else
         {
@@ -100,6 +102,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
 {
     const auto &data = event.getData();
     int clientID = event.getClientID();
+    const auto &timestamps = event.getTimestamps();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
@@ -120,7 +123,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
             // Validate authentication
             if (clientID == 0)
             {
-                sendErrorResponse(clientSocket, "Movement failed for character!", "moveCharacter", clientID);
+                sendErrorResponseWithTimestamps(clientSocket, "Movement failed for character!", "moveCharacter", clientID, timestamps);
                 return;
             }
 
@@ -130,15 +133,14 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                                                  .setHeader("hash", "")
                                                  .setHeader("clientId", clientID)
                                                  .setHeader("eventType", "moveCharacter")
+                                                 .setTimestamps(timestamps)
                                                  .setBody("character", characterJson)
                                                  .build();
 
-            std::string responseData = networkManager_.generateResponseMessage("success", successResponse);
-
             gameServices_.getLogger().log("Client data map size: " + std::to_string(gameServices_.getClientManager().getClientsList().size()));
 
-            // Broadcast to all clients
-            broadcastToAllClients(responseData);
+            // Broadcast to all clients with timestamps
+            broadcastToAllClientsWithTimestamps("success", successResponse, timestamps);
         }
         else
         {
@@ -160,6 +162,7 @@ CharacterEventHandler::handleGetConnectedCharactersEvent(const Event &event)
 {
     const auto &data = event.getData();
     int clientID = event.getClientID();
+    const auto &timestamps = event.getTimestamps();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
     try
@@ -180,11 +183,11 @@ CharacterEventHandler::handleGetConnectedCharactersEvent(const Event &event)
 
         if (clientID == 0)
         {
-            sendErrorResponse(clientSocket, "Getting connected characters failed!", "getConnectedCharacters", clientID);
+            sendErrorResponseWithTimestamps(clientSocket, "Getting connected characters failed!", "getConnectedCharacters", clientID, timestamps);
             return;
         }
 
-        sendSuccessResponse(clientSocket, "Getting connected characters success!", "getConnectedCharacters", clientID, "characters", charactersListJson);
+        sendSuccessResponseWithTimestamps(clientSocket, "Getting connected characters success!", "getConnectedCharacters", clientID, timestamps, "characters", charactersListJson);
     }
     catch (const std::bad_variant_access &ex)
     {

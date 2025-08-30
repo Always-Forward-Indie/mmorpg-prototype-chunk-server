@@ -30,13 +30,15 @@ ClientEventHandler::handlePingClientEvent(const Event &event)
     }
 
     const auto data = event.getData();
+    const TimestampStruct timestamps = event.getTimestamps();
 
     try
     {
         if (std::holds_alternative<ClientDataStruct>(data))
         {
-            sendSuccessResponse(clientSocket, "Pong!", "pingClient", clientID);
-            gameServices_.getLogger().log("Sending PING response to Client ID: " + std::to_string(clientID), GREEN);
+            const ClientDataStruct &clientData = std::get<ClientDataStruct>(data);
+            sendSuccessResponseWithTimestamps(clientSocket, "Pong!", "pingClient", clientID, timestamps, "", nlohmann::json{}, clientData.hash);
+            gameServices_.getLogger().log("Sending PING response with timestamps to Client ID: " + std::to_string(clientID), GREEN);
         }
         else
         {
@@ -55,6 +57,7 @@ ClientEventHandler::handleJoinClientEvent(const Event &event)
     const auto data = event.getData();
     int clientID = event.getClientID();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
+    const TimestampStruct timestamps = event.getTimestamps();
 
     try
     {
@@ -65,7 +68,7 @@ ClientEventHandler::handleJoinClientEvent(const Event &event)
             // Validate authentication
             if (!validateClientAuthentication(passedClientData))
             {
-                sendErrorResponse(clientSocket, "Authentication failed for user!", "joinGameClient", clientID, passedClientData.hash);
+                sendErrorResponseWithTimestamps(clientSocket, "Authentication failed for user!", "joinGameClient", clientID, timestamps, passedClientData.hash);
                 return;
             }
 
@@ -75,15 +78,16 @@ ClientEventHandler::handleJoinClientEvent(const Event &event)
             // Set client socket
             gameServices_.getClientManager().setClientSocket(clientID, clientSocket);
 
-            // Prepare success response and broadcast to all clients (including sender)
+            // Prepare success response and broadcast to all clients (including sender) with timestamps
             nlohmann::json broadcastResponse = ResponseBuilder()
                                                    .setHeader("message", "Authentication success for user!")
                                                    .setHeader("hash", passedClientData.hash)
                                                    .setHeader("clientId", passedClientData.clientId)
                                                    .setHeader("eventType", "joinGameClient")
+                                                   .setTimestamps(timestamps)
                                                    .build();
 
-            std::string responseData = networkManager_.generateResponseMessage("success", broadcastResponse);
+            std::string responseData = networkManager_.generateResponseMessage("success", broadcastResponse, timestamps);
             broadcastToAllClients(responseData); // This includes the sender, so no need for separate sendSuccessResponse
         }
         else
@@ -103,9 +107,18 @@ ClientEventHandler::handleGetConnectedClientsEvent(const Event &event)
     const auto &data = event.getData();
     int clientID = event.getClientID();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
+    const TimestampStruct timestamps = event.getTimestamps();
 
     try
     {
+        // Get client hash for response
+        std::string clientHash = "";
+        if (std::holds_alternative<ClientDataStruct>(data))
+        {
+            const ClientDataStruct &clientData = std::get<ClientDataStruct>(data);
+            clientHash = clientData.hash;
+        }
+
         // Get all connected clients
         std::vector<ClientDataStruct> clientsList;
         try
@@ -115,7 +128,7 @@ ClientEventHandler::handleGetConnectedClientsEvent(const Event &event)
         catch (const std::exception &ex)
         {
             gameServices_.getLogger().logError("Error getting client list in handleGetConnectedClientsEvent: " + std::string(ex.what()));
-            sendErrorResponse(clientSocket, "Getting connected clients failed!", "getConnectedClients", clientID);
+            sendErrorResponseWithTimestamps(clientSocket, "Getting connected clients failed!", "getConnectedClients", clientID, timestamps, clientHash);
             return;
         }
 
@@ -137,12 +150,12 @@ ClientEventHandler::handleGetConnectedClientsEvent(const Event &event)
         // Check if the authentication is not successful
         if (clientID == 0)
         {
-            sendErrorResponse(clientSocket, "Getting connected clients failed!", "getConnectedClients", clientID);
+            sendErrorResponseWithTimestamps(clientSocket, "Getting connected clients failed!", "getConnectedClients", clientID, timestamps, clientHash);
             return;
         }
 
-        // Send success response with clients list
-        sendSuccessResponse(clientSocket, "Getting connected clients success!", "getConnectedClients", clientID, "clientsList", clientsListJson);
+        // Send success response with clients list and timestamps
+        sendSuccessResponseWithTimestamps(clientSocket, "Getting connected clients success!", "getConnectedClients", clientID, timestamps, "clientsList", clientsListJson, clientHash);
     }
     catch (const std::bad_variant_access &ex)
     {

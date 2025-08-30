@@ -63,6 +63,7 @@ set(SOURCE_FILES
     src/utils/Logger.cpp
     src/utils/Config.cpp
     src/utils/TimeUtils.cpp
+    src/utils/TimestampUtils.cpp
     src/handlers/MessageHandler.cpp
     # ... other source files
 )
@@ -121,6 +122,7 @@ set(HEADER_FILES
     include/utils/TerminalColors.hpp
     include/utils/Config.hpp
     include/utils/TimeUtils.hpp
+    include/utils/TimestampUtils.hpp
     include/handlers/MessageHandler.hpp
     # ... other header files
 )

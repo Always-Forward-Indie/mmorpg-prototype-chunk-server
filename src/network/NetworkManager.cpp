@@ -1,6 +1,7 @@
 #include "network/NetworkManager.hpp"
 #include "events/EventDispatcher.hpp"
 #include "handlers/MessageHandler.hpp"
+#include "utils/TimestampUtils.hpp"
 
 NetworkManager::NetworkManager(
     GameServices &gameServices,
@@ -164,6 +165,28 @@ NetworkManager::generateResponseMessage(const std::string &status, const nlohman
 
     std::string responseString = response.dump();
     gameServices_.getLogger().log("Response generated: " + responseString, YELLOW);
+    return responseString + "\n";
+}
+
+std::string
+NetworkManager::generateResponseMessage(const std::string &status, const nlohmann::json &message, const TimestampStruct &timestamps)
+{
+    nlohmann::json response;
+    std::string currentTimestamp = gameServices_.getLogger().getCurrentTimestamp();
+    response["header"] = message["header"];
+    response["header"]["status"] = status;
+    response["header"]["timestamp"] = currentTimestamp;
+    response["header"]["version"] = "1.0";
+
+    // Add lag compensation timestamps to header
+    TimestampStruct finalTimestamps = timestamps;
+    TimestampUtils::setServerSendTimestamp(finalTimestamps); // Set serverSendMs to current time
+    TimestampUtils::addTimestampsToHeader(response, finalTimestamps);
+
+    response["body"] = message["body"];
+
+    std::string responseString = response.dump();
+    gameServices_.getLogger().log("Response with timestamps generated: " + responseString, YELLOW);
     return responseString + "\n";
 }
 

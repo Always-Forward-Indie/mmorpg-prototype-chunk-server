@@ -4,11 +4,14 @@
 Event::Event(EventType type, int clientID, const EventData &data)
     : type(type), clientID(clientID), eventData(data) {}
 
+Event::Event(EventType type, int clientID, const EventData &data, const TimestampStruct &timestamps)
+    : type(type), clientID(clientID), eventData(data), timestamps_(timestamps) {}
+
 Event::Event(const Event &other)
-    : type(other.type), clientID(other.clientID), eventData(other.eventData) {}
+    : type(other.type), clientID(other.clientID), eventData(other.eventData), timestamps_(other.timestamps_) {}
 
 Event::Event(Event &&other) noexcept
-    : type(other.type), clientID(other.clientID), eventData(std::move(other.eventData)) {}
+    : type(other.type), clientID(other.clientID), eventData(std::move(other.eventData)), timestamps_(other.timestamps_) {}
 
 Event &
 Event::operator=(const Event &other)
@@ -18,6 +21,7 @@ Event::operator=(const Event &other)
         type = other.type;
         clientID = other.clientID;
         eventData = other.eventData;
+        timestamps_ = other.timestamps_;
     }
     return *this;
 }
@@ -30,6 +34,7 @@ Event::operator=(Event &&other) noexcept
         type = other.type;
         clientID = other.clientID;
         eventData = std::move(other.eventData);
+        timestamps_ = other.timestamps_;
     }
     return *this;
 }
@@ -51,6 +56,13 @@ const EventData &
 Event::getData() const
 {
     return eventData;
+}
+
+// Getter for timestamps
+const TimestampStruct &
+Event::getTimestamps() const
+{
+    return timestamps_;
 }
 
 // Getter for type

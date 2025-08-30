@@ -1,4 +1,5 @@
 #include "utils/JSONParser.hpp"
+#include "utils/TimestampUtils.hpp"
 #include <iostream>
 
 JSONParser::JSONParser() {}
@@ -862,4 +863,168 @@ JSONParser::parseMobsSkillsMapping(const char *data, size_t length)
     }
 
     return mobsSkillsMapping;
+}
+
+TimestampStruct
+JSONParser::parseTimestamps(const char *data, size_t length)
+{
+    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    return parseTimestamps(jsonData);
+}
+
+TimestampStruct
+JSONParser::parseTimestamps(const nlohmann::json &jsonData)
+{
+    TimestampStruct timestamps;
+
+    try
+    {
+        // Try to parse from header first
+        if (jsonData.contains("header") && jsonData["header"].is_object())
+        {
+            const auto &header = jsonData["header"];
+
+            if (header.contains("serverRecvMs") && header["serverRecvMs"].is_number())
+            {
+                timestamps.serverRecvMs = header["serverRecvMs"].get<long long>();
+            }
+
+            if (header.contains("serverSendMs") && header["serverSendMs"].is_number())
+            {
+                timestamps.serverSendMs = header["serverSendMs"].get<long long>();
+            }
+
+            if (header.contains("clientSendMsEcho") && header["clientSendMsEcho"].is_number())
+            {
+                timestamps.clientSendMsEcho = header["clientSendMsEcho"].get<long long>();
+            }
+
+            // Also check for clientSendMs (from client request)
+            if (header.contains("clientSendMs") && header["clientSendMs"].is_number())
+            {
+                timestamps.clientSendMsEcho = header["clientSendMs"].get<long long>();
+            }
+
+            // Parse requestId from header
+            if (header.contains("requestId") && header["requestId"].is_string())
+            {
+                timestamps.requestId = header["requestId"].get<std::string>();
+            }
+        }
+
+        // Try to parse from body as fallback
+        if (jsonData.contains("body") && jsonData["body"].is_object())
+        {
+            const auto &body = jsonData["body"];
+
+            if (body.contains("serverRecvMs") && body["serverRecvMs"].is_number())
+            {
+                timestamps.serverRecvMs = body["serverRecvMs"].get<long long>();
+            }
+
+            if (body.contains("serverSendMs") && body["serverSendMs"].is_number())
+            {
+                timestamps.serverSendMs = body["serverSendMs"].get<long long>();
+            }
+
+            if (body.contains("clientSendMsEcho") && body["clientSendMsEcho"].is_number())
+            {
+                timestamps.clientSendMsEcho = body["clientSendMsEcho"].get<long long>();
+            }
+
+            if (body.contains("clientSendMs") && body["clientSendMs"].is_number())
+            {
+                timestamps.clientSendMsEcho = body["clientSendMs"].get<long long>();
+            }
+
+            // Parse requestId from body
+            if (body.contains("requestId") && body["requestId"].is_string())
+            {
+                timestamps.requestId = body["requestId"].get<std::string>();
+            }
+        }
+
+        // Try to parse from root level
+        if (jsonData.contains("serverRecvMs") && jsonData["serverRecvMs"].is_number())
+        {
+            timestamps.serverRecvMs = jsonData["serverRecvMs"].get<long long>();
+        }
+
+        if (jsonData.contains("serverSendMs") && jsonData["serverSendMs"].is_number())
+        {
+            timestamps.serverSendMs = jsonData["serverSendMs"].get<long long>();
+        }
+
+        if (jsonData.contains("clientSendMsEcho") && jsonData["clientSendMsEcho"].is_number())
+        {
+            timestamps.clientSendMsEcho = jsonData["clientSendMsEcho"].get<long long>();
+        }
+
+        if (jsonData.contains("clientSendMs") && jsonData["clientSendMs"].is_number())
+        {
+            timestamps.clientSendMsEcho = jsonData["clientSendMs"].get<long long>();
+        }
+
+        // Parse requestId from root level
+        if (jsonData.contains("requestId") && jsonData["requestId"].is_string())
+        {
+            timestamps.requestId = jsonData["requestId"].get<std::string>();
+        }
+    }
+    catch (const std::exception &e)
+    {
+        // Handle parsing error, return empty timestamps
+    }
+
+    return timestamps;
+}
+
+std::string
+JSONParser::parseRequestId(const char *data, size_t length)
+{
+    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    return parseRequestId(jsonData);
+}
+
+std::string
+JSONParser::parseRequestId(const nlohmann::json &jsonData)
+{
+    std::string requestId = "";
+
+    try
+    {
+        // Try to parse from header first
+        if (jsonData.contains("header") && jsonData["header"].is_object())
+        {
+            const auto &header = jsonData["header"];
+            if (header.contains("requestId") && header["requestId"].is_string())
+            {
+                requestId = header["requestId"].get<std::string>();
+                return requestId; // Return early if found in header
+            }
+        }
+
+        // Try to parse from body as fallback
+        if (jsonData.contains("body") && jsonData["body"].is_object())
+        {
+            const auto &body = jsonData["body"];
+            if (body.contains("requestId") && body["requestId"].is_string())
+            {
+                requestId = body["requestId"].get<std::string>();
+                return requestId; // Return early if found in body
+            }
+        }
+
+        // Try to parse from root level
+        if (jsonData.contains("requestId") && jsonData["requestId"].is_string())
+        {
+            requestId = jsonData["requestId"].get<std::string>();
+        }
+    }
+    catch (const std::exception &e)
+    {
+        // Handle parsing error, return empty string
+    }
+
+    return requestId;
 }

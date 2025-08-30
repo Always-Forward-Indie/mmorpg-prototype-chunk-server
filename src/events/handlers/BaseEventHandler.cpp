@@ -1,4 +1,5 @@
 #include "events/handlers/BaseEventHandler.hpp"
+#include "utils/TimestampUtils.hpp"
 #include <nlohmann/json.hpp>
 
 BaseEventHandler::BaseEventHandler(
@@ -136,6 +137,104 @@ BaseEventHandler::broadcastToAllClients(const std::string &responseData, int exc
     for (const auto &clientDataItem : clientDataMap)
     {
         // Skip excluded client
+        if (excludeClientId != -1 && clientDataItem.clientId == excludeClientId)
+        {
+            continue;
+        }
+
+        // Get socket for this client using ClientManager
+        auto itemSocket = gameServices_.getClientManager().getClientSocket(clientDataItem.clientId);
+
+        // Validate socket before using
+        if (itemSocket && itemSocket->is_open())
+        {
+            try
+            {
+                networkManager_.sendResponse(itemSocket, responseData);
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error broadcasting to client " +
+                                                   std::to_string(clientDataItem.clientId) + ": " + ex.what());
+            }
+        }
+    }
+}
+
+void
+BaseEventHandler::sendErrorResponseWithTimestamps(
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+    const std::string &message,
+    const std::string &eventType,
+    int clientId,
+    const TimestampStruct &timestamps,
+    const std::string &hash)
+{
+    if (!clientSocket || !clientSocket->is_open())
+    {
+        gameServices_.getLogger().logError("Cannot send error response: invalid or closed socket for client " + std::to_string(clientId));
+        return;
+    }
+
+    nlohmann::json response = ResponseBuilder()
+                                  .setHeader("message", message)
+                                  .setHeader("hash", hash)
+                                  .setHeader("clientId", clientId)
+                                  .setHeader("eventType", eventType)
+                                  .setTimestamps(timestamps)
+                                  .setBody("", "")
+                                  .build();
+
+    std::string errorData = networkManager_.generateResponseMessage("error", response, timestamps);
+    networkManager_.sendResponse(clientSocket, errorData);
+}
+
+void
+BaseEventHandler::sendSuccessResponseWithTimestamps(
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+    const std::string &message,
+    const std::string &eventType,
+    int clientId,
+    const TimestampStruct &timestamps,
+    const std::string &bodyKey,
+    const nlohmann::json &bodyValue,
+    const std::string &hash)
+{
+    if (!clientSocket || !clientSocket->is_open())
+    {
+        gameServices_.getLogger().logError("Cannot send success response: invalid or closed socket for client " + std::to_string(clientId));
+        return;
+    }
+
+    auto builder = ResponseBuilder()
+                       .setHeader("message", message)
+                       .setHeader("hash", hash)
+                       .setHeader("clientId", clientId)
+                       .setHeader("eventType", eventType)
+                       .setTimestamps(timestamps);
+
+    if (!bodyKey.empty())
+    {
+        builder.setBody(bodyKey, bodyValue);
+    }
+
+    nlohmann::json response = builder.build();
+    std::string successData = networkManager_.generateResponseMessage("success", response, timestamps);
+    networkManager_.sendResponse(clientSocket, successData);
+}
+
+void
+BaseEventHandler::broadcastToAllClientsWithTimestamps(
+    const std::string &status,
+    const nlohmann::json &response,
+    const TimestampStruct &timestamps,
+    int excludeClientId)
+{
+    std::string responseData = networkManager_.generateResponseMessage(status, response, timestamps);
+
+    auto clientsList = gameServices_.getClientManager().getClientsList();
+    for (const auto &clientDataItem : clientsList)
+    {
         if (excludeClientId != -1 && clientDataItem.clientId == excludeClientId)
         {
             continue;

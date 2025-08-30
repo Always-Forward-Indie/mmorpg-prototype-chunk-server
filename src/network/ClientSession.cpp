@@ -2,6 +2,7 @@
 #include "chunk_server/ChunkServer.hpp"
 #include "events/EventDispatcher.hpp"
 #include "handlers/MessageHandler.hpp"
+#include "utils/TimestampUtils.hpp"
 
 ClientSession::ClientSession(std::shared_ptr<boost::asio::ip::tcp::socket> socket,
     ChunkServer *chunkServer,
@@ -161,12 +162,17 @@ ClientSession::processMessage(const std::string &message)
             // Only process ping events for authenticated clients (clientId != 0)
             if (clientData.clientId != 0)
             {
+                // Parse timestamps for ping events to support lag compensation
+                TimestampStruct timestamps = jsonParser_.parseTimestamps(jsonData);
+                std::string requestId = jsonParser_.parseRequestId(jsonData);
+                TimestampStruct serverTimestamps = TimestampUtils::createReceiveTimestamp(timestamps.clientSendMsEcho, requestId);
+
                 // Create minimal context for ping events with properly initialized empty structs
                 CharacterDataStruct emptyCharacterData{};
                 PositionStruct emptyPositionData{};
                 MessageStruct emptyMessageData{};
 
-                EventContext pingContext{eventType, clientData, emptyCharacterData, emptyPositionData, emptyMessageData, message};
+                EventContext pingContext{eventType, clientData, emptyCharacterData, emptyPositionData, emptyMessageData, message, serverTimestamps};
                 eventDispatcher_.dispatch(pingContext, socket_);
             }
             else
@@ -181,8 +187,8 @@ ClientSession::processMessage(const std::string &message)
             return;
         }
 
-        // For non-ping events, do full parsing using MessageHandler
-        auto [fullEventType, clientData, characterData, positionData, messageStruct] = messageHandler_.parseMessage(message);
+        // For non-ping events, do full parsing using MessageHandler with timestamps
+        auto [fullEventType, clientData, characterData, positionData, messageStruct, timestamps] = messageHandler_.parseMessageWithTimestamps(message);
 
         // If client ID is not provided in the message (or is 0), try to look it up by socket
         if (clientData.clientId == 0 && socket_)
@@ -255,8 +261,8 @@ ClientSession::processMessage(const std::string &message)
             }
         }
 
-        // Create full context for non-ping events
-        EventContext context{fullEventType, clientData, characterData, positionData, messageStruct, message};
+        // Create full context for non-ping events with timestamps
+        EventContext context{fullEventType, clientData, characterData, positionData, messageStruct, message, timestamps};
         eventDispatcher_.dispatch(context, socket_);
     }
     catch (const nlohmann::json::parse_error &e)

@@ -57,6 +57,7 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
     const auto &data = event.getData();
     int clientID = event.getClientID();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
+    const TimestampStruct timestamps = event.getTimestamps();
 
     try
     {
@@ -79,21 +80,22 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
 
             if (clientID == 0)
             {
-                sendErrorResponse(clientSocket, "Spawning mobs failed!", "spawnMobsInZone", clientID);
+                sendErrorResponseWithTimestamps(clientSocket, "Spawning mobs failed!", "spawnMobsInZone", clientID, timestamps, "");
                 return;
             }
 
-            // Build success response
+            // Build success response with timestamps
             nlohmann::json response = ResponseBuilder()
                                           .setHeader("message", "Spawning mobs success!")
                                           .setHeader("hash", "")
                                           .setHeader("clientId", clientID)
                                           .setHeader("eventType", "spawnMobsInZone")
+                                          .setTimestamps(timestamps)
                                           .setBody("spawnZone", zoneJson)
                                           .setBody("mobs", mobsArray)
                                           .build();
 
-            std::string responseData = networkManager_.generateResponseMessage("success", response);
+            std::string responseData = networkManager_.generateResponseMessage("success", response, timestamps);
             networkManager_.sendResponse(clientSocket, responseData);
         }
         else
@@ -113,6 +115,7 @@ MobEventHandler::handleZoneMoveMobsEvent(const Event &event)
     const auto &data = event.getData();
     int clientID = event.getClientID();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
+    const TimestampStruct timestamps = event.getTimestamps();
 
     try
     {
@@ -141,17 +144,17 @@ MobEventHandler::handleZoneMoveMobsEvent(const Event &event)
         }
         else
         {
-            sendErrorResponse(clientSocket, "Invalid data type for zone move mobs!", "zoneMoveMobs", clientID);
+            sendErrorResponseWithTimestamps(clientSocket, "Invalid data type for zone move mobs!", "zoneMoveMobs", clientID, timestamps, "");
             return;
         }
 
         if (clientID == 0)
         {
-            sendErrorResponse(clientSocket, "Moving mobs failed!", "zoneMoveMobs", clientID);
+            sendErrorResponseWithTimestamps(clientSocket, "Moving mobs failed!", "zoneMoveMobs", clientID, timestamps, "");
             return;
         }
 
-        sendSuccessResponse(clientSocket, "Moving mobs success!", "zoneMoveMobs", clientID, "mobs", mobsArray);
+        sendSuccessResponseWithTimestamps(clientSocket, "Moving mobs success!", "zoneMoveMobs", clientID, timestamps, "mobs", mobsArray, "");
     }
     catch (const std::bad_variant_access &ex)
     {
