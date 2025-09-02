@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Event.hpp"
+#include "events/ExperienceEventHandler.hpp"
 #include "events/handlers/BaseEventHandler.hpp"
 #include "events/handlers/CharacterEventHandler.hpp"
 #include "events/handlers/ChunkEventHandler.hpp"
@@ -60,6 +61,12 @@ class EventHandler
     CombatEventHandler &getCombatEventHandler();
 
   private:
+    /**
+     * @brief Handle experience level table data from game server
+     * Sets up experience cache with level progression data
+     */
+    void handleSetExpLevelTableEvent(const Event &event);
+
     // Specialized event handlers for different event categories
     std::unique_ptr<ClientEventHandler> clientEventHandler_;
     std::unique_ptr<CharacterEventHandler> characterEventHandler_;
@@ -69,6 +76,7 @@ class EventHandler
     std::unique_ptr<CombatEventHandler> combatEventHandler_;
     std::unique_ptr<ItemEventHandler> itemEventHandler_;
     std::unique_ptr<HarvestEventHandler> harvestEventHandler_;
+    std::unique_ptr<ExperienceEventHandler> experienceEventHandler_;
 
     // References for logging and error handling
     GameServices &gameServices_;

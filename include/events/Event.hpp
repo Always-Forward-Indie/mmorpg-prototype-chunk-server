@@ -33,6 +33,7 @@ class Event
         SET_ALL_MOBS_SKILLS, // Event to set skills for all mobs
         SET_ALL_ITEMS_LIST,
         SET_MOB_LOOT_INFO,
+        SET_EXP_LEVEL_TABLE,
         SPAWN_MOBS_IN_ZONE,
         SPAWN_ZONE_MOVE_MOBS,
         MOVE_MOB,
@@ -65,7 +66,12 @@ class Event
         AI_ATTACK,
         ATTACK_TARGET_SELECTION,
         ATTACK_SEQUENCE_START,
-        ATTACK_SEQUENCE_COMPLETE
+        ATTACK_SEQUENCE_COMPLETE,
+        // Experience events
+        EXPERIENCE_GRANT,  // Grant experience to character
+        EXPERIENCE_REMOVE, // Remove experience from character
+        EXPERIENCE_UPDATE, // Update experience (broadcast to clients)
+        LEVEL_UP           // Level up event
     }; // Define more event types as needed
 
     Event() = default; // Default constructor

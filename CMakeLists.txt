@@ -37,6 +37,8 @@ set(SOURCE_FILES
     src/services/LootManager.cpp
     src/services/InventoryManager.cpp
     src/services/HarvestManager.cpp
+    src/services/ExperienceManager.cpp
+    src/services/ExperienceCacheManager.cpp
     src/services/ClientManager.cpp
     src/network/GameServerWorker.cpp
     src/network/NetworkManager.cpp
@@ -54,6 +56,7 @@ set(SOURCE_FILES
     src/events/handlers/CombatEventHandler.cpp
     src/events/handlers/ItemEventHandler.cpp
     src/events/handlers/HarvestEventHandler.cpp
+    src/events/ExperienceEventHandler.cpp
     src/data/AttackSystem.cpp
     src/utils/Scheduler.cpp
     src/utils/ThreadPool.cpp
@@ -88,6 +91,7 @@ set(HEADER_FILES
     include/services/LootManager.hpp
     include/services/InventoryManager.hpp
     include/services/HarvestManager.hpp
+    include/services/ExperienceManager.hpp
     include/services/ClientManager.hpp
     include/services/GameServices.hpp
     include/network/GameServerWorker.hpp
@@ -107,6 +111,7 @@ set(HEADER_FILES
     include/events/handlers/CombatEventHandler.hpp
     include/events/handlers/ItemEventHandler.hpp
     include/events/handlers/HarvestEventHandler.hpp
+    include/events/ExperienceEventHandler.hpp
     include/data/DataStructs.hpp
     include/data/SkillStructs.hpp
     include/data/SpecialStructs.hpp

@@ -265,6 +265,8 @@ struct MobDataStruct
     std::vector<MobAttributeStruct> attributes;
     std::vector<SkillStruct> skills;
     PositionStruct position;
+    int baseExperience = 0;
+    int radius = 0;
     bool isAggressive = false;
     bool isDead = false;
 
@@ -524,5 +526,106 @@ struct ZoneBounds
             closest.positionY = maxY;
 
         return closest;
+    }
+};
+
+// ============= EXPERIENCE SYSTEM STRUCTURES =============
+
+/**
+ * @brief Структура для данных о получении/потере опыта
+ */
+struct ExperienceEventStruct
+{
+    int characterId = 0;
+    int experienceChange = 0; // Положительное значение - получение, отрицательное - потеря
+    int oldExperience = 0;
+    int newExperience = 0;
+    int oldLevel = 0;
+    int newLevel = 0;
+    int expForCurrentLevel = 0; // Опыт требуемый для текущего уровня
+    int expForNextLevel = 0;    // Опыт требуемый для следующего уровня
+    std::string reason = "";    // Причина получения/потери опыта (например "mob_kill", "death_penalty")
+    int sourceId = 0;           // ID источника опыта (например ID убитого моба)
+    TimestampStruct timestamps; // Временные метки
+};
+
+/**
+ * @brief Структура для запроса опыта с клиента (обычно не используется, но может пригодиться)
+ */
+struct ExperienceRequestStruct
+{
+    int characterId = 0;
+    int playerId = 0; // Клиентский ID для верификации
+    TimestampStruct timestamps;
+};
+
+/**
+ * @brief Результат начисления опыта
+ */
+struct ExperienceGrantResult
+{
+    bool success = false;
+    std::string errorMessage = "";
+    ExperienceEventStruct experienceEvent;
+    bool levelUp = false;
+    std::vector<std::string> newAbilities; // Новые способности или скиллы при повышении уровня
+};
+
+/**
+ * @brief Запись таблицы опыта для конкретного уровня
+ */
+struct ExperienceLevelEntry
+{
+    int level = 0;
+    int experiencePoints = 0;
+};
+
+/**
+ * @brief Таблица опыта, кешируемая на чанк-сервере
+ */
+struct ExperienceLevelTable
+{
+    std::vector<ExperienceLevelEntry> levels;
+    bool isLoaded = false;
+    std::chrono::system_clock::time_point lastUpdated;
+
+    /**
+     * @brief Получить опыт для указанного уровня
+     */
+    int getExperienceForLevel(int level) const
+    {
+        for (const auto &entry : levels)
+        {
+            if (entry.level == level)
+            {
+                return entry.experiencePoints;
+            }
+        }
+        return 0; // Если уровень не найден
+    }
+
+    /**
+     * @brief Получить максимальный уровень в таблице
+     */
+    int getMaxLevel() const
+    {
+        int maxLevel = 0;
+        for (const auto &entry : levels)
+        {
+            if (entry.level > maxLevel)
+            {
+                maxLevel = entry.level;
+            }
+        }
+        return maxLevel;
+    }
+
+    /**
+     * @brief Очистить таблицу
+     */
+    void clear()
+    {
+        levels.clear();
+        isLoaded = false;
     }
 };

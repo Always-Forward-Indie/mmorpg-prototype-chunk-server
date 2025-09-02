@@ -71,7 +71,6 @@ GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endpoints
 
                 sendDataToGameServer(handshakeMessage);
 
-
                 receiveDataFromGameServer(); // Receive data from the Game Server
             } else {
                 logger_.logError("Error connecting to the Game Server: " + ec.message());
@@ -217,6 +216,14 @@ GameServerWorker::processGameServerData(const std::array<char, 12096> &buffer, s
         std::vector<MobLootInfoStruct> mobLootInfo = jsonParser_.parseMobLootInfo(buffer.data(), bytes_transferred);
         Event setMobLootInfoEvent(Event::SET_MOB_LOOT_INFO, clientData.clientId, mobLootInfo);
         eventsBatch.push_back(setMobLootInfoEvent);
+    }
+
+    if (eventType == "getExpLevelTable")
+    {
+        // Parse experience level table from the Game Server
+        std::vector<ExperienceLevelEntry> expLevelTable = jsonParser_.parseExpLevelTable(buffer.data(), bytes_transferred);
+        Event setExpLevelTableEvent(Event::SET_EXP_LEVEL_TABLE, clientData.clientId, expLevelTable);
+        eventsBatch.push_back(setExpLevelTableEvent);
     }
 
     // Push batched events to the event queue

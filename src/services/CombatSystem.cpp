@@ -20,6 +20,19 @@ void
 CombatSystem::setBroadcastCallback(std::function<void(const nlohmann::json &)> callback)
 {
     broadcastCallback_ = callback;
+    // Также настраиваем callback для ExperienceManager
+    setupExperienceCallbacks();
+}
+
+void
+CombatSystem::setupExperienceCallbacks()
+{
+    if (broadcastCallback_)
+    {
+        auto &experienceManager = gameServices_->getExperienceManager();
+        experienceManager.setExperiencePacketCallback(broadcastCallback_);
+        experienceManager.setStatsUpdatePacketCallback(broadcastCallback_);
+    }
 }
 
 SkillInitiationResult
@@ -220,7 +233,8 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
 
                     if (updateResult.mobDied)
                     {
-                        handleTargetDeath(targetId, targetType);
+                        // Используем новую функцию handleMobDeath с указанием убийцы
+                        handleMobDeath(targetId, casterId);
                     }
                     else
                     {
@@ -264,17 +278,28 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             }
         }
 
-        // Убеждаемся, что finalTargetMana установлена для мобов в любом случае
-        if (targetType == CombatTargetType::MOB && result.finalTargetMana == 0 && skillResult.damageResult.totalDamage == 0 && skillResult.healAmount == 0)
+        // Убеждаемся, что finalTargetHealth и finalTargetMana установлены в любом случае
+        // Это важно для случаев когда атака промахивается (isMissed = true)
+        if (result.finalTargetHealth == 0 && result.finalTargetMana == 0)
         {
             try
             {
-                auto mobData = gameServices_->getMobInstanceManager().getMobInstance(targetId);
-                result.finalTargetMana = mobData.currentMana;
+                if (targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF)
+                {
+                    auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
+                    result.finalTargetHealth = targetData.characterCurrentHealth;
+                    result.finalTargetMana = targetData.characterCurrentMana;
+                }
+                else if (targetType == CombatTargetType::MOB)
+                {
+                    auto mobData = gameServices_->getMobInstanceManager().getMobInstance(targetId);
+                    result.finalTargetHealth = mobData.currentHealth;
+                    result.finalTargetMana = mobData.currentMana;
+                }
             }
             catch (const std::exception &e)
             {
-                gameServices_->getLogger().logError("Error getting mob mana for result: " + std::string(e.what()));
+                gameServices_->getLogger().logError("Error getting target health/mana for result: " + std::string(e.what()));
             }
         }
 
@@ -474,13 +499,94 @@ CombatSystem::handleTargetDeath(int targetId, CombatTargetType targetType)
 {
     if (targetType == CombatTargetType::PLAYER)
     {
-        // TODO: Логика смерти игрока
-        gameServices_->getLogger().log("Player " + std::to_string(targetId) + " died");
+        // Логика смерти игрока - отнимаем опыт
+        try
+        {
+            auto &experienceManager = gameServices_->getExperienceManager();
+            auto characterData = gameServices_->getCharacterManager().getCharacterData(targetId);
+
+            int penaltyAmount = experienceManager.calculateDeathPenalty(characterData.characterLevel, characterData.characterExperiencePoints);
+
+            if (penaltyAmount > 0)
+            {
+                auto result = experienceManager.removeExperience(targetId, penaltyAmount, "death_penalty");
+                gameServices_->getLogger().log("Player " + std::to_string(targetId) + " died and lost " +
+                                               std::to_string(penaltyAmount) + " experience");
+            }
+            else
+            {
+                gameServices_->getLogger().log("Player " + std::to_string(targetId) + " died but no experience was lost");
+            }
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_->getLogger().logError("Error handling player death experience penalty: " + std::string(e.what()));
+        }
     }
     else if (targetType == CombatTargetType::MOB)
     {
-        // TODO: Логика смерти моба (лут, опыт и т.д.)
+        // Логика смерти моба - начисляем опыт убийце
         gameServices_->getLogger().log("Mob " + std::to_string(targetId) + " died");
+
+        // Найти кто убил моба (это должно передаваться отдельно, но пока используем последнего атаковавшего)
+        // В будущем можно добавить систему threat/aggro для определения убийцы
+        // Пока что эта логика будет вызываться из executeSkillUsage с передачей ID атакующего
+    }
+}
+
+void
+CombatSystem::handleMobDeath(int mobId, int killerId)
+{
+    try
+    {
+        // Получаем данные моба для расчета опыта
+        auto mobData = gameServices_->getMobInstanceManager().getMobInstance(mobId);
+        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " (level " + std::to_string(mobData.level) + ") was killed by " + std::to_string(killerId));
+
+        // Начисляем опыт убийце, если он является персонажем игрока
+        try
+        {
+            auto killerData = gameServices_->getCharacterManager().getCharacterData(killerId);
+            auto &experienceManager = gameServices_->getExperienceManager();
+
+            // Вычисляем количество опыта за убийство моба
+            int expAmount = experienceManager.calculateMobExperience(mobData.level, killerData.characterLevel, mobData.baseExperience);
+
+            if (expAmount > 0)
+            {
+                auto result = experienceManager.grantExperience(killerId, expAmount, "mob_kill", mobId);
+
+                if (result.success)
+                {
+                    gameServices_->getLogger().log("Character " + std::to_string(killerId) +
+                                                   " gained " + std::to_string(expAmount) +
+                                                   " experience for killing mob " + std::to_string(mobId));
+
+                    if (result.levelUp)
+                    {
+                        gameServices_->getLogger().log("Character " + std::to_string(killerId) +
+                                                           " leveled up to level " + std::to_string(result.experienceEvent.newLevel),
+                            CYAN);
+                    }
+                }
+                else
+                {
+                    gameServices_->getLogger().logError("Failed to grant experience: " + result.errorMessage);
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            // Убийца не является персонажем игрока (возможно, моб убил моба)
+            gameServices_->getLogger().log("Killer " + std::to_string(killerId) + " is not a player character, no experience granted");
+        }
+
+        // Вызываем общую логику смерти цели (для совместимости)
+        handleTargetDeath(mobId, CombatTargetType::MOB);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_->getLogger().logError("Error handling mob death: " + std::string(e.what()));
     }
 }
 
@@ -624,6 +730,22 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId)
                 catch (const std::exception &e)
                 {
                     gameServices_->getLogger().logError("Error applying damage to player: " + std::string(e.what()));
+                }
+            }
+
+            // Убеждаемся, что finalTargetHealth и finalTargetMana установлены в любом случае
+            // Это важно для случаев когда атака промахивается (isMissed = true)
+            if (result.finalTargetHealth == 0 && result.finalTargetMana == 0)
+            {
+                try
+                {
+                    auto targetData = gameServices_->getCharacterManager().getCharacterData(targetPlayer.characterId);
+                    result.finalTargetHealth = targetData.characterCurrentHealth;
+                    result.finalTargetMana = targetData.characterCurrentMana;
+                }
+                catch (const std::exception &e)
+                {
+                    gameServices_->getLogger().logError("Error getting target health/mana for AI attack result: " + std::string(e.what()));
                 }
             }
 

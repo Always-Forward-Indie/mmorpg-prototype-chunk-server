@@ -75,6 +75,9 @@ using EventData = std::variant<
     HarvestableCorpseStruct,
     CorpseLootPickupRequestStruct,
     CorpseLootInspectRequestStruct,
+    ExperienceEventStruct,
+    ExperienceGrantResult,
+    ExperienceLevelEntry,
     std::pair<int, int>, // For mob death events (mobUID, zoneId)
     std::vector<MobDataStruct>,
     std::vector<SpawnZoneStruct>,
@@ -88,5 +91,6 @@ using EventData = std::variant<
     std::vector<HarvestProgressStruct>,
     std::vector<ClientDataStruct>,
     std::vector<TargetCandidate>,
+    std::vector<ExperienceLevelEntry>,
     std::vector<std::pair<int, std::vector<SkillStruct>>> // For mob skills mapping (mobId -> skills)
     >;

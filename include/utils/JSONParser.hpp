@@ -24,6 +24,9 @@ class JSONParser
     std::vector<ItemDataStruct> parseItemsList(const char *data, size_t length);
     std::vector<MobLootInfoStruct> parseMobLootInfo(const char *data, size_t length);
 
+    // Experience system parsers
+    std::vector<ExperienceLevelEntry> parseExpLevelTable(const char *data, size_t length);
+
     // Combat system parsers
     nlohmann::json parseCombatActionData(const char *data, size_t length);
 

@@ -57,6 +57,11 @@ class CombatSystem
     void setBroadcastCallback(std::function<void(const nlohmann::json &)> callback);
 
     /**
+     * @brief Установить callback для отправки пакетов опыта
+     */
+    void setupExperienceCallbacks();
+
+    /**
      * @brief Получить доступные цели для атаки
      */
     std::vector<int> getAvailableTargets(int attackerId, const SkillStruct &skill);
@@ -81,6 +86,11 @@ class CombatSystem
      * @brief Обработать смерть цели
      */
     void handleTargetDeath(int targetId, CombatTargetType targetType);
+
+    /**
+     * @brief Обработать смерть моба с указанием убийцы
+     */
+    void handleMobDeath(int mobId, int killerId);
 
     /**
      * @brief Обработать аггро мобов

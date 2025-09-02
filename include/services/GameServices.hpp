@@ -2,6 +2,8 @@
 #include "services/CharacterManager.hpp"
 #include "services/ChunkManager.hpp"
 #include "services/ClientManager.hpp"
+#include "services/ExperienceCacheManager.hpp"
+#include "services/ExperienceManager.hpp"
 #include "services/HarvestManager.hpp"
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
@@ -31,7 +33,9 @@ class GameServices
           lootManager_(itemManager_, logger_),
           inventoryManager_(itemManager_, logger_),
           harvestManager_(itemManager_, logger_),
-          skillManager_(this)
+          skillManager_(this),
+          experienceManager_(this),
+          experienceCacheManager_(this)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
@@ -95,6 +99,14 @@ class GameServices
     {
         return skillManager_;
     }
+    ExperienceManager &getExperienceManager()
+    {
+        return experienceManager_;
+    }
+    ExperienceCacheManager &getExperienceCacheManager()
+    {
+        return experienceCacheManager_;
+    }
 
   private:
     Logger &logger_;
@@ -110,4 +122,6 @@ class GameServices
     InventoryManager inventoryManager_;
     HarvestManager harvestManager_;
     SkillManager skillManager_;
+    ExperienceManager experienceManager_;
+    ExperienceCacheManager experienceCacheManager_;
 };

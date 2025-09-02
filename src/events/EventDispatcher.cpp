@@ -77,6 +77,10 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleCorpseLootInspect(context, socket);
     }
+    else if (context.eventType == "getCharacterExperience")
+    {
+        handleGetCharacterExperience(context, socket);
+    }
     else
     {
         gameServices_.getLogger().logError("Unknown event type: " + context.eventType, RED);
@@ -934,6 +938,88 @@ EventDispatcher::handleCorpseLootInspect(const EventContext &context, std::share
         catch (const std::exception &e)
         {
             gameServices_.getLogger().logError("Error creating corpse loot inspect event: " + std::string(e.what()), RED);
+        }
+    }
+}
+
+void
+EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    try
+    {
+        gameServices_.getLogger().log("EventDispatcher handleGetCharacterExperience called", GREEN);
+
+        // Get character data
+        auto characterData = gameServices_.getCharacterManager().getCharacterData(context.characterData.characterId);
+        auto &experienceManager = gameServices_.getExperienceManager();
+
+        // Build response packet
+        nlohmann::json response;
+        response["header"]["event"] = "characterExperience";
+        response["header"]["status"] = "success";
+        response["header"]["timestamp"] = context.timestamps.serverSendMs;
+        response["header"]["requestId"] = context.timestamps.requestId;
+
+        // Character experience data
+        response["body"]["characterId"] = characterData.characterId;
+        response["body"]["currentLevel"] = characterData.characterLevel;
+        response["body"]["currentExperience"] = characterData.characterExperiencePoints;
+        response["body"]["expForCurrentLevel"] = (characterData.characterLevel > 1) ? experienceManager.getExperienceForLevel(characterData.characterLevel - 1) : 0;
+        response["body"]["expForNextLevel"] = experienceManager.getExperienceForNextLevel(characterData.characterLevel);
+
+        // Calculate experience progress within current level
+        int expForCurrentLevel = (characterData.characterLevel > 1) ? experienceManager.getExperienceForLevel(characterData.characterLevel - 1) : 0;
+        int expForNextLevel = experienceManager.getExperienceForNextLevel(characterData.characterLevel);
+        int expInCurrentLevel = characterData.characterExperiencePoints - expForCurrentLevel;
+        int expNeededForNextLevel = expForNextLevel - expForCurrentLevel;
+
+        response["body"]["expInCurrentLevel"] = expInCurrentLevel;
+        response["body"]["expNeededForNextLevel"] = expNeededForNextLevel;
+        response["body"]["progressToNextLevel"] = (expNeededForNextLevel > 0) ? static_cast<double>(expInCurrentLevel) / static_cast<double>(expNeededForNextLevel) : 1.0;
+
+        // Timestamps
+        response["timestamps"]["serverRecvMs"] = context.timestamps.serverRecvMs;
+        response["timestamps"]["serverSendMs"] = context.timestamps.serverSendMs;
+        response["timestamps"]["clientSendMsEcho"] = context.timestamps.clientSendMsEcho;
+        response["timestamps"]["requestId"] = context.timestamps.requestId;
+
+        // Send response to client
+        if (socket && socket->is_open())
+        {
+            std::string responseStr = response.dump();
+            boost::asio::async_write(*socket, boost::asio::buffer(responseStr), [this, socket](boost::system::error_code ec, std::size_t /*length*/)
+                {
+                    if (ec)
+                    {
+                        gameServices_.getLogger().logError("Error sending character experience response: " + ec.message());
+                    } });
+        }
+
+        gameServices_.getLogger().log("Sent character experience data for character " +
+                                          std::to_string(characterData.characterId),
+            GREEN);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error handling get character experience: " + std::string(e.what()));
+
+        // Send error response
+        nlohmann::json errorResponse;
+        errorResponse["header"]["event"] = "characterExperience";
+        errorResponse["header"]["status"] = "error";
+        errorResponse["header"]["message"] = std::string(e.what());
+        errorResponse["header"]["timestamp"] = context.timestamps.serverSendMs;
+        errorResponse["header"]["requestId"] = context.timestamps.requestId;
+
+        if (socket && socket->is_open())
+        {
+            std::string responseStr = errorResponse.dump();
+            boost::asio::async_write(*socket, boost::asio::buffer(responseStr), [this](boost::system::error_code ec, std::size_t /*length*/)
+                {
+                    if (ec)
+                    {
+                        gameServices_.getLogger().logError("Error sending character experience error response: " + ec.message());
+                    } });
         }
     }
 }

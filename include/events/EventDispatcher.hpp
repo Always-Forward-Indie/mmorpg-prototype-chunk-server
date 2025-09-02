@@ -27,6 +27,7 @@ class EventDispatcher
     void handleGetNearbyCorpses(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleCorpseLootPickup(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleCorpseLootInspect(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleGetCharacterExperience(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;

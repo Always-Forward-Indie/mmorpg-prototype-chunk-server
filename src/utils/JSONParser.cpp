@@ -104,6 +104,16 @@ JSONParser::parseCharacterData(const char *data, size_t length)
                 attributeData.value = attribute["value"].get<int>();
             }
             characterData.attributes.push_back(attributeData);
+
+            // Используем атрибуты для установки максимального здоровья и маны если основные поля неправильные
+            if (attributeData.slug == "max_health" && characterData.characterMaxHealth <= 0)
+            {
+                characterData.characterMaxHealth = attributeData.value;
+            }
+            else if (attributeData.slug == "max_mana" && characterData.characterMaxMana <= 0)
+            {
+                characterData.characterMaxMana = attributeData.value;
+            }
         }
     }
 
@@ -497,6 +507,14 @@ JSONParser::parseMobsList(const char *data, size_t length)
             if (mob.contains("maxHealth") && mob["maxHealth"].is_number_integer())
             {
                 mobData.maxHealth = mob["maxHealth"].get<int>();
+            }
+            if (mob.contains("baseExperience") && mob["baseExperience"].is_number_integer())
+            {
+                mobData.baseExperience = mob["baseExperience"].get<int>();
+            }
+            if (mob.contains("radius") && mob["radius"].is_number_integer())
+            {
+                mobData.radius = mob["radius"].get<int>();
             }
             if (mob.contains("posX") && (mob["posX"].is_number_float() || mob["posX"].is_number_integer()))
             {
@@ -1027,4 +1045,50 @@ JSONParser::parseRequestId(const nlohmann::json &jsonData)
     }
 
     return requestId;
+}
+
+std::vector<ExperienceLevelEntry>
+JSONParser::parseExpLevelTable(const char *data, size_t length)
+{
+    std::vector<ExperienceLevelEntry> expLevelTable;
+
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+
+        // Проверяем наличие массива таблицы опыта в body
+        if (jsonData.contains("body") && jsonData["body"].is_object() &&
+            jsonData["body"].contains("expLevelTable") && jsonData["body"]["expLevelTable"].is_array())
+        {
+            auto expTableArray = jsonData["body"]["expLevelTable"];
+
+            for (const auto &entryJson : expTableArray)
+            {
+                ExperienceLevelEntry entry;
+
+                if (entryJson.contains("level") && entryJson["level"].is_number_integer())
+                {
+                    entry.level = entryJson["level"].get<int>();
+                }
+
+                if (entryJson.contains("experiencePoints") && entryJson["experiencePoints"].is_number_integer())
+                {
+                    entry.experiencePoints = entryJson["experiencePoints"].get<int>();
+                }
+
+                // Добавляем запись только если у неё есть правильные данные
+                if (entry.level > 0 && entry.experiencePoints >= 0)
+                {
+                    expLevelTable.push_back(entry);
+                }
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        // Handle parsing error, return empty vector
+        expLevelTable.clear();
+    }
+
+    return expLevelTable;
 }

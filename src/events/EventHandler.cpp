@@ -17,6 +17,7 @@ EventHandler::EventHandler(
     combatEventHandler_ = std::make_unique<CombatEventHandler>(networkManager, gameServerWorker, gameServices);
     itemEventHandler_ = std::make_unique<ItemEventHandler>(networkManager, gameServerWorker, gameServices);
     harvestEventHandler_ = std::make_unique<HarvestEventHandler>(networkManager, gameServerWorker, gameServices);
+    experienceEventHandler_ = std::make_unique<ExperienceEventHandler>(networkManager, gameServerWorker, gameServices);
 }
 
 void
@@ -99,6 +100,9 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::SET_MOB_LOOT_INFO:
             itemEventHandler_->handleSetMobLootInfoEvent(event);
+            break;
+        case Event::SET_EXP_LEVEL_TABLE:
+            handleSetExpLevelTableEvent(event);
             break;
         case Event::ITEM_DROP:
             itemEventHandler_->handleItemDropEvent(event);
@@ -200,6 +204,20 @@ EventHandler::dispatchEvent(const Event &event)
             // TODO: Implement attack sequence completion
             break;
 
+        // Experience Events
+        case Event::EXPERIENCE_GRANT:
+            experienceEventHandler_->handleExperienceGrantEvent(event);
+            break;
+        case Event::EXPERIENCE_REMOVE:
+            experienceEventHandler_->handleExperienceRemoveEvent(event);
+            break;
+        case Event::EXPERIENCE_UPDATE:
+            experienceEventHandler_->handleExperienceUpdateEvent(event);
+            break;
+        case Event::LEVEL_UP:
+            experienceEventHandler_->handleLevelUpEvent(event);
+            break;
+
         // Legacy events that might not have direct mapping
         case Event::LEAVE_GAME_CLIENT:
             clientEventHandler_->handleDisconnectClientEvent(event);
@@ -223,4 +241,37 @@ CombatEventHandler &
 EventHandler::getCombatEventHandler()
 {
     return *combatEventHandler_;
+}
+
+void
+EventHandler::handleSetExpLevelTableEvent(const Event &event)
+{
+    try
+    {
+        gameServices_.getLogger().log("Processing SET_EXP_LEVEL_TABLE event", CYAN);
+
+        const auto &data = event.getData();
+
+        if (std::holds_alternative<std::vector<ExperienceLevelEntry>>(data))
+        {
+            std::vector<ExperienceLevelEntry> expLevelTable = std::get<std::vector<ExperienceLevelEntry>>(data);
+
+            gameServices_.getLogger().log("Received experience level table with " +
+                                              std::to_string(expLevelTable.size()) + " entries",
+                GREEN);
+
+            // Передаем данные в ExperienceCacheManager
+            gameServices_.getExperienceCacheManager().setExperienceTable(expLevelTable);
+
+            gameServices_.getLogger().log("Experience level table successfully loaded into cache", GREEN);
+        }
+        else
+        {
+            gameServices_.getLogger().logError("Invalid data type in SET_EXP_LEVEL_TABLE event");
+        }
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_EXP_LEVEL_TABLE event: " + std::string(e.what()));
+    }
 }
