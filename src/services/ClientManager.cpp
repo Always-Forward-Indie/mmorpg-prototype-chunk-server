@@ -33,7 +33,26 @@ ClientManager::loadClientData(ClientDataStruct clientData)
     try
     {
         std::unique_lock<std::shared_mutex> lock(mutex_);
+
+        // Check if client already exists to avoid duplicates
+        for (auto &existingClient : clientsList_)
+        {
+            if (existingClient.clientId == clientData.clientId)
+            {
+                // Update existing client data, preserve characterId if already set
+                if (existingClient.characterId == 0 && clientData.characterId != 0)
+                {
+                    existingClient.characterId = clientData.characterId;
+                }
+                existingClient.hash = clientData.hash;
+                logger_.log("Updated existing client ID: " + std::to_string(clientData.clientId));
+                return;
+            }
+        }
+
+        // Client doesn't exist, add new one
         clientsList_.push_back(clientData);
+        logger_.log("Added new client ID: " + std::to_string(clientData.clientId));
     }
     catch (const std::exception &e)
     {
@@ -157,7 +176,14 @@ ClientManager::setClientCharacterId(int clientID, int characterId)
             return;
         }
     }
-    logger_.logError("Client ID " + std::to_string(clientID) + " not found when setting character ID");
+
+    // Client not found, create a minimal client entry
+    logger_.log("Client ID " + std::to_string(clientID) + " not found, creating minimal client entry for character ID: " + std::to_string(characterId));
+    ClientDataStruct newClient;
+    newClient.clientId = clientID;
+    newClient.characterId = characterId;
+    clientsList_.push_back(newClient);
+    logger_.log("Created and set character ID " + std::to_string(characterId) + " for new client ID: " + std::to_string(clientID));
 }
 
 // remove client by ID

@@ -19,13 +19,16 @@ CharacterEventHandler::validateCharacterAuthentication(int clientId, int charact
 nlohmann::json
 CharacterEventHandler::characterToJson(const CharacterDataStruct &characterData)
 {
+    // Получаем опыт для текущего уровня (предыдущего порога)
+    int expForCurrentLevel = gameServices_.getExperienceManager().getExperienceForLevel(characterData.characterLevel);
+
     nlohmann::json characterJson = {
         {"id", characterData.characterId},
         {"name", characterData.characterName},
         {"class", characterData.characterClass},
         {"race", characterData.characterRace},
         {"level", characterData.characterLevel},
-        {"exp", {{"current", characterData.characterExperiencePoints}, {"nextLevel", characterData.expForNextLevel}}},
+        {"exp", {{"current", characterData.characterExperiencePoints}, {"levelStart", expForCurrentLevel}, {"levelEnd", characterData.expForNextLevel}}},
         {"stats", {{"health", {{"current", characterData.characterCurrentHealth}, {"max", characterData.characterMaxHealth}}}, {"mana", {{"current", characterData.characterCurrentMana}, {"max", characterData.characterMaxMana}}}}},
         {"position", {{"x", characterData.characterPosition.positionX}, {"y", characterData.characterPosition.positionY}, {"z", characterData.characterPosition.positionZ}, {"rotationZ", characterData.characterPosition.rotationZ}}},
         {"attributes", nlohmann::json::array()}};
@@ -58,11 +61,32 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
 
             gameServices_.getLogger().log("Passed Character ID: " + std::to_string(passedCharacterData.characterId));
 
-            // set client character ID
+            // set client character ID - now handles missing clients automatically
             gameServices_.getClientManager().setClientCharacterId(clientID, passedCharacterData.characterId);
 
             // Get character data
             CharacterDataStruct characterData = gameServices_.getCharacterManager().getCharacterData(passedCharacterData.characterId);
+
+            // Check if character data exists in local storage
+            if (characterData.characterId == 0)
+            {
+                gameServices_.getLogger().log("Character ID " + std::to_string(passedCharacterData.characterId) + " not found in local storage, adding to pending requests");
+
+                // Add this request to pending list
+                PendingJoinRequest pendingRequest;
+                pendingRequest.clientID = clientID;
+                pendingRequest.characterId = passedCharacterData.characterId;
+                pendingRequest.timestamps = timestamps;
+                pendingRequest.clientSocket = clientSocket;
+
+                pendingJoinRequests_[passedCharacterData.characterId].push_back(pendingRequest);
+
+                gameServices_.getLogger().log("Pending join request added for character ID: " + std::to_string(passedCharacterData.characterId) + ", total pending: " + std::to_string(pendingJoinRequests_[passedCharacterData.characterId].size()));
+                return;
+            }
+
+            // Character data is available, process current request immediately
+            gameServices_.getLogger().log("Character ID " + std::to_string(passedCharacterData.characterId) + " found in local storage, processing immediately");
 
             // Prepare character data in json format
             nlohmann::json characterJson = characterToJson(characterData);
@@ -84,7 +108,10 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                                                    .setBody("character", characterJson)
                                                    .build();
 
-            broadcastToAllClientsWithTimestamps("success", broadcastResponse, timestamps); // This includes the sender
+            broadcastToAllClientsWithTimestamps("success", broadcastResponse, timestamps);
+
+            // Also process any pending requests for this character
+            processPendingJoinRequests(passedCharacterData.characterId);
         }
         else
         {
@@ -206,6 +233,9 @@ CharacterEventHandler::handleSetCharacterDataEvent(const Event &event)
         {
             CharacterDataStruct characterData = std::get<CharacterDataStruct>(data);
             gameServices_.getCharacterManager().addCharacter(characterData);
+
+            // Process any pending join requests for this character
+            processPendingJoinRequests(characterData.characterId);
         }
         else
         {
@@ -262,4 +292,67 @@ CharacterEventHandler::handleSetCharacterAttributesEvent(const Event &event)
     {
         gameServices_.getLogger().log("Error here: " + std::string(ex.what()));
     }
+}
+
+void
+CharacterEventHandler::processPendingJoinRequests(int characterId)
+{
+    gameServices_.getLogger().log("processPendingJoinRequests called for character ID: " + std::to_string(characterId));
+    gameServices_.getLogger().log("Current pendingJoinRequests_ size: " + std::to_string(pendingJoinRequests_.size()));
+
+    auto it = pendingJoinRequests_.find(characterId);
+    if (it == pendingJoinRequests_.end())
+    {
+        gameServices_.getLogger().log("No pending requests map entry found for character ID: " + std::to_string(characterId));
+        return;
+    }
+
+    if (it->second.empty())
+    {
+        gameServices_.getLogger().log("Pending requests vector is empty for character ID: " + std::to_string(characterId));
+        return;
+    }
+
+    gameServices_.getLogger().log("Processing " + std::to_string(it->second.size()) + " pending join requests for character ID: " + std::to_string(characterId));
+
+    // Get character data
+    CharacterDataStruct characterData = gameServices_.getCharacterManager().getCharacterData(characterId);
+
+    if (characterData.characterId == 0)
+    {
+        gameServices_.getLogger().logError("Character data still not available for ID: " + std::to_string(characterId));
+        return;
+    }
+
+    // Process all pending requests for this character
+    for (const auto &request : it->second)
+    {
+        // Prepare character data in json format
+        nlohmann::json characterJson = characterToJson(characterData);
+
+        // Validate authentication
+        if (!validateCharacterAuthentication(request.clientID, characterData.characterId))
+        {
+            sendErrorResponseWithTimestamps(request.clientSocket, "Authentication failed for character!", "joinGameCharacter", request.clientID, request.timestamps);
+            continue;
+        }
+
+        // Prepare and broadcast success response to all clients (including sender)
+        nlohmann::json broadcastResponse = ResponseBuilder()
+                                               .setHeader("message", "Authentication success for character!")
+                                               .setHeader("hash", "")
+                                               .setHeader("clientId", request.clientID)
+                                               .setHeader("eventType", "joinGameCharacter")
+                                               .setTimestamps(request.timestamps)
+                                               .setBody("character", characterJson)
+                                               .build();
+
+        broadcastToAllClientsWithTimestamps("success", broadcastResponse, request.timestamps);
+
+        gameServices_.getLogger().log("Processed pending join request for client ID: " + std::to_string(request.clientID) + ", character ID: " + std::to_string(characterId));
+    }
+
+    // Clear processed requests
+    pendingJoinRequests_.erase(it);
+    gameServices_.getLogger().log("Cleared pending requests for character ID: " + std::to_string(characterId));
 }

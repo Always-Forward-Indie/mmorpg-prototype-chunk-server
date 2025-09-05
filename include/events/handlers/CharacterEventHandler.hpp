@@ -2,6 +2,19 @@
 
 #include "events/Event.hpp"
 #include "events/handlers/BaseEventHandler.hpp"
+#include <memory>
+#include <unordered_map>
+
+/**
+ * @brief Structure to hold pending join requests
+ */
+struct PendingJoinRequest
+{
+    int clientID;
+    int characterId;
+    TimestampStruct timestamps;
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket;
+};
 
 /**
  * @brief Handler for character-related events
@@ -88,4 +101,14 @@ class CharacterEventHandler : public BaseEventHandler
      * @return true if valid, false otherwise
      */
     bool validateCharacterAuthentication(int clientId, int characterId);
+
+    /**
+     * @brief Process pending join requests for a character
+     *
+     * @param characterId Character ID that just became available
+     */
+    void processPendingJoinRequests(int characterId);
+
+    // Store pending join requests while waiting for character data from Game Server
+    std::unordered_map<int, std::vector<PendingJoinRequest>> pendingJoinRequests_;
 };

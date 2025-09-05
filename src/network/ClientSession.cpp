@@ -220,7 +220,7 @@ ClientSession::processMessage(const std::string &message)
                 ClientDataStruct serverClientData = gameServices_.getClientManager().getClientData(clientData.clientId);
 
                 // For join events, get character ID from message body instead of stored data
-                if (fullEventType == "joinGameClient" || fullEventType == "joinGameCharacter")
+                if (fullEventType == "joinGameCharacter")
                 {
                     try
                     {

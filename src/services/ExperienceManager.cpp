@@ -46,7 +46,7 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         result.experienceEvent.newExperience = newExperience;
         result.experienceEvent.oldLevel = oldLevel;
         result.experienceEvent.newLevel = newLevel;
-        result.experienceEvent.expForCurrentLevel = (newLevel > 1) ? getExperienceForLevelFromGameServer(newLevel - 1) : 0;
+        result.experienceEvent.expForCurrentLevel = getExperienceForLevelFromGameServer(newLevel);
         result.experienceEvent.expForNextLevel = getExperienceForLevelFromGameServer(newLevel + 1);
         result.experienceEvent.reason = reason;
         result.experienceEvent.sourceId = sourceId;
