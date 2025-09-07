@@ -2,6 +2,7 @@
 
 #include "events/Event.hpp"
 #include "events/handlers/BaseEventHandler.hpp"
+#include "events/handlers/SkillEventHandler.hpp"
 #include <memory>
 #include <unordered_map>
 
@@ -29,6 +30,13 @@ class CharacterEventHandler : public BaseEventHandler
         NetworkManager &networkManager,
         GameServerWorker &gameServerWorker,
         GameServices &gameServices);
+
+    /**
+     * @brief Set skill event handler for skill initialization
+     *
+     * @param skillEventHandler Pointer to skill event handler
+     */
+    void setSkillEventHandler(SkillEventHandler *skillEventHandler);
 
     /**
      * @brief Handle character join event
@@ -84,6 +92,15 @@ class CharacterEventHandler : public BaseEventHandler
      */
     void handleSetCharacterAttributesEvent(const Event &event);
 
+    /**
+     * @brief Initialize player skills after successful character join
+     *
+     * @param characterData Character data containing skills
+     * @param clientID Client ID to send skills to
+     * @param clientSocket Client socket for response
+     */
+    void initializePlayerSkills(const CharacterDataStruct &characterData, int clientID, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket);
+
   private:
     /**
      * @brief Convert character data to JSON format
@@ -109,6 +126,14 @@ class CharacterEventHandler : public BaseEventHandler
      */
     void processPendingJoinRequests(int characterId);
 
+    /**
+     * @brief Get character data by ID
+     */
+    CharacterDataStruct getCharacterDataById(int characterId) const;
+
     // Store pending join requests while waiting for character data from Game Server
     std::unordered_map<int, std::vector<PendingJoinRequest>> pendingJoinRequests_;
+
+    // Pointer to skill event handler for skill initialization
+    SkillEventHandler *skillEventHandler_ = nullptr;
 };

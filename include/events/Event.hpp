@@ -71,7 +71,9 @@ class Event
         EXPERIENCE_GRANT,  // Grant experience to character
         EXPERIENCE_REMOVE, // Remove experience from character
         EXPERIENCE_UPDATE, // Update experience (broadcast to clients)
-        LEVEL_UP           // Level up event
+        LEVEL_UP,          // Level up event
+        // Skill events
+        INITIALIZE_PLAYER_SKILLS // Initialize player skills on client connection
     }; // Define more event types as needed
 
     Event() = default; // Default constructor

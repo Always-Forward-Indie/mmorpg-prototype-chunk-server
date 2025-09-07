@@ -17,7 +17,11 @@ EventHandler::EventHandler(
     combatEventHandler_ = std::make_unique<CombatEventHandler>(networkManager, gameServerWorker, gameServices);
     itemEventHandler_ = std::make_unique<ItemEventHandler>(networkManager, gameServerWorker, gameServices);
     harvestEventHandler_ = std::make_unique<HarvestEventHandler>(networkManager, gameServerWorker, gameServices);
+    skillEventHandler_ = std::make_unique<SkillEventHandler>(networkManager, gameServerWorker, gameServices);
     experienceEventHandler_ = std::make_unique<ExperienceEventHandler>(networkManager, gameServerWorker, gameServices);
+
+    // Set skill event handler reference in character event handler
+    characterEventHandler_->setSkillEventHandler(skillEventHandler_.get());
 }
 
 void
@@ -175,6 +179,11 @@ EventHandler::dispatchEvent(const Event &event)
             combatEventHandler_->handleCombatResult(event);
             break;
 
+        // Skill Events
+        case Event::INITIALIZE_PLAYER_SKILLS:
+            skillEventHandler_->handleInitializePlayerSkills(event);
+            break;
+
         // New Attack Events
         case Event::PLAYER_ATTACK:
             combatEventHandler_->handlePlayerAttack(event);
@@ -241,6 +250,12 @@ CombatEventHandler &
 EventHandler::getCombatEventHandler()
 {
     return *combatEventHandler_;
+}
+
+SkillEventHandler &
+EventHandler::getSkillEventHandler()
+{
+    return *skillEventHandler_;
 }
 
 void

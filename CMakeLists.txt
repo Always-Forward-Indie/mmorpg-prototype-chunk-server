@@ -54,6 +54,7 @@ set(SOURCE_FILES
     src/events/handlers/ZoneEventHandler.cpp
     src/events/handlers/ChunkEventHandler.cpp
     src/events/handlers/CombatEventHandler.cpp
+    src/events/handlers/SkillEventHandler.cpp
     src/events/handlers/ItemEventHandler.cpp
     src/events/handlers/HarvestEventHandler.cpp
     src/events/ExperienceEventHandler.cpp
@@ -109,6 +110,7 @@ set(HEADER_FILES
     include/events/handlers/ZoneEventHandler.hpp
     include/events/handlers/ChunkEventHandler.hpp
     include/events/handlers/CombatEventHandler.hpp
+    include/events/handlers/SkillEventHandler.hpp
     include/events/handlers/ItemEventHandler.hpp
     include/events/handlers/HarvestEventHandler.hpp
     include/events/ExperienceEventHandler.hpp

@@ -43,6 +43,15 @@ struct TargetSelectionStruct
     std::string selectionReason;
 };
 
+/**
+ * @brief Player skill initialization data
+ */
+struct PlayerSkillInitStruct
+{
+    int characterId;
+    std::vector<SkillStruct> skills;
+};
+
 // Unified EventData for all servers
 using EventData = std::variant<
     int,
@@ -78,6 +87,7 @@ using EventData = std::variant<
     ExperienceEventStruct,
     ExperienceGrantResult,
     ExperienceLevelEntry,
+    PlayerSkillInitStruct,
     std::pair<int, int>, // For mob death events (mobUID, zoneId)
     std::vector<MobDataStruct>,
     std::vector<SpawnZoneStruct>,

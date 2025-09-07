@@ -10,6 +10,12 @@ CharacterEventHandler::CharacterEventHandler(
 {
 }
 
+void
+CharacterEventHandler::setSkillEventHandler(SkillEventHandler *skillEventHandler)
+{
+    skillEventHandler_ = skillEventHandler;
+}
+
 bool
 CharacterEventHandler::validateCharacterAuthentication(int clientId, int characterId)
 {
@@ -109,6 +115,16 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                                                    .build();
 
             broadcastToAllClientsWithTimestamps("success", broadcastResponse, timestamps);
+
+            // Initialize player skills after successful character join
+            if (skillEventHandler_)
+            {
+                skillEventHandler_->initializeFromCharacterData(characterData, clientID, clientSocket);
+            }
+            else
+            {
+                gameServices_.getLogger().logError("SkillEventHandler not set in CharacterEventHandler");
+            }
 
             // Also process any pending requests for this character
             processPendingJoinRequests(passedCharacterData.characterId);
@@ -348,6 +364,16 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
                                                .build();
 
         broadcastToAllClientsWithTimestamps("success", broadcastResponse, request.timestamps);
+
+        // Initialize player skills after successful character join for pending request
+        if (skillEventHandler_)
+        {
+            skillEventHandler_->initializeFromCharacterData(characterData, request.clientID, request.clientSocket);
+        }
+        else
+        {
+            gameServices_.getLogger().logError("SkillEventHandler not set in CharacterEventHandler");
+        }
 
         gameServices_.getLogger().log("Processed pending join request for client ID: " + std::to_string(request.clientID) + ", character ID: " + std::to_string(characterId));
     }

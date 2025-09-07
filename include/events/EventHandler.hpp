@@ -10,6 +10,7 @@
 #include "events/handlers/HarvestEventHandler.hpp"
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/handlers/MobEventHandler.hpp"
+#include "events/handlers/SkillEventHandler.hpp"
 #include "events/handlers/ZoneEventHandler.hpp"
 #include "network/GameServerWorker.hpp"
 #include "network/NetworkManager.hpp"
@@ -60,6 +61,13 @@ class EventHandler
      */
     CombatEventHandler &getCombatEventHandler();
 
+    /**
+     * @brief Get reference to skill event handler for skill operations
+     *
+     * @return Reference to the skill event handler
+     */
+    SkillEventHandler &getSkillEventHandler();
+
   private:
     /**
      * @brief Handle experience level table data from game server
@@ -76,6 +84,7 @@ class EventHandler
     std::unique_ptr<CombatEventHandler> combatEventHandler_;
     std::unique_ptr<ItemEventHandler> itemEventHandler_;
     std::unique_ptr<HarvestEventHandler> harvestEventHandler_;
+    std::unique_ptr<SkillEventHandler> skillEventHandler_;
     std::unique_ptr<ExperienceEventHandler> experienceEventHandler_;
 
     // References for logging and error handling
