@@ -20,6 +20,7 @@ CombatResponseBuilder::buildSkillInitiationBroadcast(const SkillInitiationResult
     body["targetType"] = static_cast<int>(result.targetType);
     body["targetTypeString"] = getCombatTargetTypeString(result.targetType);
     body["skillName"] = result.skillName;
+    body["skillSlug"] = result.skillSlug;
     body["skillEffectType"] = result.skillEffectType;
     body["skillSchool"] = result.skillSchool;
     body["castTime"] = result.castTime;
@@ -58,6 +59,7 @@ CombatResponseBuilder::buildSkillExecutionBroadcast(const SkillExecutionResult &
     body["targetType"] = static_cast<int>(result.targetType);
     body["targetTypeString"] = getCombatTargetTypeString(result.targetType);
     body["skillName"] = result.skillName;
+    body["skillSlug"] = result.skillSlug;
     body["skillEffectType"] = result.skillEffectType;
     body["skillSchool"] = result.skillSchool;
 

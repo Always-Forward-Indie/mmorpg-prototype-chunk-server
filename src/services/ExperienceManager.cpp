@@ -121,7 +121,7 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         // Если произошло повышение уровня, отправляем дополнительные пакеты
         if (result.levelUp)
         {
-            sendStatsUpdatePacket(characterId);
+            gameServices_->getStatsNotificationService().sendStatsUpdate(characterId);
         }
 
         result.success = true;

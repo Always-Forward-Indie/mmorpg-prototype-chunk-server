@@ -78,6 +78,7 @@ struct CombatActionStruct
 {
     int actionId;                // Unique action ID
     std::string actionName;      // Action name (e.g., "Fireball", "Sword Strike")
+    std::string skillSlug;       // Original skill slug for execution
     CombatActionType actionType; // Type of action
     CombatTargetType targetType; // Type of target required
 

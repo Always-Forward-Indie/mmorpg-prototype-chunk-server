@@ -22,6 +22,7 @@ struct SkillInitiationResult
     int targetId = 0;
     CombatTargetType targetType = CombatTargetType::NONE;
     std::string skillName;
+    std::string skillSlug;
     std::string skillEffectType; // damage, heal, buff, debuff, etc.
     std::string skillSchool;     // physical, fire, ice, etc.
 };
@@ -41,6 +42,7 @@ struct SkillExecutionResult
     int targetId = 0;
     CombatTargetType targetType = CombatTargetType::NONE;
     std::string skillName;
+    std::string skillSlug;
     std::string skillEffectType; // damage, heal, buff, debuff, etc.
     std::string skillSchool;     // physical, fire, ice, etc.
 };

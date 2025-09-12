@@ -1,5 +1,6 @@
 #pragma once
 #include "services/CharacterManager.hpp"
+#include "services/CharacterStatsNotificationService.hpp"
 #include "services/ChunkManager.hpp"
 #include "services/ClientManager.hpp"
 #include "services/ExperienceCacheManager.hpp"
@@ -35,7 +36,8 @@ class GameServices
           harvestManager_(itemManager_, logger_),
           skillManager_(this),
           experienceManager_(this),
-          experienceCacheManager_(this)
+          experienceCacheManager_(this),
+          statsNotificationService_(this)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
@@ -107,6 +109,10 @@ class GameServices
     {
         return experienceCacheManager_;
     }
+    CharacterStatsNotificationService &getStatsNotificationService()
+    {
+        return statsNotificationService_;
+    }
 
   private:
     Logger &logger_;
@@ -124,4 +130,5 @@ class GameServices
     SkillManager skillManager_;
     ExperienceManager experienceManager_;
     ExperienceCacheManager experienceCacheManager_;
+    CharacterStatsNotificationService statsNotificationService_;
 };

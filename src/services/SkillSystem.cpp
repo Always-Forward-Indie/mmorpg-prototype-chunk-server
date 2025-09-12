@@ -31,21 +31,27 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
         }
 
         // Получаем скил
-        const SkillStruct *skill = nullptr;
+        std::optional<SkillStruct> skillOpt;
         if (casterType == CasterType::PLAYER)
         {
-            skill = getCharacterSkill(casterId, skillSlug);
+            gameServices_->getLogger().log("Getting character skill: " + skillSlug + " for player " + std::to_string(casterId), GREEN);
+            skillOpt = getCharacterSkill(casterId, skillSlug);
         }
         else
         {
-            skill = getMobSkill(casterId, skillSlug);
+            gameServices_->getLogger().log("Getting mob skill: " + skillSlug + " for mob " + std::to_string(casterId), GREEN);
+            skillOpt = getMobSkill(casterId, skillSlug);
         }
 
-        if (!skill)
+        if (!skillOpt.has_value())
         {
+            gameServices_->getLogger().logError("Skill not found in useSkill: " + skillSlug + " for caster " + std::to_string(casterId));
             result.errorMessage = "Skill not found: " + skillSlug;
             return result;
         }
+
+        const SkillStruct &skill = skillOpt.value();
+        gameServices_->getLogger().log("Skill found in useSkill: " + std::string(skill.skillName) + " (" + skill.skillSlug + ")", GREEN);
 
         // Проверяем доступность скила
         if (!isSkillAvailable(casterId, skillSlug))
@@ -55,7 +61,7 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
         }
 
         // Проверяем ресурсы
-        if (!validateResources(casterId, *skill))
+        if (!validateResources(casterId, skill))
         {
             result.errorMessage = "Insufficient resources";
             return result;
@@ -69,14 +75,14 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
         }
 
         // Проверяем дистанцию
-        if (!isInRange(*skill, casterId, targetId, targetType))
+        if (!isInRange(skill, casterId, targetId, targetType))
         {
             result.errorMessage = "Target is out of range";
             return result;
         }
 
         // Потребляем ресурсы
-        consumeResources(casterId, *skill);
+        consumeResources(casterId, skill);
 
         // Выполняем расчеты
         if (casterType == CasterType::PLAYER)
@@ -86,13 +92,13 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
             if (targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF)
             {
                 auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
-                result.damageResult = combatCalculator_->calculateSkillDamage(*skill, casterData, targetData);
-                result.healAmount = combatCalculator_->calculateBaseDamage(*skill, casterData.attributes); // Временно для лечения
+                result.damageResult = combatCalculator_->calculateSkillDamage(skill, casterData, targetData);
+                result.healAmount = combatCalculator_->calculateBaseDamage(skill, casterData.attributes); // Временно для лечения
             }
             else if (targetType == CombatTargetType::MOB)
             {
                 // Урон по мобу - пока используем упрощенную логику
-                result.damageResult.totalDamage = combatCalculator_->calculateBaseDamage(*skill, casterData.attributes);
+                result.damageResult.totalDamage = combatCalculator_->calculateBaseDamage(skill, casterData.attributes);
                 result.damageResult.isCritical = combatCalculator_->rollCriticalHit(casterData.attributes);
             }
         }
@@ -101,11 +107,11 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
             auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
             auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
 
-            result.damageResult = combatCalculator_->calculateMobSkillDamage(*skill, mobData, targetData);
+            result.damageResult = combatCalculator_->calculateMobSkillDamage(skill, mobData, targetData);
         }
 
         // Устанавливаем кулдаун
-        setCooldown(casterId, skillSlug, skill->cooldownMs);
+        setCooldown(casterId, skillSlug, skill.cooldownMs);
 
         result.success = true;
         // result.skillUsed = *skill; // Убираем это поле пока
@@ -132,58 +138,64 @@ SkillSystem::isSkillAvailable(int casterId, const std::string &skillSlug)
     return true;
 }
 
-const SkillStruct *
+std::optional<SkillStruct>
 SkillSystem::getCharacterSkill(int characterId, const std::string &skillSlug)
 {
     try
     {
+        gameServices_->getLogger().log("Getting character skill " + skillSlug + " for character " + std::to_string(characterId), GREEN);
         auto characterData = gameServices_->getCharacterManager().getCharacterData(characterId);
-
-        // Создаем статическую копию найденного скила для безопасного возврата
-        static SkillStruct tempSkill;
+        gameServices_->getLogger().log("Character " + std::to_string(characterId) + " has " + std::to_string(characterData.skills.size()) + " skills", GREEN);
 
         for (const auto &skill : characterData.skills)
         {
+            gameServices_->getLogger().log("Checking skill: " + skill.skillSlug + " against " + skillSlug, GREEN);
             if (skill.skillSlug == skillSlug)
             {
-                tempSkill = skill; // Копируем данные
-                return &tempSkill;
+                gameServices_->getLogger().log("Skill found: " + skill.skillName + " (" + skill.skillSlug + ")", GREEN);
+                // Возвращаем копию скила
+                return skill;
             }
         }
+
+        gameServices_->getLogger().logError("Skill " + skillSlug + " not found for character " + std::to_string(characterId));
     }
     catch (const std::exception &e)
     {
         gameServices_->getLogger().logError("Error getting character skill: " + std::string(e.what()));
     }
 
-    return nullptr;
+    return std::nullopt;
 }
 
-const SkillStruct *
+std::optional<SkillStruct>
 SkillSystem::getMobSkill(int mobId, const std::string &skillSlug)
 {
     try
     {
+        gameServices_->getLogger().log("Getting mob skill " + skillSlug + " for mob " + std::to_string(mobId), GREEN);
         auto mobData = gameServices_->getMobInstanceManager().getMobInstance(mobId);
-
-        // Создаем статическую копию найденного скила для безопасного возврата
-        static SkillStruct tempSkill;
+        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " has " + std::to_string(mobData.skills.size()) + " skills", GREEN);
 
         for (const auto &skill : mobData.skills)
         {
+            gameServices_->getLogger().log("Checking mob skill: " + skill.skillSlug + " against " + skillSlug, GREEN);
             if (skill.skillSlug == skillSlug)
             {
-                tempSkill = skill; // Копируем данные
-                return &tempSkill;
+                gameServices_->getLogger().log("Mob skill found: " + skill.skillName + " (" + skill.skillSlug + ")", GREEN);
+                // Возвращаем копию скила
+                return skill;
             }
         }
+
+        gameServices_->getLogger().logError("Skill " + skillSlug + " not found for mob " + std::to_string(mobId));
     }
     catch (const std::exception &e)
     {
         gameServices_->getLogger().logError("Error getting mob skill: " + std::string(e.what()));
     }
 
-    return nullptr;
+    return std::nullopt;
 }
 
 void

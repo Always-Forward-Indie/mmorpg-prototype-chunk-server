@@ -32,6 +32,9 @@ CombatSystem::setupExperienceCallbacks()
         auto &experienceManager = gameServices_->getExperienceManager();
         experienceManager.setExperiencePacketCallback(broadcastCallback_);
         experienceManager.setStatsUpdatePacketCallback(broadcastCallback_);
+
+        auto &statsService = gameServices_->getStatsNotificationService();
+        statsService.setStatsUpdateCallback(broadcastCallback_);
     }
 }
 
@@ -42,27 +45,27 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
     result.casterId = casterId;
     result.targetId = targetId;
     result.targetType = targetType;
-    result.skillName = skillSlug;
+    result.skillSlug = skillSlug; // Сохраняем оригинальный slug
 
     gameServices_->getLogger().log("CombatSystem::initiateSkillUsage called with skill: " + skillSlug, GREEN);
 
     try
     {
         // Получаем скил для проверки времени каста
-        const SkillStruct *skill = nullptr;
+        std::optional<SkillStruct> skillOpt;
 
         // Определяем тип кастера и получаем скил
         try
         {
             auto characterData = gameServices_->getCharacterManager().getCharacterData(casterId);
-            skill = skillSystem_->getCharacterSkill(casterId, skillSlug);
+            skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
         }
         catch (...)
         {
             try
             {
                 auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
-                skill = skillSystem_->getMobSkill(casterId, skillSlug);
+                skillOpt = skillSystem_->getMobSkill(casterId, skillSlug);
             }
             catch (...)
             {
@@ -71,19 +74,20 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
             }
         }
 
-        if (!skill)
+        if (!skillOpt.has_value())
         {
             result.errorMessage = "Skill not found: " + skillSlug;
             return result;
         }
 
+        const SkillStruct &skill = skillOpt.value();
         // Дополнительная проверка валидности skill указателя
-        gameServices_->getLogger().log("Skill found: " + std::string(skill->skillName), GREEN);
+        gameServices_->getLogger().log("Skill found: " + std::string(skill.skillName), GREEN);
 
         // Заполняем информацию о скиле
-        result.skillName = skill->skillName;
-        result.skillEffectType = skill->skillEffectType;
-        result.skillSchool = skill->school;
+        result.skillName = skill.skillName;
+        result.skillEffectType = skill.skillEffectType;
+        result.skillSchool = skill.school;
 
         // Проверяем базовые требования (без потребления ресурсов)
         if (skillSystem_->isOnCooldown(casterId, skillSlug))
@@ -92,14 +96,51 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
             return result;
         }
 
+        // Проверяем ману кастера
+        try
+        {
+            auto characterData = gameServices_->getCharacterManager().getCharacterData(casterId);
+            if (characterData.characterId != 0) // Это игрок
+            {
+                if (characterData.characterCurrentMana < skill.costMp)
+                {
+                    result.errorMessage = "Not enough mana";
+                    return result;
+                }
+            }
+        }
+        catch (...)
+        {
+            try
+            {
+                auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
+                if (mobData.uid != 0) // Это моб
+                {
+                    if (mobData.currentMana < skill.costMp)
+                    {
+                        result.errorMessage = "Not enough mana";
+                        return result;
+                    }
+                }
+            }
+            catch (...)
+            {
+                result.errorMessage = "Could not check mana for caster";
+                return result;
+            }
+        }
+
         // Создаем запись о начинающемся действии
         auto action = std::make_shared<CombatActionStruct>();
         action->actionId = 0; // TODO: генерировать уникальные ID
 
+        // Сохраняем оригинальный skillSlug для выполнения
+        action->skillSlug = skillSlug;
+
         // Безопасное присваивание строки
-        if (skill && !skill->skillName.empty())
+        if (!skill.skillName.empty())
         {
-            action->actionName = skill->skillName;
+            action->actionName = skill.skillName;
         }
         else
         {
@@ -110,10 +151,11 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         action->targetType = targetType;
         action->casterId = casterId;
         action->targetId = targetId;
-        action->castTime = static_cast<float>(skill->castMs) / 1000.0f;
-        action->state = (skill->castMs > 0) ? CombatActionState::CASTING : CombatActionState::EXECUTING;
+        action->skillSlug = skillSlug; // Сохраняем оригинальный slug для выполнения
+        action->castTime = static_cast<float>(skill.castMs) / 1000.0f;
+        action->state = (skill.castMs > 0) ? CombatActionState::CASTING : CombatActionState::EXECUTING;
         action->startTime = std::chrono::steady_clock::now();
-        action->endTime = action->startTime + std::chrono::milliseconds(skill->castMs);
+        action->endTime = action->startTime + std::chrono::milliseconds(skill.castMs);
         action->animationName = "skill_" + skillSlug; // TODO: получать из базы
         action->animationDuration = std::max(1.0f, action->castTime);
 
@@ -141,31 +183,23 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
     result.casterId = casterId;
     result.targetId = targetId;
     result.targetType = targetType;
+    result.skillSlug = skillSlug; // Сохраняем оригинальный slug
 
     try
     {
         // Получаем информацию о скиле для заполнения метаданных
-        const SkillStruct *skill = nullptr;
+        std::optional<SkillStruct> skillOpt;
         try
         {
             auto characterData = gameServices_->getCharacterManager().getCharacterData(casterId);
-            skill = skillSystem_->getCharacterSkill(casterId, skillSlug);
+            skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
         }
         catch (...)
         {
             try
             {
                 auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
-                // Получаем скилы из шаблона моба
-                auto mobTemplate = gameServices_->getMobManager().getMobById(mobData.id);
-                for (const auto &mobSkill : mobTemplate.skills)
-                {
-                    if (mobSkill.skillSlug == skillSlug)
-                    {
-                        skill = &mobSkill;
-                        break;
-                    }
-                }
+                skillOpt = skillSystem_->getMobSkill(casterId, skillSlug);
             }
             catch (...)
             {
@@ -174,11 +208,12 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             }
         }
 
-        if (skill)
+        if (skillOpt.has_value())
         {
-            result.skillName = skill->skillName;
-            result.skillEffectType = skill->skillEffectType;
-            result.skillSchool = skill->school;
+            const SkillStruct &skill = skillOpt.value();
+            result.skillName = skill.skillName;
+            result.skillEffectType = skill.skillEffectType;
+            result.skillSchool = skill.school;
         }
         else
         {
@@ -303,10 +338,29 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             }
         }
 
-        // Удаляем ongoing action
-        ongoingActions_.erase(casterId);
+        // НЕ удаляем ongoing action здесь - это делается в updateOngoingActions()
+        // ongoingActions_.erase(casterId);
 
         result.success = true;
+
+        // Отправляем обновление статов для кастера (потратил ману)
+        try
+        {
+            auto &statsService = gameServices_->getStatsNotificationService();
+            statsService.sendStatsUpdate(casterId);
+
+            // Если цель - игрок и получил урон/лечение, тоже отправляем обновление
+            if ((targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF) &&
+                targetId != casterId &&
+                (skillResult.damageResult.totalDamage > 0 || skillResult.healAmount > 0))
+            {
+                statsService.sendStatsUpdate(targetId);
+            }
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_->getLogger().logError("Error sending stats update after skill usage: " + std::string(e.what()));
+        }
     }
     catch (const std::exception &e)
     {
@@ -349,17 +403,25 @@ CombatSystem::updateOngoingActions()
             // Завершаем каст, переходим к выполнению
             action->state = CombatActionState::EXECUTING;
 
-            // Автоматически выполняем действие
-            auto result = executeSkillUsage(action->casterId, action->actionName, action->targetId, action->targetType);
+            // Сохраняем данные действия ПЕРЕД вызовом executeSkillUsage
+            int casterId = action->casterId;
+            std::string skillSlug = action->skillSlug;
+            int targetId = action->targetId;
+            CombatTargetType targetType = action->targetType;
+            std::string actionName = action->actionName;
+
+            // Автоматически выполняем действие, используя оригинальный skillSlug
+            auto result = executeSkillUsage(casterId, skillSlug, targetId, targetType);
 
             // Отправляем результат всем клиентам через responseBuilder
             if (responseBuilder_ && broadcastCallback_)
             {
                 auto broadcast = responseBuilder_->buildSkillExecutionBroadcast(result);
                 broadcastCallback_(broadcast);
-                gameServices_->getLogger().log("Skill execution broadcast sent for: " + action->actionName);
+                gameServices_->getLogger().log("Skill execution broadcast sent for: " + actionName);
             }
 
+            // Удаляем action после выполнения
             it = ongoingActions_.erase(it);
         }
         else
@@ -671,6 +733,7 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId)
         initiationResult.targetId = targetPlayer.characterId;
         initiationResult.targetType = CombatTargetType::PLAYER;
         initiationResult.skillName = bestSkill->skillName;
+        initiationResult.skillSlug = bestSkill->skillSlug;
         initiationResult.skillEffectType = bestSkill->skillEffectType;
         initiationResult.skillSchool = bestSkill->school;
         initiationResult.castTime = static_cast<float>(bestSkill->castMs) / 1000.0f;
@@ -697,6 +760,7 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId)
         result.targetId = targetPlayer.characterId;
         result.targetType = CombatTargetType::PLAYER;
         result.skillName = bestSkill->skillName;
+        result.skillSlug = bestSkill->skillSlug;
         result.skillEffectType = bestSkill->skillEffectType;
         result.skillSchool = bestSkill->school;
         result.skillResult = skillResult;

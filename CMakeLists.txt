@@ -38,6 +38,7 @@ set(SOURCE_FILES
     src/services/InventoryManager.cpp
     src/services/HarvestManager.cpp
     src/services/ExperienceManager.cpp
+    src/services/CharacterStatsNotificationService.cpp
     src/services/ExperienceCacheManager.cpp
     src/services/ClientManager.cpp
     src/network/GameServerWorker.cpp

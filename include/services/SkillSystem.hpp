@@ -5,6 +5,7 @@
 #include "data/SkillStructs.hpp"
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -39,12 +40,12 @@ class SkillSystem
     /**
      * @brief Получить скил по slug для персонажа
      */
-    const SkillStruct *getCharacterSkill(int characterId, const std::string &skillSlug);
+    std::optional<SkillStruct> getCharacterSkill(int characterId, const std::string &skillSlug);
 
     /**
      * @brief Получить скил по slug для моба
      */
-    const SkillStruct *getMobSkill(int mobId, const std::string &skillSlug);
+    std::optional<SkillStruct> getMobSkill(int mobId, const std::string &skillSlug);
 
     /**
      * @brief Установить кулдаун
