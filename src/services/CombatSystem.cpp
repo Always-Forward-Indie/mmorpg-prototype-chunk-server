@@ -6,7 +6,11 @@
 #include "services/SkillSystem.hpp"
 #include "utils/Logger.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+
+// Static counter for unique action IDs
+static std::atomic<uint64_t> nextActionId{1};
 
 CombatSystem::CombatSystem(GameServices *gameServices)
     : gameServices_(gameServices)
@@ -132,7 +136,7 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
 
         // Создаем запись о начинающемся действии
         auto action = std::make_shared<CombatActionStruct>();
-        action->actionId = 0; // TODO: генерировать уникальные ID
+        action->actionId = nextActionId.fetch_add(1); // Генерация уникального ID действия
 
         // Сохраняем оригинальный skillSlug для выполнения
         action->skillSlug = skillSlug;

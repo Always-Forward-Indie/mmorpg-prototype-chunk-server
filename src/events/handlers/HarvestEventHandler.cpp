@@ -407,7 +407,23 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
             return;
         }
 
-        // Получаем позицию игрока (временно используем позицию трупа, в реальной реализации нужно получать из ClientManager)
+        // Получаем позицию игрока из CharacterManager
+        PositionStruct playerPosition;
+        try
+        {
+            playerPosition = gameServices_.getCharacterManager().getCharacterPosition(pickupRequest.characterId);
+            gameServices_.getLogger().log("Retrieved player position for character ID: " + std::to_string(pickupRequest.characterId) +
+                                          " - X: " + std::to_string(playerPosition.positionX) +
+                                          ", Y: " + std::to_string(playerPosition.positionY));
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_.getLogger().logError("Failed to get player position for character ID " + std::to_string(pickupRequest.characterId) + ": " + std::string(e.what()));
+            // Используем позицию по умолчанию если не удалось получить позицию игрока
+            playerPosition = {0.0f, 0.0f, 0.0f, 0.0f};
+        }
+
+        // Проверяем существование трупа
         auto corpse = harvestManager.getCorpseByUID(pickupRequest.corpseUID);
         if (corpse.mobUID == 0)
         {
@@ -431,9 +447,6 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
             }
             return;
         }
-
-        // TODO: Получить реальную позицию игрока из ClientManager
-        PositionStruct playerPosition = corpse.position; // Временно используем позицию трупа
 
         // Пытаемся подобрать лут
         auto [success, pickedUpItems] = harvestManager.pickupCorpseLoot(
