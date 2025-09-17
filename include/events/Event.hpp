@@ -30,7 +30,9 @@ class Event
         SET_ALL_SPAWN_ZONES,
         SET_ALL_MOBS_LIST,
         SET_ALL_MOBS_ATTRIBUTES,
-        SET_ALL_MOBS_SKILLS, // Event to set skills for all mobs
+        SET_ALL_MOBS_SKILLS,     // Event to set skills for all mobs
+        SET_ALL_NPCS_LIST,       // Event to receive NPC data from game server
+        SET_ALL_NPCS_ATTRIBUTES, // Event to receive NPC attributes from game server
         SET_ALL_ITEMS_LIST,
         SET_MOB_LOOT_INFO,
         SET_EXP_LEVEL_TABLE,

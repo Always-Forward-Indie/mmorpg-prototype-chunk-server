@@ -12,6 +12,7 @@ EventHandler::EventHandler(
     clientEventHandler_ = std::make_unique<ClientEventHandler>(networkManager, gameServerWorker, gameServices);
     characterEventHandler_ = std::make_unique<CharacterEventHandler>(networkManager, gameServerWorker, gameServices);
     mobEventHandler_ = std::make_unique<MobEventHandler>(networkManager, gameServerWorker, gameServices);
+    npcEventHandler_ = std::make_unique<NPCEventHandler>(networkManager, gameServerWorker, gameServices);
     zoneEventHandler_ = std::make_unique<ZoneEventHandler>(networkManager, gameServerWorker, gameServices);
     chunkEventHandler_ = std::make_unique<ChunkEventHandler>(networkManager, gameServerWorker, gameServices);
     combatEventHandler_ = std::make_unique<CombatEventHandler>(networkManager, gameServerWorker, gameServices);
@@ -22,6 +23,9 @@ EventHandler::EventHandler(
 
     // Set skill event handler reference in character event handler
     characterEventHandler_->setSkillEventHandler(skillEventHandler_.get());
+
+    // Set NPC event handler reference in character event handler
+    characterEventHandler_->setNPCEventHandler(npcEventHandler_.get());
 }
 
 void
@@ -96,6 +100,14 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::MOB_LOOT_GENERATION:
             itemEventHandler_->handleMobLootGenerationEvent(event);
+            break;
+
+        // NPC Events
+        case Event::SET_ALL_NPCS_LIST:
+            npcEventHandler_->handleSetAllNPCsListEvent(event);
+            break;
+        case Event::SET_ALL_NPCS_ATTRIBUTES:
+            npcEventHandler_->handleSetAllNPCsAttributesEvent(event);
             break;
 
         // Item Events
@@ -256,6 +268,12 @@ SkillEventHandler &
 EventHandler::getSkillEventHandler()
 {
     return *skillEventHandler_;
+}
+
+NPCEventHandler &
+EventHandler::getNPCEventHandler()
+{
+    return *npcEventHandler_;
 }
 
 void

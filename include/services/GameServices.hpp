@@ -12,6 +12,7 @@
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
+#include "services/NPCManager.hpp"
 #include "services/SkillManager.hpp"
 #include "services/SpawnZoneManager.hpp"
 #include "utils/Logger.hpp"
@@ -34,6 +35,7 @@ class GameServices
           lootManager_(itemManager_, logger_),
           inventoryManager_(itemManager_, logger_),
           harvestManager_(itemManager_, logger_),
+          npcManager_(logger_),
           skillManager_(this),
           experienceManager_(this),
           experienceCacheManager_(this),
@@ -113,6 +115,10 @@ class GameServices
     {
         return statsNotificationService_;
     }
+    NPCManager &getNPCManager()
+    {
+        return npcManager_;
+    }
 
   private:
     Logger &logger_;
@@ -127,6 +133,7 @@ class GameServices
     LootManager lootManager_;
     InventoryManager inventoryManager_;
     HarvestManager harvestManager_;
+    NPCManager npcManager_;
     SkillManager skillManager_;
     ExperienceManager experienceManager_;
     ExperienceCacheManager experienceCacheManager_;

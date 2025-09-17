@@ -629,3 +629,42 @@ struct ExperienceLevelTable
         isLoaded = false;
     }
 };
+
+// NPC Attribute Structure
+struct NPCAttributeStruct
+{
+    int id = 0;
+    int npc_id = 0;
+    std::string name = "";
+    std::string slug = "";
+    int value = 0;
+};
+
+// NPC Data Structure
+struct NPCDataStruct
+{
+    int id = 0;
+    std::string name = "";
+    std::string slug = "";
+    std::string raceName = "";
+    int level = 0;
+    int currentHealth = 0;
+    int currentMana = 0;
+    int maxHealth = 0;
+    int maxMana = 0;
+    std::vector<NPCAttributeStruct> attributes;
+    std::vector<SkillStruct> skills;
+    PositionStruct position;
+
+    // NPC specific properties
+    std::string npcType = ""; // "vendor", "quest_giver", "general", etc.
+    bool isInteractable = true;
+    std::string dialogueId = "";
+    std::string questId = "";
+
+    // Define the equality operator
+    bool operator==(const NPCDataStruct &other) const
+    {
+        return id == other.id;
+    }
+};

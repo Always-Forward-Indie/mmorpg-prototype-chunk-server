@@ -1092,3 +1092,130 @@ JSONParser::parseExpLevelTable(const char *data, size_t length)
 
     return expLevelTable;
 }
+
+std::vector<NPCDataStruct>
+JSONParser::parseNPCsList(const char *data, size_t length)
+{
+    std::vector<NPCDataStruct> npcsList;
+
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+
+        if (jsonData.contains("body") && jsonData["body"].is_object() &&
+            jsonData["body"].contains("npcsList") && jsonData["body"]["npcsList"].is_array())
+        {
+            auto npcsArray = jsonData["body"]["npcsList"];
+
+            for (const auto &npcJson : npcsArray)
+            {
+                NPCDataStruct npc;
+
+                if (npcJson.contains("id") && npcJson["id"].is_number_integer())
+                    npc.id = npcJson["id"].get<int>();
+
+                if (npcJson.contains("name") && npcJson["name"].is_string())
+                    npc.name = npcJson["name"].get<std::string>();
+
+                if (npcJson.contains("slug") && npcJson["slug"].is_string())
+                    npc.slug = npcJson["slug"].get<std::string>();
+
+                if (npcJson.contains("race") && npcJson["race"].is_string())
+                    npc.raceName = npcJson["race"].get<std::string>();
+
+                if (npcJson.contains("level") && npcJson["level"].is_number_integer())
+                    npc.level = npcJson["level"].get<int>();
+
+                if (npcJson.contains("currentHealth") && npcJson["currentHealth"].is_number_integer())
+                    npc.currentHealth = npcJson["currentHealth"].get<int>();
+
+                if (npcJson.contains("currentMana") && npcJson["currentMana"].is_number_integer())
+                    npc.currentMana = npcJson["currentMana"].get<int>();
+
+                if (npcJson.contains("maxHealth") && npcJson["maxHealth"].is_number_integer())
+                    npc.maxHealth = npcJson["maxHealth"].get<int>();
+
+                if (npcJson.contains("maxMana") && npcJson["maxMana"].is_number_integer())
+                    npc.maxMana = npcJson["maxMana"].get<int>();
+
+                if (npcJson.contains("npcType") && npcJson["npcType"].is_string())
+                    npc.npcType = npcJson["npcType"].get<std::string>();
+
+                if (npcJson.contains("isInteractable") && npcJson["isInteractable"].is_boolean())
+                    npc.isInteractable = npcJson["isInteractable"].get<bool>();
+
+                if (npcJson.contains("dialogueId") && npcJson["dialogueId"].is_string())
+                    npc.dialogueId = npcJson["dialogueId"].get<std::string>();
+
+                if (npcJson.contains("questId") && npcJson["questId"].is_string())
+                    npc.questId = npcJson["questId"].get<std::string>();
+
+                // Parse position
+                if (npcJson.contains("posX") && npcJson["posX"].is_number())
+                    npc.position.positionX = npcJson["posX"].get<float>();
+
+                if (npcJson.contains("posY") && npcJson["posY"].is_number())
+                    npc.position.positionY = npcJson["posY"].get<float>();
+
+                if (npcJson.contains("posZ") && npcJson["posZ"].is_number())
+                    npc.position.positionZ = npcJson["posZ"].get<float>();
+
+                if (npcJson.contains("rotZ") && npcJson["rotZ"].is_number())
+                    npc.position.rotationZ = npcJson["rotZ"].get<float>();
+
+                npcsList.push_back(npc);
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        npcsList.clear();
+    }
+
+    return npcsList;
+}
+
+std::vector<NPCAttributeStruct>
+JSONParser::parseNPCsAttributes(const char *data, size_t length)
+{
+    std::vector<NPCAttributeStruct> npcsAttributes;
+
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+
+        if (jsonData.contains("body") && jsonData["body"].is_object() &&
+            jsonData["body"].contains("npcsAttributesList") && jsonData["body"]["npcsAttributesList"].is_array())
+        {
+            auto attributesArray = jsonData["body"]["npcsAttributesList"];
+
+            for (const auto &attrJson : attributesArray)
+            {
+                NPCAttributeStruct attribute;
+
+                if (attrJson.contains("id") && attrJson["id"].is_number_integer())
+                    attribute.id = attrJson["id"].get<int>();
+
+                if (attrJson.contains("npc_id") && attrJson["npc_id"].is_number_integer())
+                    attribute.npc_id = attrJson["npc_id"].get<int>();
+
+                if (attrJson.contains("name") && attrJson["name"].is_string())
+                    attribute.name = attrJson["name"].get<std::string>();
+
+                if (attrJson.contains("slug") && attrJson["slug"].is_string())
+                    attribute.slug = attrJson["slug"].get<std::string>();
+
+                if (attrJson.contains("value") && attrJson["value"].is_number_integer())
+                    attribute.value = attrJson["value"].get<int>();
+
+                npcsAttributes.push_back(attribute);
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        npcsAttributes.clear();
+    }
+
+    return npcsAttributes;
+}

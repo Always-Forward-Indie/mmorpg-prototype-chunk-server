@@ -26,6 +26,7 @@ set(SOURCE_FILES
     src/services/SpawnZoneManager.cpp
     src/services/SpawnManager.cpp
     src/services/MobManager.cpp
+    src/services/NPCManager.cpp
     src/services/MobInstanceManager.cpp
     src/services/MobMovementManager.cpp
     src/services/CombatCalculator.cpp
@@ -52,6 +53,7 @@ set(SOURCE_FILES
     src/events/handlers/ClientEventHandler.cpp
     src/events/handlers/CharacterEventHandler.cpp
     src/events/handlers/MobEventHandler.cpp
+    src/events/handlers/NPCEventHandler.cpp
     src/events/handlers/ZoneEventHandler.cpp
     src/events/handlers/ChunkEventHandler.cpp
     src/events/handlers/CombatEventHandler.cpp
@@ -82,6 +84,7 @@ set(HEADER_FILES
     include/services/SpawnZoneManager.hpp
     include/services/SpawnManager.hpp
     include/services/MobManager.hpp
+    include/services/NPCManager.hpp
     include/services/MobInstanceManager.hpp
     include/services/MobMovementManager.hpp
     include/services/CombatCalculator.hpp

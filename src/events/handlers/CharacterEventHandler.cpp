@@ -1,12 +1,15 @@
 #include "events/handlers/CharacterEventHandler.hpp"
 #include "events/EventData.hpp"
+#include "events/handlers/NPCEventHandler.hpp"
 #include "utils/TimestampUtils.hpp"
 
 CharacterEventHandler::CharacterEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices),
+      skillEventHandler_(nullptr),
+      npcEventHandler_(nullptr)
 {
 }
 
@@ -14,6 +17,12 @@ void
 CharacterEventHandler::setSkillEventHandler(SkillEventHandler *skillEventHandler)
 {
     skillEventHandler_ = skillEventHandler;
+}
+
+void
+CharacterEventHandler::setNPCEventHandler(NPCEventHandler *npcEventHandler)
+{
+    npcEventHandler_ = npcEventHandler;
 }
 
 bool
@@ -124,6 +133,16 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             else
             {
                 gameServices_.getLogger().logError("SkillEventHandler not set in CharacterEventHandler");
+            }
+
+            // Send NPC spawn data to player after successful character join
+            if (npcEventHandler_)
+            {
+                npcEventHandler_->sendNPCSpawnDataToClient(clientID, characterData.characterPosition, 50000.0f);
+            }
+            else
+            {
+                gameServices_.getLogger().logError("NPCEventHandler not set in CharacterEventHandler");
             }
 
             // Also process any pending requests for this character

@@ -6,6 +6,9 @@
 #include <memory>
 #include <unordered_map>
 
+// Forward declaration to avoid circular include
+class NPCEventHandler;
+
 /**
  * @brief Structure to hold pending join requests
  */
@@ -37,6 +40,13 @@ class CharacterEventHandler : public BaseEventHandler
      * @param skillEventHandler Pointer to skill event handler
      */
     void setSkillEventHandler(SkillEventHandler *skillEventHandler);
+
+    /**
+     * @brief Set NPC event handler for NPC spawn data
+     *
+     * @param npcEventHandler Pointer to NPC event handler
+     */
+    void setNPCEventHandler(NPCEventHandler *npcEventHandler);
 
     /**
      * @brief Handle character join event
@@ -134,6 +144,9 @@ class CharacterEventHandler : public BaseEventHandler
     // Store pending join requests while waiting for character data from Game Server
     std::unordered_map<int, std::vector<PendingJoinRequest>> pendingJoinRequests_;
 
-    // Pointer to skill event handler for skill initialization
-    SkillEventHandler *skillEventHandler_ = nullptr;
+    // Reference to skill event handler for skill initialization
+    SkillEventHandler *skillEventHandler_;
+
+    // Reference to NPC event handler for NPC spawn data
+    NPCEventHandler *npcEventHandler_;
 };

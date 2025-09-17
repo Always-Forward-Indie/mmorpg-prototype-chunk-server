@@ -202,6 +202,22 @@ GameServerWorker::processGameServerData(const std::array<char, 12096> &buffer, s
         eventsBatch.push_back(setMobsSkillsEvent);
     }
 
+    if (eventType == "setNPCsList")
+    {
+        // Parse NPCs list from the Game Server
+        std::vector<NPCDataStruct> npcsList = jsonParser_.parseNPCsList(buffer.data(), bytes_transferred);
+        Event setNPCsListEvent(Event::SET_ALL_NPCS_LIST, clientData.clientId, npcsList);
+        eventsBatch.push_back(setNPCsListEvent);
+    }
+
+    if (eventType == "setNPCsAttributes")
+    {
+        // Parse NPCs attributes from the Game Server
+        std::vector<NPCAttributeStruct> npcsAttributes = jsonParser_.parseNPCsAttributes(buffer.data(), bytes_transferred);
+        Event setNPCsAttributesEvent(Event::SET_ALL_NPCS_ATTRIBUTES, clientData.clientId, npcsAttributes);
+        eventsBatch.push_back(setNPCsAttributesEvent);
+    }
+
     if (eventType == "getItemsList")
     {
         // Parse items list from the Game Server

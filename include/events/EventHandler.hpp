@@ -10,6 +10,7 @@
 #include "events/handlers/HarvestEventHandler.hpp"
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/handlers/MobEventHandler.hpp"
+#include "events/handlers/NPCEventHandler.hpp"
 #include "events/handlers/SkillEventHandler.hpp"
 #include "events/handlers/ZoneEventHandler.hpp"
 #include "network/GameServerWorker.hpp"
@@ -68,6 +69,13 @@ class EventHandler
      */
     SkillEventHandler &getSkillEventHandler();
 
+    /**
+     * @brief Get reference to NPC event handler for sending spawn data
+     *
+     * @return Reference to the NPC event handler
+     */
+    NPCEventHandler &getNPCEventHandler();
+
   private:
     /**
      * @brief Handle experience level table data from game server
@@ -79,6 +87,7 @@ class EventHandler
     std::unique_ptr<ClientEventHandler> clientEventHandler_;
     std::unique_ptr<CharacterEventHandler> characterEventHandler_;
     std::unique_ptr<MobEventHandler> mobEventHandler_;
+    std::unique_ptr<NPCEventHandler> npcEventHandler_;
     std::unique_ptr<ZoneEventHandler> zoneEventHandler_;
     std::unique_ptr<ChunkEventHandler> chunkEventHandler_;
     std::unique_ptr<CombatEventHandler> combatEventHandler_;

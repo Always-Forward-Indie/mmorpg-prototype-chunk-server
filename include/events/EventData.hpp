@@ -64,6 +64,7 @@ using EventData = std::variant<
     ClientDataStruct,
     SpawnZoneStruct,
     MobDataStruct,
+    NPCDataStruct,
     ChunkInfoStruct,
     CombatActionStruct,
     CombatResultStruct,
@@ -90,8 +91,10 @@ using EventData = std::variant<
     PlayerSkillInitStruct,
     std::pair<int, int>, // For mob death events (mobUID, zoneId)
     std::vector<MobDataStruct>,
+    std::vector<NPCDataStruct>,
     std::vector<SpawnZoneStruct>,
     std::vector<MobAttributeStruct>,
+    std::vector<NPCAttributeStruct>,
     std::vector<CharacterDataStruct>,
     std::vector<CharacterAttributeStruct>,
     std::vector<ItemDataStruct>,
