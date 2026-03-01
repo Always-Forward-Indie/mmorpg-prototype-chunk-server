@@ -7,7 +7,8 @@
 #include <cmath>
 
 ExperienceManager::ExperienceManager(GameServices *gameServices)
-    : gameServices_(gameServices), experiencePacketCallback_(nullptr), statsUpdatePacketCallback_(nullptr)
+    : gameServices_(gameServices), experiencePacketCallback_(nullptr), statsUpdatePacketCallback_(nullptr),
+      saveProgressCallback_(nullptr)
 {
 }
 
@@ -114,6 +115,9 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
 
         // Сохраняем обновленные данные персонажа
         gameServices_->getCharacterManager().loadCharacterData(characterData);
+
+        // Немедленно сохраняем exp/level на гейм-сервере
+        sendSaveProgressToGameServer(characterId, newExperience, newLevel);
 
         // Отправляем пакет об изменении опыта
         sendExperiencePacket(result.experienceEvent);
@@ -374,6 +378,31 @@ void
 ExperienceManager::setStatsUpdatePacketCallback(std::function<void(const nlohmann::json &)> callback)
 {
     statsUpdatePacketCallback_ = callback;
+}
+
+void
+ExperienceManager::setSaveProgressCallback(std::function<void(const std::string &)> callback)
+{
+    saveProgressCallback_ = callback;
+}
+
+void
+ExperienceManager::sendSaveProgressToGameServer(int characterId, int experience, int level)
+{
+    if (!saveProgressCallback_)
+        return;
+
+    nlohmann::json packet;
+    packet["header"]["eventType"] = "saveCharacterProgress";
+    packet["header"]["clientId"] = 0;
+    packet["header"]["hash"] = "";
+    nlohmann::json entry;
+    entry["characterId"] = characterId;
+    entry["exp"] = experience;
+    entry["level"] = level;
+    packet["body"]["characters"] = nlohmann::json::array({entry});
+
+    saveProgressCallback_(packet.dump() + "\n");
 }
 
 void

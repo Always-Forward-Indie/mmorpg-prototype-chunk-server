@@ -94,10 +94,17 @@ class ExperienceManager
      */
     void setStatsUpdatePacketCallback(std::function<void(const nlohmann::json &)> callback);
 
+    /**
+     * @brief Установить callback для немедленного сохранения exp/level на гейм-сервере
+     * @param callback Функция отправки данных на гейм-сервер (принимает строку)
+     */
+    void setSaveProgressCallback(std::function<void(const std::string &)> callback);
+
   private:
     GameServices *gameServices_;
     std::function<void(const nlohmann::json &)> experiencePacketCallback_;
     std::function<void(const nlohmann::json &)> statsUpdatePacketCallback_;
+    std::function<void(const std::string &)> saveProgressCallback_;
 
     /**
      * @brief Отправить пакет об изменении опыта
@@ -125,6 +132,14 @@ class ExperienceManager
      * @return JSON пакет
      */
     nlohmann::json buildStatsUpdatePacket(const CharacterDataStruct &characterData, const std::string &requestId);
+
+    /**
+     * @brief Отправить saveCharacterProgress на гейм-сервер для немедленной записи в БД
+     * @param characterId ID персонажа
+     * @param experience Новый опыт
+     * @param level Новый уровень
+     */
+    void sendSaveProgressToGameServer(int characterId, int experience, int level);
 
     /**
      * @brief Проверить и обработать повышение уровня

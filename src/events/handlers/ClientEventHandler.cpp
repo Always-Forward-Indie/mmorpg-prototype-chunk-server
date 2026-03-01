@@ -198,6 +198,36 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
             // Remove the client data
             gameServices_.getClientManager().removeClientData(passedClientData.clientId);
 
+            // Save last known position to game server before removing character data
+            if (passedClientData.characterId > 0)
+            {
+                try
+                {
+                    PositionStruct lastPos = gameServices_.getCharacterManager().getCharacterPosition(passedClientData.characterId);
+                    nlohmann::json savePacket;
+                    savePacket["header"]["eventType"] = "savePositions";
+                    savePacket["header"]["clientId"] = 0;
+                    savePacket["header"]["hash"] = "";
+                    savePacket["body"]["characters"] = nlohmann::json::array();
+                    nlohmann::json entry;
+                    entry["characterId"] = passedClientData.characterId;
+                    entry["posX"] = lastPos.positionX;
+                    entry["posY"] = lastPos.positionY;
+                    entry["posZ"] = lastPos.positionZ;
+                    entry["rotZ"] = lastPos.rotationZ;
+                    savePacket["body"]["characters"].push_back(entry);
+                    gameServerWorker_.sendDataToGameServer(savePacket.dump() + "\n");
+                    gameServices_.getLogger().log(
+                        "[DISCONNECT] Saved position for characterId: " + std::to_string(passedClientData.characterId), GREEN);
+                }
+                catch (const std::exception &ex)
+                {
+                    gameServices_.getLogger().logError(
+                        "[DISCONNECT] Failed to save position for characterId: " +
+                        std::to_string(passedClientData.characterId) + " - " + ex.what());
+                }
+            }
+
             // Remove character data
             gameServices_.getCharacterManager().removeCharacter(passedClientData.characterId);
 

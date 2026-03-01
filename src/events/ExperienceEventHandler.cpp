@@ -213,6 +213,35 @@ ExperienceEventHandler::handleLevelUpEvent(const Event &event)
             {
                 gameServices_.getLogger().logError("Failed to send level up packet: " + std::string(e.what()));
             }
+
+            // Immediately persist the new level and experience to the game server DB
+            // so a crash/disconnect right after level-up does not lose progress.
+            try
+            {
+                nlohmann::json charEntry;
+                charEntry["characterId"] = expEvent.characterId;
+                charEntry["exp"] = expEvent.newExperience;
+                charEntry["level"] = expEvent.newLevel;
+
+                nlohmann::json savePacket;
+                savePacket["header"]["eventType"] = "saveCharacterProgress";
+                savePacket["header"]["clientId"] = 0;
+                savePacket["header"]["hash"] = "";
+                savePacket["body"]["characters"] = nlohmann::json::array({charEntry});
+
+                gameServerWorker_.sendDataToGameServer(savePacket.dump() + "\n");
+
+                gameServices_.getLogger().log(
+                    "[LEVEL_UP_SAVE] Sent saveCharacterProgress for character " +
+                        std::to_string(expEvent.characterId) +
+                        " level=" + std::to_string(expEvent.newLevel) +
+                        " exp=" + std::to_string(expEvent.newExperience),
+                    GREEN);
+            }
+            catch (const std::exception &e)
+            {
+                gameServices_.getLogger().logError("Failed to send saveCharacterProgress on level-up: " + std::string(e.what()));
+            }
         }
         else
         {

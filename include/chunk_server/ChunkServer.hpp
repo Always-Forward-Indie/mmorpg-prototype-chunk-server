@@ -3,6 +3,7 @@
 #include "events/Event.hpp"
 #include "events/EventHandler.hpp"
 #include "events/EventQueue.hpp"
+#include "network/GameServerWorker.hpp"
 #include "network/NetworkManager.hpp"
 #include "services/CharacterManager.hpp"
 #include "services/MobManager.hpp"
@@ -67,6 +68,7 @@ class ChunkServer
 
     GameServices &gameServices_;
     NetworkManager &networkManager_;
+    GameServerWorker &gameServerWorker_;
 
     // Helper method for sending spawn events to all clients
     void sendSpawnEventsToClients(const SpawnZoneStruct &zone);

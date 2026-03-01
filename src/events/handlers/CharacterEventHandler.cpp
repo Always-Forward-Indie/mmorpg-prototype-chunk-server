@@ -34,8 +34,8 @@ CharacterEventHandler::validateCharacterAuthentication(int clientId, int charact
 nlohmann::json
 CharacterEventHandler::characterToJson(const CharacterDataStruct &characterData)
 {
-    // Получаем опыт для текущего уровня (предыдущего порога)
-    int expForCurrentLevel = gameServices_.getExperienceManager().getExperienceForLevel(characterData.characterLevel);
+    // Получаем опыт для текущего уровня (порог текущего уровня из DB)
+    int expForCurrentLevel = gameServices_.getExperienceManager().getExperienceForLevelFromGameServer(characterData.characterLevel);
 
     nlohmann::json characterJson = {
         {"id", characterData.characterId},

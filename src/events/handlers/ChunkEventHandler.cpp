@@ -136,13 +136,21 @@ ChunkEventHandler::handleDisconnectChunkEvent(const Event &event)
         {
             ClientDataStruct passedClientData = std::get<ClientDataStruct>(data);
 
-            // Send disconnect response to game server
+            // Retrieve the last known position from in-memory store so game server can persist it
+            PositionStruct lastPos = gameServices_.getCharacterManager()
+                                         .getCharacterPosition(passedClientData.characterId);
+
+            // Send disconnect response to game server, carrying characterId and last position
             nlohmann::json response = ResponseBuilder()
                                           .setHeader("message", "Client disconnected!")
                                           .setHeader("hash", "")
                                           .setHeader("clientId", passedClientData.clientId)
                                           .setHeader("eventType", "disconnectClient")
-                                          .setBody("", "")
+                                          .setBody("characterId", passedClientData.characterId)
+                                          .setBody("posX", lastPos.positionX)
+                                          .setBody("posY", lastPos.positionY)
+                                          .setBody("posZ", lastPos.positionZ)
+                                          .setBody("rotZ", lastPos.rotationZ)
                                           .build();
 
             sendGameServerResponse("success", response);

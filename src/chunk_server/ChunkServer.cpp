@@ -21,7 +21,8 @@ ChunkServer::ChunkServer(GameServices &gameServices,
       eventHandler_(eventHandler),
       scheduler_(scheduler),
       gameServices_(gameServices),
-      networkManager_(networkManager)
+      networkManager_(networkManager),
+      gameServerWorker_(gameServerWorker)
 {
     // Set EventQueue for MobMovementManager to send combat events
     gameServices_.getMobMovementManager().setEventQueue(&eventQueueGameServer_);
@@ -46,6 +47,11 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 
     // Set CombatSystem for MobMovementManager to handle mob attacks
     gameServices_.getMobMovementManager().setCombatSystem(eventHandler_.getCombatEventHandler().getCombatSystem());
+
+    // Wire up saveCharacterProgress: immediately persist exp/level to game server DB on grant
+    gameServices_.getExperienceManager().setSaveProgressCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
 }
 
 void
@@ -671,6 +677,53 @@ ChunkServer::mainEventLoopCH()
     );
 
     scheduler_.scheduleTask(aggressiveCleanupTask);
+
+    // Periodic task: save all online player positions to the database every 30 seconds
+    Task savePositionsTask(
+        [this]
+        {
+            auto charactersList = gameServices_.getCharacterManager().getCharactersList();
+            if (charactersList.empty())
+                return;
+
+            // Build savePositions JSON packet for the game server
+            nlohmann::json charactersArray = nlohmann::json::array();
+            for (const auto &character : charactersList)
+            {
+                if (character.characterId <= 0)
+                    continue;
+
+                nlohmann::json entry;
+                entry["characterId"] = character.characterId;
+                entry["posX"] = character.characterPosition.positionX;
+                entry["posY"] = character.characterPosition.positionY;
+                entry["posZ"] = character.characterPosition.positionZ;
+                entry["rotZ"] = character.characterPosition.rotationZ;
+                charactersArray.push_back(entry);
+            }
+
+            if (charactersArray.empty())
+                return;
+
+            nlohmann::json packet;
+            packet["header"]["eventType"] = "savePositions";
+            packet["header"]["clientId"] = 0;
+            packet["header"]["hash"] = "";
+            packet["body"]["characters"] = charactersArray;
+
+            gameServerWorker_.sendDataToGameServer(packet.dump() + "\n");
+
+            gameServices_.getLogger().log(
+                "[SAVE_POSITIONS] Sent " + std::to_string(charactersArray.size()) +
+                    " position(s) to game server",
+                GREEN);
+        },
+        30,                                                          // Every 30 seconds
+        std::chrono::system_clock::now() + std::chrono::seconds(30), // First run after 30s
+        10                                                           // unique task ID
+    );
+
+    scheduler_.scheduleTask(savePositionsTask);
 
     try
     {

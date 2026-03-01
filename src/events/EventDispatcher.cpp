@@ -964,11 +964,11 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
         response["body"]["characterId"] = characterData.characterId;
         response["body"]["currentLevel"] = characterData.characterLevel;
         response["body"]["currentExperience"] = characterData.characterExperiencePoints;
-        response["body"]["expForCurrentLevel"] = (characterData.characterLevel > 1) ? experienceManager.getExperienceForLevel(characterData.characterLevel - 1) : 0;
+        response["body"]["expForCurrentLevel"] = experienceManager.getExperienceForLevelFromGameServer(characterData.characterLevel);
         response["body"]["expForNextLevel"] = experienceManager.getExperienceForNextLevel(characterData.characterLevel);
 
         // Calculate experience progress within current level
-        int expForCurrentLevel = (characterData.characterLevel > 1) ? experienceManager.getExperienceForLevel(characterData.characterLevel - 1) : 0;
+        int expForCurrentLevel = experienceManager.getExperienceForLevelFromGameServer(characterData.characterLevel);
         int expForNextLevel = experienceManager.getExperienceForNextLevel(characterData.characterLevel);
         int expInCurrentLevel = characterData.characterExperiencePoints - expForCurrentLevel;
         int expNeededForNextLevel = expForNextLevel - expForCurrentLevel;
