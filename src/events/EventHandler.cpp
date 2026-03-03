@@ -20,6 +20,7 @@ EventHandler::EventHandler(
     harvestEventHandler_ = std::make_unique<HarvestEventHandler>(networkManager, gameServerWorker, gameServices);
     skillEventHandler_ = std::make_unique<SkillEventHandler>(networkManager, gameServerWorker, gameServices);
     experienceEventHandler_ = std::make_unique<ExperienceEventHandler>(networkManager, gameServerWorker, gameServices);
+    dialogueEventHandler_ = std::make_unique<DialogueEventHandler>(networkManager, gameServerWorker, gameServices);
 
     // Set skill event handler reference in character event handler
     characterEventHandler_->setSkillEventHandler(skillEventHandler_.get());
@@ -247,6 +248,34 @@ EventHandler::dispatchEvent(const Event &event)
             chunkEventHandler_->handleDisconnectChunkEvent(event);
             break;
 
+        // Dialogue data events (game-server → chunk-server)
+        case Event::SET_ALL_DIALOGUES:
+            dialogueEventHandler_->handleSetAllDialoguesEvent(event);
+            break;
+        case Event::SET_NPC_DIALOGUE_MAPPINGS:
+            dialogueEventHandler_->handleSetNPCDialogueMappingsEvent(event);
+            break;
+        case Event::SET_ALL_QUESTS:
+            dialogueEventHandler_->handleSetAllQuestsEvent(event);
+            break;
+        case Event::SET_PLAYER_QUESTS:
+            dialogueEventHandler_->handleSetPlayerQuestsEvent(event);
+            break;
+        case Event::SET_PLAYER_FLAGS:
+            dialogueEventHandler_->handleSetPlayerFlagsEvent(event);
+            break;
+
+        // Client dialogue/quest interaction events
+        case Event::NPC_INTERACT:
+            dialogueEventHandler_->handleNPCInteractEvent(event);
+            break;
+        case Event::DIALOGUE_CHOICE:
+            dialogueEventHandler_->handleDialogueChoiceEvent(event);
+            break;
+        case Event::DIALOGUE_CLOSE:
+            dialogueEventHandler_->handleDialogueCloseEvent(event);
+            break;
+
         default:
             gameServices_.getLogger().logError("Unknown event type: " + std::to_string(static_cast<int>(event.getType())));
             break;
@@ -274,6 +303,12 @@ NPCEventHandler &
 EventHandler::getNPCEventHandler()
 {
     return *npcEventHandler_;
+}
+
+DialogueEventHandler &
+EventHandler::getDialogueEventHandler()
+{
+    return *dialogueEventHandler_;
 }
 
 void

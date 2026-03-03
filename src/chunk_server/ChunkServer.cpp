@@ -48,6 +48,15 @@ ChunkServer::ChunkServer(GameServices &gameServices,
     // Set CombatSystem for MobMovementManager to handle mob attacks
     gameServices_.getMobMovementManager().setCombatSystem(eventHandler_.getCombatEventHandler().getCombatSystem());
 
+    // Wire up QuestManager → GameServerWorker for persistence
+    gameServices_.getQuestManager().setGameServerWorker(&gameServerWorker_);
+
+    // Wire up QuestManager → NetworkManager for sending packets to clients
+    gameServices_.getQuestManager().setNetworkManager(&networkManager_);
+
+    // Wire up QuestManager into InventoryManager for onItemObtained triggers
+    gameServices_.getInventoryManager().setQuestManager(&gameServices_.getQuestManager());
+
     // Wire up saveCharacterProgress: immediately persist exp/level to game server DB on grant
     gameServices_.getExperienceManager().setSaveProgressCallback(
         [this](const std::string &data)
@@ -724,6 +733,30 @@ ChunkServer::mainEventLoopCH()
     );
 
     scheduler_.scheduleTask(savePositionsTask);
+
+    // Periodic task: clean up expired dialogue sessions every 60 seconds
+    Task cleanupDialogueSessionsTask(
+        [this]
+        {
+            gameServices_.getDialogueSessionManager().cleanupExpiredSessions();
+        },
+        60,                                                          // Every 60 seconds
+        std::chrono::system_clock::now() + std::chrono::seconds(60), // First run after 60s
+        11                                                           // unique task ID
+    );
+    scheduler_.scheduleTask(cleanupDialogueSessionsTask);
+
+    // Periodic task: flush dirty quest progress + pending flags every 5 seconds
+    Task flushQuestProgressTask(
+        [this]
+        {
+            gameServices_.getQuestManager().flushDirtyProgress();
+        },
+        5,                                                          // Every 5 seconds
+        std::chrono::system_clock::now() + std::chrono::seconds(5), // First run after 5s
+        12                                                          // unique task ID
+    );
+    scheduler_.scheduleTask(flushQuestProgressTask);
 
     try
     {

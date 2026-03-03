@@ -7,6 +7,7 @@
 #include "events/handlers/ChunkEventHandler.hpp"
 #include "events/handlers/ClientEventHandler.hpp"
 #include "events/handlers/CombatEventHandler.hpp"
+#include "events/handlers/DialogueEventHandler.hpp"
 #include "events/handlers/HarvestEventHandler.hpp"
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/handlers/MobEventHandler.hpp"
@@ -76,6 +77,11 @@ class EventHandler
      */
     NPCEventHandler &getNPCEventHandler();
 
+    /**
+     * @brief Get reference to dialogue event handler.
+     */
+    DialogueEventHandler &getDialogueEventHandler();
+
   private:
     /**
      * @brief Handle experience level table data from game server
@@ -95,6 +101,7 @@ class EventHandler
     std::unique_ptr<HarvestEventHandler> harvestEventHandler_;
     std::unique_ptr<SkillEventHandler> skillEventHandler_;
     std::unique_ptr<ExperienceEventHandler> experienceEventHandler_;
+    std::unique_ptr<DialogueEventHandler> dialogueEventHandler_;
 
     // References for logging and error handling
     GameServices &gameServices_;

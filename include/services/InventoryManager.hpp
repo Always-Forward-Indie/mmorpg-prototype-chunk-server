@@ -8,6 +8,7 @@
 
 // Forward declaration
 class EventQueue;
+class QuestManager;
 
 class InventoryManager
 {
@@ -19,6 +20,7 @@ class InventoryManager
      * @param eventQueue Event queue to send INVENTORY_UPDATE events
      */
     void setEventQueue(EventQueue *eventQueue);
+    void setQuestManager(QuestManager *questManager);
 
     /**
      * @brief Add item to player's inventory
@@ -88,6 +90,7 @@ class InventoryManager
 
     // Event queue for sending inventory update events
     EventQueue *eventQueue_;
+    QuestManager *questManager_ = nullptr;
 
     // Store inventories (characterId -> vector of inventory items)
     std::map<int, std::vector<PlayerInventoryItemStruct>> playerInventories_;

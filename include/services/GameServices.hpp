@@ -3,6 +3,9 @@
 #include "services/CharacterStatsNotificationService.hpp"
 #include "services/ChunkManager.hpp"
 #include "services/ClientManager.hpp"
+#include "services/DialogueConditionEvaluator.hpp"
+#include "services/DialogueManager.hpp"
+#include "services/DialogueSessionManager.hpp"
 #include "services/ExperienceCacheManager.hpp"
 #include "services/ExperienceManager.hpp"
 #include "services/HarvestManager.hpp"
@@ -13,6 +16,7 @@
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
 #include "services/NPCManager.hpp"
+#include "services/QuestManager.hpp"
 #include "services/SkillManager.hpp"
 #include "services/SpawnZoneManager.hpp"
 #include "utils/Logger.hpp"
@@ -36,6 +40,9 @@ class GameServices
           inventoryManager_(itemManager_, logger_),
           harvestManager_(itemManager_, logger_),
           npcManager_(logger_),
+          dialogueManager_(logger_),
+          dialogueSessionManager_(logger_),
+          questManager_(this, logger_),
           skillManager_(this),
           experienceManager_(this),
           experienceCacheManager_(this),
@@ -119,6 +126,18 @@ class GameServices
     {
         return npcManager_;
     }
+    DialogueManager &getDialogueManager()
+    {
+        return dialogueManager_;
+    }
+    DialogueSessionManager &getDialogueSessionManager()
+    {
+        return dialogueSessionManager_;
+    }
+    QuestManager &getQuestManager()
+    {
+        return questManager_;
+    }
 
   private:
     Logger &logger_;
@@ -134,6 +153,9 @@ class GameServices
     InventoryManager inventoryManager_;
     HarvestManager harvestManager_;
     NPCManager npcManager_;
+    DialogueManager dialogueManager_;
+    DialogueSessionManager dialogueSessionManager_;
+    QuestManager questManager_;
     SkillManager skillManager_;
     ExperienceManager experienceManager_;
     ExperienceCacheManager experienceCacheManager_;

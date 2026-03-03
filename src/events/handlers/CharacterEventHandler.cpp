@@ -145,6 +145,20 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 gameServices_.getLogger().logError("NPCEventHandler not set in CharacterEventHandler");
             }
 
+            // Request player quests and flags from game server
+            {
+                int cid = characterData.characterId;
+                nlohmann::json questsReq;
+                questsReq["header"]["eventType"] = "getPlayerQuests";
+                questsReq["body"]["characterId"] = cid;
+                gameServerWorker_.sendDataToGameServer(questsReq.dump() + "\n");
+
+                nlohmann::json flagsReq;
+                flagsReq["header"]["eventType"] = "getPlayerFlags";
+                flagsReq["body"]["characterId"] = cid;
+                gameServerWorker_.sendDataToGameServer(flagsReq.dump() + "\n");
+            }
+
             // Also process any pending requests for this character
             processPendingJoinRequests(passedCharacterData.characterId);
         }
@@ -176,6 +190,12 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
             // Update character position on server
             gameServices_.getCharacterManager().setCharacterPosition(
                 movementData.characterId, movementData.position);
+
+            // Trigger reach-type quest step check
+            gameServices_.getQuestManager().onPositionReached(
+                movementData.characterId,
+                movementData.position.positionX,
+                movementData.position.positionY);
 
             // Create minimal character data for response (only essential movement data)
             nlohmann::json characterJson = {
@@ -395,6 +415,19 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
         }
 
         gameServices_.getLogger().log("Processed pending join request for client ID: " + std::to_string(request.clientID) + ", character ID: " + std::to_string(characterId));
+    }
+
+    // Request player quests and flags from game server (once per character)
+    {
+        nlohmann::json questsReq;
+        questsReq["header"]["eventType"] = "getPlayerQuests";
+        questsReq["body"]["characterId"] = characterId;
+        gameServerWorker_.sendDataToGameServer(questsReq.dump() + "\n");
+
+        nlohmann::json flagsReq;
+        flagsReq["header"]["eventType"] = "getPlayerFlags";
+        flagsReq["body"]["characterId"] = characterId;
+        gameServerWorker_.sendDataToGameServer(flagsReq.dump() + "\n");
     }
 
     // Clear processed requests

@@ -105,5 +105,20 @@ using EventData = std::variant<
     std::vector<ClientDataStruct>,
     std::vector<TargetCandidate>,
     std::vector<ExperienceLevelEntry>,
-    std::vector<std::pair<int, std::vector<SkillStruct>>> // For mob skills mapping (mobId -> skills)
-    >;
+    std::vector<std::pair<int, std::vector<SkillStruct>>>, // For mob skills mapping (mobId -> skills)
+    // Dialogue / Quest event payloads
+    DialogueGraphStruct,
+    NPCDialogueMappingStruct,
+    QuestStruct,
+    PlayerQuestProgressStruct,
+    PlayerFlagStruct,
+    NPCInteractRequestStruct,
+    DialogueChoiceRequestStruct,
+    DialogueCloseRequestStruct,
+    UpdatePlayerQuestProgressStruct,
+    UpdatePlayerFlagStruct,
+    std::vector<DialogueGraphStruct>,
+    std::vector<NPCDialogueMappingStruct>,
+    std::vector<QuestStruct>,
+    std::vector<PlayerQuestProgressStruct>,
+    std::vector<PlayerFlagStruct>>;

@@ -81,6 +81,18 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleGetCharacterExperience(context, socket);
     }
+    else if (context.eventType == "npcInteract")
+    {
+        handleNPCInteract(context, socket);
+    }
+    else if (context.eventType == "dialogueChoice")
+    {
+        handleDialogueChoice(context, socket);
+    }
+    else if (context.eventType == "dialogueClose")
+    {
+        handleDialogueClose(context, socket);
+    }
     else
     {
         gameServices_.getLogger().logError("Unknown event type: " + context.eventType, RED);
@@ -1021,5 +1033,100 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
                         gameServices_.getLogger().logError("Error sending character experience error response: " + ec.message());
                     } });
         }
+    }
+}
+
+void
+EventDispatcher::handleNPCInteract(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleNPCInteract: invalid character");
+        return;
+    }
+
+    try
+    {
+        auto messageJson = nlohmann::json::parse(context.fullMessage);
+
+        int npcId = messageJson["body"].value("npcId", 0);
+        if (npcId <= 0)
+        {
+            gameServices_.getLogger().logError("[EventDispatcher] handleNPCInteract: invalid npcId");
+            return;
+        }
+
+        NPCInteractRequestStruct request;
+        request.characterId = context.characterData.characterId;
+        request.clientId = context.clientData.clientId;
+        request.npcId = npcId;
+        request.playerId = context.clientData.clientId;
+        request.timestamps = context.timestamps;
+
+        Event event(Event::NPC_INTERACT, context.clientData.clientId, request, context.timestamps);
+        eventsBatch_.push_back(event);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleNPCInteract exception: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleDialogueChoice(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleDialogueChoice: invalid character");
+        return;
+    }
+
+    try
+    {
+        auto messageJson = nlohmann::json::parse(context.fullMessage);
+
+        DialogueChoiceRequestStruct request;
+        request.characterId = context.characterData.characterId;
+        request.clientId = context.clientData.clientId;
+        request.sessionId = messageJson["body"].value("sessionId", "");
+        request.edgeId = messageJson["body"].value("edgeId", 0);
+        request.playerId = context.clientData.clientId;
+        request.timestamps = context.timestamps;
+
+        Event event(Event::DIALOGUE_CHOICE, context.clientData.clientId, request, context.timestamps);
+        eventsBatch_.push_back(event);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleDialogueChoice exception: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleDialogueClose(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleDialogueClose: invalid character");
+        return;
+    }
+
+    try
+    {
+        auto messageJson = nlohmann::json::parse(context.fullMessage);
+
+        DialogueCloseRequestStruct request;
+        request.characterId = context.characterData.characterId;
+        request.clientId = context.clientData.clientId;
+        request.sessionId = messageJson["body"].value("sessionId", "");
+        request.playerId = context.clientData.clientId;
+        request.timestamps = context.timestamps;
+
+        Event event(Event::DIALOGUE_CLOSE, context.clientData.clientId, request, context.timestamps);
+        eventsBatch_.push_back(event);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleDialogueClose exception: " + std::string(e.what()));
     }
 }

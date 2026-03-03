@@ -4,7 +4,9 @@
 #include <chrono>
 #include <cmath>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 /**
@@ -222,6 +224,33 @@ struct ItemPickupRequestStruct
     TimestampStruct timestamps; // Lag compensation timestamps
 };
 
+// ============= PLAYER FLAG STRUCT =============
+/**
+ * @brief Arbitrary player flag (bool or int counter) for dialogue/quest conditions
+ */
+struct PlayerFlagStruct
+{
+    std::string flagKey = "";
+    std::optional<bool> boolValue;
+    std::optional<int> intValue;
+};
+
+// ============= PLAYER QUEST PROGRESS (in-memory) =============
+/**
+ * @brief In-memory quest progress for a single quest of a specific character
+ */
+struct PlayerQuestProgressStruct
+{
+    int characterId = 0;
+    int questId = 0;
+    std::string questSlug = "";
+    std::string state = ""; // offered|active|completed|turned_in|failed
+    int currentStep = 0;
+    nlohmann::json progress = nlohmann::json::object();
+    bool isDirty = false;
+    std::chrono::steady_clock::time_point updatedAt;
+};
+
 struct CharacterDataStruct
 {
     int clientId = 0;
@@ -239,6 +268,10 @@ struct CharacterDataStruct
     PositionStruct characterPosition;
     std::vector<CharacterAttributeStruct> attributes;
     std::vector<SkillStruct> skills;
+
+    // Dialogue / quest state (populated on character join)
+    std::vector<PlayerFlagStruct> flags;
+    std::vector<PlayerQuestProgressStruct> quests;
 };
 
 struct ClientDataStruct
@@ -661,10 +694,175 @@ struct NPCDataStruct
     bool isInteractable = true;
     std::string dialogueId = "";
     std::string questId = "";
+    int radius = 200; // Interaction/spawn radius. Used for dialogue range check.
 
     // Define the equality operator
     bool operator==(const NPCDataStruct &other) const
     {
         return id == other.id;
     }
+};
+
+// ============= DIALOGUE SYSTEM STRUCTS =============
+
+/// Node of the dialogue graph
+struct DialogueNodeStruct
+{
+    int id = 0;
+    int dialogueId = 0;
+    std::string type = ""; ///< "line" | "choice_hub" | "action" | "jump" | "end"
+    int speakerNpcId = 0;
+    std::string clientNodeKey = "";
+    nlohmann::json conditionGroup; ///< null JSON → always true
+    nlohmann::json actionGroup;    ///< null JSON → no actions
+    int jumpTargetNodeId = 0;
+};
+
+/// Edge (player choice) in the dialogue graph
+struct DialogueEdgeStruct
+{
+    int id = 0;
+    int fromNodeId = 0;
+    int toNodeId = 0;
+    int orderIndex = 0;
+    std::string clientChoiceKey = "";
+    nlohmann::json conditionGroup;
+    nlohmann::json actionGroup;
+    bool hideIfLocked = false;
+};
+
+/// Entire dialogue graph cached in memory
+struct DialogueGraphStruct
+{
+    int id = 0;
+    std::string slug = "";
+    int version = 0;
+    int startNodeId = 0;
+    std::unordered_map<int, DialogueNodeStruct> nodes;              ///< nodeId → node
+    std::unordered_map<int, std::vector<DialogueEdgeStruct>> edges; ///< fromNodeId → edges
+};
+
+/// Binding NPC → Dialogue with priority
+struct NPCDialogueMappingStruct
+{
+    int npcId = 0;
+    int dialogueId = 0;
+    int priority = 0;
+    nlohmann::json conditionGroup;
+};
+
+/// Active in-memory dialogue session for one player
+struct DialogueSessionStruct
+{
+    std::string sessionId = ""; ///< "dlg_{clientId}_{timestamp}"
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    int dialogueId = 0;
+    int currentNodeId = 0;
+    std::chrono::steady_clock::time_point lastActivity;
+    static constexpr int TTL_SECONDS = 300;
+};
+
+/// Player context snapshot used to evaluate conditions
+struct PlayerContextStruct
+{
+    int characterId = 0;
+    int characterLevel = 0;
+    std::unordered_map<std::string, bool> flagsBool;          ///< flag_key → bool_value
+    std::unordered_map<std::string, int> flagsInt;            ///< flag_key → int_value
+    std::unordered_map<std::string, std::string> questStates; ///< quest_slug → state string
+    std::unordered_map<int, nlohmann::json> questProgress;    ///< quest_id → progress json
+};
+
+// ============= QUEST SYSTEM STRUCTS =============
+
+/// Reward entry for quest completion
+struct QuestRewardStruct
+{
+    std::string rewardType = ""; ///< "item" | "exp" | "gold"
+    int itemId = 0;
+    int quantity = 1;
+    int64_t amount = 0;
+};
+
+/// Single step of a quest
+struct QuestStepStruct
+{
+    int id = 0;
+    int questId = 0;
+    int stepIndex = 0;
+    std::string stepType = ""; ///< "kill" | "collect" | "talk" | "reach" | "custom"
+    nlohmann::json params;
+    std::string clientStepKey = "";
+};
+
+/// Static quest definition
+struct QuestStruct
+{
+    int id = 0;
+    std::string slug = "";
+    int minLevel = 0;
+    bool repeatable = false;
+    int cooldownSec = 0;
+    int giverNpcId = 0;
+    int turninNpcId = 0;
+    std::string clientQuestKey = "";
+    std::vector<QuestStepStruct> steps;
+    std::vector<QuestRewardStruct> rewards;
+};
+
+// ============= REQUEST STRUCTS (client → chunk) =============
+
+/// Client requests interaction with an NPC to start dialogue
+struct NPCInteractRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    int playerId = 0; ///< client-side player ID for verification
+    TimestampStruct timestamps;
+};
+
+/// Client picks a dialogue edge
+struct DialogueChoiceRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    std::string sessionId = "";
+    int edgeId = 0;
+    int playerId = 0;
+    TimestampStruct timestamps;
+};
+
+/// Client closes the dialogue
+struct DialogueCloseRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    std::string sessionId = "";
+    int playerId = 0;
+    TimestampStruct timestamps;
+};
+
+// ============= PERSISTENCE STRUCTS (chunk → game-server) =============
+
+/// Chunk-server sends quest progress to game-server for DB persistance
+struct UpdatePlayerQuestProgressStruct
+{
+    int characterId = 0;
+    int questId = 0;
+    std::string questSlug = "";
+    std::string state = "";
+    int currentStep = 0;
+    nlohmann::json progress;
+};
+
+/// Chunk-server sends flag update to game-server
+struct UpdatePlayerFlagStruct
+{
+    int characterId = 0;
+    std::string flagKey = "";
+    std::optional<bool> boolValue;
+    std::optional<int> intValue;
 };

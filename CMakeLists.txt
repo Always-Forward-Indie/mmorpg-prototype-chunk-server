@@ -40,6 +40,11 @@ set(SOURCE_FILES
     src/services/HarvestManager.cpp
     src/services/ExperienceManager.cpp
     src/services/CharacterStatsNotificationService.cpp
+    src/services/DialogueManager.cpp
+    src/services/DialogueSessionManager.cpp
+    src/services/DialogueConditionEvaluator.cpp
+    src/services/DialogueActionExecutor.cpp
+    src/services/QuestManager.cpp
     src/services/ExperienceCacheManager.cpp
     src/services/ClientManager.cpp
     src/network/GameServerWorker.cpp
@@ -60,6 +65,7 @@ set(SOURCE_FILES
     src/events/handlers/SkillEventHandler.cpp
     src/events/handlers/ItemEventHandler.cpp
     src/events/handlers/HarvestEventHandler.cpp
+    src/events/handlers/DialogueEventHandler.cpp
     src/events/ExperienceEventHandler.cpp
     src/data/AttackSystem.cpp
     src/utils/Scheduler.cpp
@@ -99,6 +105,11 @@ set(HEADER_FILES
     include/services/ExperienceManager.hpp
     include/services/ClientManager.hpp
     include/services/GameServices.hpp
+    include/services/DialogueManager.hpp
+    include/services/DialogueSessionManager.hpp
+    include/services/DialogueConditionEvaluator.hpp
+    include/services/DialogueActionExecutor.hpp
+    include/services/QuestManager.hpp
     include/network/GameServerWorker.hpp
     include/network/NetworkManager.hpp
     include/network/ClientSession.hpp
@@ -117,6 +128,7 @@ set(HEADER_FILES
     include/events/handlers/SkillEventHandler.hpp
     include/events/handlers/ItemEventHandler.hpp
     include/events/handlers/HarvestEventHandler.hpp
+    include/events/handlers/DialogueEventHandler.hpp
     include/events/ExperienceEventHandler.hpp
     include/data/DataStructs.hpp
     include/data/SkillStructs.hpp

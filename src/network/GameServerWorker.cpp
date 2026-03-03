@@ -242,6 +242,41 @@ GameServerWorker::processGameServerData(const std::array<char, 12096> &buffer, s
         eventsBatch.push_back(setExpLevelTableEvent);
     }
 
+    if (eventType == "setDialoguesData")
+    {
+        std::vector<DialogueGraphStruct> dialogues = jsonParser_.parseDialoguesList(buffer.data(), bytes_transferred);
+        Event event(Event::SET_ALL_DIALOGUES, clientData.clientId, dialogues);
+        eventsBatch.push_back(event);
+    }
+
+    if (eventType == "setNPCDialogueMappings")
+    {
+        std::vector<NPCDialogueMappingStruct> mappings = jsonParser_.parseNPCDialogueMappings(buffer.data(), bytes_transferred);
+        Event event(Event::SET_NPC_DIALOGUE_MAPPINGS, clientData.clientId, mappings);
+        eventsBatch.push_back(event);
+    }
+
+    if (eventType == "setQuestsData")
+    {
+        std::vector<QuestStruct> quests = jsonParser_.parseQuestsList(buffer.data(), bytes_transferred);
+        Event event(Event::SET_ALL_QUESTS, clientData.clientId, quests);
+        eventsBatch.push_back(event);
+    }
+
+    if (eventType == "setPlayerQuestsData")
+    {
+        std::vector<PlayerQuestProgressStruct> quests = jsonParser_.parsePlayerQuestProgress(buffer.data(), bytes_transferred);
+        Event event(Event::SET_PLAYER_QUESTS, clientData.clientId, quests);
+        eventsBatch.push_back(event);
+    }
+
+    if (eventType == "setPlayerFlagsData")
+    {
+        std::vector<PlayerFlagStruct> flags = jsonParser_.parsePlayerFlags(buffer.data(), bytes_transferred);
+        Event event(Event::SET_PLAYER_FLAGS, clientData.clientId, flags);
+        eventsBatch.push_back(event);
+    }
+
     // Push batched events to the event queue
     if (!eventsBatch.empty())
     {

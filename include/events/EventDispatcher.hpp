@@ -28,6 +28,9 @@ class EventDispatcher
     void handleCorpseLootPickup(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleCorpseLootInspect(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleGetCharacterExperience(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleNPCInteract(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleDialogueChoice(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleDialogueClose(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;

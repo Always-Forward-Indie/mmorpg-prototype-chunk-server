@@ -647,6 +647,15 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
             gameServices_->getLogger().log("Killer " + std::to_string(killerId) + " is not a player character, no experience granted");
         }
 
+        // Quest trigger: notify QuestManager that the mob was killed
+        try
+        {
+            gameServices_->getQuestManager().onMobKilled(killerId, mobData.id);
+        }
+        catch (...)
+        {
+        }
+
         // Вызываем общую логику смерти цели (для совместимости)
         handleTargetDeath(mobId, CombatTargetType::MOB);
     }

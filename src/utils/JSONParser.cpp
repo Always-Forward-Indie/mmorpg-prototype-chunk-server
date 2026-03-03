@@ -1,5 +1,6 @@
 #include "utils/JSONParser.hpp"
 #include "utils/TimestampUtils.hpp"
+#include <algorithm>
 #include <iostream>
 
 JSONParser::JSONParser() {}
@@ -1218,4 +1219,274 @@ JSONParser::parseNPCsAttributes(const char *data, size_t length)
     }
 
     return npcsAttributes;
+}
+
+// =============================================================================
+// Dialogue and quest system parsers
+// =============================================================================
+
+std::vector<DialogueGraphStruct>
+JSONParser::parseDialoguesList(const char *data, size_t length)
+{
+    std::vector<DialogueGraphStruct> result;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].contains("dialogues"))
+            return result;
+
+        for (const auto &dj : j["body"]["dialogues"])
+        {
+            // Helper: parse a field that may be a JSON string or already a JSON object
+            auto parseJsonField = [](const nlohmann::json &obj, const std::string &key) -> nlohmann::json
+            {
+                if (!obj.contains(key))
+                    return nullptr;
+                const auto &v = obj[key];
+                if (v.is_null())
+                    return nullptr;
+                if (v.is_string())
+                {
+                    const std::string s = v.get<std::string>();
+                    if (s.empty())
+                        return nullptr;
+                    try
+                    {
+                        return nlohmann::json::parse(s);
+                    }
+                    catch (...)
+                    {
+                        return nullptr;
+                    }
+                }
+                return v;
+            };
+
+            DialogueGraphStruct graph;
+            graph.id = dj.value("id", 0);
+            graph.slug = dj.value("slug", "");
+            graph.version = dj.value("version", 0);
+            graph.startNodeId = dj.value("startNodeId", 0);
+
+            if (dj.contains("nodes") && dj["nodes"].is_array())
+            {
+                for (const auto &nj : dj["nodes"])
+                {
+                    DialogueNodeStruct node;
+                    node.id = nj.value("id", 0);
+                    node.dialogueId = graph.id;
+                    node.type = nj.value("type", "");
+                    node.speakerNpcId = nj.value("speakerNpcId", 0);
+                    node.clientNodeKey = nj.value("clientNodeKey", "");
+                    node.jumpTargetNodeId = nj.value("jumpTargetNodeId", 0);
+                    node.conditionGroup = parseJsonField(nj, "conditionGroup");
+                    node.actionGroup = parseJsonField(nj, "actionGroup");
+                    graph.nodes[node.id] = std::move(node);
+                }
+            }
+
+            if (dj.contains("edges") && dj["edges"].is_array())
+            {
+                for (const auto &ej : dj["edges"])
+                {
+                    DialogueEdgeStruct edge;
+                    edge.id = ej.value("id", 0);
+                    edge.fromNodeId = ej.value("fromNodeId", 0);
+                    edge.toNodeId = ej.value("toNodeId", 0);
+                    edge.orderIndex = ej.value("orderIndex", 0);
+                    edge.clientChoiceKey = ej.value("clientChoiceKey", "");
+                    edge.hideIfLocked = ej.value("hideIfLocked", false);
+                    edge.conditionGroup = parseJsonField(ej, "conditionGroup");
+                    edge.actionGroup = parseJsonField(ej, "actionGroup");
+                    graph.edges[edge.fromNodeId].push_back(std::move(edge));
+                }
+            }
+
+            result.push_back(std::move(graph));
+        }
+    }
+    catch (const std::exception &)
+    {
+        result.clear();
+    }
+    return result;
+}
+
+std::vector<NPCDialogueMappingStruct>
+JSONParser::parseNPCDialogueMappings(const char *data, size_t length)
+{
+    std::vector<NPCDialogueMappingStruct> result;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].contains("mappings"))
+            return result;
+
+        for (const auto &mj : j["body"]["mappings"])
+        {
+            NPCDialogueMappingStruct m;
+            m.npcId = mj.value("npcId", 0);
+            m.dialogueId = mj.value("dialogueId", 0);
+            m.priority = mj.value("priority", 0);
+            if (mj.contains("conditionGroup") && !mj["conditionGroup"].is_null())
+                m.conditionGroup = mj["conditionGroup"];
+            result.push_back(std::move(m));
+        }
+    }
+    catch (const std::exception &)
+    {
+        result.clear();
+    }
+    return result;
+}
+
+std::vector<QuestStruct>
+JSONParser::parseQuestsList(const char *data, size_t length)
+{
+    std::vector<QuestStruct> result;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].contains("quests"))
+            return result;
+
+        for (const auto &qj : j["body"]["quests"])
+        {
+            QuestStruct q;
+            q.id = qj.value("id", 0);
+            q.slug = qj.value("slug", "");
+            q.minLevel = qj.value("minLevel", 0);
+            q.repeatable = qj.value("repeatable", false);
+            q.cooldownSec = qj.value("cooldownSec", 0);
+            q.giverNpcId = qj.value("giverNpcId", 0);
+            q.turninNpcId = qj.value("turninNpcId", 0);
+            q.clientQuestKey = qj.value("clientQuestKey", "");
+
+            if (qj.contains("steps") && qj["steps"].is_array())
+            {
+                for (const auto &sj : qj["steps"])
+                {
+                    QuestStepStruct step;
+                    step.id = sj.value("id", 0);
+                    step.questId = q.id;
+                    step.stepIndex = sj.value("stepIndex", 0);
+                    step.stepType = sj.value("stepType", "");
+                    step.clientStepKey = sj.value("clientStepKey", "");
+                    if (sj.contains("params"))
+                    {
+                        const auto &pv = sj["params"];
+                        if (pv.is_string())
+                        {
+                            std::string ps = pv.get<std::string>();
+                            step.params = ps.empty() ? nlohmann::json::object() : nlohmann::json::parse(ps);
+                        }
+                        else
+                        {
+                            step.params = pv;
+                        }
+                    }
+                    q.steps.push_back(std::move(step));
+                }
+                // Sort steps by step_index
+                std::sort(q.steps.begin(), q.steps.end(), [](const QuestStepStruct &a, const QuestStepStruct &b)
+                    { return a.stepIndex < b.stepIndex; });
+            }
+
+            if (qj.contains("rewards") && qj["rewards"].is_array())
+            {
+                for (const auto &rj : qj["rewards"])
+                {
+                    QuestRewardStruct reward;
+                    reward.rewardType = rj.value("rewardType", "");
+                    reward.itemId = rj.value("itemId", 0);
+                    reward.quantity = rj.value("quantity", 1);
+                    reward.amount = rj.value("amount", 0);
+                    q.rewards.push_back(std::move(reward));
+                }
+            }
+
+            result.push_back(std::move(q));
+        }
+    }
+    catch (const std::exception &)
+    {
+        result.clear();
+    }
+    return result;
+}
+
+std::vector<PlayerQuestProgressStruct>
+JSONParser::parsePlayerQuestProgress(const char *data, size_t length)
+{
+    std::vector<PlayerQuestProgressStruct> result;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].contains("quests"))
+            return result;
+
+        int bodyCharacterId = j["body"].value("characterId", 0);
+        for (const auto &pq : j["body"]["quests"])
+        {
+            PlayerQuestProgressStruct p;
+            p.characterId = bodyCharacterId;
+            p.questId = pq.value("questId", 0);
+            p.questSlug = pq.value("questSlug", "");
+            p.state = pq.value("state", "");
+            p.currentStep = pq.value("currentStep", 0);
+            if (pq.contains("progress"))
+            {
+                const auto &pv = pq["progress"];
+                if (pv.is_string())
+                {
+                    std::string ps = pv.get<std::string>();
+                    p.progress = ps.empty() ? nlohmann::json::object() : nlohmann::json::parse(ps);
+                }
+                else
+                {
+                    p.progress = pv;
+                }
+            }
+            else
+            {
+                p.progress = nlohmann::json::object();
+            }
+            p.isDirty = false;
+            p.updatedAt = std::chrono::steady_clock::now();
+            result.push_back(std::move(p));
+        }
+    }
+    catch (const std::exception &)
+    {
+        result.clear();
+    }
+    return result;
+}
+
+std::vector<PlayerFlagStruct>
+JSONParser::parsePlayerFlags(const char *data, size_t length)
+{
+    std::vector<PlayerFlagStruct> result;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].contains("flags"))
+            return result;
+
+        for (const auto &fj : j["body"]["flags"])
+        {
+            PlayerFlagStruct flag;
+            flag.flagKey = fj.value("flag_key", "");
+            if (fj.contains("bool_value") && fj["bool_value"].is_boolean())
+                flag.boolValue = fj["bool_value"].get<bool>();
+            if (fj.contains("int_value") && fj["int_value"].is_number_integer())
+                flag.intValue = fj["int_value"].get<int>();
+            result.push_back(std::move(flag));
+        }
+    }
+    catch (const std::exception &)
+    {
+        result.clear();
+    }
+    return result;
 }

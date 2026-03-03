@@ -1,6 +1,7 @@
 #include "services/InventoryManager.hpp"
 #include "events/Event.hpp"
 #include "events/EventQueue.hpp"
+#include "services/QuestManager.hpp"
 
 InventoryManager::InventoryManager(ItemManager &itemManager, Logger &logger)
     : itemManager_(itemManager), logger_(logger), eventQueue_(nullptr)
@@ -11,6 +12,12 @@ void
 InventoryManager::setEventQueue(EventQueue *eventQueue)
 {
     eventQueue_ = eventQueue;
+}
+
+void
+InventoryManager::setQuestManager(QuestManager *questManager)
+{
+    questManager_ = questManager;
 }
 
 bool
@@ -78,6 +85,18 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
         Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
         eventQueue_->push(std::move(inventoryUpdateEvent));
         logger_.log("[INVENTORY] Sent INVENTORY_UPDATE event for character " + std::to_string(characterId));
+    }
+
+    // Quest trigger: item obtained
+    if (questManager_)
+    {
+        try
+        {
+            questManager_->onItemObtained(characterId, itemId, quantity);
+        }
+        catch (...)
+        {
+        }
     }
 
     return true;

@@ -26,6 +26,13 @@ class JSONParser
     std::vector<NPCDataStruct> parseNPCsList(const char *data, size_t length);
     std::vector<NPCAttributeStruct> parseNPCsAttributes(const char *data, size_t length);
 
+    // Dialogue and quest system parsers
+    std::vector<DialogueGraphStruct> parseDialoguesList(const char *data, size_t length);
+    std::vector<NPCDialogueMappingStruct> parseNPCDialogueMappings(const char *data, size_t length);
+    std::vector<QuestStruct> parseQuestsList(const char *data, size_t length);
+    std::vector<PlayerQuestProgressStruct> parsePlayerQuestProgress(const char *data, size_t length);
+    std::vector<PlayerFlagStruct> parsePlayerFlags(const char *data, size_t length);
+
     // Experience system parsers
     std::vector<ExperienceLevelEntry> parseExpLevelTable(const char *data, size_t length);
 

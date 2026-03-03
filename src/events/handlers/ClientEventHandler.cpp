@@ -231,6 +231,23 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
             // Remove character data
             gameServices_.getCharacterManager().removeCharacter(passedClientData.characterId);
 
+            // Flush and unload quest/dialogue state on disconnect
+            if (passedClientData.characterId > 0)
+            {
+                try
+                {
+                    gameServices_.getQuestManager().flushAllProgress(passedClientData.characterId);
+                    gameServices_.getQuestManager().unloadPlayerQuests(passedClientData.characterId);
+                    gameServices_.getDialogueSessionManager().cleanupExpiredSessions();
+                }
+                catch (const std::exception &ex)
+                {
+                    gameServices_.getLogger().logError(
+                        "[DISCONNECT] Quest flush error for characterId: " +
+                        std::to_string(passedClientData.characterId) + " - " + ex.what());
+                }
+            }
+
             // Prepare disconnect notification
             nlohmann::json response = ResponseBuilder()
                                           .setHeader("message", "Client disconnected!")
