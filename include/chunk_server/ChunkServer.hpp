@@ -67,9 +67,13 @@ class ChunkServer
     ThreadPool threadPool_{std::thread::hardware_concurrency()};
 
     GameServices &gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
     NetworkManager &networkManager_;
     GameServerWorker &gameServerWorker_;
 
     // Helper method for sending spawn events to all clients
     void sendSpawnEventsToClients(const SpawnZoneStruct &zone);
+
+    // Timestamp of last aggro-mob-movement broadcast (replaces static variable in lambda)
+    std::chrono::steady_clock::time_point aggroLastBroadcastTime_;
 };

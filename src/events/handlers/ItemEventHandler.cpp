@@ -1,13 +1,15 @@
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/Event.hpp"
 #include "utils/ResponseBuilder.hpp"
+#include <spdlog/logger.h>
 
 ItemEventHandler::ItemEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices), gameServices_(gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "item"), gameServices_(gameServices)
 {
+    log_ = gameServices_.getLogger().getSystem("item");
 }
 
 void
@@ -34,7 +36,7 @@ ItemEventHandler::handleSetItemsListEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().logError("Error with extracting items list data!");
+            log_->error("Error with extracting items list data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -66,7 +68,7 @@ ItemEventHandler::handleSetMobLootInfoEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().logError("Error with extracting mob loot info data!");
+            log_->error("Error with extracting mob loot info data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -106,13 +108,13 @@ ItemEventHandler::handleItemDropEvent(const Event &event)
 
             std::string responseData = networkManager_.generateResponseMessage("success", response);
 
-            gameServices_.getLogger().log("[ITEM_DROP_EVENT] Sending to clients: " + responseData);
+            log_->info("[ITEM_DROP_EVENT] Sending to clients: " + responseData);
 
             broadcastToAllClients(responseData);
         }
         else
         {
-            gameServices_.getLogger().logError("Invalid data format for ITEM_DROP event");
+            log_->error("Invalid data format for ITEM_DROP event");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -145,7 +147,7 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
 
             if (success)
             {
-                gameServices_.getLogger().log("[ITEM_PICKUP_EVENT] Item successfully picked up");
+                log_->info("[ITEM_PICKUP_EVENT] Item successfully picked up");
 
                 // Notify clients that item was picked up
                 nlohmann::json response = ResponseBuilder()
@@ -163,7 +165,7 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
             }
             else
             {
-                gameServices_.getLogger().logError("[ITEM_PICKUP_EVENT] Failed to pickup item");
+                log_->error("[ITEM_PICKUP_EVENT] Failed to pickup item");
 
                 // Send failure response to all clients (TODO: optimize to send only to requesting client)
                 nlohmann::json response = ResponseBuilder()
@@ -181,7 +183,7 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().logError("[ITEM_PICKUP_EVENT] Invalid event data type for pickup request");
+            log_->error("[ITEM_PICKUP_EVENT] Invalid event data type for pickup request");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -244,11 +246,11 @@ ItemEventHandler::handleGetNearbyItemsEvent(const Event &event)
             // Send response to requesting client (we'll need to determine which client later)
             // For now, just log that we have the data ready
             std::string responseStr = response.dump();
-            gameServices_.getLogger().log("[GET_NEARBY_ITEMS_EVENT] Response prepared: " + responseStr.substr(0, 200) + "...");
+            log_->info("[GET_NEARBY_ITEMS_EVENT] Response prepared: " + responseStr.substr(0, 200) + "...");
         }
         else
         {
-            gameServices_.getLogger().logError("[GET_NEARBY_ITEMS_EVENT] Invalid event data type - expected PositionStruct");
+            log_->error("[GET_NEARBY_ITEMS_EVENT] Invalid event data type - expected PositionStruct");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -364,7 +366,7 @@ ItemEventHandler::handleMobLootGenerationEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().logError("Error with extracting mob loot generation data!");
+            log_->error("Error with extracting mob loot generation data!");
         }
     }
     catch (const std::exception &ex)
@@ -391,7 +393,7 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
             {
                 int characterId = requestData["characterId"];
 
-                gameServices_.getLogger().log("[INVENTORY] Processing inventory request for character " + std::to_string(characterId));
+                log_->info("[INVENTORY] Processing inventory request for character " + std::to_string(characterId));
 
                 // Get client data to extract hash
                 ClientDataStruct clientData = gameServices_.getClientManager().getClientData(clientID);
@@ -434,7 +436,7 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
             }
             else
             {
-                gameServices_.getLogger().logError("[INVENTORY] characterId not found in GET_PLAYER_INVENTORY request");
+                log_->error("[INVENTORY] characterId not found in GET_PLAYER_INVENTORY request");
 
                 // Get client data for hash
                 ClientDataStruct clientData = gameServices_.getClientManager().getClientData(clientID);
@@ -452,7 +454,7 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().logError("Error with extracting get player inventory data!");
+            log_->error("Error with extracting get player inventory data!");
 
             // Get client data for hash
             ClientDataStruct clientData = gameServices_.getClientManager().getClientData(clientID);

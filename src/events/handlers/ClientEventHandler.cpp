@@ -1,12 +1,14 @@
 #include "events/handlers/ClientEventHandler.hpp"
 #include "events/EventData.hpp"
+#include <spdlog/logger.h>
 
 ClientEventHandler::ClientEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "client")
 {
+    log_ = gameServices_.getLogger().getSystem("client");
 }
 
 bool
@@ -21,11 +23,11 @@ ClientEventHandler::handlePingClientEvent(const Event &event)
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
     int clientID = event.getClientID();
 
-    gameServices_.getLogger().log("Handling PING event for client ID: " + std::to_string(clientID), GREEN);
+    log_->info("Handling PING event for client ID: " + std::to_string(clientID));
 
     if (!clientSocket || !clientSocket->is_open())
     {
-        gameServices_.getLogger().log("Skipping ping - socket is closed for client ID: " + std::to_string(clientID), GREEN);
+        log_->info("Skipping ping - socket is closed for client ID: " + std::to_string(clientID));
         return;
     }
 
@@ -38,11 +40,11 @@ ClientEventHandler::handlePingClientEvent(const Event &event)
         {
             const ClientDataStruct &clientData = std::get<ClientDataStruct>(data);
             sendSuccessResponseWithTimestamps(clientSocket, "Pong!", "pingClient", clientID, timestamps, "", nlohmann::json{}, clientData.hash);
-            gameServices_.getLogger().log("Sending PING response with timestamps to Client ID: " + std::to_string(clientID), GREEN);
+            log_->info("Sending PING response with timestamps to Client ID: " + std::to_string(clientID));
         }
         else
         {
-            gameServices_.getLogger().logError("Error extracting data from ping event for client ID: " + std::to_string(clientID));
+            log_->error("Error extracting data from ping event for client ID: " + std::to_string(clientID));
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -92,7 +94,7 @@ ClientEventHandler::handleJoinClientEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -179,7 +181,7 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
 
             if (passedClientData.clientId == 0)
             {
-                gameServices_.getLogger().log("Client ID is 0, handling graceful disconnect without specific client identification!");
+                log_->info("Client ID is 0, handling graceful disconnect without specific client identification!");
                 return;
             }
 
@@ -217,8 +219,8 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                     entry["rotZ"] = lastPos.rotationZ;
                     savePacket["body"]["characters"].push_back(entry);
                     gameServerWorker_.sendDataToGameServer(savePacket.dump() + "\n");
-                    gameServices_.getLogger().log(
-                        "[DISCONNECT] Saved position for characterId: " + std::to_string(passedClientData.characterId), GREEN);
+                    log_->info(
+                        "[DISCONNECT] Saved position for characterId: " + std::to_string(passedClientData.characterId));
                 }
                 catch (const std::exception &ex)
                 {
@@ -264,7 +266,7 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)

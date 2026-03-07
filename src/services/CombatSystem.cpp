@@ -8,6 +8,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
+#include <optional>
+#include <tuple>
+#include <vector>
+#include <spdlog/logger.h>
 
 // Static counter for unique action IDs
 static std::atomic<uint64_t> nextActionId{1};
@@ -15,6 +20,7 @@ static std::atomic<uint64_t> nextActionId{1};
 CombatSystem::CombatSystem(GameServices *gameServices)
     : gameServices_(gameServices)
 {
+    log_ = gameServices_->getLogger().getSystem("combat");
     skillSystem_ = std::make_unique<SkillSystem>(gameServices);
     responseBuilder_ = std::make_unique<CombatResponseBuilder>(gameServices);
     broadcastCallback_ = nullptr;
@@ -51,30 +57,33 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
     result.targetType = targetType;
     result.skillSlug = skillSlug; // Сохраняем оригинальный slug
 
-    gameServices_->getLogger().log("CombatSystem::initiateSkillUsage called with skill: " + skillSlug, GREEN);
+    log_->info("CombatSystem::initiateSkillUsage called with skill: " + skillSlug);
 
     try
     {
         // Получаем скил для проверки времени каста
         std::optional<SkillStruct> skillOpt;
 
-        // Определяем тип кастера и получаем скил
-        try
+        // HIGH-8: no exceptions needed — both getCharacterData/getMobInstance return a
+        // default-constructed struct (id=0) when not found, never throw.
         {
             auto characterData = gameServices_->getCharacterManager().getCharacterData(casterId);
-            skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
-        }
-        catch (...)
-        {
-            try
+            if (characterData.characterId != 0) // player
+            {
+                skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
+            }
+            else
             {
                 auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
-                skillOpt = skillSystem_->getMobSkill(casterId, skillSlug);
-            }
-            catch (...)
-            {
-                result.errorMessage = "Caster not found";
-                return result;
+                if (mobData.uid != 0) // mob
+                {
+                    skillOpt = skillSystem_->getMobSkill(casterId, skillSlug);
+                }
+                else
+                {
+                    result.errorMessage = "Caster not found";
+                    return result;
+                }
             }
         }
 
@@ -86,7 +95,7 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
 
         const SkillStruct &skill = skillOpt.value();
         // Дополнительная проверка валидности skill указателя
-        gameServices_->getLogger().log("Skill found: " + std::string(skill.skillName), GREEN);
+        log_->info("Skill found: " + std::string(skill.skillName));
 
         // Заполняем информацию о скиле
         result.skillName = skill.skillName;
@@ -100,11 +109,10 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
             return result;
         }
 
-        // Проверяем ману кастера
-        try
+        // HIGH-8: mana check without exceptions
         {
             auto characterData = gameServices_->getCharacterManager().getCharacterData(casterId);
-            if (characterData.characterId != 0) // Это игрок
+            if (characterData.characterId != 0) // player
             {
                 if (characterData.characterCurrentMana < skill.costMp)
                 {
@@ -112,25 +120,14 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
                     return result;
                 }
             }
-        }
-        catch (...)
-        {
-            try
+            else
             {
                 auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
-                if (mobData.uid != 0) // Это моб
+                if (mobData.uid != 0 && mobData.currentMana < skill.costMp)
                 {
-                    if (mobData.currentMana < skill.costMp)
-                    {
-                        result.errorMessage = "Not enough mana";
-                        return result;
-                    }
+                    result.errorMessage = "Not enough mana";
+                    return result;
                 }
-            }
-            catch (...)
-            {
-                result.errorMessage = "Could not check mana for caster";
-                return result;
             }
         }
 
@@ -164,7 +161,10 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         action->animationDuration = std::max(1.0f, action->castTime);
 
         // Сохраняем ongoing action
-        ongoingActions_[casterId] = action;
+        {
+            std::lock_guard<std::mutex> lock(actionsMutex_);
+            ongoingActions_[casterId] = action;
+        }
 
         result.success = true;
         result.castTime = action->castTime;
@@ -192,23 +192,26 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
     try
     {
         // Получаем информацию о скиле для заполнения метаданных
+        // HIGH-8: explicit id check, no exceptions
         std::optional<SkillStruct> skillOpt;
-        try
         {
             auto characterData = gameServices_->getCharacterManager().getCharacterData(casterId);
-            skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
-        }
-        catch (...)
-        {
-            try
+            if (characterData.characterId != 0) // player
+            {
+                skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
+            }
+            else
             {
                 auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
-                skillOpt = skillSystem_->getMobSkill(casterId, skillSlug);
-            }
-            catch (...)
-            {
-                result.errorMessage = "Caster not found";
-                return result;
+                if (mobData.uid != 0) // mob
+                {
+                    skillOpt = skillSystem_->getMobSkill(casterId, skillSlug);
+                }
+                else
+                {
+                    result.errorMessage = "Caster not found";
+                    return result;
+                }
             }
         }
 
@@ -222,6 +225,14 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         else
         {
             result.errorMessage = "Skill not found: " + skillSlug;
+            return result;
+        }
+
+        // Route AoE skills to dedicated handler (resource management handled inside)
+        if (targetType == CombatTargetType::AREA)
+        {
+            executeAoESkillUsage(casterId, skillSlug);
+            result.success = true;
             return result;
         }
 
@@ -245,13 +256,13 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             {
                 if (targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF)
                 {
-                    auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
-                    int newHealth = std::max(0, targetData.characterCurrentHealth - skillResult.damageResult.totalDamage);
-                    gameServices_->getCharacterManager().updateCharacterHealth(targetId, newHealth);
+                    auto hpResult = gameServices_->getCharacterManager().applyDamageToCharacter(
+                        targetId, skillResult.damageResult.totalDamage);
 
-                    result.finalTargetHealth = newHealth;
-                    result.finalTargetMana = targetData.characterCurrentMana;
-                    result.targetDied = (newHealth <= 0);
+                    result.finalTargetHealth = hpResult.newHealth;
+                    result.finalTargetMana = hpResult.currentMana;
+                    result.targetDied = hpResult.died;
+                    result.healthPopulated = true;
 
                     if (result.targetDied)
                     {
@@ -260,25 +271,35 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
                 }
                 else if (targetType == CombatTargetType::MOB)
                 {
-                    auto mobData = gameServices_->getMobInstanceManager().getMobInstance(targetId);
-                    int newHealth = std::max(0, mobData.currentHealth - skillResult.damageResult.totalDamage);
-
-                    // Обновляем здоровье моба через MobInstanceManager
-                    auto updateResult = gameServices_->getMobInstanceManager().updateMobHealth(targetId, newHealth);
-
-                    result.finalTargetHealth = newHealth;
-                    result.finalTargetMana = mobData.currentMana; // Устанавливаем текущую ману моба
-                    result.targetDied = updateResult.mobDied;
-
-                    if (updateResult.mobDied)
+                    // Skip damage while mob is leashing (RETURNING) or in post-leash
+                    // invulnerability window (EVADING).
+                    auto mobMoveData = gameServices_->getMobMovementManager().getMobMovementData(targetId);
+                    bool isEvading = (mobMoveData.combatState == MobCombatState::RETURNING ||
+                                      mobMoveData.combatState == MobCombatState::EVADING);
+                    if (isEvading)
                     {
-                        // Используем новую функцию handleMobDeath с указанием убийцы
-                        handleMobDeath(targetId, casterId);
+                        gameServices_->getLogger().log("[COMBAT] Mob " + std::to_string(targetId) +
+                                                       " is leashing — damage blocked (EVADING)");
+                        // Leave result.healthPopulated = false so no HP update is sent.
                     }
                     else
                     {
-                        // Обработка аггро
-                        handleMobAggro(casterId, targetId, skillResult.damageResult.totalDamage);
+                        auto updateResult = gameServices_->getMobInstanceManager().applyDamageToMob(
+                            targetId, skillResult.damageResult.totalDamage);
+
+                        result.finalTargetHealth = updateResult.newHealth;
+                        result.finalTargetMana = updateResult.currentMana;
+                        result.targetDied = updateResult.mobDied;
+                        result.healthPopulated = true;
+
+                        if (updateResult.mobDied)
+                        {
+                            handleMobDeath(targetId, casterId);
+                        }
+                        else
+                        {
+                            handleMobAggro(casterId, targetId, skillResult.damageResult.totalDamage);
+                        }
                     }
                 }
             }
@@ -295,20 +316,50 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             {
                 if (targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF)
                 {
-                    auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
-                    int newHealth = std::min(targetData.characterMaxHealth,
-                        targetData.characterCurrentHealth + skillResult.healAmount);
-                    gameServices_->getCharacterManager().updateCharacterHealth(targetId, newHealth);
-                    result.finalTargetHealth = newHealth;
-                    result.finalTargetMana = targetData.characterCurrentMana;
+                    auto hpResult = gameServices_->getCharacterManager().applyHealToCharacter(
+                        targetId, skillResult.healAmount);
+                    result.finalTargetHealth = hpResult.newHealth;
+                    result.finalTargetMana = hpResult.currentMana;
+                    result.healthPopulated = true;
+
+                    // Heal threat: healer draws half the heal amount as mob aggro
+                    // (only when healer is different from the healed target).
+                    if (casterId != targetId && skillResult.healAmount > 0)
+                    {
+                        const int healThreat = skillResult.healAmount / 2;
+                        if (healThreat > 0)
+                        {
+                            try
+                            {
+                                auto &mmgr = gameServices_->getMobMovementManager();
+                                auto allMobs = gameServices_->getMobInstanceManager().getAllMobInstances();
+                                for (auto &[uid, mobInst] : allMobs)
+                                {
+                                    if (mobInst.isDead)
+                                        continue;
+                                    auto mobMov = mmgr.getMobMovementData(uid);
+                                    if (mobMov.targetPlayerId == targetId)
+                                    {
+                                        mobMov.threatTable[casterId] += healThreat;
+                                        mmgr.updateMobMovementData(uid, mobMov);
+                                    }
+                                }
+                            }
+                            catch (const std::exception &e)
+                            {
+                                gameServices_->getLogger().logError(
+                                    "Error applying heal threat: " + std::string(e.what()));
+                            }
+                        }
+                    }
                 }
                 else if (targetType == CombatTargetType::MOB)
                 {
-                    auto mobData = gameServices_->getMobInstanceManager().getMobInstance(targetId);
-                    int newHealth = std::min(mobData.maxHealth, mobData.currentHealth + skillResult.healAmount);
-                    gameServices_->getMobInstanceManager().updateMobHealth(targetId, newHealth);
-                    result.finalTargetHealth = newHealth;
-                    result.finalTargetMana = mobData.currentMana;
+                    auto updateResult = gameServices_->getMobInstanceManager().applyHealToMob(
+                        targetId, skillResult.healAmount);
+                    result.finalTargetHealth = updateResult.newHealth;
+                    result.finalTargetMana = updateResult.currentMana;
+                    result.healthPopulated = true;
                 }
             }
             catch (const std::exception &e)
@@ -319,7 +370,7 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
 
         // Убеждаемся, что finalTargetHealth и finalTargetMana установлены в любом случае
         // Это важно для случаев когда атака промахивается (isMissed = true)
-        if (result.finalTargetHealth == 0 && result.finalTargetMana == 0)
+        if (!result.healthPopulated)
         {
             try
             {
@@ -378,6 +429,7 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
 void
 CombatSystem::interruptSkillUsage(int casterId, InterruptionReason reason)
 {
+    std::lock_guard<std::mutex> lock(actionsMutex_);
     auto it = ongoingActions_.find(casterId);
     if (it != ongoingActions_.end())
     {
@@ -398,145 +450,213 @@ CombatSystem::updateOngoingActions()
 {
     auto now = std::chrono::steady_clock::now();
 
-    for (auto it = ongoingActions_.begin(); it != ongoingActions_.end();)
+    // Snapshot actions that are ready to execute, erase them under lock,
+    // then execute outside the lock to avoid holding it during heavy work.
+    std::vector<std::tuple<int, std::string, int, CombatTargetType, std::string>> toExecute;
     {
-        auto &action = it->second;
-
-        if (action->state == CombatActionState::CASTING && now >= action->endTime)
+        std::lock_guard<std::mutex> lock(actionsMutex_);
+        for (auto it = ongoingActions_.begin(); it != ongoingActions_.end();)
         {
-            // Завершаем каст, переходим к выполнению
-            action->state = CombatActionState::EXECUTING;
-
-            // Сохраняем данные действия ПЕРЕД вызовом executeSkillUsage
-            int casterId = action->casterId;
-            std::string skillSlug = action->skillSlug;
-            int targetId = action->targetId;
-            CombatTargetType targetType = action->targetType;
-            std::string actionName = action->actionName;
-
-            // Автоматически выполняем действие, используя оригинальный skillSlug
-            auto result = executeSkillUsage(casterId, skillSlug, targetId, targetType);
-
-            // Отправляем результат всем клиентам через responseBuilder
-            if (responseBuilder_ && broadcastCallback_)
+            auto &action = it->second;
+            if (action->state == CombatActionState::CASTING && now >= action->endTime)
             {
-                auto broadcast = responseBuilder_->buildSkillExecutionBroadcast(result);
-                broadcastCallback_(broadcast);
-                gameServices_->getLogger().log("Skill execution broadcast sent for: " + actionName);
+                action->state = CombatActionState::EXECUTING;
+                toExecute.emplace_back(action->casterId, action->skillSlug, action->targetId, action->targetType, action->actionName);
+                it = ongoingActions_.erase(it);
             }
-
-            // Удаляем action после выполнения
-            it = ongoingActions_.erase(it);
+            else
+            {
+                ++it;
+            }
         }
-        else
+    }
+
+    for (auto &[casterId, skillSlug, targetId, targetType, actionName] : toExecute)
+    {
+        auto result = executeSkillUsage(casterId, skillSlug, targetId, targetType);
+
+        if (responseBuilder_ && broadcastCallback_)
         {
-            ++it;
+            auto broadcast = responseBuilder_->buildSkillExecutionBroadcast(result);
+            broadcastCallback_(broadcast);
+            log_->info("Skill execution broadcast sent for: " + actionName);
         }
     }
 }
 
 void
-CombatSystem::processAIAttack(int mobId)
+CombatSystem::tickEffects()
 {
     try
     {
-        gameServices_->getLogger().log("CombatSystem::processAIAttack called for mob " + std::to_string(mobId));
+        auto &charMgr = gameServices_->getCharacterManager();
+        auto ticks = charMgr.processEffectTicks(); // applies HP changes under CharacterManager lock
 
-        auto mobData = gameServices_->getMobInstanceManager().getMobInstance(mobId);
-        gameServices_->getLogger().log("Found mob instance for " + std::to_string(mobId) + ", name: " + mobData.name + ", type ID: " + std::to_string(mobData.id));
+        if (ticks.empty())
+            return;
 
-        // Получаем скилы из шаблона моба по его типу ID, а не из экземпляра
-        auto mobTemplate = gameServices_->getMobManager().getMobById(mobData.id);
-        if (mobTemplate.skills.empty())
+        for (const auto &tick : ticks)
         {
-            gameServices_->getLogger().log("Mob type " + std::to_string(mobData.id) + " (UID " + std::to_string(mobId) + ") has no skills available");
-            return; // Нет скилов для использования
-        }
+            gameServices_->getLogger().log(
+                "[CombatSystem::tickEffects] " + tick.effectTypeSlug +
+                " '" + tick.effectSlug + "' on char " + std::to_string(tick.characterId) +
+                " value=" + std::to_string(static_cast<int>(tick.value)) +
+                " hp=" + std::to_string(tick.newHealth));
 
-        // Используем скилы из шаблона, но данные позиции и состояния из экземпляра
-        mobData.skills = mobTemplate.skills;
-
-        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " has " + std::to_string(mobData.skills.size()) + " skills");
-
-        // Получаем список возможных целей (игроков в радиусе)
-        auto players = gameServices_->getCharacterManager().getCharactersInZone(
-            mobData.position.positionX, mobData.position.positionY, 20.0f); // 20 метров радиус
-
-        if (players.empty())
-        {
-            gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " found no players in range");
-            return; // Нет целей
-        }
-
-        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " found " + std::to_string(players.size()) + " players in range");
-
-        // Находим ближайшую цель
-        CharacterDataStruct nearestTarget;
-        float minDistance = std::numeric_limits<float>::max();
-
-        for (const auto &player : players)
-        {
-            float dx = mobData.position.positionX - player.characterPosition.positionX;
-            float dy = mobData.position.positionY - player.characterPosition.positionY;
-            float distance = std::sqrt(dx * dx + dy * dy);
-
-            if (distance < minDistance)
-            {
-                minDistance = distance;
-                nearestTarget = player;
-            }
-        }
-
-        if (nearestTarget.characterId == 0)
-        {
-            gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " found no suitable targets");
-            return; // Нет подходящих целей
-        }
-
-        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " targeting player " + std::to_string(nearestTarget.characterId) + " at distance " + std::to_string(minDistance));
-
-        // Выбираем лучший скил
-        const SkillStruct *bestSkill = skillSystem_->getBestSkillForMob(mobData, nearestTarget, minDistance);
-
-        if (!bestSkill)
-        {
-            gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " found no suitable skills");
-            return; // Нет подходящих скилов
-        }
-
-        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " will use skill: " + bestSkill->skillName);
-
-        // Используем новую систему скилов для выполнения атаки
-        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " executing skill: " + bestSkill->skillSlug);
-        auto result = executeSkillUsage(mobId, bestSkill->skillSlug, nearestTarget.characterId, CombatTargetType::PLAYER);
-
-        if (result.success)
-        {
-            gameServices_->getLogger().log("Mob " + mobData.name + " used " + bestSkill->skillName +
-                                           " on " + nearestTarget.characterName +
-                                           " for " + std::to_string(result.skillResult.damageResult.totalDamage) + " damage");
-
-            // Отправляем broadcast пакеты для AI атаки
+            // Broadcast to zone
             if (responseBuilder_ && broadcastCallback_)
             {
-                gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " sending broadcast for skill execution");
-                auto broadcast = responseBuilder_->buildSkillExecutionBroadcast(result);
-                broadcastCallback_(broadcast);
-                gameServices_->getLogger().log("AI skill execution broadcast sent for: " + bestSkill->skillName);
+                broadcastCallback_(responseBuilder_->buildEffectTickBroadcast(tick));
             }
-            else
+
+            // Handle death from DoT
+            if (tick.targetDied)
             {
-                gameServices_->getLogger().logError("Mob " + std::to_string(mobId) + " broadcast failed - responseBuilder or callback missing");
+                log_->info(
+                    "[CombatSystem::tickEffects] Character " + std::to_string(tick.characterId) +
+                    " died from DoT effect '" + tick.effectSlug + "'");
+                handleTargetDeath(tick.characterId, CombatTargetType::PLAYER);
             }
-        }
-        else
-        {
-            gameServices_->getLogger().logError("Mob " + std::to_string(mobId) + " skill execution failed: " + result.errorMessage);
         }
     }
-    catch (const std::exception &e)
+    catch (const std::exception &ex)
     {
-        gameServices_->getLogger().logError("Error in AI attack: " + std::string(e.what()));
+        gameServices_->getLogger().logError("[CombatSystem::tickEffects] " + std::string(ex.what()));
+    }
+}
+
+void
+CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
+{
+    try
+    {
+        // Let SkillSystem handle mana consumption, cooldown, and validation.
+        // AREA targetType: validateTarget returns true, no damage calc inside useSkill.
+        auto skillResult = skillSystem_->useSkill(casterId, skillSlug, 0, CombatTargetType::AREA);
+        if (!skillResult.success)
+        {
+            log_->error(
+                "[AoE] useSkill failed for caster=" + std::to_string(casterId) +
+                " skill=" + skillSlug + ": " + skillResult.errorMessage);
+            return;
+        }
+
+        auto skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
+        if (!skillOpt.has_value())
+            return;
+        const SkillStruct &skill = skillOpt.value();
+
+        auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
+        const float cx = casterData.characterPosition.positionX;
+        const float cy = casterData.characterPosition.positionY;
+        const float radius = (skill.areaRadius > 0.0f) ? skill.areaRadius : 5.0f;
+        const int maxHits = static_cast<int>(
+            gameServices_->getGameConfigService().getFloat("combat.aoe_target_cap", 10.0f));
+        int hitCount = 0;
+
+        auto *calc = skillSystem_->getCombatCalculator();
+        if (!calc)
+            return;
+
+        // ---- Mob targets ----
+        auto mobs = gameServices_->getMobInstanceManager().getMobsInRange(cx, cy, radius);
+        for (const auto &mob : mobs)
+        {
+            if (hitCount >= maxHits)
+                break;
+
+            // Simplified player→mob path (mirror of SkillSystem::useSkill MOB branch)
+            int dmg = calc->calculateBaseDamage(skill, casterData.attributes);
+            if (calc->rollCriticalHit(casterData.attributes))
+                dmg = static_cast<int>(dmg * 2.0f);
+            dmg = std::max(0, dmg);
+
+            // Skip if mob is leashing back to spawn (RETURNING) or in post-leash
+            // invulnerability window (EVADING).
+            {
+                auto mobMoveData = gameServices_->getMobMovementManager().getMobMovementData(mob.uid);
+                if (mobMoveData.combatState == MobCombatState::RETURNING ||
+                    mobMoveData.combatState == MobCombatState::EVADING)
+                {
+                    gameServices_->getLogger().log("[COMBAT] AOE: Mob " + std::to_string(mob.uid) +
+                                                   " is leashing — damage blocked (EVADING)");
+                    continue;
+                }
+            }
+
+            auto upResult = gameServices_->getMobInstanceManager().applyDamageToMob(mob.uid, dmg);
+
+            SkillExecutionResult execResult;
+            execResult.success = true;
+            execResult.casterId = casterId;
+            execResult.targetId = mob.uid;
+            execResult.targetType = CombatTargetType::MOB;
+            execResult.skillSlug = skillSlug;
+            execResult.skillName = skill.skillName;
+            execResult.skillEffectType = skill.skillEffectType;
+            execResult.skillSchool = skill.school;
+            execResult.skillResult.damageResult.totalDamage = dmg;
+            execResult.finalTargetHealth = upResult.newHealth;
+            execResult.finalTargetMana = upResult.currentMana;
+            execResult.targetDied = upResult.mobDied;
+
+            if (responseBuilder_ && broadcastCallback_)
+                broadcastCallback_(responseBuilder_->buildSkillExecutionBroadcast(execResult));
+
+            if (upResult.mobDied)
+                handleMobDeath(mob.uid, casterId);
+            else
+                handleMobAggro(casterId, mob.uid, dmg);
+
+            ++hitCount;
+        }
+
+        // ---- Player targets (skip self) ----
+        auto players = gameServices_->getCharacterManager().getCharactersInZone(cx, cy, radius);
+        for (const auto &target : players)
+        {
+            if (hitCount >= maxHits)
+                break;
+            if (target.characterId == casterId)
+                continue;
+
+            auto dmgResult = calc->calculateSkillDamage(skill, casterData, target);
+            if (dmgResult.isMissed)
+                continue;
+
+            auto hpAoE = gameServices_->getCharacterManager().applyDamageToCharacter(
+                target.characterId, dmgResult.totalDamage);
+
+            SkillExecutionResult execResult;
+            execResult.success = true;
+            execResult.casterId = casterId;
+            execResult.targetId = target.characterId;
+            execResult.targetType = CombatTargetType::PLAYER;
+            execResult.skillSlug = skillSlug;
+            execResult.skillName = skill.skillName;
+            execResult.skillEffectType = skill.skillEffectType;
+            execResult.skillSchool = skill.school;
+            execResult.skillResult.damageResult = dmgResult;
+            execResult.finalTargetHealth = hpAoE.newHealth;
+            execResult.finalTargetMana = hpAoE.currentMana;
+            execResult.targetDied = hpAoE.died;
+
+            if (responseBuilder_ && broadcastCallback_)
+                broadcastCallback_(responseBuilder_->buildSkillExecutionBroadcast(execResult));
+
+            if (execResult.targetDied)
+                handleTargetDeath(target.characterId, CombatTargetType::PLAYER);
+
+            ++hitCount;
+        }
+
+        gameServices_->getLogger().log(
+            "[AoE] '" + skillSlug + "' by char " + std::to_string(casterId) +
+            " hit " + std::to_string(hitCount) + " target(s) in r=" + std::to_string(radius));
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_->getLogger().logError("[CombatSystem::executeAoESkillUsage] " + std::string(ex.what()));
     }
 }
 
@@ -571,6 +691,15 @@ CombatSystem::handleTargetDeath(int targetId, CombatTargetType targetType)
             auto &experienceManager = gameServices_->getExperienceManager();
             auto characterData = gameServices_->getCharacterManager().getCharacterData(targetId);
 
+            // Guard: character may have been healed between the death event and this handler
+            // (e.g. HoT tick fired concurrently). Also prevents double-death penalty.
+            if (characterData.characterCurrentHealth > 0)
+            {
+                gameServices_->getLogger().log("Player " + std::to_string(targetId) +
+                                               " handleTargetDeath called but HP=" + std::to_string(characterData.characterCurrentHealth) + " — skipping penalty");
+                return;
+            }
+
             int penaltyAmount = experienceManager.calculateDeathPenalty(characterData.characterLevel, characterData.characterExperiencePoints);
 
             if (penaltyAmount > 0)
@@ -581,7 +710,7 @@ CombatSystem::handleTargetDeath(int targetId, CombatTargetType targetType)
             }
             else
             {
-                gameServices_->getLogger().log("Player " + std::to_string(targetId) + " died but no experience was lost");
+                log_->info("Player " + std::to_string(targetId) + " died but no experience was lost");
             }
         }
         catch (const std::exception &e)
@@ -592,7 +721,7 @@ CombatSystem::handleTargetDeath(int targetId, CombatTargetType targetType)
     else if (targetType == CombatTargetType::MOB)
     {
         // Логика смерти моба - начисляем опыт убийце
-        gameServices_->getLogger().log("Mob " + std::to_string(targetId) + " died");
+        log_->info("Mob " + std::to_string(targetId) + " died");
 
         // Найти кто убил моба (это должно передаваться отдельно, но пока используем последнего атаковавшего)
         // В будущем можно добавить систему threat/aggro для определения убийцы
@@ -616,7 +745,9 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
             auto &experienceManager = gameServices_->getExperienceManager();
 
             // Вычисляем количество опыта за убийство моба
-            int expAmount = experienceManager.calculateMobExperience(mobData.level, killerData.characterLevel, mobData.baseExperience);
+            // rankMult масштабирует XP: элитный моб (2.20x) даёт в 2.2 раза больше опыта
+            const int scaledBaseXp = static_cast<int>(mobData.baseExperience * mobData.rankMult);
+            int expAmount = experienceManager.calculateMobExperience(mobData.level, killerData.characterLevel, scaledBaseXp);
 
             if (expAmount > 0)
             {
@@ -637,14 +768,14 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
                 }
                 else
                 {
-                    gameServices_->getLogger().logError("Failed to grant experience: " + result.errorMessage);
+                    log_->error("Failed to grant experience: " + result.errorMessage);
                 }
             }
         }
         catch (const std::exception &e)
         {
             // Убийца не является персонажем игрока (возможно, моб убил моба)
-            gameServices_->getLogger().log("Killer " + std::to_string(killerId) + " is not a player character, no experience granted");
+            log_->info("Killer " + std::to_string(killerId) + " is not a player character, no experience granted");
         }
 
         // Quest trigger: notify QuestManager that the mob was killed
@@ -674,7 +805,7 @@ CombatSystem::handleMobAggro(int attackerId, int targetId, int damage)
         try
         {
             auto &mobMovementManager = gameServices_->getMobMovementManager();
-            mobMovementManager.handleMobAttacked(targetId, attackerId);
+            mobMovementManager.handleMobAttacked(targetId, attackerId, damage);
 
             gameServices_->getLogger().log("Mob " + std::to_string(targetId) +
                                            " gained aggro on " + std::to_string(attackerId) +
@@ -688,7 +819,7 @@ CombatSystem::handleMobAggro(int attackerId, int targetId, int damage)
 }
 
 void
-CombatSystem::processAIAttack(int mobId, int targetPlayerId)
+CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug)
 {
     try
     {
@@ -725,19 +856,39 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId)
 
         gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " targeting player " + std::to_string(targetPlayerId) + " at distance " + std::to_string(distance));
 
-        // Выбираем лучший скил
-        const SkillStruct *bestSkill = skillSystem_->getBestSkillForMob(mobData, targetPlayer, distance);
-
-        if (!bestSkill)
+        // Выбираем скил: если MobAIController уже выбрал скил (forcedSkillSlug),
+        // используем его напрямую. Иначе — CombatSystem выбирает лучший скил сам.
+        std::optional<std::reference_wrapper<const SkillStruct>> forcedOpt;
+        if (!forcedSkillSlug.empty())
         {
-            gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " found no suitable skills for target");
-            return; // Нет подходящих скилов
+            for (const auto &skill : mobData.skills)
+            {
+                if (skill.skillSlug == forcedSkillSlug)
+                {
+                    forcedOpt = std::cref(skill);
+                    break;
+                }
+            }
+            if (!forcedOpt)
+            {
+                log_->info("[WARN] Mob " + std::to_string(mobId) +
+                                               " forced skill [" + forcedSkillSlug + "] not found — falling back to auto-select");
+            }
         }
 
-        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " will use skill: " + bestSkill->skillName + " on player " + std::to_string(targetPlayerId));
+        auto bestSkillOpt = forcedOpt ? forcedOpt : skillSystem_->getBestSkillForMob(mobData, targetPlayer, distance);
+
+        if (!bestSkillOpt)
+        {
+            log_->info("Mob " + std::to_string(mobId) + " found no suitable skills for target");
+            return; // Нет подходящих скилов
+        }
+        const SkillStruct &bestSkill = bestSkillOpt->get();
+
+        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " will use skill: " + bestSkill.skillName + " on player " + std::to_string(targetPlayerId));
 
         // Сначала инициируем скил
-        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " initiating skill: " + bestSkill->skillSlug + " on player " + std::to_string(targetPlayerId));
+        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " initiating skill: " + bestSkill.skillSlug + " on player " + std::to_string(targetPlayerId));
 
         // Создаем результат инициации вручную, так как у мобов скилы хранятся в шаблонах
         SkillInitiationResult initiationResult;
@@ -745,26 +896,26 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId)
         initiationResult.casterId = mobId;
         initiationResult.targetId = targetPlayer.characterId;
         initiationResult.targetType = CombatTargetType::PLAYER;
-        initiationResult.skillName = bestSkill->skillName;
-        initiationResult.skillSlug = bestSkill->skillSlug;
-        initiationResult.skillEffectType = bestSkill->skillEffectType;
-        initiationResult.skillSchool = bestSkill->school;
-        initiationResult.castTime = static_cast<float>(bestSkill->castMs) / 1000.0f;
-        initiationResult.animationName = "skill_" + bestSkill->skillSlug;
+        initiationResult.skillName = bestSkill.skillName;
+        initiationResult.skillSlug = bestSkill.skillSlug;
+        initiationResult.skillEffectType = bestSkill.skillEffectType;
+        initiationResult.skillSchool = bestSkill.school;
+        initiationResult.castTime = static_cast<float>(bestSkill.castMs) / 1000.0f;
+        initiationResult.animationName = "skill_" + bestSkill.skillSlug;
         initiationResult.animationDuration = std::max(1.0f, initiationResult.castTime);
 
         // Отправляем broadcast пакет инициации
         if (responseBuilder_ && broadcastCallback_)
         {
-            gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " sending initiation broadcast for skill: " + bestSkill->skillName);
+            log_->info("Mob " + std::to_string(mobId) + " sending initiation broadcast for skill: " + bestSkill.skillName);
             auto initiationBroadcast = responseBuilder_->buildSkillInitiationBroadcast(initiationResult);
             broadcastCallback_(initiationBroadcast);
-            gameServices_->getLogger().log("AI skill initiation broadcast sent for: " + bestSkill->skillName);
+            log_->info("AI skill initiation broadcast sent for: " + bestSkill.skillName);
         }
 
         // Затем выполняем скил напрямую через SkillSystem
-        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " executing skill: " + bestSkill->skillSlug + " on player " + std::to_string(targetPlayerId));
-        auto skillResult = skillSystem_->useSkill(mobId, bestSkill->skillSlug, targetPlayer.characterId, CombatTargetType::PLAYER);
+        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " executing skill: " + bestSkill.skillSlug + " on player " + std::to_string(targetPlayerId));
+        auto skillResult = skillSystem_->useSkill(mobId, bestSkill.skillSlug, targetPlayer.characterId, CombatTargetType::PLAYER);
 
         // Создаем результат выполнения
         SkillExecutionResult result;
@@ -772,10 +923,10 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId)
         result.casterId = mobId;
         result.targetId = targetPlayer.characterId;
         result.targetType = CombatTargetType::PLAYER;
-        result.skillName = bestSkill->skillName;
-        result.skillSlug = bestSkill->skillSlug;
-        result.skillEffectType = bestSkill->skillEffectType;
-        result.skillSchool = bestSkill->school;
+        result.skillName = bestSkill.skillName;
+        result.skillSlug = bestSkill.skillSlug;
+        result.skillEffectType = bestSkill.skillEffectType;
+        result.skillSchool = bestSkill.school;
         result.skillResult = skillResult;
         result.errorMessage = skillResult.errorMessage;
 
@@ -786,22 +937,22 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId)
             {
                 try
                 {
-                    auto targetData = gameServices_->getCharacterManager().getCharacterData(targetPlayer.characterId);
-                    int newHealth = std::max(0, targetData.characterCurrentHealth - skillResult.damageResult.totalDamage);
-                    gameServices_->getCharacterManager().updateCharacterHealth(targetPlayer.characterId, newHealth);
+                    auto hpResult = gameServices_->getCharacterManager().applyDamageToCharacter(
+                        targetPlayer.characterId, skillResult.damageResult.totalDamage);
 
-                    result.finalTargetHealth = newHealth;
-                    result.finalTargetMana = targetData.characterCurrentMana;
-                    result.targetDied = (newHealth <= 0);
+                    result.finalTargetHealth = hpResult.newHealth;
+                    result.finalTargetMana = hpResult.currentMana;
+                    result.targetDied = hpResult.died;
+                    result.healthPopulated = true;
 
                     gameServices_->getLogger().log("Mob " + mobData.name + " dealt " + std::to_string(skillResult.damageResult.totalDamage) +
                                                    " damage to " + targetPlayer.characterName +
-                                                   " (Health: " + std::to_string(newHealth) + "/" + std::to_string(targetData.characterMaxHealth) + ")");
+                                                   " (Health: " + std::to_string(hpResult.newHealth) + "/" + std::to_string(targetPlayer.characterMaxHealth) + ")");
 
                     if (result.targetDied)
                     {
                         handleTargetDeath(targetPlayer.characterId, CombatTargetType::PLAYER);
-                        gameServices_->getLogger().log("Player " + targetPlayer.characterName + " died from mob attack");
+                        log_->info("Player " + targetPlayer.characterName + " died from mob attack");
                     }
                 }
                 catch (const std::exception &e)
@@ -812,7 +963,7 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId)
 
             // Убеждаемся, что finalTargetHealth и finalTargetMana установлены в любом случае
             // Это важно для случаев когда атака промахивается (isMissed = true)
-            if (result.finalTargetHealth == 0 && result.finalTargetMana == 0)
+            if (!result.healthPopulated)
             {
                 try
                 {
@@ -826,26 +977,26 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId)
                 }
             }
 
-            gameServices_->getLogger().log("Mob " + mobData.name + " used " + bestSkill->skillName +
+            log_->info("Mob " + mobData.name + " used " + bestSkill.skillName +
                                            " on " + targetPlayer.characterName +
                                            " for " + std::to_string(result.skillResult.damageResult.totalDamage) + " damage");
 
             // Отправляем broadcast пакеты для AI атаки
             if (responseBuilder_ && broadcastCallback_)
             {
-                gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " sending broadcast for skill execution");
+                log_->info("Mob " + std::to_string(mobId) + " sending broadcast for skill execution");
                 auto broadcast = responseBuilder_->buildSkillExecutionBroadcast(result);
                 broadcastCallback_(broadcast);
-                gameServices_->getLogger().log("AI skill execution broadcast sent for: " + bestSkill->skillName);
+                log_->info("AI skill execution broadcast sent for: " + bestSkill.skillName);
             }
             else
             {
-                gameServices_->getLogger().logError("Mob " + std::to_string(mobId) + " broadcast failed - responseBuilder or callback missing");
+                log_->error("Mob " + std::to_string(mobId) + " broadcast failed - responseBuilder or callback missing");
             }
         }
         else
         {
-            gameServices_->getLogger().logError("Mob " + std::to_string(mobId) + " skill execution failed: " + result.errorMessage);
+            log_->error("Mob " + std::to_string(mobId) + " skill execution failed: " + result.errorMessage);
         }
     }
     catch (const std::exception &e)

@@ -2,17 +2,19 @@
 #include "services/GameServices.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <chrono>
+#include <spdlog/logger.h>
 
 ExperienceCacheManager::ExperienceCacheManager(GameServices *gameServices)
     : gameServices_(gameServices)
 {
+    log_ = gameServices_->getLogger().getSystem("experience");
     initialize();
 }
 
 void
 ExperienceCacheManager::initialize()
 {
-    gameServices_->getLogger().log("ExperienceCacheManager initialized (ready for experience table loading)", CYAN);
+    log_->info("ExperienceCacheManager initialized (ready for experience table loading)");
 
     // Просто инициализируем пустой кэш, данные будут загружены позже через событие
     std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -23,13 +25,13 @@ ExperienceCacheManager::initialize()
 void
 ExperienceCacheManager::loadExperienceTableFromGameServer()
 {
-    gameServices_->getLogger().log("Manual request for experience level table from game server", CYAN);
+    log_->info("Manual request for experience level table from game server");
 
     try
     {
         // Этот метод может быть вызван вручную для перезагрузки кэша
         // Запрос будет отправлен через GameServerWorker вызывающим кодом
-        gameServices_->getLogger().log("Experience table manual reload requested", BLUE);
+        log_->debug("Experience table manual reload requested");
     }
     catch (const std::exception &e)
     {
@@ -53,7 +55,7 @@ ExperienceCacheManager::setExperienceTable(const std::vector<ExperienceLevelEntr
     // Логируем несколько первых записей для отладки
     if (!entries.empty())
     {
-        gameServices_->getLogger().log("Sample entries:", BLUE);
+        log_->debug("Sample entries:");
         for (size_t i = 0; i < std::min(size_t(5), entries.size()); ++i)
         {
             const auto &entry = entries[i];
@@ -71,7 +73,7 @@ ExperienceCacheManager::getExperienceForLevel(int level) const
 
     if (!experienceTable_.isLoaded)
     {
-        gameServices_->getLogger().logError("Experience table not loaded, returning 0 for level " + std::to_string(level));
+        log_->error("Experience table not loaded, returning 0 for level " + std::to_string(level));
         return 0;
     }
 
@@ -108,7 +110,7 @@ ExperienceCacheManager::getTableSize() const
 void
 ExperienceCacheManager::refreshFromGameServer()
 {
-    gameServices_->getLogger().log("Refreshing experience table from game server", CYAN);
+    log_->info("Refreshing experience table from game server");
     loadExperienceTableFromGameServer();
 }
 
@@ -117,7 +119,7 @@ ExperienceCacheManager::clearCache()
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     experienceTable_.clear();
-    gameServices_->getLogger().log("Experience table cache cleared", YELLOW);
+    log_->info("Experience table cache cleared");
 }
 
 std::string

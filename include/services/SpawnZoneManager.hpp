@@ -39,6 +39,7 @@ class SpawnZoneManager
 
   private:
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
     MobManager &mobManager_;
     MobInstanceManager *mobInstanceManager_; // Pointer to avoid circular dependency
 

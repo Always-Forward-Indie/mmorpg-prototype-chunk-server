@@ -102,6 +102,7 @@ class ExperienceManager
 
   private:
     GameServices *gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
     std::function<void(const nlohmann::json &)> experiencePacketCallback_;
     std::function<void(const nlohmann::json &)> statsUpdatePacketCallback_;
     std::function<void(const std::string &)> saveProgressCallback_;

@@ -39,8 +39,10 @@ class Event
         SPAWN_MOBS_IN_ZONE,
         SPAWN_ZONE_MOVE_MOBS,
         MOVE_MOB,
+        MOB_MOVE_UPDATE,     // Lightweight per-tick position+velocity update (replaces SPAWN_ZONE_MOVE_MOBS for movement)
         MOB_DEATH,           // Event to notify clients about mob death/removal
         MOB_TARGET_LOST,     // Event to notify clients when mob loses target
+        MOB_HEALTH_UPDATE,   // Event to notify clients when mob HP changes (e.g. leash regen)
         MOB_LOOT_GENERATION, // Event to generate loot when mob dies
         // Item and loot events
         ITEM_DROP,
@@ -77,11 +79,13 @@ class Event
         // Skill events
         INITIALIZE_PLAYER_SKILLS, // Initialize player skills on client connection
         // Dialogue events (game-server → chunk-server, static data load)
-        SET_ALL_DIALOGUES,         // Load all dialogue graphs from game-server
-        SET_NPC_DIALOGUE_MAPPINGS, // Load all npc_dialogue bindings
-        SET_ALL_QUESTS,            // Load all quest static definitions
-        SET_PLAYER_QUESTS,         // Load active quests for a specific character (on join)
-        SET_PLAYER_FLAGS,          // Load player flags for a specific character (on join)
+        SET_ALL_DIALOGUES,                // Load all dialogue graphs from game-server
+        SET_NPC_DIALOGUE_MAPPINGS,        // Load all npc_dialogue bindings
+        SET_ALL_QUESTS,                   // Load all quest static definitions
+        SET_PLAYER_QUESTS,                // Load active quests for a specific character (on join)
+        SET_PLAYER_FLAGS,                 // Load player flags for a specific character (on join)
+        SET_PLAYER_ACTIVE_EFFECTS,        // Load non-expired active effects for a character (on join)
+        SET_CHARACTER_ATTRIBUTES_REFRESH, // Updated attributes after level-up or equip change
         // Dialogue events (client → chunk-server)
         NPC_INTERACT,    // Player clicks on NPC to start dialogue
         DIALOGUE_CHOICE, // Player selects a dialogue edge
@@ -89,7 +93,8 @@ class Event
         // Persistence events (chunk-server → game-server)
         UPDATE_PLAYER_QUEST_PROGRESS, // Flush quest progress to DB
         UPDATE_PLAYER_FLAG,           // Flush a flag change to DB
-        FLUSH_PLAYER_QUESTS           // Flush all quests for a character (on disconnect)
+        FLUSH_PLAYER_QUESTS,          // Flush all quests for a character (on disconnect)
+        SET_GAME_CONFIG               // Receive gameplay constants from game-server
     }; // Define more event types as needed
 
     Event() = default; // Default constructor

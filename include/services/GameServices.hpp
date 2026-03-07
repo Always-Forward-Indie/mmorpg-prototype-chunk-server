@@ -8,6 +8,7 @@
 #include "services/DialogueSessionManager.hpp"
 #include "services/ExperienceCacheManager.hpp"
 #include "services/ExperienceManager.hpp"
+#include "services/GameConfigService.hpp"
 #include "services/HarvestManager.hpp"
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
@@ -46,7 +47,8 @@ class GameServices
           skillManager_(this),
           experienceManager_(this),
           experienceCacheManager_(this),
-          statsNotificationService_(this)
+          statsNotificationService_(this),
+          gameConfigService_(logger_)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
@@ -138,9 +140,14 @@ class GameServices
     {
         return questManager_;
     }
+    GameConfigService &getGameConfigService()
+    {
+        return gameConfigService_;
+    }
 
   private:
     Logger &logger_;
+    GameConfigService gameConfigService_; // FIRST: initialized before all managers
     MobManager mobManager_;
     ItemManager itemManager_;
     MobInstanceManager mobInstanceManager_;

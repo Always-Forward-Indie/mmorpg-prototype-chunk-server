@@ -6,8 +6,10 @@
 #include "services/CombatResponseBuilder.hpp"
 #include <functional>
 #include <memory>
+#include <mutex>
 
 // Forward declarations
+namespace spdlog { class logger; }
 class GameServices;
 class SkillSystem;
 class CombatResponseBuilder;
@@ -42,14 +44,21 @@ class CombatSystem
     void updateOngoingActions();
 
     /**
-     * @brief AI атака для мобов
+     * @brief Обработать тики всех активных DoT/HoT эффектов.
+     *  Вызывается каждый игровой тик из CombatEventHandler.
+     *  Применяет урон/лечение, удаляет истёкшие эффекты,
+     *  рассылает broadcast-пакеты "effectTick".
      */
-    void processAIAttack(int mobId);
+    void tickEffects();
 
     /**
-     * @brief AI атака для мобов с конкретной целью
+     * @brief AI атака для мобов с конкретной целью.
+     *        Единственный актуальный путь боя — всегда передаётся явный targetPlayerId.
+     *        @param forcedSkillSlug  Если не пуст — использовать именно этот скил
+     *                                (выбранный MobAIController при подготовке атаки).
+     *                                Если пуст — CombatSystem выбирает лучший скил сам.
      */
-    void processAIAttack(int mobId, int targetPlayerId);
+    void processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug = "");
 
     /**
      * @brief Установить callback для отправки broadcast пакетов
@@ -68,11 +77,13 @@ class CombatSystem
 
   private:
     GameServices *gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
     std::unique_ptr<SkillSystem> skillSystem_;
     std::unique_ptr<CombatResponseBuilder> responseBuilder_;
 
     // Ongoing actions: casterId -> action data
     std::unordered_map<int, std::shared_ptr<CombatActionStruct>> ongoingActions_;
+    mutable std::mutex actionsMutex_; // protects ongoingActions_
 
     // Callback для отправки broadcast пакетов
     std::function<void(const nlohmann::json &)> broadcastCallback_;
@@ -96,4 +107,10 @@ class CombatSystem
      * @brief Обработать аггро мобов
      */
     void handleMobAggro(int attackerId, int targetId, int damage);
+
+    /**
+     * @brief Обработать AoE-скил: найти все цели в area_radius вокруг кастера,
+     *  применить урон, отправить broadcast на каждую цель.
+     */
+    void executeAoESkillUsage(int casterId, const std::string &skillSlug);
 };

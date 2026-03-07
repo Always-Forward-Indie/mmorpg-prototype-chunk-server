@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <spdlog/logger.h>
 
 AttackSystem::AttackSystem() : gen_(rd_()), dist_(0.0f, 1.0f)
 {

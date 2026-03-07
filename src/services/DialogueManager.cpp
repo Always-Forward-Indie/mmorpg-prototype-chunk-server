@@ -1,10 +1,12 @@
 #include "services/DialogueManager.hpp"
 #include "services/DialogueConditionEvaluator.hpp"
 #include <algorithm>
+#include <spdlog/logger.h>
 
 DialogueManager::DialogueManager(Logger &logger)
     : logger_(logger)
 {
+    log_ = logger.getSystem("dialogue");
 }
 
 void

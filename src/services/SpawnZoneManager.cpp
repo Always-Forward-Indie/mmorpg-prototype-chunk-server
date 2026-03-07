@@ -2,6 +2,7 @@
 #include "services/MobInstanceManager.hpp"
 #include "utils/Generators.hpp"
 #include <algorithm>
+#include <spdlog/logger.h>
 
 SpawnZoneManager::SpawnZoneManager(
     MobManager &mobManager,
@@ -9,6 +10,7 @@ SpawnZoneManager::SpawnZoneManager(
                       logger_(logger),
                       mobInstanceManager_(nullptr)
 {
+    log_ = logger.getSystem("spawn");
 }
 
 void
@@ -27,7 +29,7 @@ SpawnZoneManager::loadMobSpawnZones(
         if (selectSpawnZones.empty())
         {
             // log that the data is empty
-            logger_.logError("No spawn zones found in GS");
+            log_->error("No spawn zones found in GS");
         }
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -73,7 +75,7 @@ SpawnZoneManager::loadMobsInSpawnZones(
         if (selectMobs.empty())
         {
             // log that the data is empty
-            logger_.logError("No mobs found in the GS");
+            log_->error("No mobs found in the GS");
         }
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -89,6 +91,17 @@ SpawnZoneManager::loadMobsInSpawnZones(
             mobData.currentMana = row.currentMana;
             mobData.isAggressive = row.isAggressive;
             mobData.isDead = row.isDead;
+
+            // Copy per-mob AI config (migration 011)
+            mobData.aggroRange = row.aggroRange;
+            mobData.attackRange = row.attackRange;
+            mobData.attackCooldown = row.attackCooldown;
+            mobData.chaseMultiplier = row.chaseMultiplier;
+            mobData.patrolSpeed = row.patrolSpeed;
+
+            // Social behaviour (migration 012)
+            mobData.isSocial = row.isSocial;
+            mobData.chaseDuration = row.chaseDuration;
 
             mobSpawnZones_[mobData.zoneId].spawnedMobsList.push_back(mobData);
         }
@@ -145,14 +158,14 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
 {
     std::vector<MobDataStruct> mobs;
 
-    logger_.log("[SPAWN_DEBUG] Attempting to spawn mobs in zone " + std::to_string(zoneId));
+    log_->info("[SPAWN_DEBUG] Attempting to spawn mobs in zone " + std::to_string(zoneId));
 
     {
         std::shared_lock<std::shared_mutex> readLock(mutex_);
         auto zone = mobSpawnZones_.find(zoneId);
         if (zone == mobSpawnZones_.end()) // Проверяем, есть ли зона
         {
-            logger_.logError("Spawn zone " + std::to_string(zoneId) + " not found in GS");
+            log_->error("Spawn zone " + std::to_string(zoneId) + " not found in GS");
             return mobs;
         }
 
@@ -171,7 +184,7 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     if (zone == mobSpawnZones_.end())
         return mobs;
 
-    logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " - checking spawn conditions");
+    log_->info("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " - checking spawn conditions");
 
     // Get current alive mob count from MobInstanceManager (more accurate than spawnedMobsCount)
     int currentAliveMobs = 0;
@@ -200,6 +213,23 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
         int mobsToSpawn = zone->second.spawnCount - currentAliveMobs;
         logger_.log("[SPAWN_DEBUG] Need to spawn " + std::to_string(mobsToSpawn) + " mobs in zone " + std::to_string(zoneId));
 
+        // Collect current mob positions so newly spawned mobs don't overlap
+        // with existing ones or with each other within the same batch.
+        std::vector<PositionStruct> occupiedPositions;
+        if (mobInstanceManager_)
+        {
+            auto existingPositions = mobInstanceManager_->getMobPositionsInZone(zoneId);
+            occupiedPositions.reserve(existingPositions.size());
+            for (const auto &ep : existingPositions)
+                occupiedPositions.push_back(ep.second);
+        }
+
+        // Minimum distance between mob centres = sum of radii + a small gap.
+        // If radius is not set in the template we fall back to a safe default.
+        // All mobs in a zone share the same template (one spawnMobId per zone)
+        // so we can derive the template radius once from the first-fetched mob.
+        // The actual value is filled in below after getMobById() succeeds.
+
         for (int i = 0; i < mobsToSpawn; i++)
         {
             MobDataStruct mob = mobManager_.getMobById(zone->second.spawnMobId);
@@ -214,7 +244,7 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             // CRITICAL CHECK: Don't spawn if mob template is invalid (not loaded yet)
             if (mob.id == 0 || mob.name.empty())
             {
-                logger_.log("[SPAWN_DELAY] Mob template ID " + std::to_string(zone->second.spawnMobId) +
+                log_->info("[SPAWN_DELAY] Mob template ID " + std::to_string(zone->second.spawnMobId) +
                             " not loaded yet, delaying spawn");
                 return mobs; // Exit early, try again later
             }
@@ -237,9 +267,53 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             float minZ = centerZ - (sizeZ / 2.0f);
             float maxZ = centerZ + (sizeZ / 2.0f);
 
-            // Генерация случайных координат внутри зоны
-            mob.position.positionX = minX + (dist(gen) * (maxX - minX));
-            mob.position.positionY = minY + (dist(gen) * (maxY - minY));
+            // Minimum separation = radiusA + radiusB + gap between edges.
+            // For a homogeneous zone all mobs share the same template radius.
+            constexpr float SPAWN_EDGE_GAP = 50.0f;       // extra clearance between surfaces
+            constexpr float FALLBACK_SEPARATION = 140.0f; // used when radius is not set
+            const float minSpawnSeparation = (mob.radius > 0)
+                                                 ? (mob.radius * 2.0f + SPAWN_EDGE_GAP)
+                                                 : FALLBACK_SEPARATION;
+            constexpr int MAX_SPAWN_ATTEMPTS = 15;
+            bool positionFound = false;
+
+            for (int attempt = 0; attempt < MAX_SPAWN_ATTEMPTS; ++attempt)
+            {
+                float candidateX = minX + (dist(gen) * (maxX - minX));
+                float candidateY = minY + (dist(gen) * (maxY - minY));
+
+                bool tooClose = false;
+                for (const auto &occupied : occupiedPositions)
+                {
+                    float ddx = candidateX - occupied.positionX;
+                    float ddy = candidateY - occupied.positionY;
+                    if (ddx * ddx + ddy * ddy < minSpawnSeparation * minSpawnSeparation)
+                    {
+                        tooClose = true;
+                        break;
+                    }
+                }
+
+                if (!tooClose)
+                {
+                    mob.position.positionX = candidateX;
+                    mob.position.positionY = candidateY;
+                    positionFound = true;
+                    break;
+                }
+            }
+
+            if (!positionFound)
+            {
+                logger_.log("[SPAWN_SKIP] No valid spawn position found for mob (radius=" +
+                            std::to_string(mob.radius) + ", sep=" +
+                            std::to_string(static_cast<int>(minSpawnSeparation)) +
+                            ") in zone " + std::to_string(zoneId) +
+                            " after " + std::to_string(MAX_SPAWN_ATTEMPTS) +
+                            " attempts - will retry on next tick");
+                continue;
+            }
+
             mob.position.positionZ = 200;
 
             // Поворот случайный от 0 до 360 градусов
@@ -263,6 +337,9 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
                         " - isDead: " + (mob.isDead ? "true" : "false") +
                         ", currentHealth: " + std::to_string(mob.currentHealth) +
                         ", maxHealth: " + std::to_string(mob.maxHealth));
+
+            // Track this position so the next mob in the same batch won't overlap.
+            occupiedPositions.push_back(mob.position);
 
             mobs.push_back(mob);
             zone->second.spawnedMobsCount++;
@@ -351,7 +428,7 @@ SpawnZoneManager::removeMobByUIDInternal(int mobUID)
                 zone.second.spawnedMobsUIDList.erase(uidIt);
             }
 
-            logger_.log("[INFO] Removed mob UID " + std::to_string(mobUID) + " from zone");
+            log_->info("[INFO] Removed mob UID " + std::to_string(mobUID) + " from zone");
             return;
         }
     }

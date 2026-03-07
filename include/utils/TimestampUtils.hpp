@@ -17,6 +17,12 @@ class TimestampUtils
     static long long getCurrentTimestampMs();
 
     /**
+     * @brief Get current timestamp as formatted string (YYYY-MM-DD HH:MM:SS.mmm)
+     * @return Formatted timestamp string
+     */
+    static std::string getCurrentTimestamp();
+
+    /**
      * @brief Create timestamp struct with serverRecvMs set to current time
      * @param clientSendMsEcho Echo timestamp from client request (0 if not available)
      * @param requestId Echo of client requestId for packet synchronization

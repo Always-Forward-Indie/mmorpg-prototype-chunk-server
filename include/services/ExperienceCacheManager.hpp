@@ -66,6 +66,7 @@ class ExperienceCacheManager
 
   private:
     GameServices *gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
     mutable std::shared_mutex mutex_;
     ExperienceLevelTable experienceTable_;
 

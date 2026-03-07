@@ -3,26 +3,34 @@
 
 Scheduler::Scheduler() : stopFlag(false) {}
 
-Scheduler::~Scheduler() {
+Scheduler::~Scheduler()
+{
     stop();
 }
 
-void Scheduler::start() {
+void
+Scheduler::start()
+{
     thread = std::thread(&Scheduler::run, this);
 }
 
-void Scheduler::stop() {
+void
+Scheduler::stop()
+{
     {
         std::lock_guard<std::mutex> lock(mutex);
         stopFlag.store(true);
     }
     cv.notify_all();
-    if (thread.joinable()) {
+    if (thread.joinable())
+    {
         thread.join();
     }
 }
 
-void Scheduler::scheduleTask(const Task &task) {
+void
+Scheduler::scheduleTask(const Task &task)
+{
     {
         std::lock_guard<std::mutex> lock(mutex);
         tasksHeap.push(task);
@@ -30,55 +38,69 @@ void Scheduler::scheduleTask(const Task &task) {
     cv.notify_all();
 }
 
-void Scheduler::removeTask(int id) {
+void
+Scheduler::removeTask(int id)
+{
     std::lock_guard<std::mutex> lock(mutex);
     // Пересобираем кучу, помечая задачи с заданным id
     std::vector<Task> temp;
-    while (!tasksHeap.empty()) {
+    while (!tasksHeap.empty())
+    {
         Task t = tasksHeap.top();
         tasksHeap.pop();
-        if (t.id == id) {
+        if (t.id == id)
+        {
             t.stopFlag = true;
         }
         temp.push_back(t);
     }
-    for (const auto &t : temp) {
+    for (const auto &t : temp)
+    {
         tasksHeap.push(t);
     }
     cv.notify_all();
 }
 
-void Scheduler::run() {
+void
+Scheduler::run()
+{
     std::unique_lock<std::mutex> lock(mutex);
-    while (!stopFlag.load()) {
-        if (tasksHeap.empty()) {
-            cv.wait(lock, [this] { return stopFlag.load() || !tasksHeap.empty(); });
+    while (!stopFlag.load())
+    {
+        if (tasksHeap.empty())
+        {
+            cv.wait(lock, [this]
+                { return stopFlag.load() || !tasksHeap.empty(); });
             if (stopFlag.load())
                 break;
         }
         // Получаем задачу с минимальным nextRunTime
         Task t = tasksHeap.top();
         // Если задача помечена на удаление, просто удаляем её
-        if (t.stopFlag) {
+        if (t.stopFlag)
+        {
             tasksHeap.pop();
             continue;
         }
-        auto now = std::chrono::system_clock::now();
-        if (now >= t.nextRunTime) {
+        // HIGH-2: steady_clock avoids NTP-induced jumps
+        auto now = std::chrono::steady_clock::now();
+        if (now >= t.nextRunTime)
+        {
             // Готовая задача – удаляем её из кучи, освобождаем мьютекс и выполняем
             tasksHeap.pop();
             lock.unlock();
             t.func();
             lock.lock();
-            // Обновляем время следующего запуска и возвращаем задачу в кучу
-            t.nextRunTime = now + std::chrono::seconds(t.interval);
+            // HIGH-3: update with milliseconds
+            t.nextRunTime = now + std::chrono::milliseconds(t.intervalMs);
             tasksHeap.push(t);
             cv.notify_all();
-        } else {
+        }
+        else
+        {
             // Ждём до следующего времени выполнения или появления новой задачи с более ранним временем
-            cv.wait_until(lock, t.nextRunTime, [this, &t] {
-                return stopFlag.load() || (!tasksHeap.empty() && tasksHeap.top().nextRunTime < t.nextRunTime);
-            });
+            cv.wait_until(lock, t.nextRunTime, [this, &t]
+                { return stopFlag.load() || (!tasksHeap.empty() && tasksHeap.top().nextRunTime < t.nextRunTime); });
         }
     }
 }

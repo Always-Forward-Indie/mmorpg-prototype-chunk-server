@@ -93,7 +93,8 @@ class NPCManager
     std::unordered_map<int, NPCDataStruct> npcsMap_;                         ///< Map of NPC ID to NPC data
     std::unordered_map<int, std::vector<NPCAttributeStruct>> attributesMap_; ///< Map of NPC ID to attributes
     bool npcsLoaded_;                                                        ///< Flag indicating if NPCs have been loaded
-    Logger &logger_;                                                         ///< Reference to logger for error reporting
+    Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;                                                         ///< Reference to logger for error reporting
 
     /**
      * @brief Apply attributes to NPC data

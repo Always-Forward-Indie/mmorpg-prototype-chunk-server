@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 // Forward declarations
+namespace spdlog { class logger; }
 class GameServices;
 
 /**
@@ -38,6 +39,7 @@ struct SkillExecutionResult
     bool targetDied = false;
     int finalTargetHealth = 0;
     int finalTargetMana = 0;
+    bool healthPopulated = false; ///< true once finalTargetHealth/Mana have been explicitly set
     int casterId = 0;
     int targetId = 0;
     CombatTargetType targetType = CombatTargetType::NONE;
@@ -75,8 +77,16 @@ class CombatResponseBuilder
      */
     nlohmann::json buildAnimationPacket(int characterId, const std::string &animationName, float duration, const PositionStruct &position, const PositionStruct &targetPosition = {});
 
+    /**
+     * @brief Создать broadcast-пакет тика DoT/HoT эффекта.
+     *  type: "effectTick"
+     *  body: { characterId, effectSlug, effectTypeSlug, value, newHealth, newMana, targetDied }
+     */
+    nlohmann::json buildEffectTickBroadcast(const EffectTickResult &tick);
+
   private:
     GameServices *gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
 
     /**
      * @brief Определить тип персонажа (игрок/моб)

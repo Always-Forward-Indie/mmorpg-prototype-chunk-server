@@ -40,9 +40,11 @@ bool
 EventQueue::pop(Event &event)
 {
     std::unique_lock<std::mutex> lock(mtx);
+    // HIGH-4: also wake when stopped so consumer threads exit cleanly
     cv.wait(lock, [this]
-        { return !queue.empty(); });
-
+        { return !queue.empty() || stopped_.load(std::memory_order_relaxed); });
+    if (queue.empty())
+        return false; // stopped with no pending events
     event = std::move(queue.front());
     queue.pop();
     return true;
@@ -113,8 +115,11 @@ bool
 EventQueue::popBatch(std::vector<Event> &events, int batchSize)
 {
     std::unique_lock<std::mutex> lock(mtx);
+    // HIGH-4: also wake when stopped
     cv.wait(lock, [this]
-        { return !queue.empty(); });
+        { return !queue.empty() || stopped_.load(std::memory_order_relaxed); });
+    if (queue.empty())
+        return false; // stopped
 
     int actualSize = std::min(batchSize, static_cast<int>(queue.size()));
 
@@ -156,4 +161,11 @@ EventQueue::forceCleanup()
         queue.swap(newQueue);
         // newQueue will be destroyed when it goes out of scope, releasing memory
     }
+}
+
+void
+EventQueue::stop()
+{
+    stopped_.store(true, std::memory_order_release);
+    cv.notify_all(); // wake all blocked pop/popBatch callers
 }

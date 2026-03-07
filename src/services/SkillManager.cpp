@@ -2,9 +2,11 @@
 #include "services/CharacterManager.hpp"
 #include "services/GameServices.hpp"
 #include "services/MobManager.hpp"
+#include "services/MobMovementManager.hpp"
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <spdlog/logger.h>
 
 SkillManager::SkillManager()
     : combatCalculator_(std::make_unique<CombatCalculator>()),
@@ -16,6 +18,11 @@ SkillManager::SkillManager(GameServices *gameServices)
     : combatCalculator_(std::make_unique<CombatCalculator>()),
       gameServices_(gameServices)
 {
+    log_ = gameServices_->getLogger().getSystem("skill");
+    if (gameServices_)
+    {
+        combatCalculator_->setGameConfigService(&gameServices_->getGameConfigService());
+    }
 }
 
 void
@@ -242,19 +249,27 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
             // Применяем урон к мобу
             if (result.damageResult.totalDamage > 0)
             {
-                int newHealth = std::max<int>(0, mobData.currentHealth - result.damageResult.totalDamage);
-                auto updateResult = gameServices_->getMobInstanceManager().updateMobHealth(targetId, newHealth);
-
-                if (!updateResult.success)
+                // Skip damage while mob is leashing (RETURNING) or in post-leash
+                // invulnerability window (EVADING).
+                auto mobMoveData = gameServices_->getMobMovementManager().getMobMovementData(targetId);
+                bool isEvading = (mobMoveData.combatState == MobCombatState::RETURNING ||
+                                  mobMoveData.combatState == MobCombatState::EVADING);
+                if (!isEvading)
                 {
-                    result.errorMessage = "Failed to update mob health";
-                    return result;
-                }
+                    auto updateResult = gameServices_->getMobInstanceManager().applyDamageToMob(
+                        targetId, result.damageResult.totalDamage);
 
-                if (updateResult.wasAlreadyDead)
-                {
-                    result.errorMessage = "Target mob is already dead";
-                    return result;
+                    if (!updateResult.success)
+                    {
+                        result.errorMessage = "Failed to update mob health";
+                        return result;
+                    }
+
+                    if (updateResult.wasAlreadyDead)
+                    {
+                        result.errorMessage = "Target mob is already dead";
+                        return result;
+                    }
                 }
             }
         }
@@ -269,9 +284,7 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
                 result.healAmount = result.damageResult.totalDamage; // Используем "урон" как лечение
                 result.damageResult.totalDamage = 0;                 // Убираем урон для лечения
 
-                int newHealth = std::min<int>(casterData.characterMaxHealth,
-                    casterData.characterCurrentHealth + result.healAmount);
-                gameServices_->getCharacterManager().updateCharacterHealth(casterId, newHealth);
+                gameServices_->getCharacterManager().applyHealToCharacter(casterId, result.healAmount);
             }
         }
         else
@@ -281,8 +294,7 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
         }
 
         // 5. Тратим ману кастера
-        int newMana = std::max<int>(0, casterData.characterCurrentMana - skill->costMp);
-        gameServices_->getCharacterManager().updateCharacterMana(casterId, newMana);
+        gameServices_->getCharacterManager().applyManaCostToCharacter(casterId, skill->costMp);
 
         // 6. Устанавливаем кулдаун
         setCooldown(casterId, skillSlug, skill->cooldownMs);

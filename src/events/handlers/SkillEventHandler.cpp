@@ -3,14 +3,16 @@
 #include "services/GameServices.hpp"
 #include "utils/Logger.hpp"
 #include <nlohmann/json.hpp>
+#include <spdlog/logger.h>
 
 SkillEventHandler::SkillEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "skill")
 {
-    gameServices_.getLogger().log("SkillEventHandler initialized", GREEN);
+    log_ = gameServices_.getLogger().getSystem("skill");
+    log_->info("SkillEventHandler initialized");
 }
 
 void
@@ -24,7 +26,7 @@ SkillEventHandler::handleInitializePlayerSkills(const Event &event)
     {
         if (!std::holds_alternative<PlayerSkillInitStruct>(data))
         {
-            gameServices_.getLogger().logError("Invalid data format for INITIALIZE_PLAYER_SKILLS event");
+            log_->error("Invalid data format for INITIALIZE_PLAYER_SKILLS event");
             sendErrorResponse("Invalid skill data format", clientID, clientSocket);
             return;
         }
@@ -55,9 +57,8 @@ SkillEventHandler::handleInitializePlayerSkillsDirect(const PlayerSkillInitStruc
         // Send response to client
         sendSkillsResponse(response, clientID, clientSocket);
 
-        gameServices_.getLogger().log("Player skills initialized successfully for client " +
-                                          std::to_string(clientID),
-            GREEN);
+        log_->info("Player skills initialized successfully for client " +
+                                          std::to_string(clientID));
     }
     catch (const std::exception &ex)
     {
@@ -127,7 +128,7 @@ SkillEventHandler::buildSkillsResponse(const PlayerSkillInitStruct &skillInitDat
             skillData["maxRange"] = skill.maxRange;
 
             skillsArray.push_back(skillData);
-            gameServices_.getLogger().log("Successfully processed skill " + std::to_string(i), GREEN);
+            log_->info("Successfully processed skill " + std::to_string(i));
         }
         catch (const std::exception &ex)
         {
@@ -146,7 +147,7 @@ SkillEventHandler::sendSkillsResponse(const nlohmann::json &response, int client
 {
     if (!clientSocket)
     {
-        gameServices_.getLogger().log("Client socket not found for player skills initialization", YELLOW);
+        log_->info("Client socket not found for player skills initialization");
         return;
     }
 

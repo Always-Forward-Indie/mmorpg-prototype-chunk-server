@@ -2,6 +2,7 @@
 
 #include "data/DataStructs.hpp"
 #include <nlohmann/json.hpp>
+#include <utility>
 
 class JSONParser
 {
@@ -32,6 +33,9 @@ class JSONParser
     std::vector<QuestStruct> parseQuestsList(const char *data, size_t length);
     std::vector<PlayerQuestProgressStruct> parsePlayerQuestProgress(const char *data, size_t length);
     std::vector<PlayerFlagStruct> parsePlayerFlags(const char *data, size_t length);
+    std::vector<ActiveEffectStruct> parsePlayerActiveEffects(const char *data, size_t length);
+    // Parse attribute refresh response from game-server (characterId + attributesData array)
+    std::pair<int, std::vector<CharacterAttributeStruct>> parseCharacterAttributesRefresh(const char *data, size_t length);
 
     // Experience system parsers
     std::vector<ExperienceLevelEntry> parseExpLevelTable(const char *data, size_t length);

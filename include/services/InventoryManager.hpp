@@ -87,6 +87,7 @@ class InventoryManager
   private:
     ItemManager &itemManager_;
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
 
     // Event queue for sending inventory update events
     EventQueue *eventQueue_;

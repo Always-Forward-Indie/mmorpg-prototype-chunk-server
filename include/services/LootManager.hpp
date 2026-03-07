@@ -75,6 +75,7 @@ class LootManager
   private:
     ItemManager &itemManager_;
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
 
     // Event queue for sending loot events to clients
     EventQueue *eventQueue_;

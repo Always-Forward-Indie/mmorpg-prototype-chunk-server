@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 // Forward declarations
+namespace spdlog { class logger; }
 class GameServices;
 
 /**
@@ -125,6 +126,7 @@ class SkillManager
   private:
     std::unique_ptr<CombatCalculator> combatCalculator_;
     GameServices *gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
 
     // Кулдауны: characterId -> (skillSlug -> timepoint)
     std::unordered_map<int, std::unordered_map<std::string, std::chrono::steady_clock::time_point>> cooldowns_;

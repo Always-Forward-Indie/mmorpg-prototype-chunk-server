@@ -6,8 +6,13 @@ services:
     volumes:
       - ./src:/usr/src/app/src  # ✅ Mount only the `src` folder
       - ./include:/usr/src/app/include  # ✅ Mount only the `include` folder
+      - ./CMakeLists.txt:/usr/src/app/CMakeLists.txt  # ✅ Mount CMakeLists.txt so new source files are picked up without image rebuilds
     environment:
       - ENV=development
+      - LOG_LEVEL=info
+      - LOG_LEVEL_NETWORK=warn
+      - LOG_LEVEL_GAMELOOP=warn
+      - LOG_LEVEL_EVENTS=warn
     security_opt:
       - seccomp=unconfined
     networks:

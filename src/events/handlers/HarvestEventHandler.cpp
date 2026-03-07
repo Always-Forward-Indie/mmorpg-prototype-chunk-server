@@ -3,26 +3,28 @@
 #include "events/Event.hpp"
 #include "nlohmann/json.hpp"
 #include "utils/ResponseBuilder.hpp"
+#include <spdlog/logger.h>
 
 HarvestEventHandler::HarvestEventHandler(NetworkManager &networkManager, GameServerWorker &gameServerWorker, GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices), gameServices_(gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "harvest"), gameServices_(gameServices)
 {
+    log_ = gameServices_.getLogger().getSystem("harvest");
 }
 
 void
 HarvestEventHandler::handleHarvestStartRequest(const Event &event)
 {
-    gameServices_.getLogger().log("HarvestEventHandler::handleHarvestStartRequest called", GREEN);
-    gameServices_.getLogger().log("Handling harvest start request");
+    log_->info("HarvestEventHandler::handleHarvestStartRequest called");
+    log_->info("Handling harvest start request");
 
     try
     {
         const auto &data = event.getData();
-        gameServices_.getLogger().log("HarvestEventHandler: Checking event data type", GREEN);
+        log_->info("HarvestEventHandler: Checking event data type");
 
         if (std::holds_alternative<HarvestRequestStruct>(data))
         {
-            gameServices_.getLogger().log("HarvestEventHandler: Event contains HarvestRequestStruct", GREEN);
+            log_->info("HarvestEventHandler: Event contains HarvestRequestStruct");
             HarvestRequestStruct request = std::get<HarvestRequestStruct>(data);
             int clientId = event.getClientID();
 
@@ -34,20 +36,20 @@ HarvestEventHandler::handleHarvestStartRequest(const Event &event)
             // Проверяем что characterId валидный
             if (request.characterId <= 0)
             {
-                gameServices_.getLogger().logError("Invalid character ID in harvest request: " + std::to_string(request.characterId));
+                log_->error("Invalid character ID in harvest request: " + std::to_string(request.characterId));
                 return;
             }
 
-            gameServices_.getLogger().log("HarvestEventHandler: Using character ID from request: " + std::to_string(request.characterId), GREEN);
+            log_->info("HarvestEventHandler: Using character ID from request: " + std::to_string(request.characterId));
 
             // Проверяем существование трупа
-            gameServices_.getLogger().log("HarvestEventHandler: Getting HarvestManager", GREEN);
+            log_->info("HarvestEventHandler: Getting HarvestManager");
             auto &harvestManager = gameServices_.getHarvestManager();
-            gameServices_.getLogger().log("HarvestEventHandler: Getting corpse by UID: " + std::to_string(request.corpseUID), GREEN);
+            log_->info("HarvestEventHandler: Getting corpse by UID: " + std::to_string(request.corpseUID));
             auto corpse = harvestManager.getCorpseByUID(request.corpseUID);
             if (corpse.mobUID == 0)
             {
-                gameServices_.getLogger().logError("Corpse not harvestable: " + std::to_string(request.corpseUID));
+                log_->error("Corpse not harvestable: " + std::to_string(request.corpseUID));
 
                 // Отправляем ошибку клиенту
                 auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
@@ -82,13 +84,13 @@ HarvestEventHandler::handleHarvestStartRequest(const Event &event)
                 if (player.characterId != 0)
                 {
                     playerPosition = player.characterPosition;
-                    gameServices_.getLogger().log("HarvestEventHandler: Got player position from CharacterManager", GREEN);
+                    log_->info("HarvestEventHandler: Got player position from CharacterManager");
                 }
                 else
                 {
                     // Использовать позицию по умолчанию если игрок не найден
                     playerPosition = {0.0f, 0.0f, 0.0f, 0.0f};
-                    gameServices_.getLogger().log("HarvestEventHandler: Using default position for harvest", GREEN);
+                    log_->info("HarvestEventHandler: Using default position for harvest");
                 }
             }
             catch (const std::exception &e)
@@ -100,9 +102,9 @@ HarvestEventHandler::handleHarvestStartRequest(const Event &event)
             bool success = false;
             try
             {
-                gameServices_.getLogger().log("HarvestEventHandler: Calling harvestManager.startHarvest()", GREEN);
+                log_->info("HarvestEventHandler: Calling harvestManager.startHarvest()");
                 success = harvestManager.startHarvest(clientId, request.corpseUID, playerPosition);
-                gameServices_.getLogger().log("HarvestEventHandler: startHarvest returned: " + std::string(success ? "true" : "false"), GREEN);
+                log_->info("HarvestEventHandler: startHarvest returned: " + std::string(success ? "true" : "false"));
             }
             catch (const std::exception &e)
             {
@@ -154,26 +156,26 @@ HarvestEventHandler::handleHarvestStartRequest(const Event &event)
                     std::string responseData = networkManager_.generateResponseMessage("error", response);
                     networkManager_.sendResponse(clientSocket, responseData);
 
-                    gameServices_.getLogger().logError("Failed to start harvest for player " + std::to_string(clientId));
+                    log_->error("Failed to start harvest for player " + std::to_string(clientId));
                 }
             }
         }
         else
         {
-            gameServices_.getLogger().logError("HarvestEventHandler: Invalid data type for harvest start request - expected HarvestRequestStruct", RED);
+            log_->error("HarvestEventHandler: Invalid data type for harvest start request - expected HarvestRequestStruct");
 
             // Попробуем определить какой тип данных у нас есть
             if (std::holds_alternative<nlohmann::json>(data))
             {
-                gameServices_.getLogger().logError("HarvestEventHandler: Event contains JSON instead of HarvestRequestStruct", RED);
+                log_->error("HarvestEventHandler: Event contains JSON instead of HarvestRequestStruct");
             }
             else if (std::holds_alternative<CharacterDataStruct>(data))
             {
-                gameServices_.getLogger().logError("HarvestEventHandler: Event contains CharacterDataStruct instead of HarvestRequestStruct", RED);
+                log_->error("HarvestEventHandler: Event contains CharacterDataStruct instead of HarvestRequestStruct");
             }
             else
             {
-                gameServices_.getLogger().logError("HarvestEventHandler: Event contains unknown data type", RED);
+                log_->error("HarvestEventHandler: Event contains unknown data type");
             }
         }
     }
@@ -186,7 +188,7 @@ HarvestEventHandler::handleHarvestStartRequest(const Event &event)
 void
 HarvestEventHandler::handleGetNearbyCorpses(const Event &event)
 {
-    gameServices_.getLogger().log("Handling get nearby corpses request");
+    log_->info("Handling get nearby corpses request");
 
     try
     {
@@ -196,7 +198,7 @@ HarvestEventHandler::handleGetNearbyCorpses(const Event &event)
         auto player = gameServices_.getCharacterManager().getCharacterById(clientId);
         if (player.characterId == 0)
         {
-            gameServices_.getLogger().logError("Player not found for nearby corpses request: " + std::to_string(clientId));
+            log_->error("Player not found for nearby corpses request: " + std::to_string(clientId));
             return;
         }
 
@@ -249,7 +251,7 @@ HarvestEventHandler::handleGetNearbyCorpses(const Event &event)
 void
 HarvestEventHandler::handleHarvestCancel(const Event &event)
 {
-    gameServices_.getLogger().log("Handling harvest cancel request");
+    log_->info("Handling harvest cancel request");
 
     try
     {
@@ -259,7 +261,7 @@ HarvestEventHandler::handleHarvestCancel(const Event &event)
         auto player = gameServices_.getCharacterManager().getCharacterById(clientId);
         if (player.characterId == 0)
         {
-            gameServices_.getLogger().logError("Player not found for harvest cancel request: " + std::to_string(clientId));
+            log_->error("Player not found for harvest cancel request: " + std::to_string(clientId));
             return;
         }
 
@@ -291,7 +293,7 @@ HarvestEventHandler::handleHarvestCancel(const Event &event)
             std::string responseData = networkManager_.generateResponseMessage("success", response);
             networkManager_.sendResponse(clientSocket, responseData);
 
-            gameServices_.getLogger().log("Harvest cancelled for player " + std::to_string(clientId));
+            log_->info("Harvest cancelled for player " + std::to_string(clientId));
         }
     }
     catch (const std::exception &e)
@@ -303,7 +305,7 @@ HarvestEventHandler::handleHarvestCancel(const Event &event)
 void
 HarvestEventHandler::handleHarvestComplete(int playerId, int corpseId)
 {
-    gameServices_.getLogger().log("Handling harvest completion for player " + std::to_string(playerId));
+    log_->info("Handling harvest completion for player " + std::to_string(playerId));
 
     try
     {
@@ -315,7 +317,7 @@ HarvestEventHandler::handleHarvestComplete(int playerId, int corpseId)
 
         if (harvestLoot.empty())
         {
-            gameServices_.getLogger().log("No loot generated for harvest completion by player " + std::to_string(playerId));
+            log_->info("No loot generated for harvest completion by player " + std::to_string(playerId));
             // Все равно отправляем ответ о завершении харвеста, даже если лута нет
         }
 
@@ -376,7 +378,7 @@ HarvestEventHandler::handleHarvestComplete(int playerId, int corpseId)
 void
 HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct &pickupRequest)
 {
-    gameServices_.getLogger().log("Handling corpse loot pickup for player " + std::to_string(pickupRequest.characterId));
+    log_->info("Handling corpse loot pickup for player " + std::to_string(pickupRequest.characterId));
 
     try
     {
@@ -386,7 +388,7 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
         // Валидация playerId (сверяем с characterId из сессии)
         if (pickupRequest.playerId != pickupRequest.characterId)
         {
-            gameServices_.getLogger().logError("Security violation: playerId mismatch in corpse loot pickup");
+            log_->error("Security violation: playerId mismatch in corpse loot pickup");
 
             auto clientSocket = gameServices_.getClientManager().getClientSocket(pickupRequest.characterId);
             if (clientSocket)
@@ -427,7 +429,7 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
         auto corpse = harvestManager.getCorpseByUID(pickupRequest.corpseUID);
         if (corpse.mobUID == 0)
         {
-            gameServices_.getLogger().logError("Corpse not found for loot pickup: " + std::to_string(pickupRequest.corpseUID));
+            log_->error("Corpse not found for loot pickup: " + std::to_string(pickupRequest.corpseUID));
 
             auto clientSocket = gameServices_.getClientManager().getClientSocket(pickupRequest.characterId);
             if (clientSocket)
@@ -535,7 +537,7 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                 std::string responseData = networkManager_.generateResponseMessage("error", errorResponse);
                 networkManager_.sendResponse(clientSocket, responseData);
 
-                gameServices_.getLogger().logError("Failed to pickup loot for player " + std::to_string(pickupRequest.characterId));
+                log_->error("Failed to pickup loot for player " + std::to_string(pickupRequest.characterId));
             }
         }
     }
@@ -548,7 +550,7 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
 void
 HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruct &inspectRequest)
 {
-    gameServices_.getLogger().log("Handling corpse loot inspect for player " + std::to_string(inspectRequest.characterId));
+    log_->info("Handling corpse loot inspect for player " + std::to_string(inspectRequest.characterId));
 
     try
     {
@@ -558,7 +560,7 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
         // Валидация playerId (сверяем с characterId из сессии)
         if (inspectRequest.playerId != inspectRequest.characterId)
         {
-            gameServices_.getLogger().logError("Security violation: playerId mismatch in corpse loot inspect");
+            log_->error("Security violation: playerId mismatch in corpse loot inspect");
 
             auto clientSocket = gameServices_.getClientManager().getClientSocket(inspectRequest.characterId);
             if (clientSocket)
@@ -583,7 +585,7 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
         auto corpse = harvestManager.getCorpseByUID(inspectRequest.corpseUID);
         if (corpse.mobUID == 0)
         {
-            gameServices_.getLogger().logError("Corpse not found for loot inspect: " + std::to_string(inspectRequest.corpseUID));
+            log_->error("Corpse not found for loot inspect: " + std::to_string(inspectRequest.corpseUID));
 
             auto clientSocket = gameServices_.getClientManager().getClientSocket(inspectRequest.characterId);
             if (clientSocket)
@@ -607,7 +609,7 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
         // Проверяем что труп был заха рвещен
         if (!corpse.hasBeenHarvested)
         {
-            gameServices_.getLogger().logError("Cannot inspect loot from non-harvested corpse: " + std::to_string(inspectRequest.corpseUID));
+            log_->error("Cannot inspect loot from non-harvested corpse: " + std::to_string(inspectRequest.corpseUID));
 
             auto clientSocket = gameServices_.getClientManager().getClientSocket(inspectRequest.characterId);
             if (clientSocket)

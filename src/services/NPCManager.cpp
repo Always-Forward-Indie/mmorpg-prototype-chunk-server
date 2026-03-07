@@ -2,11 +2,13 @@
 #include "utils/TerminalColors.hpp"
 #include <algorithm>
 #include <cmath>
+#include <spdlog/logger.h>
 
 NPCManager::NPCManager(Logger &logger)
     : npcsLoaded_(false), logger_(logger)
 {
-    logger_.log("NPCManager initialized", GREEN);
+    log_ = logger.getSystem("npc");
+    log_->info("NPCManager initialized");
 }
 
 void
@@ -135,7 +137,7 @@ NPCManager::clearNPCData()
     attributesMap_.clear();
     npcsLoaded_ = false;
 
-    logger_.log("Cleared all NPC data", YELLOW);
+    log_->info("Cleared all NPC data");
 }
 
 void

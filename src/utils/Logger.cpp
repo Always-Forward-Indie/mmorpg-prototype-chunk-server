@@ -1,82 +1,131 @@
 #include "utils/Logger.hpp"
-#include <iostream>
-#include <sstream>
-#include <iomanip>
-#include <chrono>
-#include <ctime>
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <filesystem>
+#include <spdlog/async.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
-Logger::Logger() : stopThread_(false), loggingThread_(&Logger::processQueue, this) {
+namespace
+{
+spdlog::level::level_enum
+parseLevel(const std::string &level)
+{
+    if (level == "trace")
+        return spdlog::level::trace;
+    if (level == "debug")
+        return spdlog::level::debug;
+    if (level == "info")
+        return spdlog::level::info;
+    if (level == "warn" || level == "warning")
+        return spdlog::level::warn;
+    if (level == "error")
+        return spdlog::level::err;
+    if (level == "critical")
+        return spdlog::level::critical;
+    return spdlog::level::info;
+}
+} // namespace
+
+Logger::Logger(const std::string &serverName) : serverName_(serverName)
+{
+    std::filesystem::create_directories("logs");
+
+    spdlog::init_thread_pool(8192, 1);
+
+    auto stdout_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    stdout_sink->set_color_mode(spdlog::color_mode::always);
+    auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+        "logs/" + serverName + ".log", 10 * 1024 * 1024, 5);
+
+    logger_ = std::make_shared<spdlog::async_logger>(
+        serverName,
+        spdlog::sinks_init_list{stdout_sink, file_sink},
+        spdlog::thread_pool(),
+        spdlog::async_overflow_policy::block);
+
+    const char *envLevel = std::getenv("LOG_LEVEL");
+    logger_->set_level(parseLevel(envLevel ? envLevel : "info"));
+    logger_->set_pattern("[%H:%M:%S.%e] [%n] [%^%l%$] %v");
+
+    spdlog::register_logger(logger_);
 }
 
-Logger::~Logger() {
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        stopThread_ = true;
-    }
-    cv_.notify_all();
-    if (loggingThread_.joinable()) {
-        loggingThread_.join();
-    }
+Logger::~Logger()
+{
+    spdlog::drop(logger_->name());
+    spdlog::shutdown();
 }
 
-std::string Logger::getCurrentTimestamp() {
-    auto now = std::chrono::system_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-    auto in_time_t = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    {
-        std::lock_guard<std::mutex> lock(timeMutex);
-        ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %X");
-        ss << '.' << std::setfill('0') << std::setw(3) << ms.count();
-    }
-    return ss.str();
+void
+Logger::log(const std::string &message, const std::string &)
+{
+    logger_->info(message);
+}
+void
+Logger::logError(const std::string &message, const std::string &)
+{
+    logger_->error(message);
+}
+void
+Logger::debug(const std::string &message)
+{
+    logger_->debug(message);
+}
+void
+Logger::warn(const std::string &message)
+{
+    logger_->warn(message);
+}
+void
+Logger::info(const std::string &message)
+{
+    logger_->info(message);
+}
+void
+Logger::error(const std::string &message)
+{
+    logger_->error(message);
+}
+void
+Logger::critical(const std::string &message)
+{
+    logger_->critical(message);
 }
 
-void Logger::log(const std::string& message, const std::string& color) {
-    LogMessage logMsg;
-    logMsg.type = "INFO";
-    logMsg.timestamp = getCurrentTimestamp();
-    logMsg.message = message;
-    logMsg.color = color;
-    
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        logQueue_.push(logMsg);
-    }
-    cv_.notify_one();
+void
+Logger::setLevel(const std::string &level)
+{
+    logger_->set_level(parseLevel(level));
 }
 
-void Logger::logError(const std::string& message, const std::string& color) {
-    LogMessage logMsg;
-    logMsg.type = "ERROR";
-    logMsg.timestamp = getCurrentTimestamp();
-    logMsg.message = message;
-    logMsg.color = color;
-    
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        logQueue_.push(logMsg);
-    }
-    cv_.notify_one();
-}
+std::shared_ptr<spdlog::logger>
+Logger::getSystem(const std::string &system)
+{
+    const std::string name = serverName_ + "." + system;
 
-void Logger::processQueue() {
-    while (true) {
-        LogMessage logMsg;
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex_);
-            cv_.wait(lock, [this]() { return !logQueue_.empty() || stopThread_; });
-            if (stopThread_ && logQueue_.empty())
-                break;
-            logMsg = std::move(logQueue_.front());
-            logQueue_.pop();
-        }
-        if (logMsg.type == "INFO") {
-            std::cout << logMsg.color << "[" << logMsg.type << "] [" 
-                      << logMsg.timestamp << "] " << logMsg.message << RESET << std::endl;
-        } else if (logMsg.type == "ERROR") {
-            std::cerr << logMsg.color << "[" << logMsg.type << "] [" 
-                      << logMsg.timestamp << "] " << logMsg.message << RESET << std::endl;
-        }
-    }
+    // Return existing logger if already registered
+    if (auto existing = spdlog::get(name))
+        return existing;
+
+    // Create child logger sharing the same sinks as the parent
+    auto child = std::make_shared<spdlog::async_logger>(
+        name,
+        logger_->sinks().begin(),
+        logger_->sinks().end(),
+        spdlog::thread_pool(),
+        spdlog::async_overflow_policy::block);
+
+    child->set_pattern("[%H:%M:%S.%e] [%n] [%^%l%$] %v");
+
+    // Per-system level: LOG_LEVEL_COMBAT, LOG_LEVEL_MOB, LOG_LEVEL_NETWORK, ...
+    std::string envKey = "LOG_LEVEL_";
+    std::transform(system.begin(), system.end(), std::back_inserter(envKey), ::toupper);
+    const char *envLevel = std::getenv(envKey.c_str());
+    child->set_level(parseLevel(envLevel ? envLevel : spdlog::level::to_string_view(logger_->level()).data()));
+
+    spdlog::register_logger(child);
+    return child;
 }

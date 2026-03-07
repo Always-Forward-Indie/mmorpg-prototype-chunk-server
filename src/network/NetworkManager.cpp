@@ -2,6 +2,7 @@
 #include "events/EventDispatcher.hpp"
 #include "handlers/MessageHandler.hpp"
 #include "utils/TimestampUtils.hpp"
+#include <spdlog/logger.h>
 
 NetworkManager::NetworkManager(
     GameServices &gameServices,
@@ -16,6 +17,7 @@ NetworkManager::NetworkManager(
       eventQueuePing_(eventQueuePing),
       gameServices_(gameServices)
 {
+    log_ = gameServices_.getLogger().getSystem("network");
     boost::system::error_code ec;
 
     short customPort = std::get<1>(configs).port;
@@ -26,17 +28,17 @@ NetworkManager::NetworkManager(
     acceptor_.open(endpoint.protocol(), ec);
     if (!ec)
     {
-        gameServices_.getLogger().log("Starting Chunk Server...", YELLOW);
+        log_->info("Starting Chunk Server...");
         acceptor_.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true), ec);
         acceptor_.bind(endpoint, ec);
         acceptor_.listen(maxClients, ec);
     }
     if (ec)
     {
-        gameServices_.getLogger().logError("Error during server initialization: " + ec.message(), RED);
+        log_->error("Error during server initialization: " + ec.message());
         return;
     }
-    gameServices_.getLogger().log("Chunk Server started on IP: " + customIP + ", Port: " + std::to_string(customPort), GREEN);
+    log_->info("Chunk Server started on IP: " + customIP + ", Port: " + std::to_string(customPort));
 }
 
 void
@@ -49,7 +51,7 @@ NetworkManager::startAccept()
             boost::asio::ip::tcp::endpoint remoteEndpoint = clientSocket->remote_endpoint();
             std::string clientIP = remoteEndpoint.address().to_string();
             std::string portNumber = std::to_string(remoteEndpoint.port());
-            gameServices_.getLogger().log("New Client with IP: " + clientIP + " Port: " + portNumber + " - connected!", GREEN);
+            log_->info("New Client with IP: " + clientIP + " Port: " + portNumber + " - connected!");
             
             // Create session and add to active sessions list
             auto session = std::make_shared<ClientSession>(clientSocket, chunkServer_, gameServices_, eventQueue_, eventQueuePing_, jsonParser_, *eventDispatcher_, *messageHandler_);
@@ -62,7 +64,7 @@ NetworkManager::startAccept()
             session->start();
         }
         else{
-            gameServices_.getLogger().log("Accept client connection error: " + error.message(), RED);
+            log_->warn("Accept client connection error: " + error.message());
         }
         startAccept(); });
 }
@@ -70,7 +72,7 @@ NetworkManager::startAccept()
 void
 NetworkManager::startIOEventLoop()
 {
-    gameServices_.getLogger().log("Starting Chunk Server IO Context...", YELLOW);
+    log_->info("Starting Chunk Server IO Context...");
     auto numThreads = std::thread::hardware_concurrency();
     for (size_t i = 0; i < numThreads; ++i)
     {
@@ -86,7 +88,7 @@ NetworkManager::startIOEventLoop()
 
 NetworkManager::~NetworkManager()
 {
-    gameServices_.getLogger().log("Network Manager destructor is called...", RED);
+    log_->warn("Network Manager destructor is called...");
 
     // Clean up all active sessions before shutdown
     {
@@ -105,7 +107,7 @@ NetworkManager::~NetworkManager()
             thread.join();
     }
 
-    gameServices_.getLogger().log("Network Manager cleanup completed.", GREEN);
+    log_->info("Network Manager cleanup completed.");
 }
 
 void
@@ -113,7 +115,7 @@ NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clien
 {
     if (!clientSocket)
     {
-        gameServices_.getLogger().logError("Attempted write on null socket.", RED);
+        log_->error("Attempted write on null socket.");
         return;
     }
 
@@ -121,7 +123,7 @@ NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clien
     {
         if (!clientSocket->is_open())
         {
-            gameServices_.getLogger().logError("Attempted write on closed socket.", RED);
+            log_->error("Attempted write on closed socket.");
             return;
         }
     }
@@ -131,19 +133,24 @@ NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clien
         return;
     }
 
-    boost::asio::async_write(*clientSocket, boost::asio::buffer(responseString), [this, clientSocket](const boost::system::error_code &error, size_t bytes_transferred)
+    // CRITICAL-1 fix: responseString is a const-ref parameter; it may be destroyed before
+    // async_write completes. Copy once into a shared_ptr so the buffer stays alive
+    // across the async boundary. All callers share refcount increments — no extra copies.
+    auto dataPtr = std::make_shared<const std::string>(responseString);
+
+    boost::asio::async_write(*clientSocket, boost::asio::buffer(*dataPtr), [this, clientSocket, dataPtr](const boost::system::error_code &error, size_t bytes_transferred)
         {
             if (error) {
-                gameServices_.getLogger().logError("Error during async_write: " + error.message(), RED);
+                log_->error("Error during async_write: " + error.message());
                 if (clientSocket->is_open()) {
                     boost::system::error_code close_ec;
                     clientSocket->close(close_ec);
                     if (close_ec) {
-                        gameServices_.getLogger().logError("Error closing socket after write failure: " + close_ec.message(), RED);
+                        log_->error("Error closing socket after write failure: " + close_ec.message());
                     }
                 }
             } else {
-                gameServices_.getLogger().log("Bytes sent: " + std::to_string(bytes_transferred), BLUE);
+                log_->debug("Bytes sent: " + std::to_string(bytes_transferred));
                 boost::system::error_code ec;
                 auto remoteEndpoint = clientSocket->remote_endpoint(ec);
                 if (!ec) {
@@ -152,11 +159,39 @@ NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clien
             } });
 }
 
+// CRITICAL-8: shared_ptr overload — buffer stays alive until async_write completes.
+// Used by broadcastToAllClients: one string allocation for N clients.
+void
+NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+    std::shared_ptr<const std::string> data)
+{
+    if (!clientSocket || !data)
+        return;
+
+    try
+    {
+        if (!clientSocket->is_open())
+            return;
+    }
+    catch (...)
+    {
+        return;
+    }
+
+    boost::asio::async_write(*clientSocket, boost::asio::buffer(*data), [clientSocket, data](const boost::system::error_code &error, size_t)
+        {
+            if (error && clientSocket->is_open())
+            {
+                boost::system::error_code ec;
+                clientSocket->close(ec);
+            } });
+}
+
 std::string
 NetworkManager::generateResponseMessage(const std::string &status, const nlohmann::json &message)
 {
     nlohmann::json response;
-    std::string currentTimestamp = gameServices_.getLogger().getCurrentTimestamp();
+    std::string currentTimestamp = TimestampUtils::getCurrentTimestamp();
     response["header"] = message["header"];
     response["header"]["status"] = status;
     response["header"]["timestamp"] = currentTimestamp;
@@ -164,7 +199,7 @@ NetworkManager::generateResponseMessage(const std::string &status, const nlohman
     response["body"] = message["body"];
 
     std::string responseString = response.dump();
-    gameServices_.getLogger().log("Response generated: " + responseString, YELLOW);
+    log_->info("Response generated: " + responseString);
     return responseString + "\n";
 }
 
@@ -172,7 +207,7 @@ std::string
 NetworkManager::generateResponseMessage(const std::string &status, const nlohmann::json &message, const TimestampStruct &timestamps)
 {
     nlohmann::json response;
-    std::string currentTimestamp = gameServices_.getLogger().getCurrentTimestamp();
+    std::string currentTimestamp = TimestampUtils::getCurrentTimestamp();
     response["header"] = message["header"];
     response["header"]["status"] = status;
     response["header"]["timestamp"] = currentTimestamp;
@@ -186,7 +221,7 @@ NetworkManager::generateResponseMessage(const std::string &status, const nlohman
     response["body"] = message["body"];
 
     std::string responseString = response.dump();
-    gameServices_.getLogger().log("Response with timestamps generated: " + responseString, YELLOW);
+    log_->info("Response with timestamps generated: " + responseString);
     return responseString + "\n";
 }
 
@@ -238,27 +273,22 @@ NetworkManager::cleanupInactiveSessions()
 
     size_t initialSize = activeSessions_.size();
 
-    // Remove expired sessions (those that only exist in our set)
+    // Remove expired sessions: sole reliable indicator is the socket being closed.
+    // use_count() was intentionally removed — reference-count snapshots have an
+    // inherent TOCTOU race on multi-threaded io_context threadpools and could
+    // falsely evict sessions that are temporarily not holding a shared_ptr copy.
     for (auto it = activeSessions_.begin(); it != activeSessions_.end();)
     {
         bool shouldRemove = false;
 
-        if (it->use_count() <= 1) // Only our reference remains
+        if (!(*it)->isSocketOpen())
         {
             shouldRemove = true;
-        }
-        else
-        {
-            // Also check if the session's socket is still valid using public method
-            if (!(*it)->isSocketOpen())
-            {
-                shouldRemove = true;
-            }
         }
 
         if (shouldRemove)
         {
-            gameServices_.getLogger().log("Cleaning up inactive session", GREEN);
+            log_->info("Cleaning up inactive session");
             it = activeSessions_.erase(it);
         }
         else

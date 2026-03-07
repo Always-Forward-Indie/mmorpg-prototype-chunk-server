@@ -7,11 +7,13 @@
 #include "utils/ResponseBuilder.hpp"
 #include <algorithm>
 #include <nlohmann/json.hpp>
+#include <spdlog/logger.h>
 
 HarvestManager::HarvestManager(ItemManager &itemManager, Logger &logger)
     : itemManager_(itemManager), logger_(logger), eventQueue_(nullptr),
       inventoryManager_(nullptr), clientManager_(nullptr), networkManager_(nullptr), randomGenerator_(randomDevice_())
 {
+    log_ = logger.getSystem("harvest");
 }
 
 void
@@ -62,7 +64,7 @@ HarvestManager::startHarvest(int characterId, int corpseUID, const PositionStruc
     auto validation = validateHarvest(characterId, corpseUID, playerPosition);
     if (!validation.isValid)
     {
-        logger_.logError("[HARVEST] Harvest validation failed for character " +
+        log_->error("[HARVEST] Harvest validation failed for character " +
                          std::to_string(characterId) + ": " + validation.failureReason);
         return false;
     }
@@ -72,7 +74,7 @@ HarvestManager::startHarvest(int characterId, int corpseUID, const PositionStruc
         std::shared_lock<std::shared_mutex> harvestLock(harvestsMutex_);
         if (activeHarvests_.find(characterId) != activeHarvests_.end())
         {
-            logger_.logError("[HARVEST] Character " + std::to_string(characterId) +
+            log_->error("[HARVEST] Character " + std::to_string(characterId) +
                              " is already harvesting");
             return false;
         }
@@ -121,9 +123,9 @@ HarvestManager::startHarvest(int characterId, int corpseUID, const PositionStruc
     // Broadcast harvest start to all clients
     try
     {
-        logger_.log("[HARVEST] Attempting to broadcast harvest start", GREEN);
+        log_->info("[HARVEST] Attempting to broadcast harvest start");
         broadcastHarvestStart(characterId, corpseUID, playerPosition);
-        logger_.log("[HARVEST] Successfully broadcasted harvest start", GREEN);
+        log_->info("[HARVEST] Successfully broadcasted harvest start");
     }
     catch (const std::exception &e)
     {
@@ -291,7 +293,7 @@ HarvestManager::cleanupOldCorpses(int maxAgeSeconds)
             if (now - it->second.deathTime > maxAge)
             {
                 corpsesToCleanup.push_back(it->first);
-                logger_.log("[HARVEST] Cleaned up old corpse: " + std::to_string(it->first));
+                log_->info("[HARVEST] Cleaned up old corpse: " + std::to_string(it->first));
                 it = harvestableCorpses_.erase(it);
             }
             else
@@ -310,7 +312,7 @@ HarvestManager::cleanupOldCorpses(int maxAgeSeconds)
             auto lootIt = corpseLoot_.find(corpseUID);
             if (lootIt != corpseLoot_.end())
             {
-                logger_.log("[HARVEST] Cleaned up loot for corpse: " + std::to_string(corpseUID));
+                log_->info("[HARVEST] Cleaned up loot for corpse: " + std::to_string(corpseUID));
                 corpseLoot_.erase(lootIt);
             }
         }
@@ -378,8 +380,13 @@ HarvestManager::generateHarvestLoot(int mobId)
 
         if (roll <= lootInfo.dropChance)
         {
-            // Determine quantity (could be enhanced with quantity ranges)
-            int quantity = 1; // For now, always 1
+            // Randomise quantity within [minQuantity, maxQuantity] range (migration 014)
+            int quantity = lootInfo.minQuantity;
+            if (lootInfo.maxQuantity > lootInfo.minQuantity)
+            {
+                std::uniform_int_distribution<int> qtyDist(lootInfo.minQuantity, lootInfo.maxQuantity);
+                quantity = qtyDist(randomGenerator_);
+            }
             loot.emplace_back(lootInfo.itemId, quantity);
 
             logger_.log("[HARVEST] Generated harvest loot: " + std::to_string(quantity) +
@@ -401,7 +408,7 @@ HarvestManager::generateHarvestLoot(int mobId)
 std::vector<std::pair<int, int>>
 HarvestManager::completeHarvestAndGenerateLoot(int characterId)
 {
-    logger_.log("[HARVEST] Attempting to complete harvest for character " + std::to_string(characterId));
+    log_->info("[HARVEST] Attempting to complete harvest for character " + std::to_string(characterId));
 
     std::vector<std::pair<int, int>> harvestLoot;
 
@@ -415,7 +422,7 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
         auto it = activeHarvests_.find(characterId);
         if (it == activeHarvests_.end())
         {
-            logger_.logError("[HARVEST] No harvest record found for character " + std::to_string(characterId));
+            log_->error("[HARVEST] No harvest record found for character " + std::to_string(characterId));
 
             // Log all active harvests for debugging
             for (const auto &[charId, harvest] : activeHarvests_)
@@ -443,7 +450,7 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
     auto corpse = getCorpseByUID(harvestProgress.corpseUID);
     if (corpse.mobUID == 0)
     {
-        logger_.logError("[HARVEST] Corpse not found for completion: " + std::to_string(harvestProgress.corpseUID));
+        log_->error("[HARVEST] Corpse not found for completion: " + std::to_string(harvestProgress.corpseUID));
         return harvestLoot;
     }
 
@@ -488,7 +495,7 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
 
     // Remove the completed harvest from active harvests
     activeHarvests_.erase(characterId);
-    logger_.log("[HARVEST] Removed completed harvest for character " + std::to_string(characterId));
+    log_->info("[HARVEST] Removed completed harvest for character " + std::to_string(characterId));
 
     return harvestLoot;
 }
@@ -517,7 +524,7 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
     auto corpse = getCorpseByUID(corpseUID);
     if (corpse.mobUID == 0)
     {
-        logger_.logError("[HARVEST] Corpse not found for loot pickup: " + std::to_string(corpseUID));
+        log_->error("[HARVEST] Corpse not found for loot pickup: " + std::to_string(corpseUID));
         return {false, successfulPickups};
     }
 
@@ -533,7 +540,7 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
     // Проверяем что труп был заха рвещен
     if (!corpse.hasBeenHarvested)
     {
-        logger_.logError("[HARVEST] Cannot pickup loot from non-harvested corpse: " + std::to_string(corpseUID));
+        log_->error("[HARVEST] Cannot pickup loot from non-harvested corpse: " + std::to_string(corpseUID));
         return {false, successfulPickups};
     }
 
@@ -551,7 +558,7 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
     auto lootIt = corpseLoot_.find(corpseUID);
     if (lootIt == corpseLoot_.end())
     {
-        logger_.logError("[HARVEST] No loot data found for corpse: " + std::to_string(corpseUID));
+        log_->error("[HARVEST] No loot data found for corpse: " + std::to_string(corpseUID));
         return {false, successfulPickups};
     }
 
@@ -562,7 +569,7 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
     {
         if (requestedQuantity <= 0)
         {
-            logger_.logError("[HARVEST] Invalid quantity requested: " + std::to_string(requestedQuantity));
+            log_->error("[HARVEST] Invalid quantity requested: " + std::to_string(requestedQuantity));
             continue;
         }
 
@@ -572,7 +579,7 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
 
         if (lootItemIt == availableLoot.end())
         {
-            logger_.logError("[HARVEST] Requested item not found in corpse loot: " + std::to_string(requestedItemId));
+            log_->error("[HARVEST] Requested item not found in corpse loot: " + std::to_string(requestedItemId));
             continue;
         }
 
@@ -582,7 +589,7 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
 
         if (quantityToTake <= 0)
         {
-            logger_.logError("[HARVEST] No quantity available for item: " + std::to_string(requestedItemId));
+            log_->error("[HARVEST] No quantity available for item: " + std::to_string(requestedItemId));
             continue;
         }
 
@@ -606,7 +613,7 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
         }
         else
         {
-            logger_.logError("[HARVEST] Failed to add item to inventory: " + std::to_string(requestedItemId));
+            log_->error("[HARVEST] Failed to add item to inventory: " + std::to_string(requestedItemId));
         }
     }
 
@@ -614,7 +621,7 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
     if (availableLoot.empty())
     {
         corpseLoot_.erase(lootIt);
-        logger_.log("[HARVEST] All loot picked up from corpse: " + std::to_string(corpseUID));
+        log_->info("[HARVEST] All loot picked up from corpse: " + std::to_string(corpseUID));
     }
 
     // Логируем результат
@@ -653,21 +660,21 @@ HarvestManager::corpseHasLoot(int corpseUID) const
 void
 HarvestManager::broadcastHarvestStart(int characterId, int corpseUID, const PositionStruct &playerPosition)
 {
-    logger_.log("[HARVEST] Starting broadcastHarvestStart", GREEN);
+    log_->info("[HARVEST] Starting broadcastHarvestStart");
 
     if (!clientManager_ || !networkManager_)
     {
-        logger_.logError("[HARVEST] Cannot broadcast harvest start - managers not set");
+        log_->error("[HARVEST] Cannot broadcast harvest start - managers not set");
         return;
     }
 
     try
     {
-        logger_.log("[HARVEST] Getting clients list", GREEN);
+        log_->info("[HARVEST] Getting clients list");
         auto clientsList = clientManager_->getClientsListReadOnly();
         logger_.log("[HARVEST] Got " + std::to_string(clientsList.size()) + " clients", GREEN);
 
-        logger_.log("[HARVEST] Creating broadcast message JSON", GREEN);
+        log_->info("[HARVEST] Creating broadcast message JSON");
 
         // Создаем правильную структуру для generateResponseMessage
         nlohmann::json broadcastMessage;
@@ -691,14 +698,14 @@ HarvestManager::broadcastHarvestStart(int characterId, int corpseUID, const Posi
         broadcastMessage["body"]["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch())
                                                     .count();
-        logger_.log("[HARVEST] Created broadcast message JSON", GREEN);
+        log_->info("[HARVEST] Created broadcast message JSON");
 
-        logger_.log("[HARVEST] Generating response message", GREEN);
+        log_->info("[HARVEST] Generating response message");
         std::string messageData;
         try
         {
             messageData = networkManager_->generateResponseMessage("success", broadcastMessage);
-            logger_.log("[HARVEST] Generated response message successfully", GREEN);
+            log_->info("[HARVEST] Generated response message successfully");
         }
         catch (const std::exception &e)
         {
@@ -706,20 +713,20 @@ HarvestManager::broadcastHarvestStart(int characterId, int corpseUID, const Posi
             return;
         }
 
-        logger_.log("[HARVEST] Starting to send messages to clients", GREEN);
+        log_->info("[HARVEST] Starting to send messages to clients");
         for (const auto &client : clientsList)
         {
-            logger_.log("[HARVEST] Processing client " + std::to_string(client.clientId), GREEN);
+            log_->info("[HARVEST] Processing client " + std::to_string(client.clientId));
             auto clientSocket = clientManager_->getClientSocket(client.clientId);
             if (clientSocket)
             {
-                logger_.log("[HARVEST] Sending message to client " + std::to_string(client.clientId), GREEN);
+                log_->info("[HARVEST] Sending message to client " + std::to_string(client.clientId));
                 networkManager_->sendResponse(clientSocket, messageData);
-                logger_.log("[HARVEST] Sent message to client " + std::to_string(client.clientId), GREEN);
+                log_->info("[HARVEST] Sent message to client " + std::to_string(client.clientId));
             }
             else
             {
-                logger_.log("[HARVEST] No socket for client " + std::to_string(client.clientId), GREEN);
+                log_->info("[HARVEST] No socket for client " + std::to_string(client.clientId));
             }
         }
 
@@ -736,7 +743,7 @@ HarvestManager::broadcastHarvestComplete(int characterId, int corpseUID, const P
 {
     if (!clientManager_ || !networkManager_)
     {
-        logger_.logError("[HARVEST] Cannot broadcast harvest complete - managers not set");
+        log_->error("[HARVEST] Cannot broadcast harvest complete - managers not set");
         return;
     }
 
@@ -791,7 +798,7 @@ HarvestManager::broadcastHarvestCancel(int characterId, int corpseUID, const std
 {
     if (!clientManager_ || !networkManager_)
     {
-        logger_.logError("[HARVEST] Cannot broadcast harvest cancel - managers not set");
+        log_->error("[HARVEST] Cannot broadcast harvest cancel - managers not set");
         return;
     }
 

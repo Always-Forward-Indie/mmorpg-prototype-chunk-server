@@ -2,13 +2,15 @@
 #include "events/EventData.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TerminalColors.hpp"
+#include <spdlog/logger.h>
 
 NPCEventHandler::NPCEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "npc")
 {
+    log_ = gameServices_.getLogger().getSystem("npc");
 }
 
 void
@@ -31,7 +33,7 @@ NPCEventHandler::handleSetAllNPCsListEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().logError("Invalid data type in handleSetAllNPCsListEvent");
+            log_->error("Invalid data type in handleSetAllNPCsListEvent");
         }
     }
     catch (const std::exception &ex)
@@ -55,13 +57,12 @@ NPCEventHandler::handleSetAllNPCsAttributesEvent(const Event &event)
             // Store NPC attributes in NPCManager
             gameServices_.getNPCManager().setNPCsAttributes(attributes);
 
-            gameServices_.getLogger().log(
-                "Received and stored attributes for NPCs from game server",
-                GREEN);
+            log_->info(
+                "Received and stored attributes for NPCs from game server");
         }
         else
         {
-            gameServices_.getLogger().logError("Invalid data type in handleSetAllNPCsAttributesEvent");
+            log_->error("Invalid data type in handleSetAllNPCsAttributesEvent");
         }
     }
     catch (const std::exception &ex)
@@ -78,7 +79,7 @@ NPCEventHandler::sendNPCSpawnDataToClient(int clientId, const PositionStruct &pl
     {
         if (!gameServices_.getNPCManager().isNPCsLoaded())
         {
-            gameServices_.getLogger().log("NPCs not loaded yet, cannot send spawn data to client " + std::to_string(clientId), YELLOW);
+            log_->info("NPCs not loaded yet, cannot send spawn data to client " + std::to_string(clientId));
             return;
         }
 
@@ -90,7 +91,7 @@ NPCEventHandler::sendNPCSpawnDataToClient(int clientId, const PositionStruct &pl
 
         if (nearbyNPCs.empty())
         {
-            gameServices_.getLogger().log("No NPCs found near player " + std::to_string(clientId), BLUE);
+            log_->debug("No NPCs found near player " + std::to_string(clientId));
             return;
         }
 
@@ -121,7 +122,7 @@ NPCEventHandler::sendNPCSpawnDataToClient(int clientId, const PositionStruct &pl
         }
         else
         {
-            gameServices_.getLogger().logError("Client socket not found for client " + std::to_string(clientId));
+            log_->error("Client socket not found for client " + std::to_string(clientId));
         }
 
         gameServices_.getLogger().log(

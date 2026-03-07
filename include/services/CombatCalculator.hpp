@@ -2,16 +2,30 @@
 
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
+#include "services/GameConfigService.hpp"
+#include <chrono>
 #include <random>
 
 /**
  * @brief Класс для расчетов боевой системы
+ *
+ * Геймплейные константы (формулы защиты, разброс урона, шансы) читаются из GameConfigService если он доступен,
+ * иначе используются хардкодные дефолты.
  */
 class CombatCalculator
 {
   public:
-    CombatCalculator();
+    /**
+     * @param configService Необязательный GameConfigService (nullptr = использовать дефолты).
+     */
+    explicit CombatCalculator(GameConfigService *configService = nullptr);
     ~CombatCalculator() = default;
+
+    /**
+     * @brief Привязать GameConfigService. Вызывается из SkillManager после получения
+     *        конфига от game-server (событие SET_GAME_CONFIG).
+     */
+    void setGameConfigService(GameConfigService *configService);
 
     /**
      * @brief Рассчитать урон от скила
@@ -38,6 +52,16 @@ class CombatCalculator
         const CharacterDataStruct &target);
 
     /**
+     * @brief Рассчитать количество лечения скила (без редукции броней/сопротивлений)
+     * @param skill Используемый скил
+     * @param casterAttributes Атрибуты кастера
+     * @return Количество лечения
+     */
+    int calculateHealAmount(
+        const SkillStruct &skill,
+        const std::vector<CharacterAttributeStruct> &casterAttributes);
+
+    /**
      * @brief Рассчитать базовый урон скила
      * @param skill Скил
      * @param attackerAttributes Атрибуты атакующего
@@ -58,28 +82,37 @@ class CombatCalculator
         const std::vector<MobAttributeStruct> &attackerAttributes);
 
     /**
-     * @brief Проверить критический удар
-     * @param attackerAttributes Атрибуты атакующего
-     * @return true если критический удар
+     * @brief Проверить критический удар персонажа
      */
     bool rollCriticalHit(const std::vector<CharacterAttributeStruct> &attackerAttributes);
 
     /**
+     * @brief Проверить критический удар моба
+     */
+    bool rollCriticalHit(const std::vector<MobAttributeStruct> &attackerAttributes);
+
+    /**
      * @brief Проверить блокирование
-     * @param targetAttributes Атрибуты цели
-     * @return true если атака заблокирована
      */
     bool rollBlock(const std::vector<CharacterAttributeStruct> &targetAttributes);
 
     /**
-     * @brief Проверить промах
-     * @param attackerAttributes Атрибуты атакующего
-     * @param targetAttributes Атрибуты цели
-     * @return true если атака промахнулась
+     * @brief Проверить промах персонажа по персонажу
+     * @param hitModifier Дополнительный бонус/штраф к шансу попадания (level diff)
      */
     bool rollMiss(
         const std::vector<CharacterAttributeStruct> &attackerAttributes,
-        const std::vector<CharacterAttributeStruct> &targetAttributes);
+        const std::vector<CharacterAttributeStruct> &targetAttributes,
+        float hitModifier = 0.0f);
+
+    /**
+     * @brief Проверить промах моба по персонажу
+     * @param hitModifier Дополнительный бонус/штраф к шансу попадания (level diff)
+     */
+    bool rollMiss(
+        const std::vector<MobAttributeStruct> &attackerAttributes,
+        const std::vector<CharacterAttributeStruct> &targetAttributes,
+        float hitModifier = 0.0f);
 
     /**
      * @brief Получить значение атрибута по slug
@@ -99,15 +132,33 @@ class CombatCalculator
 
     /**
      * @brief Применить защиту к урону
-     * @param damage Изначальный урон
-     * @param defenseValue Значение защиты
-     * @param damageType Тип урона (physical/magical)
-     * @return Уменьшенный урон
+     *
+     * Формула убывающей доходности: reduction = armor / (armor + K * targetLevel)
+     * Это гарантирует что защита никогда не будет бесполезной на низких
+     * значениях и не уйдёт в кап на высоких.
+     *
+     * @param damage       Входящий урон после крита/блока
+     * @param defenseValue Значение защиты цели (physical_defense / magical_defense)
+     * @param damageType   Тип урона: "physical" | "magical"
+     * @param targetLevel  Уровень цели (используется в знаменателе формулы DR)
+     * @return Финальный урон после снижения
      */
-    int applyDefense(int damage, int defenseValue, const std::string &damageType);
+    int applyDefense(int damage, int defenseValue, const std::string &damageType, int targetLevel);
 
   private:
     std::random_device rd_;
     std::mt19937 gen_;
     std::uniform_real_distribution<float> dis_;
+    GameConfigService *gameConfig_ = nullptr; ///< nullable, reads gameplay constants
+
+    /// @brief Reads float constant from config if loaded, otherwise returns defaultValue.
+    float cfg(const std::string &key, float defaultValue) const;
+
+    /**
+     * @brief Returns a copy of character attributes with non-expired active effects applied.
+     *
+     * Iterates character.activeEffects; skips entries where expiresAt != 0 and expiresAt <= now.
+     * Adds effect.value to the matching attribute slug, or appends a new entry if not found.
+     */
+    std::vector<CharacterAttributeStruct> mergeEffects(const CharacterDataStruct &character) const;
 };

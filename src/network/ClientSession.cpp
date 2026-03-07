@@ -3,6 +3,7 @@
 #include "events/EventDispatcher.hpp"
 #include "handlers/MessageHandler.hpp"
 #include "utils/TimestampUtils.hpp"
+#include <spdlog/logger.h>
 
 ClientSession::ClientSession(std::shared_ptr<boost::asio::ip::tcp::socket> socket,
     ChunkServer *chunkServer,
@@ -21,6 +22,7 @@ ClientSession::ClientSession(std::shared_ptr<boost::asio::ip::tcp::socket> socke
       messageHandler_(messageHandler),
       gameServices_(gameServices)
 {
+    log_ = gameServices_.getLogger().getSystem("network");
 }
 
 void
@@ -42,7 +44,7 @@ ClientSession::doRead()
                 constexpr size_t MAX_BUFFER_SIZE = 64 * 1024; // 64KB limit
                 if (accumulatedData_.size() + bytes_transferred > MAX_BUFFER_SIZE)
                 {
-                    gameServices_.getLogger().logError("Buffer overflow detected, disconnecting client", RED);
+                    log_->error("Buffer overflow detected, disconnecting client");
                     handleClientDisconnect();
                     return;
                 }
@@ -69,7 +71,7 @@ ClientSession::doRead()
                         continue;
                     }
 
-                    gameServices_.getLogger().log("Received data from Client: " + message, YELLOW);
+                    log_->info("Received data from Client: " + message);
                     processMessage(message);
                     accumulatedData_.erase(0, pos + delimiter.size());
                     processed_messages++;
@@ -78,7 +80,7 @@ ClientSession::doRead()
                 // If accumulated buffer is getting large without complete messages, clear it
                 if (accumulatedData_.size() > MAX_BUFFER_SIZE / 2 && accumulatedData_.find(delimiter) == std::string::npos)
                 {
-                    gameServices_.getLogger().logError("Clearing large incomplete buffer to prevent memory leak", RED);
+                    log_->error("Clearing large incomplete buffer to prevent memory leak");
                     accumulatedData_.clear();
                 }
 
@@ -95,12 +97,12 @@ ClientSession::doRead()
             }
             else if (ec == boost::asio::error::eof)
             {
-                gameServices_.getLogger().logError("Client disconnected gracefully.", RED);
+                log_->error("Client disconnected gracefully.");
                 handleClientDisconnect();
             }
             else
             {
-                gameServices_.getLogger().logError("Error during async_read_some: " + ec.message(), RED);
+                log_->error("Error during async_read_some: " + ec.message());
                 handleClientDisconnect();
             }
         });
@@ -181,7 +183,7 @@ ClientSession::processMessage(const std::string &message)
                 static thread_local int logCounter = 0;
                 if (++logCounter % 100 == 0)
                 {
-                    gameServices_.getLogger().log("Skipping ping for unauthenticated client (logged every 100th occurrence)", GREEN);
+                    log_->info("Skipping ping for unauthenticated client (logged every 100th occurrence)");
                 }
             }
             return;
@@ -199,11 +201,11 @@ ClientSession::processMessage(const std::string &message)
                 if (lookupClientId != 0)
                 {
                     clientData.clientId = lookupClientId;
-                    gameServices_.getLogger().log("Client ID " + std::to_string(lookupClientId) + " resolved by socket lookup for event: " + fullEventType, GREEN);
+                    log_->info("Client ID " + std::to_string(lookupClientId) + " resolved by socket lookup for event: " + fullEventType);
                 }
                 else
                 {
-                    gameServices_.getLogger().log("No client ID found for socket in event: " + fullEventType, YELLOW);
+                    log_->info("No client ID found for socket in event: " + fullEventType);
                 }
             }
             catch (const std::exception &e)
@@ -224,10 +226,11 @@ ClientSession::processMessage(const std::string &message)
                 {
                     try
                     {
-                        nlohmann::json msgJson = nlohmann::json::parse(message);
-                        if (msgJson.contains("body") && msgJson["body"].contains("id"))
+                        // MEDIUM-3: reuse jsonData already parsed at the top of processMessage
+                        // — avoids a second nlohmann::json::parse(message) call.
+                        if (jsonData.contains("body") && jsonData["body"].contains("id"))
                         {
-                            int messageCharacterId = msgJson["body"]["id"];
+                            int messageCharacterId = jsonData["body"]["id"];
                             clientData.characterId = messageCharacterId;
                             characterData.characterId = messageCharacterId;
                             gameServices_.getLogger().log("Character ID " + std::to_string(messageCharacterId) + " extracted from message for client " + std::to_string(clientData.clientId) + " for event: " + fullEventType, GREEN);
@@ -291,21 +294,21 @@ ClientSession::handleClientDisconnect()
                     socket_->close(ec);
                     if (ec)
                     {
-                        gameServices_.getLogger().logError("Error closing socket: " + ec.message(), RED);
+                        log_->error("Error closing socket: " + ec.message());
                     }
                     else
                     {
-                        gameServices_.getLogger().log("Socket closed successfully during disconnect", GREEN);
+                        log_->info("Socket closed successfully during disconnect");
                     }
                 }
                 else
                 {
-                    gameServices_.getLogger().log("Socket was already closed during disconnect", GREEN);
+                    log_->info("Socket was already closed during disconnect");
                 }
             }
             else
             {
-                gameServices_.getLogger().log("Socket reference count too low, avoiding access during disconnect", YELLOW);
+                log_->info("Socket reference count too low, avoiding access during disconnect");
             }
         }
         catch (const std::exception &e)
@@ -315,7 +318,7 @@ ClientSession::handleClientDisconnect()
     }
     else
     {
-        gameServices_.getLogger().log("Socket is null during disconnect", GREEN);
+        log_->info("Socket is null during disconnect");
     }
 
     // Get client ID before cleanup to prevent clientId=0 issues
@@ -349,11 +352,11 @@ ClientSession::handleClientDisconnect()
         // Push the disconnect event to the event queue
         eventQueue_.pushBatch(eventsBatch);
 
-        gameServices_.getLogger().log("Disconnect event created for clientId: " + std::to_string(clientId), GREEN);
+        log_->info("Disconnect event created for clientId: " + std::to_string(clientId));
     }
     else
     {
-        gameServices_.getLogger().log("No valid clientId found, skipping disconnect event", YELLOW);
+        log_->info("No valid clientId found, skipping disconnect event");
     }
 
     // Notify NetworkManager about session cleanup

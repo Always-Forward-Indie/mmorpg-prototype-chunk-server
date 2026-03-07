@@ -1,12 +1,14 @@
 #include "events/handlers/ChunkEventHandler.hpp"
 #include "events/EventData.hpp"
+#include <spdlog/logger.h>
 
 ChunkEventHandler::ChunkEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "chunk")
 {
+    log_ = gameServices_.getLogger().getSystem("chunk");
 }
 
 bool
@@ -63,7 +65,7 @@ ChunkEventHandler::handleInitChunkEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -116,7 +118,7 @@ ChunkEventHandler::handleJoinChunkEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -157,7 +159,7 @@ ChunkEventHandler::handleDisconnectChunkEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)

@@ -1,10 +1,12 @@
 #include "services/DialogueActionExecutor.hpp"
 #include "services/GameServices.hpp"
 #include "services/QuestManager.hpp"
+#include <spdlog/logger.h>
 
 DialogueActionExecutor::DialogueActionExecutor(GameServices &services, Logger &logger)
     : services_(services), logger_(logger)
 {
+    log_ = logger.getSystem("dialogue");
 }
 
 DialogueActionExecutor::ActionResult
@@ -64,7 +66,7 @@ DialogueActionExecutor::executeDispatch(const nlohmann::json &action, const std:
     else if (type == "give_exp")
         executeGiveExp(action, characterId, clientId, result);
     else
-        logger_.log("[DialogueAction] Unknown action type: " + type, YELLOW);
+        log_->info("[DialogueAction] Unknown action type: " + type);
 }
 
 void
@@ -142,7 +144,7 @@ DialogueActionExecutor::executeOfferQuest(const nlohmann::json &action,
             result.clientNotifications.push_back(std::move(notification));
         }
 
-        logger_.log("[DialogueAction] Offered quest '" + slug + "' to character " +
+        log_->info("[DialogueAction] Offered quest '" + slug + "' to character " +
                     std::to_string(characterId));
     }
 }

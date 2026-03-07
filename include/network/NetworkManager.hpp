@@ -28,6 +28,8 @@ class NetworkManager
     void startAccept();
     void startIOEventLoop();
     void sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::string &responseString);
+    /// CRITICAL-8: shared_ptr overload for broadcast — one allocation for N clients, zero copies
+    void sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, std::shared_ptr<const std::string> data);
     std::string generateResponseMessage(const std::string &status, const nlohmann::json &message);
     std::string generateResponseMessage(const std::string &status, const nlohmann::json &message, const TimestampStruct &timestamps);
     void setChunkServer(ChunkServer *ChunkServer);
@@ -61,4 +63,5 @@ class NetworkManager
 
     // game services
     GameServices &gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
 };

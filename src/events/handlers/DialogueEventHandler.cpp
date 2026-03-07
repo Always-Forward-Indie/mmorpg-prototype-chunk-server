@@ -6,13 +6,15 @@
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TerminalColors.hpp"
 #include <cmath>
+#include <spdlog/logger.h>
 
 DialogueEventHandler::DialogueEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "dialogue")
 {
+    log_ = gameServices_.getLogger().getSystem("dialogue");
 }
 
 // =============================================================================
@@ -27,7 +29,7 @@ DialogueEventHandler::handleSetAllDialoguesEvent(const Event &event)
         const auto &data = event.getData();
         if (!std::holds_alternative<std::vector<DialogueGraphStruct>>(data))
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] SET_ALL_DIALOGUES: unexpected data type");
+            log_->error("[DialogueEventHandler] SET_ALL_DIALOGUES: unexpected data type");
             return;
         }
 
@@ -51,7 +53,7 @@ DialogueEventHandler::handleSetNPCDialogueMappingsEvent(const Event &event)
         const auto &data = event.getData();
         if (!std::holds_alternative<std::vector<NPCDialogueMappingStruct>>(data))
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] SET_NPC_DIALOGUE_MAPPINGS: unexpected data type");
+            log_->error("[DialogueEventHandler] SET_NPC_DIALOGUE_MAPPINGS: unexpected data type");
             return;
         }
 
@@ -75,7 +77,7 @@ DialogueEventHandler::handleSetAllQuestsEvent(const Event &event)
         const auto &data = event.getData();
         if (!std::holds_alternative<std::vector<QuestStruct>>(data))
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] SET_ALL_QUESTS: unexpected data type");
+            log_->error("[DialogueEventHandler] SET_ALL_QUESTS: unexpected data type");
             return;
         }
 
@@ -103,7 +105,7 @@ DialogueEventHandler::handleSetPlayerQuestsEvent(const Event &event)
         const auto &data = event.getData();
         if (!std::holds_alternative<std::vector<PlayerQuestProgressStruct>>(data))
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] SET_PLAYER_QUESTS: unexpected data type");
+            log_->error("[DialogueEventHandler] SET_PLAYER_QUESTS: unexpected data type");
             return;
         }
 
@@ -131,7 +133,7 @@ DialogueEventHandler::handleSetPlayerFlagsEvent(const Event &event)
         const auto &data = event.getData();
         if (!std::holds_alternative<std::vector<PlayerFlagStruct>>(data))
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] SET_PLAYER_FLAGS: unexpected data type");
+            log_->error("[DialogueEventHandler] SET_PLAYER_FLAGS: unexpected data type");
             return;
         }
 
@@ -163,7 +165,7 @@ DialogueEventHandler::handleSetPlayerFlagsEvent(const Event &event)
 
         if (characterId <= 0)
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] SET_PLAYER_FLAGS: no character for clientId " + std::to_string(clientId));
+            log_->error("[DialogueEventHandler] SET_PLAYER_FLAGS: no character for clientId " + std::to_string(clientId));
             return;
         }
 
@@ -194,7 +196,7 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
         const auto &data = event.getData();
         if (!std::holds_alternative<NPCInteractRequestStruct>(data))
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] NPC_INTERACT: unexpected data type");
+            log_->error("[DialogueEventHandler] NPC_INTERACT: unexpected data type");
             return;
         }
 
@@ -203,7 +205,7 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
 
         if (characterId <= 0 || clientId <= 0)
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] NPC_INTERACT: invalid characterId or clientId");
+            log_->error("[DialogueEventHandler] NPC_INTERACT: invalid characterId or clientId");
             return;
         }
 
@@ -214,7 +216,7 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
         NPCDataStruct npc = gameServices_.getNPCManager().getNPCById(request.npcId);
         if (npc.id <= 0)
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] NPC_INTERACT: NPC " + std::to_string(request.npcId) + " not found");
+            log_->error("[DialogueEventHandler] NPC_INTERACT: NPC " + std::to_string(request.npcId) + " not found");
             if (clientSocket)
             {
                 auto clientData = gameServices_.getClientManager().getClientData(clientId);
@@ -232,7 +234,7 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
 
         if (!npc.isInteractable)
         {
-            gameServices_.getLogger().log("[DialogueEventHandler] NPC " + std::to_string(request.npcId) + " not interactable");
+            log_->info("[DialogueEventHandler] NPC " + std::to_string(request.npcId) + " not interactable");
             return;
         }
 
@@ -262,7 +264,7 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
         int dialogueId = gameServices_.getDialogueManager().selectDialogueForNPC(request.npcId, ctx);
         if (dialogueId < 0)
         {
-            gameServices_.getLogger().log("[DialogueEventHandler] No matching dialogue for NPC " + std::to_string(request.npcId));
+            log_->info("[DialogueEventHandler] No matching dialogue for NPC " + std::to_string(request.npcId));
             if (clientSocket)
             {
                 auto clientData = gameServices_.getClientManager().getClientData(clientId);
@@ -325,7 +327,7 @@ DialogueEventHandler::handleDialogueChoiceEvent(const Event &event)
         const auto &data = event.getData();
         if (!std::holds_alternative<DialogueChoiceRequestStruct>(data))
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] DIALOGUE_CHOICE: unexpected data type");
+            log_->error("[DialogueEventHandler] DIALOGUE_CHOICE: unexpected data type");
             return;
         }
 
@@ -341,7 +343,7 @@ DialogueEventHandler::handleDialogueChoiceEvent(const Event &event)
         auto *session = gameServices_.getDialogueSessionManager().getSession(request.sessionId);
         if (!session || session->characterId != characterId)
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] DIALOGUE_CHOICE: session not found or mismatch for sessionId=" + request.sessionId);
+            log_->error("[DialogueEventHandler] DIALOGUE_CHOICE: session not found or mismatch for sessionId=" + request.sessionId);
             if (clientSocket)
             {
                 auto clientData = gameServices_.getClientManager().getClientData(clientId);
@@ -359,7 +361,7 @@ DialogueEventHandler::handleDialogueChoiceEvent(const Event &event)
         const DialogueGraphStruct *dialogue = gameServices_.getDialogueManager().getDialogueById(session->dialogueId);
         if (!dialogue)
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] DIALOGUE_CHOICE: dialogue not found for id=" + std::to_string(session->dialogueId));
+            log_->error("[DialogueEventHandler] DIALOGUE_CHOICE: dialogue not found for id=" + std::to_string(session->dialogueId));
             gameServices_.getDialogueSessionManager().closeSession(session->sessionId);
             sendDialogueClose(clientId, request.sessionId);
             return;
@@ -369,7 +371,7 @@ DialogueEventHandler::handleDialogueChoiceEvent(const Event &event)
         auto edgeIt = dialogue->edges.find(session->currentNodeId);
         if (edgeIt == dialogue->edges.end())
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] DIALOGUE_CHOICE: no edges from node " + std::to_string(session->currentNodeId));
+            log_->error("[DialogueEventHandler] DIALOGUE_CHOICE: no edges from node " + std::to_string(session->currentNodeId));
             gameServices_.getDialogueSessionManager().closeSession(session->sessionId);
             sendDialogueClose(clientId, request.sessionId);
             return;
@@ -402,7 +404,7 @@ DialogueEventHandler::handleDialogueChoiceEvent(const Event &event)
         {
             if (!DialogueConditionEvaluator::evaluate(chosenEdge->conditionGroup, ctx))
             {
-                gameServices_.getLogger().log("[DialogueEventHandler] DIALOGUE_CHOICE: edge condition not met for edge " + std::to_string(request.edgeId));
+                log_->info("[DialogueEventHandler] DIALOGUE_CHOICE: edge condition not met for edge " + std::to_string(request.edgeId));
                 if (clientSocket)
                 {
                     auto clientData = gameServices_.getClientManager().getClientData(clientId);
@@ -473,7 +475,7 @@ DialogueEventHandler::handleDialogueCloseEvent(const Event &event)
         const auto &data = event.getData();
         if (!std::holds_alternative<DialogueCloseRequestStruct>(data))
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] DIALOGUE_CLOSE: unexpected data type");
+            log_->error("[DialogueEventHandler] DIALOGUE_CLOSE: unexpected data type");
             return;
         }
 
@@ -486,7 +488,7 @@ DialogueEventHandler::handleDialogueCloseEvent(const Event &event)
         // Acknowledge close to client
         sendDialogueClose(clientId, request.sessionId);
 
-        gameServices_.getLogger().log("[DialogueEventHandler] Session closed for character " + std::to_string(characterId));
+        log_->info("[DialogueEventHandler] Session closed for character " + std::to_string(characterId));
     }
     catch (const std::exception &ex)
     {
@@ -535,7 +537,7 @@ DialogueEventHandler::traverseToInteractiveNode(
         auto nit = dialogue.nodes.find(nodeId);
         if (nit == dialogue.nodes.end())
         {
-            gameServices_.getLogger().logError("[DialogueEventHandler] traverseToInteractiveNode: node " + std::to_string(nodeId) + " not found");
+            log_->error("[DialogueEventHandler] traverseToInteractiveNode: node " + std::to_string(nodeId) + " not found");
             return -1;
         }
 
@@ -604,7 +606,7 @@ DialogueEventHandler::traverseToInteractiveNode(
         return -1;
     }
 
-    gameServices_.getLogger().logError("[DialogueEventHandler] traverseToInteractiveNode: max auto-traverse exceeded");
+    log_->error("[DialogueEventHandler] traverseToInteractiveNode: max auto-traverse exceeded");
     return -1;
 }
 

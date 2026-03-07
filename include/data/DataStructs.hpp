@@ -82,6 +82,7 @@ struct ItemAttributeStruct
     std::string name = "";
     std::string slug = "";
     int value = 0;
+    std::string apply_on = "equip"; // 'equip' | 'use'
 };
 
 struct ItemDataStruct
@@ -99,6 +100,7 @@ struct ItemDataStruct
     bool isTradable = true;
     bool isEquippable = false;
     bool isHarvest = false; // Flag to indicate this item can only be obtained through harvesting
+    bool isUsable = false;  // TRUE = can be used from inventory (potion, scroll, food)
     float weight = 0.0f;
     int rarityId = 1;
     std::string rarityName = "";
@@ -120,7 +122,9 @@ struct MobLootInfoStruct
     int mobId = 0;
     int itemId = 0;
     float dropChance = 0.0f;
-    bool isHarvestOnly = false; // Flag to indicate this loot only drops from harvesting
+    bool isHarvestOnly = false; // true = only drops from harvesting, not regular kill
+    int minQuantity = 1;
+    int maxQuantity = 1;
 };
 
 // Structure for tracking harvestable corpses
@@ -251,6 +255,35 @@ struct PlayerQuestProgressStruct
     std::chrono::steady_clock::time_point updatedAt;
 };
 
+// Runtime buff/debuff applied to a character (sourced from skill, item, quest, dialogue)
+struct ActiveEffectStruct
+{
+    int64_t id = 0;                  // player_active_effect.id
+    int effectId = 0;                // skill_effects.id
+    std::string effectSlug = "";     // e.g. "physical_attack"
+    std::string effectTypeSlug = ""; // e.g. "damage", "dot", "hot"
+    int attributeId = 0;             // entity_attributes.id (0 = non-stat effect)
+    std::string attributeSlug = "";  // slug matched against CharacterAttributeStruct::slug
+    float value = 0.0f;              // stat: additive modifier; dot/hot: per-tick amount
+    std::string sourceType = "";     // quest|skill|item|dialogue
+    int64_t expiresAt = 0;           // Unix timestamp (seconds); 0 = permanent
+    int tickMs = 0;                  // tick interval (ms); 0 = non-tick (stat modifier only)
+    // Runtime-only: when the next tick should fire. Not serialized to/from DB.
+    std::chrono::steady_clock::time_point nextTickAt = {};
+};
+
+// Result of one DoT/HoT tick, used by CombatSystem to build broadcast packets
+struct EffectTickResult
+{
+    int characterId = 0;
+    std::string effectSlug;
+    std::string effectTypeSlug; // "dot" or "hot"
+    float value = 0.0f;         // absolute per-tick damage (dot) or heal (hot)
+    int newHealth = 0;
+    int newMana = 0;
+    bool targetDied = false;
+};
+
 struct CharacterDataStruct
 {
     int clientId = 0;
@@ -272,6 +305,9 @@ struct CharacterDataStruct
     // Dialogue / quest state (populated on character join)
     std::vector<PlayerFlagStruct> flags;
     std::vector<PlayerQuestProgressStruct> quests;
+
+    // Active buffs/debuffs (populated on character join, checked vs expiresAt at runtime)
+    std::vector<ActiveEffectStruct> activeEffects;
 };
 
 struct ClientDataStruct
@@ -303,14 +339,31 @@ struct MobDataStruct
     bool isAggressive = false;
     bool isDead = false;
 
-    float speedMultiplier = 1.0f;
-    float nextMoveTime = 0.0f;
+    /// Recorded when markMobAsDead() is called. Used by the cleanup task to
+    /// keep the corpse in the world for CORPSE_DURATION_MS before removing it.
+    std::chrono::steady_clock::time_point deathTimestamp = {};
 
-    // New movement attributes
-    float movementDirectionX = 0.0f;
-    float movementDirectionY = 0.0f;
+    // Per-mob AI configuration (migration 011, from mob table columns).
+    // Set from MobDataStruct template when spawning; used by MobMovementManager
+    // instead of global MobAIConfig so each mob type can behave differently.
+    float aggroRange = 400.0f;    // Aggro detection radius (world units)
+    float attackRange = 150.0f;   // Melee/ranged attack range (world units)
+    float attackCooldown = 2.0f;  // Seconds between attacks
+    float chaseMultiplier = 2.0f; // aggroRange * chaseMultiplier = max chase distance
+    float patrolSpeed = 1.0f;     // Patrol movement speed multiplier
 
-    float stepMultiplier = 0.0f;
+    // Social and chase behaviour (migration 012)
+    bool isSocial = false;       // Group aggro / passive-social enabled
+    float chaseDuration = 30.0f; // Max seconds of pursuit before leashing
+
+    // Rank info (used to scale XP reward)
+    int rankId = 1;
+    std::string rankCode = "normal";
+    float rankMult = 1.0f;
+
+    // AI depth (migration 016)
+    float fleeHpThreshold = 0.0f;      // 0.0 = never flees; 0.25 = flee at 25% HP
+    std::string aiArchetype = "melee"; // melee | caster | ranged | support
 
     // Define the equality operator
     bool operator==(const MobDataStruct &other) const
@@ -382,7 +435,7 @@ struct MobMovementParams
     float rotationJitterMax = 5.0f;
     float directionAdjustMin = 0.2f;
     float directionAdjustMax = 0.6f;
-    float borderThresholdPercent = 0.25f;
+    float borderThresholdPercent = 0.10f; // plan §5.4: reduced from 0.25 so mobs use more of the zone
     float maxStepSizePercent = 0.08f;
     float maxStepSizeAbsolute = 450.0f;
     int maxRetries = 4;
@@ -427,7 +480,9 @@ enum class MobCombatState
     PREPARING_ATTACK = 2, // Stopped and preparing to attack
     ATTACKING = 3,        // Currently attacking
     ATTACK_COOLDOWN = 4,  // Post-attack cooldown
-    RETURNING = 5         // Returning to spawn
+    RETURNING = 5,        // Returning to spawn (leashing)
+    EVADING = 6,          // Brief invulnerability window after reaching spawn
+    FLEEING = 7           // Low-HP panic flee (still takes damage, not immune)
 };
 
 /**
@@ -457,13 +512,50 @@ struct MobMovementData
     float postAttackCooldown = 1.0f; // Кулдаун после атаки (секунды)
 
     // Network optimization
-    PositionStruct lastSentPosition; // Последняя отправленная позиция
+    PositionStruct lastSentPosition;      // Последняя отправленная позиция
+    float currentSpeedUnitsPerSec = 0.0f; // Last computed movement speed (units/second) for client interpolation
 
-    // AI configuration (set from MobAIConfig)
-    float aggroRange = 400.0f;
-    float attackRange = 150.0f;
-    float attackCooldown = 2.0f;
-    float minimumMoveDistance = 50.0f;
+    // Leash regen tick tracker: time of last HP restoration while RETURNING.
+    // Zero = regen not yet started for current leash.
+    float lastRegenTime = 0.0f;
+
+    // EVADING state: absolute time when the invulnerability window ends.
+    // Zero = not in EVADING state.
+    float evadeEndTime = 0.0f;
+
+    // Threat table: playerId -> accumulated threat points.
+    // Used to pick the highest-threat target when the mob searches for a new target.
+    // Cleared when the mob begins returning to spawn.
+    std::unordered_map<int, int> threatTable;
+
+    // Skill-driven combat timing (plan §2.1).
+    // Slug of the skill chosen at CHASING→PREPARING_ATTACK.
+    // Empty string = no pre-selected skill (will be chosen by CombatSystem).
+    std::string pendingSkillSlug = "";
+
+    // Per-skill last-use absolute timestamp (getCurrentGameTime()).
+    // Checked against skill.cooldownMs to avoid using skills before their CD expires.
+    std::unordered_map<std::string, float> skillLastUsedTime;
+
+    // Absolute game-time of the last threat-decay pass (plan §4.1).
+    // 0.0f until the mob enters CHASING for the first time.
+    float lastThreatDecayTime = 0.0f;
+
+    // Flee behavior (migration 016).
+    // Set when the mob transitions into FLEEING state.
+    bool isFleeing = false;            // Movement manager uses flee movement when true
+    PositionStruct fleeTargetPosition; // Destination to flee toward
+    float fleeStartTime = 0.0f;        // Absolute time when FLEEING started
+
+    // Caster archetype backpedal.
+    // Set when caster is too close to its target and needs to create distance.
+    bool isBackpedaling = false;
+
+    // Patrol waypoint (plan §5.1).
+    // When hasPatrolTarget is true the mob steers toward patrolTargetPoint
+    // until it arrives, then picks a new random point inside the zone.
+    PositionStruct patrolTargetPoint;
+    bool hasPatrolTarget = false;
 };
 
 /**
@@ -475,6 +567,23 @@ struct MobMovementResult
     float newDirectionX;
     float newDirectionY;
     bool validMovement;
+    float speed = 0.0f; // Movement speed in units/second for this step (for client-side interpolation)
+};
+
+/**
+ * @brief Lightweight movement update sent to clients every tick.
+ * Contains only position + velocity. Full mob data (name, stats, attributes, skills)
+ * is sent once via spawnMobsInZone and never repeated in move packets.
+ */
+struct MobMoveUpdateStruct
+{
+    int uid = 0;
+    int zoneId = 0;
+    PositionStruct position;
+    float dirX = 0.0f;   // Normalized direction vector X
+    float dirY = 0.0f;   // Normalized direction vector Y
+    float speed = 0.0f;  // World-units per second (for dead reckoning on client)
+    int combatState = 0; // MobCombatState cast to int
 };
 
 /**

@@ -75,4 +75,5 @@ class ClientSession : public std::enable_shared_from_this<ClientSession>
     EventDispatcher &eventDispatcher_;
     MessageHandler &messageHandler_;
     GameServices &gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
 };

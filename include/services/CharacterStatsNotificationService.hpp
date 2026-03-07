@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 // Forward declarations
+namespace spdlog { class logger; }
 class GameServices;
 
 /**
@@ -34,6 +35,7 @@ class CharacterStatsNotificationService
 
   private:
     GameServices *gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
     std::function<void(const nlohmann::json &)> statsUpdateCallback_;
 
     /**

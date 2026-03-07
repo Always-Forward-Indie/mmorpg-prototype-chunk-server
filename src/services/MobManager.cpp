@@ -1,8 +1,10 @@
 #include "services/MobManager.hpp"
+#include <spdlog/logger.h>
 
 MobManager::MobManager(Logger &logger)
     : logger_(logger)
 {
+    log_ = logger.getSystem("mob");
 }
 
 // Function to set mobs from the database and store them in memory
@@ -16,7 +18,7 @@ MobManager::setListOfMobs(
         if (selectMobs.empty())
         {
             // log that the data is empty
-            logger_.logError("No mobs found in the GS");
+            log_->error("No mobs found in the GS");
         }
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -35,6 +37,18 @@ MobManager::setListOfMobs(
             mobData.isAggressive = row.isAggressive;
             mobData.isDead = row.isDead;
             mobData.position = row.position;
+            mobData.attributes = row.attributes; // copy template attributes if already populated
+
+            // Per-mob AI configuration (migration 011)
+            mobData.aggroRange = row.aggroRange;
+            mobData.attackRange = row.attackRange;
+            mobData.attackCooldown = row.attackCooldown;
+            mobData.chaseMultiplier = row.chaseMultiplier;
+            mobData.patrolSpeed = row.patrolSpeed;
+
+            // Social behaviour (migration 012)
+            mobData.isSocial = row.isSocial;
+            mobData.chaseDuration = row.chaseDuration;
 
             mobs_[mobData.id] = mobData;
         }
@@ -54,7 +68,7 @@ MobManager::setListOfMobsAttributes(
     {
         if (selectMobAttributes.empty())
         {
-            logger_.logError("No mob attributes found in the GS");
+            log_->error("No mob attributes found in the GS");
             return;
         }
 
@@ -63,7 +77,7 @@ MobManager::setListOfMobsAttributes(
         {
             if (mobs_.find(row.mob_id) == mobs_.end())
             {
-                logger_.logError("Mob ID " + std::to_string(row.mob_id) + " not found for attribute " + row.name);
+                log_->error("Mob ID " + std::to_string(row.mob_id) + " not found for attribute " + row.name);
                 continue; // Пропускаем, если моба нет
             }
 
@@ -92,7 +106,7 @@ MobManager::setListOfMobsSkills(std::vector<std::pair<int, std::vector<SkillStru
 
         if (mobSkillsMapping.empty())
         {
-            logger_.logError("No mob skills mapping found");
+            log_->error("No mob skills mapping found");
             return;
         }
 
@@ -108,7 +122,7 @@ MobManager::setListOfMobsSkills(std::vector<std::pair<int, std::vector<SkillStru
 
             if (mobs_.find(mobId) == mobs_.end())
             {
-                logger_.logError("Mob ID " + std::to_string(mobId) + " not found for skills assignment");
+                log_->error("Mob ID " + std::to_string(mobId) + " not found for skills assignment");
                 continue;
             }
 
@@ -118,7 +132,7 @@ MobManager::setListOfMobsSkills(std::vector<std::pair<int, std::vector<SkillStru
             // Логируем каждый скил
             for (const auto &skill : skills)
             {
-                logger_.log("[DEBUG] - Skill: " + skill.skillName + " (" + skill.skillSlug + ")");
+                log_->info("[DEBUG] - Skill: " + skill.skillName + " (" + skill.skillSlug + ")");
             }
         }
 
@@ -197,5 +211,5 @@ MobManager::updateMobMana(const int mobUid, int newMana)
             return;
         }
     }
-    logger_.logError("Mob " + std::to_string(mobUid) + " not found when updating mana");
+    log_->error("Mob " + std::to_string(mobUid) + " not found when updating mana");
 }

@@ -7,13 +7,15 @@
 #include "services/SkillSystem.hpp"
 #include "utils/Logger.hpp"
 #include <nlohmann/json.hpp>
+#include <spdlog/logger.h>
 
 CombatEventHandler::CombatEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "combat")
 {
+    log_ = gameServices_.getLogger().getSystem("combat");
     combatSystem_ = std::make_unique<CombatSystem>(&gameServices);
     skillSystem_ = std::make_unique<SkillSystem>(&gameServices);
     responseBuilder_ = std::make_unique<CombatResponseBuilder>(&gameServices);
@@ -22,7 +24,7 @@ CombatEventHandler::CombatEventHandler(
     combatSystem_->setBroadcastCallback([this](const nlohmann::json &packet)
         { this->sendBroadcast(packet); });
 
-    gameServices_.getLogger().log("CombatEventHandler initialized with new refactored architecture", GREEN);
+    log_->info("CombatEventHandler initialized with new refactored architecture");
 }
 
 CombatEventHandler::~CombatEventHandler() = default;
@@ -48,6 +50,28 @@ CombatEventHandler::sendBroadcast(const nlohmann::json &packet)
     }
 }
 
+bool
+CombatEventHandler::checkRateLimit(int clientId)
+{
+    // ARCH-2/3: reject requests arriving faster than COMBAT_RATE_LIMIT_MS from the same client
+    auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> guard(rateLimitMutex_);
+    auto it = lastCombatRequest_.find(clientId);
+    if (it != lastCombatRequest_.end())
+    {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second).count();
+        if (elapsed < COMBAT_RATE_LIMIT_MS)
+        {
+            gameServices_.getLogger().log("Rate limit hit for client " + std::to_string(clientId) +
+                                              " (elapsed=" + std::to_string(elapsed) + "ms)",
+                YELLOW);
+            return false;
+        }
+    }
+    lastCombatRequest_[clientId] = now;
+    return true;
+}
+
 void
 CombatEventHandler::handlePlayerAttack(const Event &event)
 {
@@ -55,32 +79,36 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
     int clientID = event.getClientID();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
-    gameServices_.getLogger().log("handlePlayerAttack called for client ID: " + std::to_string(clientID), GREEN);
+    log_->info("handlePlayerAttack called for client ID: " + std::to_string(clientID));
+
+    // ARCH-2: server-side combat rate limiting
+    if (!checkRateLimit(clientID))
+    {
+        auto errorResponse = responseBuilder_->buildErrorResponse("Request too fast, slow down!", "playerAttack", clientID);
+        std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
+        if (clientSocket)
+            networkManager_.sendResponse(clientSocket, errorData);
+        return;
+    }
 
     try
     {
-        // Получаем данные клиента
         auto clientData = gameServices_.getClientManager().getClientData(clientID);
         if (clientData.characterId == 0)
         {
             auto errorResponse = responseBuilder_->buildErrorResponse("Character not found!", "playerAttack", clientID);
             std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
             if (clientSocket)
-            {
                 networkManager_.sendResponse(clientSocket, errorData);
-            }
             return;
         }
 
-        // Парсим данные запроса
         if (!std::holds_alternative<nlohmann::json>(data))
         {
             auto errorResponse = responseBuilder_->buildErrorResponse("Invalid request format!", "playerAttack", clientID);
             std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
             if (clientSocket)
-            {
                 networkManager_.sendResponse(clientSocket, errorData);
-            }
             return;
         }
 
@@ -94,9 +122,7 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
             auto errorResponse = responseBuilder_->buildErrorResponse("Invalid attack parameters!", "playerAttack", clientID);
             std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
             if (clientSocket)
-            {
                 networkManager_.sendResponse(clientSocket, errorData);
-            }
             return;
         }
 
@@ -104,22 +130,7 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
                                           " (type: " + std::to_string(static_cast<int>(targetType)) + ")",
             GREEN);
 
-        // 1. Инициируем использование скила
-        auto initiationResult = combatSystem_->initiateSkillUsage(clientData.characterId, skillSlug, targetId, targetType);
-        broadcastSkillInitiation(initiationResult);
-
-        if (!initiationResult.success)
-        {
-            return;
-        }
-
-        // 2. Если нет времени каста, сразу выполняем действие
-        if (initiationResult.castTime <= 0.0f)
-        {
-            auto executionResult = combatSystem_->executeSkillUsage(clientData.characterId, skillSlug, targetId, targetType);
-            broadcastSkillExecution(executionResult);
-        }
-        // Если есть время каста, действие завершится автоматически в updateOngoingActions()
+        dispatchSkillAction(clientData.characterId, skillSlug, targetId, targetType, "playerAttack", clientSocket);
     }
     catch (const std::exception &ex)
     {
@@ -127,9 +138,7 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
         auto errorResponse = responseBuilder_->buildErrorResponse("Internal server error!", "playerAttack", clientID);
         std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
         if (clientSocket)
-        {
             networkManager_.sendResponse(clientSocket, errorData);
-        }
     }
 }
 
@@ -140,30 +149,34 @@ CombatEventHandler::handleSkillUsage(const Event &event)
     int clientID = event.getClientID();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
+    // ARCH-2: server-side combat rate limiting
+    if (!checkRateLimit(clientID))
+    {
+        auto errorResponse = responseBuilder_->buildErrorResponse("Request too fast, slow down!", "skillUsage", clientID);
+        std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
+        if (clientSocket)
+            networkManager_.sendResponse(clientSocket, errorData);
+        return;
+    }
+
     try
     {
-        // Получаем данные клиента
         auto clientData = gameServices_.getClientManager().getClientData(clientID);
         if (clientData.characterId == 0)
         {
             auto errorResponse = responseBuilder_->buildErrorResponse("Character not found!", "skillUsage", clientID);
             std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
             if (clientSocket)
-            {
                 networkManager_.sendResponse(clientSocket, errorData);
-            }
             return;
         }
 
-        // Парсим данные запроса
         if (!std::holds_alternative<nlohmann::json>(data))
         {
             auto errorResponse = responseBuilder_->buildErrorResponse("Invalid request format!", "skillUsage", clientID);
             std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
             if (clientSocket)
-            {
                 networkManager_.sendResponse(clientSocket, errorData);
-            }
             return;
         }
 
@@ -177,9 +190,7 @@ CombatEventHandler::handleSkillUsage(const Event &event)
             auto errorResponse = responseBuilder_->buildErrorResponse("Invalid skill parameters!", "skillUsage", clientID);
             std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
             if (clientSocket)
-            {
                 networkManager_.sendResponse(clientSocket, errorData);
-            }
             return;
         }
 
@@ -187,21 +198,7 @@ CombatEventHandler::handleSkillUsage(const Event &event)
                                           " (type: " + std::to_string(static_cast<int>(targetType)) + ")",
             GREEN);
 
-        // Инициируем использование скила
-        auto initiationResult = combatSystem_->initiateSkillUsage(clientData.characterId, skillSlug, targetId, targetType);
-        broadcastSkillInitiation(initiationResult);
-
-        if (!initiationResult.success)
-        {
-            return;
-        }
-
-        // Если нет времени каста, сразу выполняем действие
-        if (initiationResult.castTime <= 0.0f)
-        {
-            auto executionResult = combatSystem_->executeSkillUsage(clientData.characterId, skillSlug, targetId, targetType);
-            broadcastSkillExecution(executionResult);
-        }
+        dispatchSkillAction(clientData.characterId, skillSlug, targetId, targetType, "skillUsage", clientSocket);
     }
     catch (const std::exception &ex)
     {
@@ -209,22 +206,7 @@ CombatEventHandler::handleSkillUsage(const Event &event)
         auto errorResponse = responseBuilder_->buildErrorResponse("Internal server error!", "skillUsage", clientID);
         std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
         if (clientSocket)
-        {
             networkManager_.sendResponse(clientSocket, errorData);
-        }
-    }
-}
-
-void
-CombatEventHandler::handleAIAttack(int characterId)
-{
-    try
-    {
-        combatSystem_->processAIAttack(characterId);
-    }
-    catch (const std::exception &ex)
-    {
-        gameServices_.getLogger().logError("Error in handleAIAttack: " + std::string(ex.what()));
     }
 }
 
@@ -246,7 +228,7 @@ CombatEventHandler::handleInterruptCombatAction(const Event &event)
         // Прерываем действие
         combatSystem_->interruptSkillUsage(clientData.characterId, InterruptionReason::PLAYER_CANCELLED);
 
-        gameServices_.getLogger().log("Skill usage interrupted for character " + std::to_string(clientData.characterId));
+        log_->info("Skill usage interrupted for character " + std::to_string(clientData.characterId));
     }
     catch (const std::exception &ex)
     {
@@ -260,6 +242,7 @@ CombatEventHandler::updateOngoingActions()
     try
     {
         combatSystem_->updateOngoingActions();
+        combatSystem_->tickEffects();
     }
     catch (const std::exception &ex)
     {
@@ -411,6 +394,29 @@ CombatEventHandler::broadcastSkillExecution(const SkillExecutionResult &result)
 }
 
 void
+CombatEventHandler::dispatchSkillAction(int characterId,
+    const std::string &skillSlug,
+    int targetId,
+    CombatTargetType targetType,
+    const std::string &actionTag,
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket)
+{
+    // LOW-4: shared initiate + execute logic factored out from handlePlayerAttack / handleSkillUsage
+    auto initiationResult = combatSystem_->initiateSkillUsage(characterId, skillSlug, targetId, targetType);
+    broadcastSkillInitiation(initiationResult);
+
+    if (!initiationResult.success)
+        return;
+
+    // No cast time — execute immediately; otherwise updateOngoingActions() will fire later
+    if (initiationResult.castTime <= 0.0f)
+    {
+        auto executionResult = combatSystem_->executeSkillUsage(characterId, skillSlug, targetId, targetType);
+        broadcastSkillExecution(executionResult);
+    }
+}
+
+void
 CombatEventHandler::handleInitiateCombatAction(const Event &event)
 {
     // Для совместимости со старым API, делегируем к новому методу
@@ -422,7 +428,7 @@ CombatEventHandler::handleCompleteCombatAction(const Event &event)
 {
     // Этот метод может быть реализован для завершения боевых действий
     // В новой архитектуре это обрабатывается через CombatSystem
-    gameServices_.getLogger().log("handleCompleteCombatAction - using new architecture", GREEN);
+    log_->info("handleCompleteCombatAction - using new architecture");
 }
 
 void
@@ -430,7 +436,7 @@ CombatEventHandler::handleCombatAnimation(const Event &event)
 {
     // Обработка анимации боя
     // В новой архитектуре это может обрабатываться через CombatSystem
-    gameServices_.getLogger().log("handleCombatAnimation - using new architecture", GREEN);
+    log_->info("handleCombatAnimation - using new architecture");
 }
 
 void
@@ -438,5 +444,5 @@ CombatEventHandler::handleCombatResult(const Event &event)
 {
     // Обработка результатов боя
     // В новой архитектуре это обрабатывается через CombatSystem
-    gameServices_.getLogger().log("handleCombatResult - using new architecture", GREEN);
+    log_->info("handleCombatResult - using new architecture");
 }

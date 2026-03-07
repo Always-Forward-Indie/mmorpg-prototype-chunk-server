@@ -5,6 +5,7 @@
 #include <unordered_set>
 #ifdef __GLIBC__
 #include <malloc.h>
+#include <spdlog/logger.h>
 #endif
 
 ChunkServer::ChunkServer(GameServices &gameServices,
@@ -22,8 +23,10 @@ ChunkServer::ChunkServer(GameServices &gameServices,
       scheduler_(scheduler),
       gameServices_(gameServices),
       networkManager_(networkManager),
-      gameServerWorker_(gameServerWorker)
+      gameServerWorker_(gameServerWorker),
+      aggroLastBroadcastTime_(std::chrono::steady_clock::now())
 {
+    log_ = gameServices_.getLogger().getSystem("gameloop");
     // Set EventQueue for MobMovementManager to send combat events
     gameServices_.getMobMovementManager().setEventQueue(&eventQueueGameServer_);
 
@@ -47,6 +50,9 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 
     // Set CombatSystem for MobMovementManager to handle mob attacks
     gameServices_.getMobMovementManager().setCombatSystem(eventHandler_.getCombatEventHandler().getCombatSystem());
+
+    // Set MobManager so MobAIController can look up skill templates (plan §2.1)
+    gameServices_.getMobMovementManager().setMobManager(&gameServices_.getMobManager());
 
     // Wire up QuestManager → GameServerWorker for persistence
     gameServices_.getQuestManager().setGameServerWorker(&gameServerWorker_);
@@ -80,17 +86,17 @@ ChunkServer::sendSpawnEventsToClients(const SpawnZoneStruct &zone)
 void
 ChunkServer::mainEventLoopCH()
 {
-    gameServices_.getLogger().log("Add Tasks To Game Server Scheduler...", YELLOW);
+    log_->info("Add Tasks To Game Server Scheduler...");
     constexpr int BATCH_SIZE = 10;
 
     // Perform initial mob spawn directly instead of using scheduler to avoid infinite loop
     {
-        gameServices_.getLogger().log("Starting initial mob spawn for all zones...", YELLOW);
+        log_->info("Starting initial mob spawn for all zones...");
 
         auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
         if (spawnZones.empty())
         {
-            gameServices_.getLogger().logError("No spawn zones found for initial spawn!", RED);
+            log_->error("No spawn zones found for initial spawn!");
         }
         else
         {
@@ -126,7 +132,7 @@ ChunkServer::mainEventLoopCH()
                 }
             }
 
-            gameServices_.getLogger().log("[INITIAL_SPAWN] Completed! Total mobs spawned: " + std::to_string(totalInitialSpawns), GREEN);
+            log_->info("[INITIAL_SPAWN] Completed! Total mobs spawned: " + std::to_string(totalInitialSpawns));
         }
     }
 
@@ -138,7 +144,7 @@ ChunkServer::mainEventLoopCH()
             auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
             if (spawnZones.empty())
             {
-                gameServices_.getLogger().logError("No spawn zones found, cannot spawn mobs!", RED);
+                log_->error("No spawn zones found, cannot spawn mobs!");
                 return;
             }
 
@@ -187,7 +193,7 @@ ChunkServer::mainEventLoopCH()
                 }
                 else
                 {
-                    gameServices_.getLogger().log("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
+                    log_->info("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
                                                   " - spawn disabled or no mob ID set");
                 }
             }
@@ -195,11 +201,11 @@ ChunkServer::mainEventLoopCH()
             // Log summary only if mobs were spawned
             if (anyMobsSpawned)
             {
-                gameServices_.getLogger().log("[SPAWN_SUMMARY] Total mobs spawned this cycle: " + std::to_string(totalMobsSpawned));
+                log_->info("[SPAWN_SUMMARY] Total mobs spawned this cycle: " + std::to_string(totalMobsSpawned));
             }
         },
-        300, // Increased to 5 minutes (300 seconds) - less frequent safety checks
-        std::chrono::system_clock::now(),
+        300000, // Increased to 5 minutes (300 seconds) - less frequent safety checks
+        std::chrono::steady_clock::now(),
         1 // unique task ID
     );
 
@@ -236,9 +242,9 @@ ChunkServer::mainEventLoopCH()
                 }
             }
         },
-        30,                                                          // Every 30 seconds - more frequent than safety check but respects respawn times
-        std::chrono::system_clock::now() + std::chrono::seconds(10), // Start after initial spawn
-        8                                                            // unique task ID
+        30000,                                                                   // Every 30 seconds - more frequent than safety check but respects respawn times
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(10 * 1000), // Start after initial spawn
+        8                                                                        // unique task ID
     );
 
     scheduler_.scheduleTask(respawnMobTask);
@@ -251,7 +257,7 @@ ChunkServer::mainEventLoopCH()
             auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
             if (spawnZones.empty())
             {
-                gameServices_.getLogger().logError("No spawn zones found, cannot move mobs!", RED);
+                log_->error("No spawn zones found, cannot move mobs!");
                 return;
             }
 
@@ -268,13 +274,22 @@ ChunkServer::mainEventLoopCH()
                     {
                         // Get mobs that should send updates (moved significantly)
                         auto movedMobs = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
-                        std::vector<MobDataStruct> mobsToSend;
+                        std::vector<MobMoveUpdateStruct> mobsToSend;
 
                         for (const auto &mob : movedMobs)
                         {
                             if (gameServices_.getMobMovementManager().shouldSendMobUpdate(mob.uid, mob.position))
                             {
-                                mobsToSend.push_back(mob);
+                                auto mvData = gameServices_.getMobMovementManager().getMobMovementData(mob.uid);
+                                MobMoveUpdateStruct upd;
+                                upd.uid = mob.uid;
+                                upd.zoneId = mob.zoneId;
+                                upd.position = mob.position;
+                                upd.dirX = mvData.movementDirectionX;
+                                upd.dirY = mvData.movementDirectionY;
+                                upd.speed = mvData.currentSpeedUnitsPerSec;
+                                upd.combatState = static_cast<int>(mvData.combatState);
+                                mobsToSend.push_back(upd);
                             }
                         }
 
@@ -287,18 +302,16 @@ ChunkServer::mainEventLoopCH()
                             {
                                 if (client.clientId <= 0) // Strict validation
                                     continue;
-                                auto clientSocket = gameServices_.getClientManager().getClientSocket(client.clientId);
-                                // Send specific moved mobs instead of just zone ID
-                                Event moveMobsInZoneEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, mobsToSend);
-                                eventQueueGameServer_.push(std::move(moveMobsInZoneEvent)); // Use move
+                                Event moveMobsEvent(Event::MOB_MOVE_UPDATE, client.clientId, mobsToSend);
+                                eventQueueGameServer_.push(std::move(moveMobsEvent));
                             }
                         }
                     }
                 }
             }
         },
-        1, // Increased frequency - every 1 second instead of 3
-        std::chrono::system_clock::now(),
+        1000, // Increased frequency - every 1 second instead of 3
+        std::chrono::steady_clock::now(),
         2 // unique task ID
     );
 
@@ -317,7 +330,8 @@ ChunkServer::mainEventLoopCH()
 
             // Track individual mobs that need position updates
             std::unordered_map<int, int> mobsToUpdate; // mobUID -> zoneId
-            static auto lastBroadcastTime = std::chrono::steady_clock::now();
+            // Use member variable instead of static to avoid shared-state issues
+            // across lambda re-invocations and to allow proper reset on reconnect.
 
             // Check for mobs with active targets and move them more frequently
             for (const auto &zone : spawnZones)
@@ -368,7 +382,7 @@ ChunkServer::mainEventLoopCH()
             // Send position updates only for mobs that moved significantly
             // And limit update frequency to avoid client spam
             auto currentTime = std::chrono::steady_clock::now();
-            auto timeSinceLastBroadcast = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastBroadcastTime);
+            auto timeSinceLastBroadcast = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - aggroLastBroadcastTime_);
 
             // Only send updates every 50ms minimum to avoid overwhelming clients
             if (!mobsToUpdate.empty() && timeSinceLastBroadcast.count() >= 50)
@@ -382,14 +396,23 @@ ChunkServer::mainEventLoopCH()
 
                 for (const auto &[zoneId, mobUIDs] : mobsByZone)
                 {
-                    // Get actual mob data for the moved mobs
-                    std::vector<MobDataStruct> movedMobs;
+                    // Build compact movement structs instead of full MobDataStruct
+                    std::vector<MobMoveUpdateStruct> movedMobs;
                     for (int mobUID : mobUIDs)
                     {
                         auto mobData = gameServices_.getMobInstanceManager().getMobInstance(mobUID);
                         if (mobData.uid > 0) // Valid mob
                         {
-                            movedMobs.push_back(mobData);
+                            auto mvData = gameServices_.getMobMovementManager().getMobMovementData(mobUID);
+                            MobMoveUpdateStruct upd;
+                            upd.uid = mobData.uid;
+                            upd.zoneId = mobData.zoneId;
+                            upd.position = mobData.position;
+                            upd.dirX = mvData.movementDirectionX;
+                            upd.dirY = mvData.movementDirectionY;
+                            upd.speed = mvData.currentSpeedUnitsPerSec;
+                            upd.combatState = static_cast<int>(mvData.combatState);
+                            movedMobs.push_back(upd);
                         }
                     }
 
@@ -402,18 +425,17 @@ ChunkServer::mainEventLoopCH()
                             if (client.clientId <= 0)
                                 continue;
 
-                            // Send event with vector of moved mobs instead of just zoneId
-                            Event mobUpdateEvent(Event::SPAWN_ZONE_MOVE_MOBS, client.clientId, movedMobs);
+                            Event mobUpdateEvent(Event::MOB_MOVE_UPDATE, client.clientId, movedMobs);
                             eventQueueGameServer_.push(std::move(mobUpdateEvent));
                         }
                     }
                 }
 
-                lastBroadcastTime = currentTime;
+                aggroLastBroadcastTime_ = currentTime;
             }
         },
-        0.05, // Very fast frequency - every 50ms for very smooth chase movement
-        std::chrono::system_clock::now(),
+        50, // Very fast frequency - every 50ms for very smooth chase movement
+        std::chrono::steady_clock::now(),
         7 // unique task ID
     );
 
@@ -434,8 +456,8 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("Error updating combat actions: " + std::string(ex.what()));
             }
         },
-        1, // Run every 1 second - frequent enough for responsive combat
-        std::chrono::system_clock::now(),
+        1000, // Run every 1 second - frequent enough for responsive combat
+        std::chrono::steady_clock::now(),
         6 // unique task ID
     );
 
@@ -460,7 +482,7 @@ ChunkServer::mainEventLoopCH()
             for (int clientId : clientsToRemove)
             {
                 gameServices_.getClientManager().removeClientData(clientId);
-                gameServices_.getLogger().log("Force removed disconnected client: " + std::to_string(clientId), YELLOW);
+                log_->info("Force removed disconnected client: " + std::to_string(clientId));
             }
 
             // Force cleanup memory in ClientManager
@@ -479,11 +501,11 @@ ChunkServer::mainEventLoopCH()
             // If any queue is getting too large, log a warning
             if (eventQueueGameServer_.size() > 500 || eventQueueChunkServer_.size() > 500 || eventQueueGameServerPing_.size() > 500 || threadPool_.getTaskQueueSize() > 500)
             {
-                gameServices_.getLogger().logError("Event queues are getting large - potential memory leak!", RED);
+                log_->error("Event queues are getting large - potential memory leak!");
             }
         },
-        10, // Run every 10 seconds (more frequent cleanup)
-        std::chrono::system_clock::now(),
+        10000, // Run every 10 seconds (more frequent cleanup)
+        std::chrono::steady_clock::now(),
         3 // unique task ID
     );
 
@@ -506,8 +528,8 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("Error updating harvest progress: " + std::string(ex.what()));
             }
         },
-        1, // Run every 1 second for responsive harvest updates
-        std::chrono::system_clock::now(),
+        1000, // Run every 1 second for responsive harvest updates
+        std::chrono::steady_clock::now(),
         7 // unique task ID
     );
 
@@ -533,17 +555,25 @@ ChunkServer::mainEventLoopCH()
                 auto mobsInZone = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
                 std::vector<int> deadMobUIDs;
 
-                // Find dead mobs and generate loot
+                // Find dead mobs whose corpse timer has expired
+                constexpr int64_t CORPSE_DURATION_MS = 30'000; // corpse lies for 30 s
+                auto now = std::chrono::steady_clock::now();
                 for (const auto &mob : mobsInZone)
                 {
-                    if (mob.isDead || mob.currentHealth <= 0)
-                    {
-                        deadMobUIDs.push_back(mob.uid);
-                        deadMobsToNotify.emplace_back(mob.uid, zone.second.zoneId);
+                    if (!mob.isDead && mob.currentHealth > 0)
+                        continue;
 
-                        // Note: Loot generation is now handled immediately in MobInstanceManager::updateMobHealth()
-                        // when mob dies, not during cleanup task
+                    // Only remove once the corpse has been visible for the full duration.
+                    // deathTimestamp == {} means the mob was marked dead without recording
+                    // a timestamp (legacy path) → remove immediately to avoid infinite retention.
+                    if (mob.deathTimestamp != std::chrono::steady_clock::time_point{} &&
+                        std::chrono::duration_cast<std::chrono::milliseconds>(now - mob.deathTimestamp).count() < CORPSE_DURATION_MS)
+                    {
+                        continue; // corpse still within display window
                     }
+
+                    deadMobUIDs.push_back(mob.uid);
+                    deadMobsToNotify.emplace_back(mob.uid, zone.second.zoneId);
                 }
 
                 // Remove dead mobs and trigger respawn logic
@@ -579,13 +609,13 @@ ChunkServer::mainEventLoopCH()
 
             if (totalDeadMobsRemoved > 0)
             {
-                gameServices_.getLogger().log("[CLEANUP] Cleaned up " + std::to_string(totalDeadMobsRemoved) +
+                log_->info("[CLEANUP] Cleaned up " + std::to_string(totalDeadMobsRemoved) +
                                               " dead mobs across all zones");
             }
         },
-        60,                                                          // Every 60 seconds - cleanup dead mobs to allow respawning
-        std::chrono::system_clock::now() + std::chrono::seconds(30), // Start after 30 seconds
-        9                                                            // unique task ID
+        5000,                                                                    // Every 5 seconds - check if corpse duration has expired
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000), // Start after 30 seconds
+        9                                                                        // unique task ID
     );
 
     scheduler_.scheduleTask(deadMobCleanupTask);
@@ -603,15 +633,15 @@ ChunkServer::mainEventLoopCH()
                 {
                     if (line.find("VmRSS:") == 0)
                     {
-                        gameServices_.getLogger().log("Memory usage: " + line, GREEN);
+                        log_->info("Memory usage: " + line);
                         break;
                     }
                 }
                 statusFile.close();
             }
         },
-        5, // Run every 5 seconds
-        std::chrono::system_clock::now(),
+        5000, // Run every 5 seconds
+        std::chrono::steady_clock::now(),
         4 // unique task ID
     );
 
@@ -621,7 +651,7 @@ ChunkServer::mainEventLoopCH()
     Task aggressiveCleanupTask(
         [&]
         {
-            gameServices_.getLogger().log("Running aggressive memory cleanup...", YELLOW);
+            log_->info("Running aggressive memory cleanup...");
 
             // Force garbage collection by explicitly clearing and shrinking containers
             // Force memory cleanup in all managers
@@ -632,31 +662,31 @@ ChunkServer::mainEventLoopCH()
             if (eventQueueGameServer_.empty())
             {
                 eventQueueGameServer_.forceCleanup();
-                gameServices_.getLogger().log("Cleaned up Game Server event queue", BLUE);
+                log_->debug("Cleaned up Game Server event queue");
             }
             if (eventQueueChunkServer_.empty())
             {
                 eventQueueChunkServer_.forceCleanup();
-                gameServices_.getLogger().log("Cleaned up Chunk Server event queue", BLUE);
+                log_->debug("Cleaned up Chunk Server event queue");
             }
             if (eventQueueGameServerPing_.empty())
             {
                 eventQueueGameServerPing_.forceCleanup();
-                gameServices_.getLogger().log("Cleaned up Ping event queue", BLUE);
+                log_->debug("Cleaned up Ping event queue");
             }
 
             // Force cleanup of thread pool task queue if possible
             if (threadPool_.getTaskQueueSize() == 0)
             {
                 // When there are no tasks, it's safe to shrink internal containers
-                gameServices_.getLogger().log("Thread pool is idle, triggering internal cleanup", BLUE);
+                log_->debug("Thread pool is idle, triggering internal cleanup");
             }
 
 // Force system to release unused memory back to OS (Linux/glibc specific)
 #ifdef __GLIBC__
             if (malloc_trim(0))
             {
-                gameServices_.getLogger().log("malloc_trim() released memory back to OS", BLUE);
+                log_->debug("malloc_trim() released memory back to OS");
             }
 #endif
 
@@ -669,19 +699,19 @@ ChunkServer::mainEventLoopCH()
                 {
                     if (line.find("VmRSS:") == 0)
                     {
-                        gameServices_.getLogger().log("Post-cleanup " + line, YELLOW);
+                        log_->info("Post-cleanup " + line);
                         break;
                     }
                     if (line.find("VmSize:") == 0)
                     {
-                        gameServices_.getLogger().log("Post-cleanup " + line, YELLOW);
+                        log_->info("Post-cleanup " + line);
                     }
                 }
                 statusFile.close();
             }
         },
-        30, // Run every 30 seconds - aggressive but not too frequent
-        std::chrono::system_clock::now(),
+        30000, // Run every 30 seconds - aggressive but not too frequent
+        std::chrono::steady_clock::now(),
         5 // unique task ID
     );
 
@@ -727,9 +757,9 @@ ChunkServer::mainEventLoopCH()
                     " position(s) to game server",
                 GREEN);
         },
-        30,                                                          // Every 30 seconds
-        std::chrono::system_clock::now() + std::chrono::seconds(30), // First run after 30s
-        10                                                           // unique task ID
+        30000,                                                                   // Every 30 seconds
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000), // First run after 30s
+        10                                                                       // unique task ID
     );
 
     scheduler_.scheduleTask(savePositionsTask);
@@ -740,9 +770,9 @@ ChunkServer::mainEventLoopCH()
         {
             gameServices_.getDialogueSessionManager().cleanupExpiredSessions();
         },
-        60,                                                          // Every 60 seconds
-        std::chrono::system_clock::now() + std::chrono::seconds(60), // First run after 60s
-        11                                                           // unique task ID
+        60000,                                                                   // Every 60 seconds
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(60 * 1000), // First run after 60s
+        11                                                                       // unique task ID
     );
     scheduler_.scheduleTask(cleanupDialogueSessionsTask);
 
@@ -752,31 +782,94 @@ ChunkServer::mainEventLoopCH()
         {
             gameServices_.getQuestManager().flushDirtyProgress();
         },
-        5,                                                          // Every 5 seconds
-        std::chrono::system_clock::now() + std::chrono::seconds(5), // First run after 5s
-        12                                                          // unique task ID
+        5000,                                                                   // Every 5 seconds
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(5 * 1000), // First run after 5s
+        12                                                                      // unique task ID
     );
     scheduler_.scheduleTask(flushQuestProgressTask);
 
+    // CRITICAL-8: Periodic dead-socket cleanup separated from hot broadcast path.
+    // broadcastToAllClients no longer removes dead sockets inline;
+    // this task does it every 30 seconds under unique_lock.
+    Task cleanupDeadSocketsTask(
+        [this]
+        {
+            try
+            {
+                gameServices_.getClientManager().cleanupDeadSockets();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[Scheduler] cleanupDeadSockets error: " + std::string(ex.what()));
+            }
+        },
+        30000,                                                                   // Every 30 seconds
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000), // First run after 30s
+        13                                                                       // unique task ID
+    );
+    scheduler_.scheduleTask(cleanupDeadSocketsTask);
+
+    // ARCH-4: Periodic task: save all online player HP and Mana to the database every 30 seconds.
+    // Prevents loss of current health/mana on unexpected server restart or crash.
+    Task saveHpManaTask(
+        [this]
+        {
+            auto charactersList = gameServices_.getCharacterManager().getCharactersList();
+            if (charactersList.empty())
+                return;
+
+            nlohmann::json charactersArray = nlohmann::json::array();
+            for (const auto &character : charactersList)
+            {
+                if (character.characterId <= 0)
+                    continue;
+
+                nlohmann::json entry;
+                entry["characterId"] = character.characterId;
+                entry["currentHp"] = character.characterCurrentHealth;
+                entry["currentMana"] = character.characterCurrentMana;
+                charactersArray.push_back(entry);
+            }
+
+            if (charactersArray.empty())
+                return;
+
+            nlohmann::json packet;
+            packet["header"]["eventType"] = "saveHpMana";
+            packet["header"]["clientId"] = 0;
+            packet["header"]["hash"] = "";
+            packet["body"]["characters"] = charactersArray;
+
+            gameServerWorker_.sendDataToGameServer(packet.dump() + "\n");
+
+            gameServices_.getLogger().log(
+                "[SAVE_HP_MANA] Saved HP/Mana for " + std::to_string(charactersArray.size()) +
+                    " character(s)",
+                GREEN);
+        },
+        30000,                                                                   // Every 30 seconds
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000), // First run after 30s
+        14                                                                       // unique task ID
+    );
+    scheduler_.scheduleTask(saveHpManaTask);
     try
     {
-        gameServices_.getLogger().log("Starting Game Server Event Loop...", YELLOW);
+        log_->info("Starting Game Server Event Loop...");
         while (running_)
         {
             std::vector<Event> eventsBatch;
-            if (eventQueueGameServer_.popBatch(eventsBatch, BATCH_SIZE))
-            {
-                processBatch(eventsBatch);
+            if (!eventQueueGameServer_.popBatch(eventsBatch, BATCH_SIZE))
+                break; // queue stopped (HIGH-5)
+            processBatch(eventsBatch);
 
-                // Clear and shrink the batch vector to prevent memory retention
-                eventsBatch.clear();
-                eventsBatch.shrink_to_fit();
-            }
+            // Clear and shrink the batch vector to prevent memory retention
+            eventsBatch.clear();
+            eventsBatch.shrink_to_fit();
         }
     }
     catch (const std::exception &e)
     {
-        gameServices_.getLogger().logError(e.what(), RED);
+        log_->error(e.what());
     }
 }
 
@@ -784,27 +877,26 @@ void
 ChunkServer::mainEventLoopGS()
 {
     constexpr int BATCH_SIZE = 10;
-    gameServices_.getLogger().log("Add Tasks To Chunk Server Scheduler...", YELLOW);
+    log_->info("Add Tasks To Chunk Server Scheduler...");
 
     try
     {
-        gameServices_.getLogger().log("Starting Chunk Server Event Loop...", YELLOW);
+        log_->info("Starting Chunk Server Event Loop...");
         while (running_)
         {
             std::vector<Event> eventsBatch;
-            if (eventQueueChunkServer_.popBatch(eventsBatch, BATCH_SIZE))
-            {
-                processBatch(eventsBatch);
+            if (!eventQueueChunkServer_.popBatch(eventsBatch, BATCH_SIZE))
+                break; // queue stopped (HIGH-5)
+            processBatch(eventsBatch);
 
-                // Clear and shrink the batch vector to prevent memory retention
-                eventsBatch.clear();
-                eventsBatch.shrink_to_fit();
-            }
+            // Clear and shrink the batch vector to prevent memory retention
+            eventsBatch.clear();
+            eventsBatch.shrink_to_fit();
         }
     }
     catch (const std::exception &e)
     {
-        gameServices_.getLogger().logError(e.what(), RED);
+        log_->error(e.what());
     }
 }
 
@@ -813,21 +905,20 @@ ChunkServer::mainEventLoopPing()
 {
     constexpr int BATCH_SIZE = 1; // Ping обрабатывай сразу
 
-    gameServices_.getLogger().log("Starting Ping Event Loop...", YELLOW);
+    log_->info("Starting Ping Event Loop...");
 
     try
     {
         while (running_)
         {
             std::vector<Event> pingEvents;
-            if (eventQueueGameServerPing_.popBatch(pingEvents, BATCH_SIZE))
-            {
-                processPingBatch(pingEvents);
+            if (!eventQueueGameServerPing_.popBatch(pingEvents, BATCH_SIZE))
+                break; // queue stopped (HIGH-5)
+            processPingBatch(pingEvents);
 
-                // Clear and shrink the ping events vector to prevent memory retention
-                pingEvents.clear();
-                pingEvents.shrink_to_fit();
-            }
+            // Clear and shrink the ping events vector to prevent memory retention
+            pingEvents.clear();
+            pingEvents.shrink_to_fit();
         }
     }
     catch (const std::exception &e)
@@ -918,7 +1009,7 @@ ChunkServer::startMainEventLoop()
 {
     if (event_game_server_thread_.joinable() || event_chunk_server_thread_.joinable())
     {
-        gameServices_.getLogger().log("Chunk server event loops are already running!", RED);
+        log_->warn("Chunk server event loops are already running!");
         return;
     }
 
@@ -931,13 +1022,18 @@ void
 ChunkServer::stop()
 {
     running_ = false;
+    // HIGH-5: stop all event queues so blocked popBatch() calls unblock and
+    // the event-loop threads can exit cleanly.
+    eventQueueGameServer_.stop();
+    eventQueueChunkServer_.stop();
+    eventQueueGameServerPing_.stop();
     scheduler_.stop();
     eventCondition.notify_all();
 }
 
 ChunkServer::~ChunkServer()
 {
-    gameServices_.getLogger().log("Shutting down Chunk Server...", YELLOW);
+    log_->info("Shutting down Chunk Server...");
 
     stop();
 

@@ -28,7 +28,8 @@ class BaseEventHandler
     BaseEventHandler(
         NetworkManager &networkManager,
         GameServerWorker &gameServerWorker,
-        GameServices &gameServices);
+        GameServices &gameServices,
+        const std::string &loggerSubsystem = "events");
 
     virtual ~BaseEventHandler() = default;
 
@@ -150,6 +151,7 @@ class BaseEventHandler
     void broadcastToAllClients(const std::string &responseData, int excludeClientId = -1);
 
     // Protected member variables for derived classes
+    std::shared_ptr<spdlog::logger> log_;
     NetworkManager &networkManager_;
     GameServerWorker &gameServerWorker_;
     GameServices &gameServices_;

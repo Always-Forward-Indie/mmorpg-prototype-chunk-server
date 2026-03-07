@@ -66,4 +66,5 @@ class DialogueSessionManager
     std::unordered_map<std::string, DialogueSessionStruct> sessions_; ///< sessionId → session
     std::unordered_map<int, std::string> characterToSession_;         ///< characterId → sessionId
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
 };

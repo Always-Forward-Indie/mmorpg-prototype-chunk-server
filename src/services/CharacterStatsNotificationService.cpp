@@ -5,10 +5,12 @@
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <nlohmann/json.hpp>
+#include <spdlog/logger.h>
 
 CharacterStatsNotificationService::CharacterStatsNotificationService(GameServices *gameServices)
     : gameServices_(gameServices)
 {
+    log_ = gameServices_->getLogger().getSystem("character");
 }
 
 void

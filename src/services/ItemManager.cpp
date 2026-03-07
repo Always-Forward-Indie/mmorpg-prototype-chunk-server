@@ -1,8 +1,10 @@
 #include "services/ItemManager.hpp"
+#include <spdlog/logger.h>
 
 ItemManager::ItemManager(Logger &logger)
     : logger_(logger)
 {
+    log_ = logger.getSystem("item");
 }
 
 void
@@ -12,7 +14,7 @@ ItemManager::setItemsList(const std::vector<ItemDataStruct> &items)
     {
         if (items.empty())
         {
-            logger_.logError("No items received from Game Server");
+            log_->error("No items received from Game Server");
             return;
         }
 
@@ -39,7 +41,7 @@ ItemManager::setMobLootInfo(const std::vector<MobLootInfoStruct> &mobLootInfo)
     {
         if (mobLootInfo.empty())
         {
-            logger_.logError("No mob loot information received from Game Server");
+            log_->error("No mob loot information received from Game Server");
             return;
         }
 

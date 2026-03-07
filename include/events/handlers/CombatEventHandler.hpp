@@ -3,7 +3,10 @@
 #include "data/CombatStructs.hpp"
 #include "events/Event.hpp"
 #include "events/handlers/BaseEventHandler.hpp"
+#include <chrono>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
 
 // Forward declarations
 class CombatSystem;
@@ -38,11 +41,6 @@ class CombatEventHandler : public BaseEventHandler
      * @brief Handle skill usage event
      */
     void handleSkillUsage(const Event &event);
-
-    /**
-     * @brief Handle AI attack for mobs
-     */
-    void handleAIAttack(int characterId);
 
     /**
      * @brief Handle combat action interruption
@@ -102,6 +100,18 @@ class CombatEventHandler : public BaseEventHandler
         CombatTargetType &targetType);
 
     /**
+     * @brief Common: initiate + optionally execute skill for a player character.
+     *        Sends error response to socket on failure.
+     *        LOW-4: extracted shared logic from handlePlayerAttack / handleSkillUsage
+     */
+    void dispatchSkillAction(int characterId,
+        const std::string &skillSlug,
+        int targetId,
+        CombatTargetType targetType,
+        const std::string &actionTag,
+        std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket);
+
+    /**
      * @brief Send skill responses to all clients (broadcast)
      */
     void broadcastSkillInitiation(const SkillInitiationResult &result);
@@ -111,4 +121,17 @@ class CombatEventHandler : public BaseEventHandler
     std::unique_ptr<CombatSystem> combatSystem_;
     std::unique_ptr<SkillSystem> skillSystem_;
     std::unique_ptr<CombatResponseBuilder> responseBuilder_;
+
+    /// ARCH-2/3: per-client rate limiting for combat requests.
+    /// Minimum interval between consecutive attack/skill requests from the same client.
+    static constexpr int64_t COMBAT_RATE_LIMIT_MS = 100; // 100 ms minimum between requests
+    std::unordered_map<int, std::chrono::steady_clock::time_point> lastCombatRequest_;
+    std::mutex rateLimitMutex_;
+
+    /**
+     * @brief Returns true if the client is allowed to make a combat request now.
+     *        Updates the last-request timestamp on success.
+     *        ARCH-2: server-side combat rate limiting.
+     */
+    bool checkRateLimit(int clientId);
 };

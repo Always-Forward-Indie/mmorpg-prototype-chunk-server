@@ -4,10 +4,12 @@
 #include "services/GameServices.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <cmath>
+#include <spdlog/logger.h>
 
 QuestManager::QuestManager(GameServices *services, Logger &logger)
     : services_(services), logger_(logger)
 {
+    log_ = logger.getSystem("quest");
 }
 
 void
@@ -125,7 +127,7 @@ QuestManager::offerQuest(int characterId, const std::string &questSlug)
     auto qit = questsBySlug_.find(questSlug);
     if (qit == questsBySlug_.end())
     {
-        logger_.logError("[QuestManager] offerQuest: unknown quest slug '" + questSlug + "'");
+        log_->error("[QuestManager] offerQuest: unknown quest slug '" + questSlug + "'");
         return false;
     }
     const QuestStruct &quest = qit->second;
@@ -134,7 +136,7 @@ QuestManager::offerQuest(int characterId, const std::string &questSlug)
     auto charData = services_->getCharacterManager().getCharacterData(characterId);
     if (charData.characterLevel < quest.minLevel)
     {
-        logger_.log("[QuestManager] Character " + std::to_string(characterId) +
+        log_->info("[QuestManager] Character " + std::to_string(characterId) +
                     " level too low for quest '" + questSlug + "'");
         return false;
     }
@@ -148,7 +150,7 @@ QuestManager::offerQuest(int characterId, const std::string &questSlug)
         const std::string &currentState = pit->second.state;
         if (currentState == "active" || currentState == "offered" || currentState == "completed")
         {
-            logger_.log("[QuestManager] Quest '" + questSlug + "' already in state " + currentState);
+            log_->info("[QuestManager] Quest '" + questSlug + "' already in state " + currentState);
             return false;
         }
     }
@@ -183,7 +185,7 @@ QuestManager::offerQuest(int characterId, const std::string &questSlug)
     // Send update to client
     sendQuestUpdate(characterId, progress[quest.id], quest);
 
-    logger_.log("[QuestManager] Quest '" + questSlug + "' offered to character " +
+    log_->info("[QuestManager] Quest '" + questSlug + "' offered to character " +
                 std::to_string(characterId));
     return true;
 }
@@ -197,7 +199,7 @@ QuestManager::turnInQuest(int characterId, const std::string &questSlug, int cli
     auto qit = questsBySlug_.find(questSlug);
     if (qit == questsBySlug_.end())
     {
-        logger_.logError("[QuestManager] turnInQuest: unknown quest '" + questSlug + "'");
+        log_->error("[QuestManager] turnInQuest: unknown quest '" + questSlug + "'");
         return notifications;
     }
     const QuestStruct &quest = qit->second;
@@ -207,7 +209,7 @@ QuestManager::turnInQuest(int characterId, const std::string &questSlug, int cli
 
     if (pit == progress.end() || pit->second.state != "completed")
     {
-        logger_.log("[QuestManager] Cannot turn in quest '" + questSlug +
+        log_->info("[QuestManager] Cannot turn in quest '" + questSlug +
                     "': not in completed state");
         return notifications;
     }
@@ -257,7 +259,7 @@ QuestManager::turnInQuest(int characterId, const std::string &questSlug, int cli
     // Send QUEST_UPDATE to the client (state = turned_in)
     sendQuestUpdate(characterId, pit->second, quest);
 
-    logger_.log("[QuestManager] Quest '" + questSlug + "' turned in by character " +
+    log_->info("[QuestManager] Quest '" + questSlug + "' turned in by character " +
                 std::to_string(characterId));
 
     // Grant rewards (unlocked - services accessed)
@@ -605,7 +607,7 @@ QuestManager::sendQuestUpdate(int characterId,
 
     if (!networkManager_)
     {
-        logger_.logError("[QuestManager] sendQuestUpdate: networkManager_ not set");
+        log_->error("[QuestManager] sendQuestUpdate: networkManager_ not set");
         return;
     }
 

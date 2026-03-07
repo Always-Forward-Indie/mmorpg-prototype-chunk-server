@@ -6,6 +6,7 @@
 #include "services/CharacterManager.hpp"
 #include "services/CombatSystem.hpp"
 #include "services/MobInstanceManager.hpp"
+#include "services/MobManager.hpp"
 #include "services/SpawnZoneManager.hpp"
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <random>
+#include <spdlog/logger.h>
 #include <unordered_set>
 
 MobMovementManager::MobMovementManager(Logger &logger)
@@ -22,16 +24,20 @@ MobMovementManager::MobMovementManager(Logger &logger)
       characterManager_(nullptr),
       eventQueue_(nullptr),
       combatSystem_(nullptr),
-      rng_(std::random_device{}())
+      rng_(std::random_device{}()),
+      mobAIController_(logger)
 {
-    // Initialize AI config with default values (already set in struct)
-    logger_.log("[INFO] MobMovementManager initialized with default AI configuration");
+    log_ = logger.getSystem("mob");
+    // Wire back-pointer so AI controller can call our public helpers.
+    mobAIController_.setMobMovementManager(this);
+    log_->info("[INFO] MobMovementManager initialized with default AI configuration");
 }
 
 void
 MobMovementManager::setMobInstanceManager(MobInstanceManager *mobInstanceManager)
 {
     mobInstanceManager_ = mobInstanceManager;
+    mobAIController_.setMobInstanceManager(mobInstanceManager);
 }
 
 void
@@ -44,18 +50,27 @@ void
 MobMovementManager::setCharacterManager(CharacterManager *characterManager)
 {
     characterManager_ = characterManager;
+    mobAIController_.setCharacterManager(characterManager);
 }
 
 void
 MobMovementManager::setEventQueue(EventQueue *eventQueue)
 {
     eventQueue_ = eventQueue;
+    mobAIController_.setEventQueue(eventQueue);
 }
 
 void
 MobMovementManager::setCombatSystem(CombatSystem *combatSystem)
 {
     combatSystem_ = combatSystem;
+    mobAIController_.setCombatSystem(combatSystem);
+}
+
+void
+MobMovementManager::setMobManager(MobManager *mobManager)
+{
+    mobAIController_.setMobManager(mobManager);
 }
 
 void
@@ -70,7 +85,7 @@ MobMovementManager::moveMobsInZone(int zoneId)
 {
     if (!mobInstanceManager_ || !spawnZoneManager_)
     {
-        logger_.logError("MobMovementManager: Dependencies not set");
+        log_->error("MobMovementManager: Dependencies not set");
         return false;
     }
 
@@ -78,18 +93,18 @@ MobMovementManager::moveMobsInZone(int zoneId)
     auto zone = spawnZoneManager_->getMobSpawnZoneByID(zoneId);
     if (zone.zoneId == 0)
     {
-        logger_.logError("MobMovementManager: Zone " + std::to_string(zoneId) + " not found");
+        log_->error("MobMovementManager: Zone " + std::to_string(zoneId) + " not found");
         return false;
     }
 
-    // Get mobs in zone
+    // Get mobs in zone (full data for AI/combat logic)
     auto mobsInZone = mobInstanceManager_->getMobInstancesInZone(zoneId);
     if (mobsInZone.empty())
     {
         return false; // No mobs to move
     }
 
-    // Get movement parameters for zone
+    // Get movement parameters for zone (fetched once per tick)
     auto params = getDefaultMovementParams();
     {
         std::shared_lock<std::shared_mutex> lock(mutex_);
@@ -99,6 +114,9 @@ MobMovementManager::moveMobsInZone(int zoneId)
             params = paramIt->second;
         }
     }
+
+    // Lightweight positions for collision detection (avoids deep-copying attribute/skill vectors)
+    auto mobPositions = mobInstanceManager_->getMobPositionsInZone(zoneId);
 
     float currentTime = getCurrentGameTime();
     bool anyMobMoved = false;
@@ -128,7 +146,7 @@ MobMovementManager::moveMobsInZone(int zoneId)
         // Only call aggro handling if mob is aggressive, has a target, or is already in combat state
         if ((mob.isAggressive || movementData.targetPlayerId > 0) && characterManager_)
         {
-            handlePlayerAggro(const_cast<MobDataStruct &>(mob), zone, movementData);
+            mobAIController_.handlePlayerAggro(mob, zone, movementData);
             // Refresh movement data after aggro handling, as it may have changed
             movementData = getMobMovementDataInternal(mob.uid);
         }
@@ -140,12 +158,12 @@ MobMovementManager::moveMobsInZone(int zoneId)
                 std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
                 movementData.nextMoveTime = currentTime + moveTime(rng_);
                 updateMobMovementData(mob.uid, movementData);
-                logger_.log("[DEBUG] Fixed non-aggressive mob UID: " + std::to_string(mob.uid) + " movement timing");
+                log_->info("[DEBUG] Fixed non-aggressive mob UID: " + std::to_string(mob.uid) + " movement timing");
             }
         }
 
         // Update combat state for this mob
-        updateMobCombatState(const_cast<MobDataStruct &>(mob), movementData, currentTime);
+        mobAIController_.updateMobCombatState(mob, movementData, currentTime);
 
         // Get fresh movement data after combat state update to ensure we have the latest state
         movementData = getMobMovementDataInternal(mob.uid);
@@ -167,7 +185,8 @@ MobMovementManager::moveMobsInZone(int zoneId)
         }
 
         // Check if it's time to move - respect timing even for mobs with targets
-        bool hasTarget = (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn);
+        bool hasTarget = (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn ||
+                          movementData.isFleeing || movementData.isBackpedaling);
         bool timeToMove = (currentTime >= movementData.nextMoveTime);
 
         // For mobs with targets or returning to spawn, allow faster movement
@@ -185,43 +204,35 @@ MobMovementManager::moveMobsInZone(int zoneId)
             continue;
         }
 
-        // Debug: Log movement state for troubleshooting
-        static std::unordered_set<int> debugLoggedMobs;
-        if (debugLoggedMobs.find(mob.uid) == debugLoggedMobs.end())
-        {
-            logger_.log("[DEBUG] Mob UID: " + std::to_string(mob.uid) +
-                        " state - isReturning: " + (movementData.isReturningToSpawn ? "true" : "false") +
-                        ", targetId: " + std::to_string(movementData.targetPlayerId) +
-                        ", nextMoveTime: " + std::to_string(movementData.nextMoveTime) +
-                        ", currentTime: " + std::to_string(currentTime));
-            debugLoggedMobs.insert(mob.uid);
-        }
-
         // Calculate new position based on mob behavior
         std::optional<MobMovementResult> movementResult;
 
-        if (movementData.isReturningToSpawn)
+        if (movementData.isFleeing || movementData.isBackpedaling)
+        {
+            // Flee or caster backpedal: move toward precomputed fleeTargetPosition
+            movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, movementData.fleeTargetPosition, params);
+            if (!movementResult.has_value())
+            {
+                // Reached flee destination — clear flags
+                movementData.isFleeing = false;
+                movementData.isBackpedaling = false;
+                updateMobMovementData(mob.uid, movementData);
+            }
+        }
+        else if (movementData.isReturningToSpawn)
         {
             // Return to spawn zone
-            movementResult = calculateReturnToSpawnMovement(mob, zone, mobsInZone, movementData.spawnPosition);
+            movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, movementData.spawnPosition, params);
         }
         else if (movementData.targetPlayerId > 0 && characterManager_)
         {
             // Chase target player
-            movementResult = calculateChaseMovement(mob, zone, mobsInZone, movementData.targetPlayerId);
+            movementResult = calculateChaseMovement(mob, zone, mobPositions, movementData.targetPlayerId, params);
         }
         else
         {
             // Normal random movement
-            movementResult = calculateNewPosition(mob, zone, mobsInZone);
-
-            // Debug log for mobs that just returned to spawn
-            static std::unordered_set<int> loggedMobs;
-            if (loggedMobs.find(mob.uid) == loggedMobs.end())
-            {
-                logger_.log("[DEBUG] Mob UID: " + std::to_string(mob.uid) + " starting normal patrol mode");
-                loggedMobs.insert(mob.uid);
-            }
+            movementResult = calculateNewPosition(mob, zone, mobPositions, params);
         }
         if (movementResult && movementResult->validMovement)
         {
@@ -243,21 +254,21 @@ MobMovementManager::moveMobsInZone(int zoneId)
             }
             else
             {
-                // Normal movement timing
-                std::uniform_real_distribution<float> speedTime(params.speedTimeMin, params.speedTimeMax);
-                movementData.nextMoveTime = currentTime + std::max(speedTime(rng_) / movementData.speedMultiplier, 7.0f);
-
-                // Random cooldown
-                std::uniform_real_distribution<float> randFactor(0.85f, 1.2f);
-                if (randFactor(rng_) > 1.15f)
-                {
-                    std::uniform_real_distribution<float> cooldown(params.cooldownMin, params.cooldownMax);
-                    movementData.nextMoveTime += cooldown(rng_) * 0.5f;
-                }
+                // Normal movement timing — use per-mob patrol speed (plan §5.3)
+                movementData.nextMoveTime = calculateNextMoveTime(currentTime, mob, movementData, params);
             }
 
-            // Store updated movement data
-            updateMobMovementData(mob.uid, movementData);
+            // Targeted write: update only direction/timing fields.
+            // This prevents overwriting targetPlayerId / combatState that may
+            // have been set by handleMobAttacked on another thread between our
+            // last re-read and now (RMW race fix).
+            updateMobMovementPositionFields(
+                mob.uid,
+                movementData.movementDirectionX,
+                movementData.movementDirectionY,
+                movementData.lastMoveTime,
+                movementData.nextMoveTime,
+                movementResult->speed);
 
             // Update position in MobInstanceManager
             mobInstanceManager_->updateMobPosition(mob.uid, movementResult->newPosition);
@@ -290,8 +301,17 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
         return false;
     }
 
-    // Get all mobs in zone for collision detection
-    auto mobsInZone = mobInstanceManager_->getMobInstancesInZone(zoneId);
+    // Get lightweight {uid,position} pairs for collision detection (4.1 optimization)
+    auto mobPositions = mobInstanceManager_->getMobPositionsInZone(zoneId);
+
+    // Fetch movement params once for the whole function (4.2 optimization)
+    auto params = getDefaultMovementParams();
+    {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        auto paramIt = zoneMovementParams_.find(zoneId);
+        if (paramIt != zoneMovementParams_.end())
+            params = paramIt->second;
+    }
 
     // Get movement data for this mob
     auto movementData = getMobMovementDataInternal(mobUID);
@@ -310,14 +330,14 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
     // Both aggressive mobs and non-aggressive mobs that have been attacked can have targets
     if ((mob.isAggressive || movementData.targetPlayerId > 0) && characterManager_)
     {
-        handlePlayerAggro(const_cast<MobDataStruct &>(mob), zone, movementData);
+        mobAIController_.handlePlayerAggro(mob, zone, movementData);
         // Refresh movement data after potential aggro changes to get latest state
         movementData = getMobMovementDataInternal(mobUID);
     }
 
     // Update combat state for this mob
     float currentTime = getCurrentGameTime();
-    updateMobCombatState(const_cast<MobDataStruct &>(mob), movementData, currentTime);
+    mobAIController_.updateMobCombatState(mob, movementData, currentTime);
 
     // Get fresh movement data after combat state update
     movementData = getMobMovementDataInternal(mobUID);
@@ -330,7 +350,8 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
     }
 
     // Check if it's time to move this mob (respect timing constraints)
-    bool hasTarget = (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn);
+    bool hasTarget = (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn ||
+                      movementData.isFleeing || movementData.isBackpedaling);
     bool timeToMove = (currentTime >= movementData.nextMoveTime);
 
     // For mobs with targets or returning to spawn, allow more frequent movement
@@ -350,18 +371,29 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
     // Calculate new position based on mob behavior
     std::optional<MobMovementResult> movementResult;
 
-    if (movementData.isReturningToSpawn)
+    if (movementData.isFleeing || movementData.isBackpedaling)
     {
-        movementResult = calculateReturnToSpawnMovement(mob, zone, mobsInZone, movementData.spawnPosition);
+        // Flee or caster backpedal: move toward precomputed fleeTargetPosition
+        movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, movementData.fleeTargetPosition, params);
+        if (!movementResult.has_value())
+        {
+            movementData.isFleeing = false;
+            movementData.isBackpedaling = false;
+            updateMobMovementData(mobUID, movementData);
+        }
+    }
+    else if (movementData.isReturningToSpawn)
+    {
+        movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, movementData.spawnPosition, params);
     }
     else if (movementData.targetPlayerId > 0 && characterManager_)
     {
-        movementResult = calculateChaseMovement(mob, zone, mobsInZone, movementData.targetPlayerId);
+        movementResult = calculateChaseMovement(mob, zone, mobPositions, movementData.targetPlayerId, params);
     }
     else
     {
         // Normal random movement
-        movementResult = calculateNewPosition(mob, zone, mobsInZone);
+        movementResult = calculateNewPosition(mob, zone, mobPositions, params);
     }
 
     if (movementResult && movementResult->validMovement)
@@ -373,8 +405,7 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
         // Update movement timing
         movementData.lastMoveTime = currentTime;
 
-        // Update next move time based on mob behavior
-        auto params = getDefaultMovementParams();
+        // Update next move time based on mob behavior (params already fetched above)
         if (movementData.targetPlayerId > 0)
         {
             // Use AI config for chase movement timing
@@ -387,12 +418,17 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
         }
         else
         {
-            // Normal movement timing
-            std::uniform_real_distribution<float> speedTime(params.speedTimeMin, params.speedTimeMax);
-            movementData.nextMoveTime = currentTime + std::max(speedTime(rng_) / movementData.speedMultiplier, 7.0f);
+            // Normal movement timing — use per-mob patrol speed (plan §5.3)
+            movementData.nextMoveTime = calculateNextMoveTime(currentTime, mob, movementData, params);
         }
 
-        updateMobMovementData(mobUID, movementData);
+        updateMobMovementPositionFields(
+            mobUID,
+            movementData.movementDirectionX,
+            movementData.movementDirectionY,
+            movementData.lastMoveTime,
+            movementData.nextMoveTime,
+            movementResult->speed);
 
         // Update position in MobInstanceManager
         mobInstanceManager_->updateMobPosition(mobUID, movementResult->newPosition);
@@ -407,19 +443,9 @@ std::optional<MobMovementResult>
 MobMovementManager::calculateNewPosition(
     const MobDataStruct &mob,
     const SpawnZoneStruct &zone,
-    const std::vector<MobDataStruct> &otherMobs)
+    const std::vector<std::pair<int, PositionStruct>> &otherMobs,
+    const MobMovementParams &params)
 {
-    // Get movement parameters for zone
-    auto params = getDefaultMovementParams();
-    {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        auto paramIt = zoneMovementParams_.find(zone.zoneId);
-        if (paramIt != zoneMovementParams_.end())
-        {
-            params = paramIt->second;
-        }
-    }
-
     // Get movement data for this mob
     auto movementData = getMobMovementDataInternal(mob.uid);
 
@@ -480,9 +506,54 @@ MobMovementManager::calculateNewPosition(
         }
         else
         {
-            // Random direction
-            std::uniform_real_distribution<float> randAngle(0.0f, 360.0f);
-            newAngle = randAngle(rng_) * (M_PI / 180.0f);
+            // Waypoint patrol (plan §5.1): pick/reuse a random target and steer toward it.
+            float wpDX = movementData.patrolTargetPoint.positionX - mob.position.positionX;
+            float wpDY = movementData.patrolTargetPoint.positionY - mob.position.positionY;
+            float wpDist = std::sqrt(wpDX * wpDX + wpDY * wpDY);
+
+            bool needNewWaypoint = !movementData.hasPatrolTarget || wpDist < 2.0f;
+            if (needNewWaypoint)
+            {
+                float innerMinX = minX + borderThreshold + 1.0f;
+                float innerMaxX = maxX - borderThreshold - 1.0f;
+                float innerMinY = minY + borderThreshold + 1.0f;
+                float innerMaxY = maxY - borderThreshold - 1.0f;
+
+                if (innerMaxX > innerMinX && innerMaxY > innerMinY)
+                {
+                    std::uniform_real_distribution<float> ptX(innerMinX, innerMaxX);
+                    std::uniform_real_distribution<float> ptY(innerMinY, innerMaxY);
+                    movementData.patrolTargetPoint.positionX = ptX(rng_);
+                    movementData.patrolTargetPoint.positionY = ptY(rng_);
+                    movementData.hasPatrolTarget = true;
+                    updateMobMovementData(mob.uid, movementData);
+                    // Recalculate direction vector to new waypoint
+                    wpDX = movementData.patrolTargetPoint.positionX - mob.position.positionX;
+                    wpDY = movementData.patrolTargetPoint.positionY - mob.position.positionY;
+                }
+            }
+
+            float angleToWaypoint = std::atan2(wpDY, wpDX);
+
+            // Direction inertia (plan §5.2): 70% chance of continuing ±30° from
+            // previous heading, 30% chance of re-aligning straight toward waypoint.
+            bool hasPrevDir = (movementData.movementDirectionX != 0.0f ||
+                               movementData.movementDirectionY != 0.0f);
+            std::uniform_real_distribution<float> coinFlip(0.0f, 1.0f);
+            if (hasPrevDir && coinFlip(rng_) < 0.70f)
+            {
+                float prevAngle = std::atan2(movementData.movementDirectionY,
+                    movementData.movementDirectionX);
+                // Blend ±30° (π/6) around previous heading
+                std::uniform_real_distribution<float> inertiaAngle(-M_PI / 6.0f, M_PI / 6.0f);
+                newAngle = prevAngle + inertiaAngle(rng_);
+            }
+            else
+            {
+                // Re-align to waypoint with a small random scatter (±15°)
+                std::uniform_real_distribution<float> scatter(-M_PI / 12.0f, M_PI / 12.0f);
+                newAngle = angleToWaypoint + scatter(rng_);
+            }
         }
 
         float tempDirectionX = cos(newAngle);
@@ -491,7 +562,7 @@ MobMovementManager::calculateNewPosition(
         float testNewY = mob.position.positionY + (tempDirectionY * stepSize);
 
         // Check if position is valid
-        if (isValidPosition(testNewX, testNewY, zone, otherMobs, mob))
+        if (isValidPosition(testNewX, testNewY, zone, otherMobs, mob, params))
         {
             newDirectionX = tempDirectionX;
             newDirectionY = tempDirectionY;
@@ -514,7 +585,7 @@ MobMovementManager::calculateNewPosition(
     float newY = std::clamp(mob.position.positionY + (newDirectionY * stepSize), minY, maxY);
 
     // Final validation
-    if (!isValidPosition(newX, newY, zone, otherMobs, mob))
+    if (!isValidPosition(newX, newY, zone, otherMobs, mob, params))
     {
         return std::nullopt; // No valid movement
     }
@@ -532,13 +603,15 @@ MobMovementManager::calculateNewPosition(
     result.newDirectionX = newDirectionX;
     result.newDirectionY = newDirectionY;
     result.validMovement = true;
+    // Patrol: server tick is 1 s, so stepSize units per tick ≈ units/second
+    result.speed = stepSize;
 
     return result;
 }
 
 bool
 MobMovementManager::isValidPosition(
-    float x, float y, const SpawnZoneStruct &zone, const std::vector<MobDataStruct> &otherMobs, const MobDataStruct &currentMob)
+    float x, float y, const SpawnZoneStruct &zone, const std::vector<std::pair<int, PositionStruct>> &otherMobs, const MobDataStruct &currentMob, const MobMovementParams &params)
 {
     // Check zone boundaries
     float minX = zone.posX - (zone.sizeX / 2.0f);
@@ -551,25 +624,22 @@ MobMovementManager::isValidPosition(
         return false;
     }
 
-    // Check collision with other mobs
-    auto params = getDefaultMovementParams();
-    {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        auto paramIt = zoneMovementParams_.find(zone.zoneId);
-        if (paramIt != zoneMovementParams_.end())
-        {
-            params = paramIt->second;
-        }
-    }
+    // Derive minimum separation from mob's own collision radius.
+    // Two mobs must be at least (radiusA + radiusB) apart to avoid overlap.
+    // Since otherMobs is a lightweight {uid,pos} list without radius data,
+    // we conservatively assume the neighbours share the same radius.
+    // Falls back to params.minSeparationDistance when radius is not set.
+    const float mobRadius = (currentMob.radius > 0) ? static_cast<float>(currentMob.radius) : 0.0f;
+    const float minSep = (mobRadius > 0.0f) ? (mobRadius * 2.0f) : params.minSeparationDistance;
 
     for (const auto &otherMob : otherMobs)
     {
-        if (otherMob.uid == currentMob.uid)
+        if (otherMob.first == currentMob.uid)
             continue;
 
-        float distance = sqrt(pow(x - otherMob.position.positionX, 2) +
-                              pow(y - otherMob.position.positionY, 2));
-        if (distance < params.minSeparationDistance)
+        float dx = x - otherMob.second.positionX;
+        float dy = y - otherMob.second.positionY;
+        if (dx * dx + dy * dy < minSep * minSep)
         {
             return false;
         }
@@ -580,19 +650,20 @@ MobMovementManager::isValidPosition(
 
 bool
 MobMovementManager::isValidPositionForChase(
-    float x, float y, const std::vector<MobDataStruct> &otherMobs, const MobDataStruct &currentMob)
+    float x, float y, const std::vector<std::pair<int, PositionStruct>> &otherMobs, const MobDataStruct &currentMob, const MobMovementParams &params)
 {
-    // For chase movement, we only check collision with other mobs, not zone boundaries
-    auto params = getDefaultMovementParams();
+    // Same radius-based separation as isValidPosition.
+    const float mobRadius = (currentMob.radius > 0) ? static_cast<float>(currentMob.radius) : 0.0f;
+    const float minSep = (mobRadius > 0.0f) ? (mobRadius * 2.0f) : params.minSeparationDistance;
 
     for (const auto &otherMob : otherMobs)
     {
-        if (otherMob.uid == currentMob.uid)
+        if (otherMob.first == currentMob.uid)
             continue;
 
-        float distance = sqrt(pow(x - otherMob.position.positionX, 2) +
-                              pow(y - otherMob.position.positionY, 2));
-        if (distance < params.minSeparationDistance)
+        float dx = x - otherMob.second.positionX;
+        float dy = y - otherMob.second.positionY;
+        if (dx * dx + dy * dy < minSep * minSep)
         {
             return false;
         }
@@ -622,41 +693,51 @@ MobMovementManager::getMobMovementData(int mobUID) const
 bool
 MobMovementManager::shouldSendMobUpdate(int mobUID, const PositionStruct &currentPosition)
 {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    // Phase-1: shared (read) lock – fast path for the common case where the mob
+    // has not moved far enough. Avoids exclusive contention on every tick.
+    {
+        std::shared_lock<std::shared_mutex> rlock(mutex_);
+        auto it = mobMovementData_.find(mobUID);
+        if (it != mobMovementData_.end())
+        {
+            float distance = calculateDistance(currentPosition, it->second.lastSentPosition);
+            if (distance < aiConfig_.minimumMoveDistance)
+                return false; // No write needed — bail out without exclusive lock
+        }
+    }
+
+    // Phase-2: exclusive (write) lock – only reached when the mob has moved enough
+    // or its record doesn’t exist yet. Re-check distance after acquiring the lock
+    // to handle the race where another thread already updated lastSentPosition.
+    std::unique_lock<std::shared_mutex> wlock(mutex_);
     auto it = mobMovementData_.find(mobUID);
     if (it == mobMovementData_.end())
     {
-        // First time, always send
         MobMovementData newData;
         newData.lastSentPosition = currentPosition;
         mobMovementData_[mobUID] = newData;
         return true;
     }
 
-    // Check if mob moved far enough from last sent position
     float distance = calculateDistance(currentPosition, it->second.lastSentPosition);
-    if (distance >= it->second.minimumMoveDistance)
+    if (distance < aiConfig_.minimumMoveDistance)
+        return false; // Another thread may have already updated lastSentPosition
+
+    it->second.lastSentPosition = currentPosition;
+
+    if (it->second.combatState != MobCombatState::PATROLLING)
     {
-        // Update last sent position
-        it->second.lastSentPosition = currentPosition;
-
-        // Log movement updates for mobs in combat states
-        if (it->second.combatState != MobCombatState::PATROLLING)
+        const char *stateNames[] = {"PATROLLING", "CHASING", "PREPARING_ATTACK", "ATTACKING", "ATTACK_COOLDOWN", "RETURNING", "EVADING", "FLEEING"};
+        int stateIndex = static_cast<int>(it->second.combatState);
+        if (stateIndex >= 0 && stateIndex < 8)
         {
-            const char *stateNames[] = {"PATROLLING", "CHASING", "PREPARING_ATTACK", "ATTACKING", "ATTACK_COOLDOWN", "RETURNING"};
-            int stateIndex = static_cast<int>(it->second.combatState);
-            if (stateIndex >= 0 && stateIndex < 6)
-            {
-                logger_.log("[MOVEMENT] Sending position update for mob " + std::to_string(mobUID) +
-                            " (state: " + stateNames[stateIndex] + ", distance moved: " +
-                            std::to_string(distance) + ")");
-            }
+            logger_.log("[MOVEMENT] Sending position update for mob " + std::to_string(mobUID) +
+                        " (state: " + stateNames[stateIndex] + ", distance moved: " +
+                        std::to_string(distance) + ")");
         }
-
-        return true;
     }
 
-    return false;
+    return true;
 }
 
 void
@@ -670,9 +751,9 @@ MobMovementManager::forceMobStateUpdate(int mobUID)
         it->second.lastSentPosition.positionX = -999999.0f;
         it->second.lastSentPosition.positionY = -999999.0f;
 
-        const char *stateNames[] = {"PATROLLING", "CHASING", "PREPARING_ATTACK", "ATTACKING", "ATTACK_COOLDOWN", "RETURNING"};
+        const char *stateNames[] = {"PATROLLING", "CHASING", "PREPARING_ATTACK", "ATTACKING", "ATTACK_COOLDOWN", "RETURNING", "EVADING", "FLEEING"};
         int stateIndex = static_cast<int>(it->second.combatState);
-        if (stateIndex >= 0 && stateIndex < 6)
+        if (stateIndex >= 0 && stateIndex < 8)
         {
             logger_.log("[COMBAT] Forcing state update for mob " + std::to_string(mobUID) +
                         " (state: " + stateNames[stateIndex] + ")");
@@ -715,134 +796,38 @@ MobMovementManager::updateMobMovementData(int mobUID, const MobMovementData &dat
 }
 
 void
-MobMovementManager::handleMobAttacked(int mobUID, int attackerPlayerId)
+MobMovementManager::updateMobMovementPositionFields(
+    int mobUID, float dirX, float dirY, float lastMoveTime, float nextMoveTime, float currentSpeed)
 {
-    if (!characterManager_)
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = mobMovementData_.find(mobUID);
+    if (it != mobMovementData_.end())
     {
-        logger_.logError("CharacterManager not set when handling mob attack");
-        return;
+        it->second.movementDirectionX = dirX;
+        it->second.movementDirectionY = dirY;
+        it->second.lastMoveTime = lastMoveTime;
+        it->second.nextMoveTime = nextMoveTime;
+        it->second.currentSpeedUnitsPerSec = currentSpeed;
     }
-
-    // Check if attacker is still alive before setting as target
-    if (!isTargetAlive(attackerPlayerId))
-    {
-        logger_.log("[INFO] Mob UID: " + std::to_string(mobUID) + " attacked by dead player " + std::to_string(attackerPlayerId) + ", ignoring");
-        return;
-    }
-
-    auto movementData = getMobMovementDataInternal(mobUID);
-    movementData.targetPlayerId = attackerPlayerId;
-    movementData.isReturningToSpawn = false;
-
-    // Force immediate movement by resetting next move time
-    movementData.nextMoveTime = getCurrentGameTime();
-
-    updateMobMovementData(mobUID, movementData);
-
-    logger_.log("[INFO] Mob UID: " + std::to_string(mobUID) + " is now targeting player " + std::to_string(attackerPlayerId));
 }
 
 void
-MobMovementManager::handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct &zone, MobMovementData &movementData)
+MobMovementManager::handleMobAttacked(int mobUID, int attackerPlayerId, int damage)
 {
-    if (!characterManager_)
-        return;
-
-    // 1) Проверяем валидность текущей цели (если есть)
-    if (movementData.targetPlayerId > 0)
-    {
-        auto currentTarget = characterManager_->getCharacterById(movementData.targetPlayerId);
-        if (currentTarget.characterId > 0 && isTargetAlive(movementData.targetPlayerId))
-        {
-            float distanceToTarget = calculateDistance(mob.position, currentTarget.characterPosition);
-            float maxChaseDistance = aiConfig_.aggroRange * aiConfig_.chaseDistanceMultiplier;
-
-            // Если цель слишком далеко, сбрасываем и начинаем возвращение
-            if (distanceToTarget > maxChaseDistance)
-            {
-                int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
-                movementData.targetPlayerId = 0;
-                movementData.isReturningToSpawn = true;
-                updateMobMovementData(mob.uid, movementData);
-
-                // Send target lost event to clients
-                sendMobTargetLost(mob, lostTargetId);
-
-                logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
-                            " lost target (distance " + std::to_string(distanceToTarget) +
-                            " > " + std::to_string(maxChaseDistance) + "), returning to spawn");
-                return;
-            }
-        }
-        else
-        {
-            // Цель исчезла — сразу возвращаемся
-            int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
-            movementData.targetPlayerId = 0;
-            movementData.isReturningToSpawn = true;
-            updateMobMovementData(mob.uid, movementData);
-
-            // Send target lost event to clients
-            sendMobTargetLost(mob, lostTargetId);
-
-            logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
-                        " target died or no longer exists, returning to spawn");
-            return;
-        }
-    }
-
-    // 3) Если нет цели и мы не в состоянии возврата — ищем новую
-    if (movementData.targetPlayerId == 0 && !movementData.isReturningToSpawn)
-    {
-        auto nearbyPlayers = characterManager_->getCharactersInZone(
-            mob.position.positionX,
-            mob.position.positionY,
-            aiConfig_.aggroRange);
-
-        if (!nearbyPlayers.empty() && canSearchNewTargets(mob.position, zone))
-        {
-            float closestDistance = aiConfig_.aggroRange + 1.0f;
-            int closestPlayerId = 0;
-
-            for (const auto &player : nearbyPlayers)
-            {
-                // Only consider alive players as targets
-                if (!isTargetAlive(player.characterId))
-                {
-                    continue;
-                }
-
-                float d = calculateDistance(mob.position, player.characterPosition);
-                if (d < closestDistance)
-                {
-                    closestDistance = d;
-                    closestPlayerId = player.characterId;
-                }
-            }
-
-            if (closestPlayerId > 0)
-            {
-                movementData.targetPlayerId = closestPlayerId;
-                movementData.isReturningToSpawn = false;
-                updateMobMovementData(mob.uid, movementData);
-
-                logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
-                            " found new target: " + std::to_string(closestPlayerId));
-            }
-        }
-    }
+    mobAIController_.handleMobAttacked(mobUID, attackerPlayerId, damage);
 }
 
 std::optional<MobMovementResult>
 MobMovementManager::calculateChaseMovement(
     const MobDataStruct &mob,
     const SpawnZoneStruct &zone,
-    const std::vector<MobDataStruct> &otherMobs,
-    int targetPlayerId)
+    const std::vector<std::pair<int, PositionStruct>> &otherMobs,
+    int targetPlayerId,
+    const MobMovementParams &params)
 {
     if (!characterManager_)
     {
-        logger_.logError("CharacterManager not available in calculateChaseMovement");
+        log_->error("CharacterManager not available in calculateChaseMovement");
         return std::nullopt;
     }
 
@@ -858,7 +843,7 @@ MobMovementManager::calculateChaseMovement(
     float distance = std::sqrt(dx * dx + dy * dy);
 
     // 2) Abandon if too far
-    float maxChaseDistance = aiConfig_.aggroRange * aiConfig_.chaseDistanceMultiplier;
+    float maxChaseDistance = mob.aggroRange * mob.chaseMultiplier;
     if (distance > maxChaseDistance)
     {
         auto updated = getMobMovementDataInternal(mob.uid);
@@ -888,29 +873,31 @@ MobMovementManager::calculateChaseMovement(
         // Send target lost event to clients
         sendMobTargetLost(mob, lostTargetId);
 
-        logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
-                    " too far from spawn zone, returning");
+        log_->info("[INFO] Mob UID: " + std::to_string(mob.uid) +
+                   " too far from spawn zone, returning");
         return std::nullopt;
     }
 
     constexpr float ATTACK_BUFFER = 10.0f;
 
     // 4) If within attack range → stop movement (combat state system will handle attacks)
-    static std::unordered_set<int> inRangeSet;
-    if (distance <= aiConfig_.attackRange + ATTACK_BUFFER)
     {
-        if (inRangeSet.insert(mob.uid).second)
+        std::lock_guard<std::mutex> lg(logMutex_);
+        if (distance <= mob.attackRange + ATTACK_BUFFER)
         {
-            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
-                        " reached attack range of player " + std::to_string(targetPlayerId) +
-                        " (distance: " + std::to_string(distance) + ") - stopping movement");
+            if (inRangeSet_.insert(mob.uid).second)
+            {
+                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
+                            " reached attack range of player " + std::to_string(targetPlayerId) +
+                            " (distance: " + std::to_string(distance) + ") - stopping movement");
+            }
+            // Don't move, let combat state system handle the attack sequence
+            return std::nullopt;
         }
-        // Don't move, let combat state system handle the attack sequence
-        return std::nullopt;
-    }
-    else
-    {
-        inRangeSet.erase(mob.uid);
+        else
+        {
+            inRangeSet_.erase(mob.uid);
+        }
     }
 
     // 5) Avoid jitter if extremely close
@@ -923,32 +910,60 @@ MobMovementManager::calculateChaseMovement(
     dx /= distance;
     dy /= distance;
 
-    // 7) Load movement parameters
-    auto params = getDefaultMovementParams();
-    {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        auto it = zoneMovementParams_.find(zone.zoneId);
-        if (it != zoneMovementParams_.end())
-            params = it->second;
-    }
-
-    // 8) Compute step size limited by attackRange
+    // 7) Compute step size limited by attackRange (params passed from caller)
     float maxStep = std::min(params.baseSpeedMax * 1.5f, params.maxStepSizeAbsolute);
-    float overshoot = distance - aiConfig_.attackRange;
+    float overshoot = distance - mob.attackRange;
     float stepSize = std::min(maxStep, overshoot);
     if (stepSize <= 0.0f)
     {
         return std::nullopt;
     }
 
-    // 9) New position
+    // 9) New position; record speed for client interpolation before computing final pos
+    const float chaseSpeed = (aiConfig_.chaseMovementInterval > 0.0f)
+                                 ? stepSize / aiConfig_.chaseMovementInterval
+                                 : stepSize;
     float newX = mob.position.positionX + dx * stepSize;
     float newY = mob.position.positionY + dy * stepSize;
 
-    // 10) Validate collisions (skip zone bounds)
-    if (!isValidPositionForChase(newX, newY, otherMobs, mob))
+    // 8+1) Validate collisions (skip zone bounds).
+    // If the direct path is blocked by another mob, try progressively wider
+    // deflection angles so mobs steer around each other instead of stacking.
+    if (!isValidPositionForChase(newX, newY, otherMobs, mob, params))
     {
-        return std::nullopt;
+        // Angles tried in order of increasing deviation so the mob always
+        // picks the least deflection that clears the obstacle.
+        static const float kDeflectAngles[] = {
+            static_cast<float>(M_PI) / 6.0f,  //  30°
+            -static_cast<float>(M_PI) / 6.0f, // -30°
+            static_cast<float>(M_PI) / 3.0f,  //  60°
+            -static_cast<float>(M_PI) / 3.0f, // -60°
+            static_cast<float>(M_PI) / 2.0f,  //  90°
+            -static_cast<float>(M_PI) / 2.0f, // -90°
+        };
+
+        const float baseAngle = std::atan2(dy, dx);
+        bool steeredAround = false;
+        for (float delta : kDeflectAngles)
+        {
+            const float testAngle = baseAngle + delta;
+            const float testDx = std::cos(testAngle);
+            const float testDy = std::sin(testAngle);
+            const float testX = mob.position.positionX + testDx * stepSize;
+            const float testY = mob.position.positionY + testDy * stepSize;
+            if (isValidPositionForChase(testX, testY, otherMobs, mob, params))
+            {
+                newX = testX;
+                newY = testY;
+                dx = testDx;
+                dy = testDy;
+                steeredAround = true;
+                break;
+            }
+        }
+
+        if (!steeredAround)
+            return std::nullopt;
     }
 
     // 11) Return movement result
@@ -960,6 +975,7 @@ MobMovementManager::calculateChaseMovement(
     result.newDirectionX = dx;
     result.newDirectionY = dy;
     result.validMovement = true;
+    result.speed = chaseSpeed;
     return result;
 }
 
@@ -967,22 +983,15 @@ std::optional<MobMovementResult>
 MobMovementManager::calculateReturnToSpawnMovement(
     const MobDataStruct &mob,
     const SpawnZoneStruct & /*zone*/,
-    const std::vector<MobDataStruct> & /*otherMobs*/,
-    const PositionStruct &spawnPosition)
+    const std::vector<std::pair<int, PositionStruct>> & /*otherMobs*/,
+    const PositionStruct &spawnPosition,
+    const MobMovementParams &params)
 {
     // Вектор к точке спавна
     float dx = spawnPosition.positionX - mob.position.positionX;
     float dy = spawnPosition.positionY - mob.position.positionY;
     float dist = std::sqrt(dx * dx + dy * dy);
 
-    // Получаем параметры движения
-    auto params = getDefaultMovementParams();
-    {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        auto it = zoneMovementParams_.find(mob.zoneId);
-        if (it != zoneMovementParams_.end())
-            params = it->second;
-    }
     float stepSize = params.baseSpeedMax;
 
     // Проверяем, находится ли моб уже очень близко к точке спавна
@@ -1024,6 +1033,9 @@ MobMovementManager::calculateReturnToSpawnMovement(
         result.newDirectionX = dx / dist;
         result.newDirectionY = dy / dist;
         result.validMovement = true;
+        result.speed = (aiConfig_.returnMovementInterval > 0.0f)
+                           ? stepSize / aiConfig_.returnMovementInterval
+                           : stepSize;
 
         logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) + " teleporting to spawn (distance: " +
                     std::to_string(dist) + ")");
@@ -1043,82 +1055,10 @@ MobMovementManager::calculateReturnToSpawnMovement(
     result.newDirectionX = dx;
     result.newDirectionY = dy;
     result.validMovement = true;
+    result.speed = (aiConfig_.returnMovementInterval > 0.0f)
+                       ? stepSize / aiConfig_.returnMovementInterval
+                       : stepSize;
     return result;
-}
-
-bool
-MobMovementManager::canAttackPlayer(const MobDataStruct &mob, int targetPlayerId, const MobMovementData &movementData)
-{
-    if (!characterManager_)
-    {
-        return false;
-    }
-
-    // Check attack cooldown
-    float currentTime = getCurrentGameTime();
-    float timeSinceLastAttack = currentTime - movementData.lastAttackTime;
-
-    if (timeSinceLastAttack < movementData.attackCooldown)
-    {
-        return false;
-    }
-
-    // Check if player exists and is in attack range
-    auto targetPlayer = characterManager_->getCharacterById(targetPlayerId);
-    if (targetPlayer.characterId == 0)
-    {
-        return false;
-    }
-
-    // Check if target is still alive using the dedicated method
-    if (!isTargetAlive(targetPlayerId))
-    {
-        return false;
-    }
-
-    float distance = calculateDistance(mob.position, targetPlayer.characterPosition);
-    return distance <= movementData.attackRange;
-}
-
-bool
-MobMovementManager::isTargetAlive(int targetPlayerId)
-{
-    if (!characterManager_)
-    {
-        return false;
-    }
-
-    auto targetPlayer = characterManager_->getCharacterById(targetPlayerId);
-    if (targetPlayer.characterId == 0)
-    {
-        return false;
-    }
-
-    // Check if target is still alive (health > 0)
-    return targetPlayer.characterCurrentHealth > 0;
-}
-
-void
-MobMovementManager::executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData)
-{
-    // Update attack time
-    movementData.lastAttackTime = getCurrentGameTime();
-    updateMobMovementData(mob.uid, movementData);
-
-    // Use new CombatSystem
-    if (combatSystem_)
-    {
-        // Используем новую систему скилов для атаки моба с конкретной целью
-        combatSystem_->processAIAttack(mob.uid, targetPlayerId);
-
-        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attacking player " +
-                    std::to_string(targetPlayerId) + " using new combat system");
-    }
-    else
-    {
-        // CombatSystem not available - this should not happen in production
-        logger_.logError("CombatSystem not available - mob attack cannot be processed!");
-    }
 }
 
 void
@@ -1126,7 +1066,7 @@ MobMovementManager::sendMobTargetLost(const MobDataStruct &mob, int lostTargetPl
 {
     if (!eventQueue_)
     {
-        logger_.logError("EventQueue not set - cannot send mob target lost event");
+        log_->error("EventQueue not set - cannot send mob target lost event");
         return;
     }
 
@@ -1162,7 +1102,7 @@ MobMovementManager::setAIConfig(const MobAIConfig &config)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     aiConfig_ = config;
-    logger_.log("[INFO] MobMovementManager: AI configuration updated");
+    log_->info("[INFO] MobMovementManager: AI configuration updated");
 }
 
 void
@@ -1173,310 +1113,13 @@ MobMovementManager::initializeMobMovementData(int mobUID)
     if (mobMovementData_.find(mobUID) == mobMovementData_.end())
     {
         MobMovementData newData;
-        // Initialize with AI config values
-        newData.aggroRange = aiConfig_.aggroRange;
-        newData.attackRange = aiConfig_.attackRange;
-        newData.attackCooldown = aiConfig_.attackCooldown;
-        newData.minimumMoveDistance = aiConfig_.minimumMoveDistance;
-
-        // Initialize combat state
+        // Combat state and timing initialisation only.
+        // aggroRange / attackRange / attackCooldown are read directly from
+        // MobDataStruct on use (migration 011 fields), so no copy is needed here.
         newData.combatState = MobCombatState::PATROLLING;
         newData.stateChangeTime = getCurrentGameTime();
 
         mobMovementData_[mobUID] = newData;
-    }
-}
-
-void
-MobMovementManager::updateMobCombatState(MobDataStruct &mob, MobMovementData &movementData, float currentTime)
-{
-    if (!characterManager_)
-        return;
-
-    float timeSinceStateChange = currentTime - movementData.stateChangeTime;
-
-    switch (movementData.combatState)
-    {
-    case MobCombatState::PATROLLING:
-        // Transition to chasing if target found
-        if (movementData.targetPlayerId > 0)
-        {
-            movementData.combatState = MobCombatState::CHASING;
-            movementData.stateChangeTime = currentTime;
-            updateMobMovementData(mob.uid, movementData); // Save state change
-            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " entering CHASING state");
-        }
-        break;
-
-    case MobCombatState::CHASING:
-        if (movementData.targetPlayerId == 0)
-        {
-            // Lost target, return to patrolling or returning
-            if (movementData.isReturningToSpawn)
-            {
-                movementData.combatState = MobCombatState::RETURNING;
-            }
-            else
-            {
-                movementData.combatState = MobCombatState::PATROLLING;
-            }
-            movementData.stateChangeTime = currentTime;
-            updateMobMovementData(mob.uid, movementData); // Save state change
-            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " lost target, returning to patrol");
-        }
-        else
-        {
-            // Check if target is still valid and alive
-            auto targetPlayer = characterManager_->getCharacterById(movementData.targetPlayerId);
-            if (targetPlayer.characterId == 0)
-            {
-                // Target no longer exists, clear target and return to patrolling
-                int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
-                movementData.targetPlayerId = 0;
-                movementData.combatState = MobCombatState::PATROLLING;
-                movementData.stateChangeTime = currentTime;
-                updateMobMovementData(mob.uid, movementData);
-
-                // Send target lost event to clients
-                sendMobTargetLost(mob, lostTargetId);
-
-                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target no longer exists, returning to patrol");
-            }
-            else if (!isTargetAlive(movementData.targetPlayerId))
-            {
-                // Target is dead, clear target and return to patrolling
-                int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
-                movementData.targetPlayerId = 0;
-                movementData.combatState = MobCombatState::PATROLLING;
-                movementData.stateChangeTime = currentTime;
-                updateMobMovementData(mob.uid, movementData);
-
-                // Send target lost event to clients
-                sendMobTargetLost(mob, lostTargetId);
-
-                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target is dead, returning to patrol");
-            }
-            else
-            {
-                // Check if we've been chasing too long (add timeout to prevent infinite chase)
-                float timeSinceChasing = currentTime - movementData.stateChangeTime;
-                const float maxChaseTime = 30.0f; // 30 seconds timeout
-                if (timeSinceChasing > maxChaseTime)
-                {
-                    // Chase timeout, give up and return to spawn
-                    int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
-                    movementData.targetPlayerId = 0;
-                    movementData.combatState = MobCombatState::RETURNING;
-                    movementData.stateChangeTime = currentTime;
-                    movementData.isReturningToSpawn = true;
-                    updateMobMovementData(mob.uid, movementData);
-
-                    // Send target lost event to clients
-                    sendMobTargetLost(mob, lostTargetId);
-
-                    logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " chase timeout, returning to spawn");
-                }
-                else
-                {
-                    // Check if in attack range
-                    float distance = calculateDistance(mob.position, targetPlayer.characterPosition);
-                    if (distance <= aiConfig_.attackRange)
-                    {
-                        // Combat initiation handled by new CombatSystem - just log state change
-                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " in attack range, preparing attack");
-
-                        // Enter prepare attack state
-                        movementData.combatState = MobCombatState::PREPARING_ATTACK;
-                        movementData.stateChangeTime = currentTime;
-                        updateMobMovementData(mob.uid, movementData); // Save state change
-                        forceMobStateUpdate(mob.uid);                 // Force state update to clients
-                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " initiated combat, preparing to attack player " + std::to_string(movementData.targetPlayerId) + " (distance: " + std::to_string(distance) + ")");
-                    }
-                    else if (distance > aiConfig_.aggroRange * aiConfig_.chaseDistanceMultiplier)
-                    {
-                        // Target moved too far away, give up chase and return to spawn
-                        int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
-                        movementData.targetPlayerId = 0;
-                        movementData.combatState = MobCombatState::RETURNING;
-                        movementData.stateChangeTime = currentTime;
-                        movementData.isReturningToSpawn = true;
-                        updateMobMovementData(mob.uid, movementData);
-
-                        // Send target lost event to clients
-                        sendMobTargetLost(mob, lostTargetId);
-
-                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target too far away (distance: " + std::to_string(distance) + "), returning to spawn");
-                    }
-                }
-            }
-        }
-        break;
-
-    case MobCombatState::PREPARING_ATTACK:
-        // Skip processing if mob is already transitioning to returning state
-        if (movementData.isReturningToSpawn)
-        {
-            movementData.combatState = MobCombatState::RETURNING;
-            movementData.stateChangeTime = currentTime;
-            updateMobMovementData(mob.uid, movementData);
-            break;
-        }
-
-        if (timeSinceStateChange >= movementData.attackPrepareTime)
-        {
-            // Check if target is still in range and can attack
-            if (movementData.targetPlayerId > 0 && canAttackPlayer(mob, movementData.targetPlayerId, movementData))
-            {
-                // Animation handled by new CombatSystem - just log state change
-                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " starting attack sequence");
-
-                movementData.combatState = MobCombatState::ATTACKING;
-                movementData.stateChangeTime = currentTime;
-
-                updateMobMovementData(mob.uid, movementData); // Save state change
-                forceMobStateUpdate(mob.uid);                 // Force state update to clients
-            }
-            else
-            {
-                // Check if target is dead before other checks
-                if (movementData.targetPlayerId > 0 && !isTargetAlive(movementData.targetPlayerId))
-                {
-                    // Target is dead, clear target and return to patrolling
-                    int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
-                    movementData.targetPlayerId = 0;
-                    movementData.combatState = MobCombatState::PATROLLING;
-                    movementData.stateChangeTime = currentTime;
-                    updateMobMovementData(mob.uid, movementData);
-
-                    // Send target lost event to clients
-                    sendMobTargetLost(mob, lostTargetId);
-
-                    logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target is dead during prepare attack, returning to patrol");
-                }
-                else
-                {
-                    // Target moved away or can't attack, check if we should continue chasing
-                    float timeSincePreparingAttack = currentTime - movementData.stateChangeTime;
-
-                    // If been trying to attack for too long, give up and return to spawn
-                    if (timeSincePreparingAttack > 10.0f) // 10 seconds timeout
-                    {
-                        int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
-                        movementData.targetPlayerId = 0;
-                        movementData.combatState = MobCombatState::RETURNING;
-                        movementData.stateChangeTime = currentTime;
-                        movementData.isReturningToSpawn = true;
-                        updateMobMovementData(mob.uid, movementData);
-
-                        // Send target lost event to clients
-                        sendMobTargetLost(mob, lostTargetId);
-
-                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attack timeout, returning to spawn");
-                    }
-                    else
-                    {
-                        // Return to chasing, but limit log spam
-                        movementData.combatState = MobCombatState::CHASING;
-                        movementData.stateChangeTime = currentTime;
-                        updateMobMovementData(mob.uid, movementData);
-
-                        // Only log occasionally to avoid spam
-                        static std::map<int, float> lastLogTime;
-                        if (currentTime - lastLogTime[mob.uid] > 2.0f) // Log max once per 2 seconds per mob
-                        {
-                            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target moved away, returning to chase");
-                            lastLogTime[mob.uid] = currentTime;
-                        }
-                    }
-                }
-            }
-            break;
-
-        case MobCombatState::ATTACKING:
-            if (timeSinceStateChange >= movementData.attackDuration)
-            {
-                // Attack duration finished, execute the attack now
-                if (movementData.targetPlayerId > 0 && canAttackPlayer(mob, movementData.targetPlayerId, movementData))
-                {
-                    logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " executing attack after animation");
-                    executeMobAttack(mob, movementData.targetPlayerId, movementData);
-                }
-                else
-                {
-                    if (movementData.targetPlayerId > 0 && !isTargetAlive(movementData.targetPlayerId))
-                    {
-                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attack missed - target is dead");
-                    }
-                    else
-                    {
-                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attack missed - target moved away");
-                    }
-                }
-
-                // Attack finished, enter cooldown
-                movementData.combatState = MobCombatState::ATTACK_COOLDOWN;
-                movementData.stateChangeTime = currentTime;
-                logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attack finished, entering cooldown");
-                updateMobMovementData(mob.uid, movementData); // Save state change
-                forceMobStateUpdate(mob.uid);                 // Force state update to clients
-            }
-            break;
-
-        case MobCombatState::ATTACK_COOLDOWN:
-            if (timeSinceStateChange >= movementData.postAttackCooldown)
-            {
-                // Cooldown finished, return to chasing if target still exists and is alive
-                if (movementData.targetPlayerId > 0)
-                {
-                    if (!isTargetAlive(movementData.targetPlayerId))
-                    {
-                        // Target is dead, clear target and return to patrolling
-                        int lostTargetId = movementData.targetPlayerId; // Save target ID before clearing
-                        movementData.targetPlayerId = 0;
-                        movementData.combatState = MobCombatState::PATROLLING;
-                        movementData.stateChangeTime = currentTime;
-                        updateMobMovementData(mob.uid, movementData);
-
-                        // Send target lost event to clients
-                        sendMobTargetLost(mob, lostTargetId);
-
-                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " target is dead after cooldown, returning to patrol");
-                    }
-                    else
-                    {
-                        movementData.combatState = MobCombatState::CHASING;
-                        movementData.stateChangeTime = currentTime;
-                        updateMobMovementData(mob.uid, movementData); // Save state change
-                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " cooldown finished, resuming chase");
-                    }
-                }
-                else if (movementData.isReturningToSpawn)
-                {
-                    movementData.combatState = MobCombatState::RETURNING;
-                    movementData.stateChangeTime = currentTime;
-                    updateMobMovementData(mob.uid, movementData); // Save state change
-                }
-                else
-                {
-                    movementData.combatState = MobCombatState::PATROLLING;
-                    movementData.stateChangeTime = currentTime;
-                    updateMobMovementData(mob.uid, movementData); // Save state change
-                }
-            }
-            break;
-        }
-        break;
-
-    case MobCombatState::RETURNING:
-        if (!movementData.isReturningToSpawn)
-        {
-            // Finished returning, back to patrolling
-            movementData.combatState = MobCombatState::PATROLLING;
-            movementData.stateChangeTime = currentTime;
-            updateMobMovementData(mob.uid, movementData); // Save state change
-            logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " finished returning, back to patrol");
-        }
-        break;
     }
 }
 
@@ -1494,7 +1137,8 @@ MobMovementManager::canPerformAction(const MobMovementData &movementData, float 
     case MobCombatState::PREPARING_ATTACK:
     case MobCombatState::ATTACKING:
     case MobCombatState::ATTACK_COOLDOWN:
-        return false; // No movement during attack phases
+    case MobCombatState::EVADING:
+        return false; // No movement during attack phases or evade window
     }
     return false;
 }
@@ -1535,6 +1179,27 @@ MobMovementManager::canSearchNewTargets(const PositionStruct &mobPos, const Spaw
     // Can search for targets if close enough to zone
     return distanceFromZoneEdge <= aiConfig_.newTargetZoneDistance;
 }
+
+float
+MobMovementManager::calculateNextMoveTime(float currentTime,
+    const MobDataStruct &mob,
+    const MobMovementData &movementData,
+    const MobMovementParams &params)
+{
+    std::uniform_real_distribution<float> speedTime(params.speedTimeMin, params.speedTimeMax);
+    float patrolSpeedFactor = (mob.patrolSpeed > 0.01f) ? mob.patrolSpeed : movementData.speedMultiplier;
+    float nextTime = currentTime + std::max(speedTime(rng_) / patrolSpeedFactor, 2.0f);
+
+    // Optional random cooldown pause to add unpredictability
+    std::uniform_real_distribution<float> randFactor(0.85f, 1.2f);
+    if (randFactor(rng_) > 1.15f)
+    {
+        std::uniform_real_distribution<float> cooldown(params.cooldownMin, params.cooldownMax);
+        nextTime += cooldown(rng_) * 0.5f;
+    }
+    return nextTime;
+}
+
 bool
 MobMovementManager::shouldStopChasing(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {

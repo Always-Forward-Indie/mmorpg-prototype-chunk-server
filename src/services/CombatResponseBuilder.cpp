@@ -4,10 +4,12 @@
 #include "services/MobInstanceManager.hpp"
 #include "utils/Logger.hpp"
 #include "utils/ResponseBuilder.hpp"
+#include <spdlog/logger.h>
 
 CombatResponseBuilder::CombatResponseBuilder(GameServices *gameServices)
     : gameServices_(gameServices)
 {
+    log_ = gameServices_->getLogger().getSystem("combat");
 }
 
 nlohmann::json
@@ -233,4 +235,19 @@ CombatResponseBuilder::getCombatTargetTypeString(CombatTargetType targetType)
     default:
         return "UNKNOWN";
     }
+}
+
+nlohmann::json
+CombatResponseBuilder::buildEffectTickBroadcast(const EffectTickResult &tick)
+{
+    nlohmann::json packet;
+    packet["header"]["eventType"] = "effectTick";
+    packet["body"]["characterId"] = tick.characterId;
+    packet["body"]["effectSlug"] = tick.effectSlug;
+    packet["body"]["effectTypeSlug"] = tick.effectTypeSlug;
+    packet["body"]["value"] = tick.value;
+    packet["body"]["newHealth"] = tick.newHealth;
+    packet["body"]["newMana"] = tick.newMana;
+    packet["body"]["targetDied"] = tick.targetDied;
+    return packet;
 }

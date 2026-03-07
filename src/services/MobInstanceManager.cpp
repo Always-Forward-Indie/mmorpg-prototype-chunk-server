@@ -3,11 +3,33 @@
 #include "events/EventQueue.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <unordered_map>
+#include <spdlog/logger.h>
 
 MobInstanceManager::MobInstanceManager(Logger &logger)
     : logger_(logger), eventQueue_(nullptr)
 {
+    log_ = logger.getSystem("mob");
+}
+
+void
+MobInstanceManager::applyBulkAttributes(const std::vector<MobAttributeStruct> &attrs)
+{
+    // Group incoming attributes by mob template id
+    std::unordered_map<int, std::vector<MobAttributeStruct>> byType;
+    for (const auto &a : attrs)
+        byType[a.mob_id].push_back(a);
+
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    for (auto &[uid, instance] : mobInstances_)
+    {
+        auto it = byType.find(instance.id);
+        if (it != byType.end())
+        {
+            instance.attributes = it->second;
+        }
+    }
 }
 
 void
@@ -24,7 +46,7 @@ MobInstanceManager::registerMobInstance(const MobDataStruct &mobInstance)
     // Check if UID already exists
     if (mobInstances_.find(mobInstance.uid) != mobInstances_.end())
     {
-        logger_.logError("Mob instance with UID " + std::to_string(mobInstance.uid) + " already exists");
+        log_->error("Mob instance with UID " + std::to_string(mobInstance.uid) + " already exists");
         return false;
     }
 
@@ -56,11 +78,11 @@ MobInstanceManager::unregisterMobInstance(int mobUID)
         // Remove from main map
         mobInstances_.erase(it);
 
-        logger_.log("[INFO] Unregistered mob instance UID: " + std::to_string(mobUID));
+        log_->info("[INFO] Unregistered mob instance UID: " + std::to_string(mobUID));
     }
     else
     {
-        logger_.logError("Attempted to unregister non-existent mob UID: " + std::to_string(mobUID));
+        log_->error("Attempted to unregister non-existent mob UID: " + std::to_string(mobUID));
     }
 }
 
@@ -100,6 +122,29 @@ MobInstanceManager::getMobInstancesInZone(int zoneId) const
     return result;
 }
 
+std::vector<std::pair<int, PositionStruct>>
+MobInstanceManager::getMobPositionsInZone(int zoneId) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    std::vector<std::pair<int, PositionStruct>> result;
+
+    auto zoneIt = mobsByZone_.find(zoneId);
+    if (zoneIt != mobsByZone_.end())
+    {
+        result.reserve(zoneIt->second.size());
+        for (int mobUID : zoneIt->second)
+        {
+            auto mobIt = mobInstances_.find(mobUID);
+            if (mobIt != mobInstances_.end())
+            {
+                result.emplace_back(mobUID, mobIt->second.position);
+            }
+        }
+    }
+
+    return result;
+}
+
 bool
 MobInstanceManager::updateMobPosition(int mobUID, const PositionStruct &position)
 {
@@ -109,21 +154,22 @@ MobInstanceManager::updateMobPosition(int mobUID, const PositionStruct &position
     if (it != mobInstances_.end())
     {
         it->second.position = position;
-        // Only log position updates very rarely to prevent spam
-        static std::unordered_map<int, float> lastLogTime;
+        // Only log position updates very rarely to prevent spam.
+        // positionLogThrottleMap_ is already protected by unique_lock above.
         float currentTime = std::chrono::duration<float>(std::chrono::steady_clock::now().time_since_epoch()).count();
-        if (lastLogTime[mobUID] == 0 || (currentTime - lastLogTime[mobUID]) > 30.0f) // Log every 30 seconds max
+        float &lastLog = positionLogThrottleMap_[mobUID];
+        if (lastLog == 0.0f || (currentTime - lastLog) > 30.0f) // Log every 30 seconds max
         {
             logger_.log("[DEBUG] Updated mob " + std::to_string(mobUID) + " position to (" +
                         std::to_string(position.positionX) + ", " +
                         std::to_string(position.positionY) + ", " +
                         std::to_string(position.positionZ) + ")");
-            lastLogTime[mobUID] = currentTime;
+            lastLog = currentTime;
         }
         return true;
     }
 
-    logger_.logError("Failed to update position for mob UID: " + std::to_string(mobUID));
+    log_->error("Failed to update position for mob UID: " + std::to_string(mobUID));
     return false;
 }
 
@@ -135,7 +181,7 @@ MobInstanceManager::updateMobHealth(int mobUID, int health)
     auto it = mobInstances_.find(mobUID);
     if (it == mobInstances_.end())
     {
-        logger_.logError("Failed to update health for mob UID: " + std::to_string(mobUID));
+        log_->error("Failed to update health for mob UID: " + std::to_string(mobUID));
         return {false, false, false};
     }
 
@@ -144,7 +190,7 @@ MobInstanceManager::updateMobHealth(int mobUID, int health)
     // Don't process any health updates on already dead mobs
     if (wasAlreadyDead)
     {
-        logger_.log("[WARNING] Attempted to update health on already dead mob " + std::to_string(mobUID));
+        log_->info("[WARNING] Attempted to update health on already dead mob " + std::to_string(mobUID));
         return {false, false, true};
     }
 
@@ -156,8 +202,9 @@ MobInstanceManager::updateMobHealth(int mobUID, int health)
     if (health <= 0)
     {
         it->second.isDead = true;
+        it->second.deathTimestamp = std::chrono::steady_clock::now();
         mobDied = true;
-        logger_.log("[INFO] Mob " + std::to_string(mobUID) + " has died");
+        log_->info("[INFO] Mob " + std::to_string(mobUID) + " has died");
 
         // Send event for loot generation
         if (eventQueue_)
@@ -197,7 +244,101 @@ MobInstanceManager::updateMobMana(int mobUID, int mana)
         return true;
     }
 
-    logger_.logError("Failed to update mana for mob UID: " + std::to_string(mobUID));
+    log_->error("Failed to update mana for mob UID: " + std::to_string(mobUID));
+    return false;
+}
+
+MobHealthUpdateResult
+MobInstanceManager::applyDamageToMob(int mobUID, int damageAmount)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+
+    auto it = mobInstances_.find(mobUID);
+    if (it == mobInstances_.end())
+    {
+        log_->error("[applyDamageToMob] Mob UID not found: " + std::to_string(mobUID));
+        return {false, false, false, 0, 0};
+    }
+
+    if (it->second.isDead)
+    {
+        return {false, false, true, 0, it->second.currentMana};
+    }
+
+    int newHealth = std::max(0, it->second.currentHealth - damageAmount);
+    it->second.currentHealth = newHealth;
+
+    bool mobDied = (newHealth <= 0);
+    if (mobDied)
+    {
+        it->second.isDead = true;
+        it->second.deathTimestamp = std::chrono::steady_clock::now();
+        logger_.log("[INFO] Mob " + std::to_string(mobUID) + " has died from " + std::to_string(damageAmount) + " damage");
+
+        if (eventQueue_)
+        {
+            nlohmann::json mobLootData;
+            mobLootData["mobId"] = it->second.id;
+            mobLootData["mobUID"] = mobUID;
+            mobLootData["positionX"] = it->second.position.positionX;
+            mobLootData["positionY"] = it->second.position.positionY;
+            mobLootData["positionZ"] = it->second.position.positionZ;
+            mobLootData["zoneId"] = it->second.zoneId;
+            eventQueue_->push(Event(Event::MOB_LOOT_GENERATION, 0, mobLootData));
+        }
+    }
+
+    return {true, mobDied, false, newHealth, it->second.currentMana};
+}
+
+MobHealthUpdateResult
+MobInstanceManager::applyHealToMob(int mobUID, int healAmount)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+
+    auto it = mobInstances_.find(mobUID);
+    if (it == mobInstances_.end())
+    {
+        log_->error("[applyHealToMob] Mob UID not found: " + std::to_string(mobUID));
+        return {false, false, false, 0, 0};
+    }
+
+    int newHealth = std::min(it->second.maxHealth,
+        it->second.currentHealth + healAmount);
+    it->second.currentHealth = newHealth;
+
+    return {true, false, false, newHealth, it->second.currentMana};
+}
+
+int
+MobInstanceManager::applyManaCostToMob(int mobUID, int costAmount)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+
+    auto it = mobInstances_.find(mobUID);
+    if (it != mobInstances_.end())
+    {
+        int newMana = std::max(0, it->second.currentMana - costAmount);
+        it->second.currentMana = newMana;
+        return newMana;
+    }
+
+    log_->error("[applyManaCostToMob] Mob UID not found: " + std::to_string(mobUID));
+    return 0;
+}
+
+bool
+MobInstanceManager::trySpendMana(int mobUID, int amount)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = mobInstances_.find(mobUID);
+    if (it != mobInstances_.end())
+    {
+        if (it->second.currentMana < amount)
+            return false;
+        it->second.currentMana -= amount;
+        return true;
+    }
     return false;
 }
 
@@ -223,14 +364,15 @@ MobInstanceManager::markMobAsDead(int mobUID)
     auto it = mobInstances_.find(mobUID);
     if (it == mobInstances_.end())
     {
-        logger_.logError("Failed to mark mob as dead - UID not found: " + std::to_string(mobUID));
+        log_->error("Failed to mark mob as dead - UID not found: " + std::to_string(mobUID));
         return false;
     }
 
     bool wasAlive = !it->second.isDead;
     it->second.isDead = true;
     it->second.currentHealth = 0;
-    logger_.log("[INFO] Marked mob " + std::to_string(mobUID) + " as dead");
+    it->second.deathTimestamp = std::chrono::steady_clock::now();
+    log_->info("[INFO] Marked mob " + std::to_string(mobUID) + " as dead");
 
     return true;
 }
@@ -240,6 +382,23 @@ MobInstanceManager::getAllMobInstances() const
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     return mobInstances_;
+}
+
+std::vector<MobDataStruct>
+MobInstanceManager::getMobsInRange(float centerX, float centerY, float radius) const
+{
+    std::vector<MobDataStruct> result;
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    for (const auto &[uid, mob] : mobInstances_)
+    {
+        if (mob.isDead)
+            continue;
+        float dx = mob.position.positionX - centerX;
+        float dy = mob.position.positionY - centerY;
+        if (std::sqrt(dx * dx + dy * dy) <= radius)
+            result.push_back(mob);
+    }
+    return result;
 }
 
 int

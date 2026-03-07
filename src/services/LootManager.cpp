@@ -4,6 +4,7 @@
 #include "services/InventoryManager.hpp"
 #include <algorithm>
 #include <cmath>
+#include <spdlog/logger.h>
 
 // Static member initialization
 int LootManager::nextDroppedItemUID_ = 1;
@@ -11,6 +12,7 @@ int LootManager::nextDroppedItemUID_ = 1;
 LootManager::LootManager(ItemManager &itemManager, Logger &logger)
     : itemManager_(itemManager), logger_(logger), eventQueue_(nullptr), inventoryManager_(nullptr), randomGenerator_(randomDevice_())
 {
+    log_ = logger.getSystem("item");
 }
 
 void
@@ -37,7 +39,7 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
 
         if (lootTable.empty())
         {
-            logger_.log("[LOOT] No loot table found for mob ID " + std::to_string(mobId));
+            log_->info("[LOOT] No loot table found for mob ID " + std::to_string(mobId));
             return droppedItems;
         }
 
@@ -49,16 +51,18 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
 
         for (const auto &lootEntry : lootTable)
         {
-            // Get item info to check if it's a harvest-only item
-            ItemDataStruct itemInfo = itemManager_.getItemById(lootEntry.itemId);
-
-            // Skip items that are harvest-only (can only be obtained through harvesting)
-            if (itemInfo.isHarvest)
+            // Skip items that are harvest-only (can only be obtained through harvesting).
+            // The isHarvestOnly flag on the loot entry is the authoritative source
+            // (set from mob_loot_info.is_harvest_only, migration 013).
+            if (lootEntry.isHarvestOnly)
             {
-                logger_.log("[LOOT] Skipping harvest-only item " + itemInfo.name + " (ID: " +
+                logger_.log("[LOOT] Skipping harvest-only item (ID: " +
                             std::to_string(lootEntry.itemId) + ") from regular drop");
                 continue;
             }
+
+            // Retrieve item info for name logging
+            ItemDataStruct itemInfo = itemManager_.getItemById(lootEntry.itemId);
 
             float randomRoll = distribution(randomGenerator_);
 
@@ -72,7 +76,16 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
                 DroppedItemStruct droppedItem;
                 droppedItem.uid = generateDroppedItemUID();
                 droppedItem.itemId = lootEntry.itemId;
-                droppedItem.quantity = 1; // Could be configurable later
+                // Randomise quantity within [minQuantity, maxQuantity] (migration 014)
+                if (lootEntry.maxQuantity > lootEntry.minQuantity)
+                {
+                    std::uniform_int_distribution<int> qtyDist(lootEntry.minQuantity, lootEntry.maxQuantity);
+                    droppedItem.quantity = qtyDist(randomGenerator_);
+                }
+                else
+                {
+                    droppedItem.quantity = lootEntry.minQuantity;
+                }
                 droppedItem.position = position;
 
                 // Add random circular offset around the mob's death position
@@ -187,13 +200,13 @@ LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruc
         auto it = droppedItems_.find(itemUID);
         if (it == droppedItems_.end())
         {
-            logger_.logError("Attempted to pickup non-existent dropped item UID: " + std::to_string(itemUID));
+            log_->error("Attempted to pickup non-existent dropped item UID: " + std::to_string(itemUID));
             return false;
         }
 
         if (!it->second.canBePickedUp)
         {
-            logger_.logError("Attempted to pickup item that cannot be picked up, UID: " + std::to_string(itemUID));
+            log_->error("Attempted to pickup item that cannot be picked up, UID: " + std::to_string(itemUID));
             return false;
         }
 
@@ -236,7 +249,7 @@ LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruc
     }
     else
     {
-        logger_.logError("[LOOT] InventoryManager not set - cannot add item to inventory");
+        log_->error("[LOOT] InventoryManager not set - cannot add item to inventory");
         return false;
     }
 
@@ -261,7 +274,7 @@ LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruc
         else
         {
             // Item was picked up by someone else in the meantime
-            logger_.logError("[LOOT] Item UID " + std::to_string(itemUID) + " was already picked up by another player");
+            log_->error("[LOOT] Item UID " + std::to_string(itemUID) + " was already picked up by another player");
 
             // We need to remove the item from inventory since it was already taken
             if (inventoryManager_)
@@ -291,7 +304,7 @@ LootManager::cleanupOldDroppedItems(int maxAgeSeconds)
         auto age = currentTime - it->second.dropTime;
         if (age > maxAge)
         {
-            logger_.log("[LOOT] Cleaning up old dropped item UID: " + std::to_string(it->first));
+            log_->info("[LOOT] Cleaning up old dropped item UID: " + std::to_string(it->first));
             it = droppedItems_.erase(it);
             cleanedUp++;
         }
@@ -303,7 +316,7 @@ LootManager::cleanupOldDroppedItems(int maxAgeSeconds)
 
     if (cleanedUp > 0)
     {
-        logger_.log("[LOOT] Cleaned up " + std::to_string(cleanedUp) + " old dropped items");
+        log_->info("[LOOT] Cleaned up " + std::to_string(cleanedUp) + " old dropped items");
     }
 }
 

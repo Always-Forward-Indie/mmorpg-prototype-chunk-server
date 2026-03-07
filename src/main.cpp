@@ -23,6 +23,7 @@ signalHandler(int signal)
 int
 main()
 {
+    Logger logger("chunk-server");
     try
     {
         // Устанавливаем обработчик сигналов (Ctrl+C)
@@ -31,8 +32,6 @@ main()
 
         // Initialize Config
         Config config;
-        // Initialize Logger
-        Logger logger;
         // Get configs for connections to servers from config.json
         auto configs = config.parseConfig("config.json");
 
@@ -83,13 +82,18 @@ main()
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
-        std::cout << "Shutting down gracefully..." << std::endl;
+        logger.info("Shutting down gracefully...");
+
+        // HIGH-5: explicit ordered shutdown
+        // 1. Stop event queues and wake all consumer threads
+        chunkServer.stop(); // sets running_=false, stops queues + scheduler
+        // 2. Stop the network I/O (done in NetworkManager destructor upon scope exit)
 
         return 0;
     }
     catch (const std::exception &e)
     {
-        std::cerr << "Error: " << e.what() << std::endl;
+        logger.critical("Fatal error: " + std::string(e.what()));
         return 1;
     }
 }

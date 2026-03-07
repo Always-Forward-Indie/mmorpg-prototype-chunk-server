@@ -72,4 +72,5 @@ class DialogueManager
     std::unordered_map<int, std::vector<NPCDialogueMappingStruct>> npcMappings_;
     bool loaded_ = false;
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
 };

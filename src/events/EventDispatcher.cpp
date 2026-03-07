@@ -1,6 +1,7 @@
 #include "events/EventDispatcher.hpp"
 #include "utils/JSONParser.hpp"
 #include <boost/asio.hpp>
+#include <spdlog/logger.h>
 
 EventDispatcher::EventDispatcher(
     EventQueue &eventQueue,
@@ -12,11 +13,16 @@ EventDispatcher::EventDispatcher(
       chunkServer_(chunkServer),
       gameServices_(gameServices)
 {
+    log_ = gameServices_.getLogger().getSystem("events");
 }
 
 void
 EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
+    // CRITICAL-3 fix: eventsBatch_ is a shared member; serialise all dispatch() invocations
+    // so concurrent io_context threads cannot race on it.
+    std::lock_guard<std::mutex> dispatchLock(dispatchMutex_);
+
     if (context.eventType == "joinGameClient")
     {
         handleJoinGameClient(context, socket);
@@ -95,7 +101,7 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     }
     else
     {
-        gameServices_.getLogger().logError("Unknown event type: " + context.eventType, RED);
+        log_->error("Unknown event type: " + context.eventType);
     }
 
     // Push the batch of events to the queue
@@ -110,7 +116,7 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
             eventsBatch_.shrink_to_fit();
         }
 
-        gameServices_.getLogger().log("Cleared eventsBatch_ vector", BLUE);
+        log_->debug("Cleared eventsBatch_ vector");
     }
 
     // Reserve space for next batch to avoid frequent reallocations
@@ -119,11 +125,12 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
         eventsBatch_.reserve(BATCH_SIZE);
     }
 
-    // Log the size of eventsBatch_ for monitoring memory usage
+#ifdef DEBUG
+    // MEDIUM-5: these per-dispatch size logs were fired on EVERY incoming message;
+    //           gate them behind DEBUG to avoid hammering the logger in production.
     gameServices_.getLogger().log("eventsBatch_ size: " + std::to_string(eventsBatch_.size()), GREEN);
-
-    // Log the capacity of eventsBatch_ for monitoring memory usage
     gameServices_.getLogger().log("eventsBatch_ capacity: " + std::to_string(eventsBatch_.capacity()), GREEN);
+#endif
 }
 
 void
@@ -178,7 +185,7 @@ EventDispatcher::handleJoinGameClient(const EventContext &context, std::shared_p
     else
     {
         // Log that we're skipping the event for a disconnected client
-        gameServices_.getLogger().log("Skipping join client event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+        log_->info("Skipping join client event for disconnected client ID: " + std::to_string(context.clientData.clientId));
     }
 }
 
@@ -244,7 +251,7 @@ EventDispatcher::handleJoinGameCharacter(const EventContext &context, std::share
     else
     {
         // Log that we're skipping the event for a disconnected client
-        gameServices_.getLogger().log("Skipping join character event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+        log_->info("Skipping join character event for disconnected client ID: " + std::to_string(context.clientData.clientId));
     }
 }
 
@@ -259,15 +266,15 @@ EventDispatcher::handleMoveCharacter(const EventContext &context, std::shared_pt
     movementData.timestamps = context.timestamps; // Add timestamps for lag compensation
 
     // Log character data for debugging
-    gameServices_.getLogger().log("Creating MOVE_CHARACTER event with movement data:", GREEN);
-    gameServices_.getLogger().log("Client ID: " + std::to_string(movementData.clientId), GREEN);
-    gameServices_.getLogger().log("Character ID: " + std::to_string(movementData.characterId), GREEN);
+    log_->info("Creating MOVE_CHARACTER event with movement data:");
+    log_->info("Client ID: " + std::to_string(movementData.clientId));
+    log_->info("Character ID: " + std::to_string(movementData.characterId));
     gameServices_.getLogger().log("Position: " + std::to_string(movementData.position.positionX) + ", " + std::to_string(movementData.position.positionY), GREEN);
 
     // Validate character data
     if (movementData.characterId <= 0)
     {
-        gameServices_.getLogger().logError("Invalid character data for MOVE_CHARACTER event", RED);
+        log_->error("Invalid character data for MOVE_CHARACTER event");
         return;
     }
 
@@ -319,7 +326,7 @@ EventDispatcher::handleMoveCharacter(const EventContext &context, std::shared_pt
     else
     {
         // Log that we're skipping the event for a disconnected client
-        gameServices_.getLogger().log("Skipping move character event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+        log_->info("Skipping move character event for disconnected client ID: " + std::to_string(context.clientData.clientId));
     }
 }
 
@@ -379,7 +386,7 @@ EventDispatcher::handlePing(const EventContext &context, std::shared_ptr<boost::
         static thread_local int logCounter = 0;
         if (++logCounter % 100 == 0) // Log every 100th occurrence
         {
-            gameServices_.getLogger().log("Skipping ping event for unauthenticated client (logged every 100th occurrence)", GREEN);
+            log_->info("Skipping ping event for unauthenticated client (logged every 100th occurrence)");
         }
         return;
     }
@@ -425,7 +432,7 @@ EventDispatcher::handlePing(const EventContext &context, std::shared_ptr<boost::
     else
     {
         // Log that we're skipping ping for a disconnected client
-        gameServices_.getLogger().log("Skipping ping event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+        log_->info("Skipping ping event for disconnected client ID: " + std::to_string(context.clientData.clientId));
     }
 }
 
@@ -434,7 +441,7 @@ EventDispatcher::handleGetSpawnZones(const EventContext &context, std::shared_pt
 {
     if (!chunkServer_)
     {
-        gameServices_.getLogger().logError("ChunkServer is nullptr in EventDispatcher!", RED);
+        log_->error("ChunkServer is nullptr in EventDispatcher!");
         return;
     }
 
@@ -489,7 +496,7 @@ EventDispatcher::handleGetSpawnZones(const EventContext &context, std::shared_pt
     else
     {
         // Log that we're skipping the event for a disconnected client
-        gameServices_.getLogger().log("Skipping get spawn zones event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+        log_->info("Skipping get spawn zones event for disconnected client ID: " + std::to_string(context.clientData.clientId));
     }
 }
 
@@ -531,7 +538,7 @@ EventDispatcher::handleGetConnectedClients(const EventContext &context, std::sha
     else
     {
         // Log that we're skipping the event for a disconnected client
-        gameServices_.getLogger().log("Skipping get connected clients event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+        log_->info("Skipping get connected clients event for disconnected client ID: " + std::to_string(context.clientData.clientId));
     }
 }
 
@@ -563,12 +570,12 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
         {
             // Use the full message to parse combat data
             std::string fullMessage = context.fullMessage;
-            gameServices_.getLogger().log("EventDispatcher handlePlayerAttack - Full message: " + fullMessage, GREEN);
+            log_->info("EventDispatcher handlePlayerAttack - Full message: " + fullMessage);
 
             // Parse the complete JSON message instead of just the body
             JSONParser jsonParser;
             nlohmann::json fullData = nlohmann::json::parse(fullMessage);
-            gameServices_.getLogger().log("EventDispatcher handlePlayerAttack - Parsed full data: " + fullData.dump(), GREEN);
+            log_->info("EventDispatcher handlePlayerAttack - Parsed full data: " + fullData.dump());
 
             Event playerAttackEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, fullData}, context.timestamps);
             eventsBatch_.push_back(playerAttackEvent);
@@ -587,7 +594,7 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
     else
     {
         // Log that we're skipping the event for a disconnected client
-        gameServices_.getLogger().log("Skipping player attack event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+        log_->info("Skipping player attack event for disconnected client ID: " + std::to_string(context.clientData.clientId));
     }
 }
 
@@ -601,13 +608,13 @@ EventDispatcher::handlePickupDroppedItem(const EventContext &context, std::share
         {
             // Parse pickup data from the full message
             std::string fullMessage = context.fullMessage;
-            gameServices_.getLogger().log("EventDispatcher handlePickupDroppedItem - Full message: " + fullMessage, GREEN);
+            log_->info("EventDispatcher handlePickupDroppedItem - Full message: " + fullMessage);
 
             // Parse JSON to extract pickup data
             nlohmann::json j = nlohmann::json::parse(fullMessage);
             nlohmann::json pickupData = j["body"];
 
-            gameServices_.getLogger().log("EventDispatcher handlePickupDroppedItem - Parsed pickup data: " + pickupData.dump(), GREEN);
+            log_->info("EventDispatcher handlePickupDroppedItem - Parsed pickup data: " + pickupData.dump());
 
             // Create ItemPickupRequestStruct
             ItemPickupRequestStruct pickupRequest;
@@ -622,7 +629,7 @@ EventDispatcher::handlePickupDroppedItem(const EventContext &context, std::share
             }
             else
             {
-                gameServices_.getLogger().logError("EventDispatcher handlePickupDroppedItem - Missing characterId in client request", RED);
+                log_->error("EventDispatcher handlePickupDroppedItem - Missing characterId in client request");
                 return;
             }
 
@@ -655,7 +662,7 @@ EventDispatcher::handlePickupDroppedItem(const EventContext &context, std::share
     else
     {
         // Log that we're skipping the event for a disconnected client
-        gameServices_.getLogger().log("Skipping item pickup event for disconnected client ID: " + std::to_string(context.clientData.clientId), GREEN);
+        log_->info("Skipping item pickup event for disconnected client ID: " + std::to_string(context.clientData.clientId));
     }
 }
 
@@ -665,7 +672,7 @@ EventDispatcher::handleGetPlayerInventory(const EventContext &context, std::shar
     // Check if character is valid
     if (context.characterData.characterId > 0)
     {
-        gameServices_.getLogger().log("EventDispatcher handleGetPlayerInventory - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+        log_->info("EventDispatcher handleGetPlayerInventory - Character ID: " + std::to_string(context.characterData.characterId));
 
         try
         {
@@ -692,14 +699,14 @@ EventDispatcher::handleGetPlayerInventory(const EventContext &context, std::shar
 void
 EventDispatcher::handleHarvestStart(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
-    gameServices_.getLogger().log("EventDispatcher::handleHarvestStart called", GREEN);
-    gameServices_.getLogger().log("Character ID in context: " + std::to_string(context.characterData.characterId), GREEN);
-    gameServices_.getLogger().log("Client ID in context: " + std::to_string(context.clientData.clientId), GREEN);
+    log_->info("EventDispatcher::handleHarvestStart called");
+    log_->info("Character ID in context: " + std::to_string(context.characterData.characterId));
+    log_->info("Client ID in context: " + std::to_string(context.clientData.clientId));
 
     // Check if character is valid
     if (context.characterData.characterId > 0)
     {
-        gameServices_.getLogger().log("EventDispatcher handleHarvestStart - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+        log_->info("EventDispatcher handleHarvestStart - Character ID: " + std::to_string(context.characterData.characterId));
 
         try
         {
@@ -708,7 +715,7 @@ EventDispatcher::handleHarvestStart(const EventContext &context, std::shared_ptr
 
             if (!messageJson.contains("body") || !messageJson["body"].contains("corpseUID"))
             {
-                gameServices_.getLogger().logError("Missing corpseUID in harvest start request", RED);
+                log_->error("Missing corpseUID in harvest start request");
                 return;
             }
 
@@ -732,7 +739,7 @@ EventDispatcher::handleHarvestStart(const EventContext &context, std::shared_ptr
     }
     else
     {
-        gameServices_.getLogger().logError("Invalid character ID for harvest start: " + std::to_string(context.characterData.characterId), RED);
+        log_->error("Invalid character ID for harvest start: " + std::to_string(context.characterData.characterId));
     }
 }
 
@@ -742,7 +749,7 @@ EventDispatcher::handleHarvestCancel(const EventContext &context, std::shared_pt
     // Check if character is valid
     if (context.characterData.characterId > 0)
     {
-        gameServices_.getLogger().log("EventDispatcher handleHarvestCancel - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+        log_->info("EventDispatcher handleHarvestCancel - Character ID: " + std::to_string(context.characterData.characterId));
 
         try
         {
@@ -763,7 +770,7 @@ EventDispatcher::handleGetNearbyCorpses(const EventContext &context, std::shared
     // Check if character is valid
     if (context.characterData.characterId > 0)
     {
-        gameServices_.getLogger().log("EventDispatcher handleGetNearbyCorpses - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+        log_->info("EventDispatcher handleGetNearbyCorpses - Character ID: " + std::to_string(context.characterData.characterId));
 
         try
         {
@@ -784,19 +791,19 @@ EventDispatcher::handleCorpseLootPickup(const EventContext &context, std::shared
     // Check if character is valid
     if (context.characterData.characterId > 0)
     {
-        gameServices_.getLogger().log("EventDispatcher handleCorpseLootPickup - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+        log_->info("EventDispatcher handleCorpseLootPickup - Character ID: " + std::to_string(context.characterData.characterId));
 
         try
         {
             // Parse pickup data from the full message
             std::string fullMessage = context.fullMessage;
-            gameServices_.getLogger().log("EventDispatcher handleCorpseLootPickup - Full message: " + fullMessage, GREEN);
+            log_->info("EventDispatcher handleCorpseLootPickup - Full message: " + fullMessage);
 
             // Parse JSON to extract pickup data
             nlohmann::json j = nlohmann::json::parse(fullMessage);
             nlohmann::json bodyData = j["body"];
 
-            gameServices_.getLogger().log("EventDispatcher handleCorpseLootPickup - Parsed body data: " + bodyData.dump(), GREEN);
+            log_->info("EventDispatcher handleCorpseLootPickup - Parsed body data: " + bodyData.dump());
 
             // Create CorpseLootPickupRequestStruct
             CorpseLootPickupRequestStruct pickupRequest;
@@ -809,7 +816,7 @@ EventDispatcher::handleCorpseLootPickup(const EventContext &context, std::shared
             }
             else
             {
-                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootPickup - Missing playerId in client request", RED);
+                log_->error("EventDispatcher handleCorpseLootPickup - Missing playerId in client request");
                 return;
             }
 
@@ -830,7 +837,7 @@ EventDispatcher::handleCorpseLootPickup(const EventContext &context, std::shared
             }
             else
             {
-                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootPickup - Missing or invalid corpseUID in client request", RED);
+                log_->error("EventDispatcher handleCorpseLootPickup - Missing or invalid corpseUID in client request");
                 return;
             }
 
@@ -854,14 +861,14 @@ EventDispatcher::handleCorpseLootPickup(const EventContext &context, std::shared
             }
             else
             {
-                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootPickup - Missing or invalid requestedItems in client request", RED);
+                log_->error("EventDispatcher handleCorpseLootPickup - Missing or invalid requestedItems in client request");
                 return;
             }
 
             // Validate that there are items to pickup
             if (pickupRequest.requestedItems.empty())
             {
-                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootPickup - No valid items requested for pickup", RED);
+                log_->error("EventDispatcher handleCorpseLootPickup - No valid items requested for pickup");
                 return;
             }
 
@@ -888,19 +895,19 @@ EventDispatcher::handleCorpseLootInspect(const EventContext &context, std::share
     // Check if character is valid
     if (context.characterData.characterId > 0)
     {
-        gameServices_.getLogger().log("EventDispatcher handleCorpseLootInspect - Character ID: " + std::to_string(context.characterData.characterId), GREEN);
+        log_->info("EventDispatcher handleCorpseLootInspect - Character ID: " + std::to_string(context.characterData.characterId));
 
         try
         {
             // Parse inspect data from the full message
             std::string fullMessage = context.fullMessage;
-            gameServices_.getLogger().log("EventDispatcher handleCorpseLootInspect - Full message: " + fullMessage, GREEN);
+            log_->info("EventDispatcher handleCorpseLootInspect - Full message: " + fullMessage);
 
             // Parse JSON to extract inspect data
             nlohmann::json j = nlohmann::json::parse(fullMessage);
             nlohmann::json bodyData = j["body"];
 
-            gameServices_.getLogger().log("EventDispatcher handleCorpseLootInspect - Parsed body data: " + bodyData.dump(), GREEN);
+            log_->info("EventDispatcher handleCorpseLootInspect - Parsed body data: " + bodyData.dump());
 
             // Create CorpseLootInspectRequestStruct
             CorpseLootInspectRequestStruct inspectRequest;
@@ -913,7 +920,7 @@ EventDispatcher::handleCorpseLootInspect(const EventContext &context, std::share
             }
             else
             {
-                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootInspect - Missing playerId in client request", RED);
+                log_->error("EventDispatcher handleCorpseLootInspect - Missing playerId in client request");
                 return;
             }
 
@@ -934,7 +941,7 @@ EventDispatcher::handleCorpseLootInspect(const EventContext &context, std::share
             }
             else
             {
-                gameServices_.getLogger().logError("EventDispatcher handleCorpseLootInspect - Missing or invalid corpseUID in client request", RED);
+                log_->error("EventDispatcher handleCorpseLootInspect - Missing or invalid corpseUID in client request");
                 return;
             }
 
@@ -959,7 +966,7 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
 {
     try
     {
-        gameServices_.getLogger().log("EventDispatcher handleGetCharacterExperience called", GREEN);
+        log_->info("EventDispatcher handleGetCharacterExperience called");
 
         // Get character data
         auto characterData = gameServices_.getCharacterManager().getCharacterData(context.characterData.characterId);
@@ -1003,13 +1010,12 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
                 {
                     if (ec)
                     {
-                        gameServices_.getLogger().logError("Error sending character experience response: " + ec.message());
+                        log_->error("Error sending character experience response: " + ec.message());
                     } });
         }
 
-        gameServices_.getLogger().log("Sent character experience data for character " +
-                                          std::to_string(characterData.characterId),
-            GREEN);
+        log_->info("Sent character experience data for character " +
+                                          std::to_string(characterData.characterId));
     }
     catch (const std::exception &e)
     {
@@ -1030,7 +1036,7 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
                 {
                     if (ec)
                     {
-                        gameServices_.getLogger().logError("Error sending character experience error response: " + ec.message());
+                        log_->error("Error sending character experience error response: " + ec.message());
                     } });
         }
     }
@@ -1041,7 +1047,7 @@ EventDispatcher::handleNPCInteract(const EventContext &context, std::shared_ptr<
 {
     if (context.characterData.characterId <= 0)
     {
-        gameServices_.getLogger().logError("[EventDispatcher] handleNPCInteract: invalid character");
+        log_->error("[EventDispatcher] handleNPCInteract: invalid character");
         return;
     }
 
@@ -1052,7 +1058,7 @@ EventDispatcher::handleNPCInteract(const EventContext &context, std::shared_ptr<
         int npcId = messageJson["body"].value("npcId", 0);
         if (npcId <= 0)
         {
-            gameServices_.getLogger().logError("[EventDispatcher] handleNPCInteract: invalid npcId");
+            log_->error("[EventDispatcher] handleNPCInteract: invalid npcId");
             return;
         }
 
@@ -1077,7 +1083,7 @@ EventDispatcher::handleDialogueChoice(const EventContext &context, std::shared_p
 {
     if (context.characterData.characterId <= 0)
     {
-        gameServices_.getLogger().logError("[EventDispatcher] handleDialogueChoice: invalid character");
+        log_->error("[EventDispatcher] handleDialogueChoice: invalid character");
         return;
     }
 
@@ -1107,7 +1113,7 @@ EventDispatcher::handleDialogueClose(const EventContext &context, std::shared_pt
 {
     if (context.characterData.characterId <= 0)
     {
-        gameServices_.getLogger().logError("[EventDispatcher] handleDialogueClose: invalid character");
+        log_->error("[EventDispatcher] handleDialogueClose: invalid character");
         return;
     }
 

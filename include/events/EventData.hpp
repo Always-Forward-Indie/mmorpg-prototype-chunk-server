@@ -4,6 +4,7 @@
 #include "data/DataStructs.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -121,4 +122,7 @@ using EventData = std::variant<
     std::vector<NPCDialogueMappingStruct>,
     std::vector<QuestStruct>,
     std::vector<PlayerQuestProgressStruct>,
-    std::vector<PlayerFlagStruct>>;
+    std::vector<PlayerFlagStruct>,
+    std::vector<ActiveEffectStruct>,                       // Active buffs/debuffs for a character (on join)
+    std::pair<int, std::vector<CharacterAttributeStruct>>, // Attribute refresh: {characterId, attrs}
+    std::vector<MobMoveUpdateStruct>>;                     // Lightweight mob movement updates

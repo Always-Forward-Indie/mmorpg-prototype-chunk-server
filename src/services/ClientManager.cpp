@@ -1,8 +1,10 @@
 #include "services/ClientManager.hpp"
+#include <spdlog/logger.h>
 
 ClientManager::ClientManager(Logger &logger)
     : logger_(logger)
 {
+    log_ = logger.getSystem("client");
 }
 
 void
@@ -12,7 +14,7 @@ ClientManager::loadClientsList(std::vector<ClientDataStruct> clientsList)
     {
         if (clientsList.empty())
         {
-            logger_.logError("No clients found in the GS");
+            log_->error("No clients found in the GS");
         }
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -45,14 +47,14 @@ ClientManager::loadClientData(ClientDataStruct clientData)
                     existingClient.characterId = clientData.characterId;
                 }
                 existingClient.hash = clientData.hash;
-                logger_.log("Updated existing client ID: " + std::to_string(clientData.clientId));
+                log_->info("Updated existing client ID: " + std::to_string(clientData.clientId));
                 return;
             }
         }
 
         // Client doesn't exist, add new one
         clientsList_.push_back(clientData);
-        logger_.log("Added new client ID: " + std::to_string(clientData.clientId));
+        log_->info("Added new client ID: " + std::to_string(clientData.clientId));
     }
     catch (const std::exception &e)
     {
@@ -93,7 +95,7 @@ ClientManager::getClientsList()
 
         if (shouldRemove)
         {
-            logger_.log("Removing client with invalid socket during getClientsList, ID: " + std::to_string(it->clientId));
+            log_->info("Removing client with invalid socket during getClientsList, ID: " + std::to_string(it->clientId));
             // Remove from both the list and socket map
             clientSockets_.erase(it->clientId);
             it = clientsList_.erase(it);
@@ -269,7 +271,7 @@ ClientManager::cleanupInvalidClients()
 
         if (shouldRemove)
         {
-            logger_.log("Removing client with invalid socket, ID: " + std::to_string(it->clientId));
+            log_->info("Removing client with invalid socket, ID: " + std::to_string(it->clientId));
             // Remove from both the list and socket map
             clientSockets_.erase(it->clientId);
             it = clientsList_.erase(it);
@@ -317,7 +319,7 @@ ClientManager::forceCleanupMemory()
 
         if (shouldRemove)
         {
-            logger_.log("Force cleanup removing client ID: " + std::to_string(it->clientId));
+            log_->info("Force cleanup removing client ID: " + std::to_string(it->clientId));
             clientSockets_.erase(it->clientId);
             it = clientsList_.erase(it);
         }
@@ -331,7 +333,7 @@ ClientManager::forceCleanupMemory()
     if (clientsList_.capacity() > clientsList_.size() * 2 && clientsList_.capacity() > 100)
     {
         clientsList_.shrink_to_fit();
-        logger_.log("Shrunk clientsList capacity to reduce memory usage");
+        log_->info("Shrunk clientsList capacity to reduce memory usage");
     }
 
     size_t finalListSize = clientsList_.size();
@@ -341,5 +343,71 @@ ClientManager::forceCleanupMemory()
     {
         logger_.log("Memory cleanup: removed " + std::to_string(initialListSize - finalListSize) +
                     " clients and " + std::to_string(initialSocketsSize - finalSocketsSize) + " sockets");
+    }
+}
+
+// CRITICAL-8 fix: snapshot of live sockets under shared_lock (read-only).
+// Callers (broadcast) take ONE lock instead of N individual getClientSocket() calls.
+std::vector<std::shared_ptr<boost::asio::ip::tcp::socket>>
+ClientManager::getActiveSockets(int excludeClientId) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    std::vector<std::shared_ptr<boost::asio::ip::tcp::socket>> result;
+    result.reserve(clientSockets_.size());
+    for (const auto &[id, sock] : clientSockets_)
+    {
+        if (id != excludeClientId && sock)
+        {
+            result.push_back(sock);
+        }
+    }
+    return result;
+}
+
+// Separated dead-socket cleanup from the hot broadcast path.
+// Called by Scheduler every 30 seconds, NOT from broadcastToAllClients.
+void
+ClientManager::cleanupDeadSockets()
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+
+    for (auto it = clientSockets_.begin(); it != clientSockets_.end();)
+    {
+        bool dead = false;
+        if (!it->second)
+        {
+            dead = true;
+        }
+        else
+        {
+            try
+            {
+                dead = !it->second->is_open();
+            }
+            catch (...)
+            {
+                dead = true;
+            }
+        }
+
+        if (dead)
+        {
+            log_->info("[ClientManager] cleanupDeadSockets: removing dead socket for client " +
+                        std::to_string(it->first));
+            // Also remove from clientsList_ to keep both containers consistent
+            for (auto jt = clientsList_.begin(); jt != clientsList_.end(); ++jt)
+            {
+                if (jt->clientId == it->first)
+                {
+                    clientsList_.erase(jt);
+                    break;
+                }
+            }
+            it = clientSockets_.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
     }
 }

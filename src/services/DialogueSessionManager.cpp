@@ -1,9 +1,11 @@
 #include "services/DialogueSessionManager.hpp"
 #include <chrono>
+#include <spdlog/logger.h>
 
 DialogueSessionManager::DialogueSessionManager(Logger &logger)
     : logger_(logger)
 {
+    log_ = logger.getSystem("dialogue");
 }
 
 DialogueSessionStruct &
@@ -76,7 +78,7 @@ DialogueSessionManager::closeSession(const std::string &sessionId)
     sessions_.erase(it);
     characterToSession_.erase(characterId);
 
-    logger_.log("[DialogueSession] Closed session " + sessionId);
+    log_->info("[DialogueSession] Closed session " + sessionId);
 }
 
 void
@@ -115,7 +117,7 @@ DialogueSessionManager::cleanupExpiredSessions()
         {
             characterToSession_.erase(it->second.characterId);
             sessions_.erase(it);
-            logger_.log("[DialogueSession] Expired session removed: " + sid);
+            log_->info("[DialogueSession] Expired session removed: " + sid);
         }
     }
 

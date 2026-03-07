@@ -2,15 +2,17 @@
 #include "events/EventData.hpp"
 #include "events/handlers/NPCEventHandler.hpp"
 #include "utils/TimestampUtils.hpp"
+#include <spdlog/logger.h>
 
 CharacterEventHandler::CharacterEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices),
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "character"),
       skillEventHandler_(nullptr),
       npcEventHandler_(nullptr)
 {
+    log_ = gameServices_.getLogger().getSystem("character");
 }
 
 void
@@ -74,7 +76,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
         {
             CharacterDataStruct passedCharacterData = std::get<CharacterDataStruct>(data);
 
-            gameServices_.getLogger().log("Passed Character ID: " + std::to_string(passedCharacterData.characterId));
+            log_->info("Passed Character ID: " + std::to_string(passedCharacterData.characterId));
 
             // set client character ID - now handles missing clients automatically
             gameServices_.getClientManager().setClientCharacterId(clientID, passedCharacterData.characterId);
@@ -85,7 +87,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             // Check if character data exists in local storage
             if (characterData.characterId == 0)
             {
-                gameServices_.getLogger().log("Character ID " + std::to_string(passedCharacterData.characterId) + " not found in local storage, adding to pending requests");
+                log_->info("Character ID " + std::to_string(passedCharacterData.characterId) + " not found in local storage, adding to pending requests");
 
                 // Add this request to pending list
                 PendingJoinRequest pendingRequest;
@@ -101,7 +103,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             }
 
             // Character data is available, process current request immediately
-            gameServices_.getLogger().log("Character ID " + std::to_string(passedCharacterData.characterId) + " found in local storage, processing immediately");
+            log_->info("Character ID " + std::to_string(passedCharacterData.characterId) + " found in local storage, processing immediately");
 
             // Prepare character data in json format
             nlohmann::json characterJson = characterToJson(characterData);
@@ -132,7 +134,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             }
             else
             {
-                gameServices_.getLogger().logError("SkillEventHandler not set in CharacterEventHandler");
+                log_->error("SkillEventHandler not set in CharacterEventHandler");
             }
 
             // Send NPC spawn data to player after successful character join
@@ -142,7 +144,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             }
             else
             {
-                gameServices_.getLogger().logError("NPCEventHandler not set in CharacterEventHandler");
+                log_->error("NPCEventHandler not set in CharacterEventHandler");
             }
 
             // Request player quests and flags from game server
@@ -157,6 +159,11 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 flagsReq["header"]["eventType"] = "getPlayerFlags";
                 flagsReq["body"]["characterId"] = cid;
                 gameServerWorker_.sendDataToGameServer(flagsReq.dump() + "\n");
+
+                nlohmann::json effectsReq;
+                effectsReq["header"]["eventType"] = "getPlayerActiveEffects";
+                effectsReq["body"]["characterId"] = cid;
+                gameServerWorker_.sendDataToGameServer(effectsReq.dump() + "\n");
             }
 
             // Also process any pending requests for this character
@@ -164,7 +171,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -226,7 +233,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data in moveCharacter - variant doesn't contain MovementDataStruct!");
+            log_->info("Error with extracting data in moveCharacter - variant doesn't contain MovementDataStruct!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -294,7 +301,7 @@ CharacterEventHandler::handleSetCharacterDataEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -317,7 +324,7 @@ CharacterEventHandler::handleSetCharactersListEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -340,7 +347,7 @@ CharacterEventHandler::handleSetCharacterAttributesEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -352,19 +359,19 @@ CharacterEventHandler::handleSetCharacterAttributesEvent(const Event &event)
 void
 CharacterEventHandler::processPendingJoinRequests(int characterId)
 {
-    gameServices_.getLogger().log("processPendingJoinRequests called for character ID: " + std::to_string(characterId));
+    log_->info("processPendingJoinRequests called for character ID: " + std::to_string(characterId));
     gameServices_.getLogger().log("Current pendingJoinRequests_ size: " + std::to_string(pendingJoinRequests_.size()));
 
     auto it = pendingJoinRequests_.find(characterId);
     if (it == pendingJoinRequests_.end())
     {
-        gameServices_.getLogger().log("No pending requests map entry found for character ID: " + std::to_string(characterId));
+        log_->info("No pending requests map entry found for character ID: " + std::to_string(characterId));
         return;
     }
 
     if (it->second.empty())
     {
-        gameServices_.getLogger().log("Pending requests vector is empty for character ID: " + std::to_string(characterId));
+        log_->info("Pending requests vector is empty for character ID: " + std::to_string(characterId));
         return;
     }
 
@@ -375,7 +382,7 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
 
     if (characterData.characterId == 0)
     {
-        gameServices_.getLogger().logError("Character data still not available for ID: " + std::to_string(characterId));
+        log_->error("Character data still not available for ID: " + std::to_string(characterId));
         return;
     }
 
@@ -411,7 +418,7 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
         }
         else
         {
-            gameServices_.getLogger().logError("SkillEventHandler not set in CharacterEventHandler");
+            log_->error("SkillEventHandler not set in CharacterEventHandler");
         }
 
         gameServices_.getLogger().log("Processed pending join request for client ID: " + std::to_string(request.clientID) + ", character ID: " + std::to_string(characterId));
@@ -428,9 +435,14 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
         flagsReq["header"]["eventType"] = "getPlayerFlags";
         flagsReq["body"]["characterId"] = characterId;
         gameServerWorker_.sendDataToGameServer(flagsReq.dump() + "\n");
+
+        nlohmann::json effectsReq;
+        effectsReq["header"]["eventType"] = "getPlayerActiveEffects";
+        effectsReq["body"]["characterId"] = characterId;
+        gameServerWorker_.sendDataToGameServer(effectsReq.dump() + "\n");
     }
 
     // Clear processed requests
     pendingJoinRequests_.erase(it);
-    gameServices_.getLogger().log("Cleared pending requests for character ID: " + std::to_string(characterId));
+    log_->info("Cleared pending requests for character ID: " + std::to_string(characterId));
 }

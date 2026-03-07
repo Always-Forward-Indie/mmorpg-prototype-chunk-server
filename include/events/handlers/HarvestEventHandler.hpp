@@ -67,4 +67,5 @@ class HarvestEventHandler : public BaseEventHandler
 
   private:
     GameServices &gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
 };

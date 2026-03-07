@@ -85,4 +85,5 @@ class DialogueActionExecutor
 
     GameServices &services_;
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
 };

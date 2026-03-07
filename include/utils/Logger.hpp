@@ -1,42 +1,46 @@
 #pragma once
-#include <iostream>
-#include <mutex>
-#include <iomanip>
-#include <sstream>
-#include <ctime>
-#include "utils/TerminalColors.hpp"
-#include <condition_variable>
-#include <thread>
-#include <queue>
 
-class Logger {
-    public:
-        Logger();
-        ~Logger();
-    
-        std::string getCurrentTimestamp();
-        // Добавляем значения по умолчанию для цвета:
-        void log(const std::string& message, const std::string& color = BLUE);
-        void logError(const std::string& message, const std::string& color = RED);
-    
-    private:
-        // Структура для хранения лог-сообщения
-        struct LogMessage {
-            std::string type;       // "INFO" или "ERROR"
-            std::string timestamp;
-            std::string message;
-            std::string color;
-        };
-    
-        // Метод, который запускается в отдельном потоке и обрабатывает очередь логов
-        void processQueue();
-    
-        std::mutex logger_mutex_; // Используется, например, для getCurrentTimestamp()
-        std::mutex queue_mutex_;
-        std::condition_variable cv_;
-        std::queue<LogMessage> logQueue_;
-        bool stopThread_;
-        std::thread loggingThread_;
-    
-        std::mutex timeMutex;
-    };
+#include "utils/TerminalColors.hpp" // kept for backward-compat (callers pass color consts, we ignore them)
+#include <memory>
+#include <string>
+
+// Forward declaration — spdlog headers are only in Logger.cpp, not pulled into every TU
+namespace spdlog
+{
+class logger;
+}
+
+class Logger
+{
+  public:
+    explicit Logger(const std::string &serverName = "server");
+    ~Logger();
+
+    Logger(const Logger &) = delete;
+    Logger &operator=(const Logger &) = delete;
+
+    // ── Backward-compatible API ──────────────────────────────────────────────
+    // color param kept so existing call sites compile without changes; ignored internally
+    void log(const std::string &message, const std::string &color = "");
+    void logError(const std::string &message, const std::string &color = "");
+
+    // ── Explicit-level methods ───────────────────────────────────────────────
+    void debug(const std::string &message);
+    void warn(const std::string &message);
+    void info(const std::string &message);
+    void error(const std::string &message);
+    void critical(const std::string &message);
+
+    void setLevel(const std::string &level);
+
+    // ── Per-system loggers ───────────────────────────────────────────────────
+    // Returns (creating if needed) a named child logger sharing the same sinks.
+    // Level is read from LOG_LEVEL_<UPPER(system)> env var, falls back to global level.
+    // Usage: auto log = logger_.getSystem("combat");
+    //        log->debug("Player {} hit mob {}", playerId, mobId);
+    std::shared_ptr<spdlog::logger> getSystem(const std::string &system);
+
+  private:
+    std::string serverName_;
+    std::shared_ptr<spdlog::logger> logger_;
+};

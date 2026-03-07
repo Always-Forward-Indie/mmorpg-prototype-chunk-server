@@ -89,6 +89,15 @@ class EventHandler
      */
     void handleSetExpLevelTableEvent(const Event &event);
 
+    /**
+     * @brief Handle game config data from game server.
+     *        Populates GameConfigService so CombatCalculator and other
+     *        services can read gameplay constants without hardcoding.
+     */
+    void handleSetGameConfigEvent(const Event &event);
+    void handleSetPlayerActiveEffectsEvent(const Event &event);
+    void handleSetCharacterAttributesRefreshEvent(const Event &event);
+
     // Specialized event handlers for different event categories
     std::unique_ptr<ClientEventHandler> clientEventHandler_;
     std::unique_ptr<CharacterEventHandler> characterEventHandler_;
@@ -104,5 +113,7 @@ class EventHandler
     std::unique_ptr<DialogueEventHandler> dialogueEventHandler_;
 
     // References for logging and error handling
+    NetworkManager &networkManager_;
     GameServices &gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
 };

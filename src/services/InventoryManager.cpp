@@ -2,10 +2,12 @@
 #include "events/Event.hpp"
 #include "events/EventQueue.hpp"
 #include "services/QuestManager.hpp"
+#include <spdlog/logger.h>
 
 InventoryManager::InventoryManager(ItemManager &itemManager, Logger &logger)
     : itemManager_(itemManager), logger_(logger), eventQueue_(nullptr)
 {
+    log_ = logger.getSystem("inventory");
 }
 
 void
@@ -33,7 +35,7 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
     ItemDataStruct itemInfo = itemManager_.getItemById(itemId);
     if (itemInfo.id == 0)
     {
-        logger_.logError("Attempted to add non-existent item ID: " + std::to_string(itemId));
+        log_->error("Attempted to add non-existent item ID: " + std::to_string(itemId));
         return false;
     }
 
@@ -84,7 +86,7 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
 
         Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
         eventQueue_->push(std::move(inventoryUpdateEvent));
-        logger_.log("[INVENTORY] Sent INVENTORY_UPDATE event for character " + std::to_string(characterId));
+        log_->info("[INVENTORY] Sent INVENTORY_UPDATE event for character " + std::to_string(characterId));
     }
 
     // Quest trigger: item obtained
@@ -138,7 +140,7 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
     {
         // Remove item completely
         playerInventories_[characterId].erase(itemIt);
-        logger_.log("[INVENTORY] Removed all " + itemInfo.name + " from character " + std::to_string(characterId));
+        log_->info("[INVENTORY] Removed all " + itemInfo.name + " from character " + std::to_string(characterId));
     }
     else
     {
@@ -167,7 +169,7 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
 
         Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
         eventQueue_->push(std::move(inventoryUpdateEvent));
-        logger_.log("[INVENTORY] Sent INVENTORY_UPDATE event for character " + std::to_string(characterId));
+        log_->info("[INVENTORY] Sent INVENTORY_UPDATE event for character " + std::to_string(characterId));
     }
 
     return true;
@@ -214,7 +216,7 @@ InventoryManager::clearPlayerInventory(int characterId)
     std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
 
     playerInventories_[characterId].clear();
-    logger_.log("[INVENTORY] Cleared inventory for character " + std::to_string(characterId));
+    log_->info("[INVENTORY] Cleared inventory for character " + std::to_string(characterId));
 }
 
 int
@@ -308,7 +310,7 @@ InventoryManager::inventoryItemToJson(const PlayerInventoryItemStruct &item) con
     }
     else
     {
-        logger_.logError("[INVENTORY] Item data not found for ID " + std::to_string(item.itemId));
+        log_->error("[INVENTORY] Item data not found for ID " + std::to_string(item.itemId));
         // Set default values for missing item data
         itemJson["name"] = "Unknown Item";
         itemJson["slug"] = "unknown";

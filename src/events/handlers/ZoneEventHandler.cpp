@@ -1,12 +1,14 @@
 #include "events/handlers/ZoneEventHandler.hpp"
 #include "events/EventData.hpp"
+#include <spdlog/logger.h>
 
 ZoneEventHandler::ZoneEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "zone")
 {
+    log_ = gameServices_.getLogger().getSystem("zone");
 }
 
 void
@@ -46,11 +48,11 @@ ZoneEventHandler::handleSetAllSpawnZonesEvent(const Event &event)
             // Set data to the spawn zone manager
             gameServices_.getSpawnZoneManager().loadMobSpawnZones(spawnZonesList);
 
-            gameServices_.getLogger().log("Loaded all spawn zones data from the event handler!", GREEN);
+            log_->info("Loaded all spawn zones data from the event handler!");
         }
         else
         {
-            gameServices_.getLogger().log("Error with extracting data!");
+            log_->info("Error with extracting data!");
         }
     }
     catch (const std::bad_variant_access &ex)
@@ -65,5 +67,5 @@ ZoneEventHandler::handleGetSpawnZoneDataEvent(const Event &event)
     const auto &data = event.getData();
 
     // Implementation placeholder - can be extended based on requirements
-    gameServices_.getLogger().log("HandleGetSpawnZoneDataEvent called - implementation placeholder");
+    log_->info("HandleGetSpawnZoneDataEvent called - implementation placeholder");
 }

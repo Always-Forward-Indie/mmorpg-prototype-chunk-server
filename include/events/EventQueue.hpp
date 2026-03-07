@@ -1,5 +1,6 @@
 #pragma once
 #include "Event.hpp"
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <queue>
@@ -11,7 +12,7 @@ class EventQueue
 
     void push(const Event &event);
     void push(Event &&event); // Add rvalue overload for efficient move
-    bool pop(Event &event);
+    bool pop(Event &event);   // returns false when stopped and queue is empty
 
     void pushBatch(const std::vector<Event> &events);
     bool popBatch(std::vector<Event> &events, int batchSize);
@@ -21,11 +22,21 @@ class EventQueue
     // Force cleanup to shrink internal containers when queue is empty
     void forceCleanup();
 
+    /// HIGH-4: Signal all blocked pop/popBatch callers to return false so that
+    ///         consumer threads can exit cleanly on shutdown.
+    void stop();
+    bool isStopped() const
+    {
+        return stopped_.load(std::memory_order_acquire);
+    }
+
   private:
     std::queue<Event> queue;
     std::mutex mtx;
     std::condition_variable cv;
     size_t maxSize_;
+    /// HIGH-4: set to true by stop(); causes waiting consumers to wake and return false.
+    std::atomic<bool> stopped_{false};
 
     // Helper method to enforce size limit
     void enforceLimit();

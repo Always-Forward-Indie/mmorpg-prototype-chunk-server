@@ -2,13 +2,15 @@
 #include "services/ExperienceManager.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TimestampUtils.hpp"
+#include <spdlog/logger.h>
 
 ExperienceEventHandler::ExperienceEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
     GameServices &gameServices)
-    : BaseEventHandler(networkManager, gameServerWorker, gameServices)
+    : BaseEventHandler(networkManager, gameServerWorker, gameServices, "experience")
 {
+    log_ = gameServices_.getLogger().getSystem("experience");
 }
 
 void
@@ -40,12 +42,12 @@ ExperienceEventHandler::handleExperienceGrantEvent(const Event &event)
             }
             else
             {
-                gameServices_.getLogger().logError("Failed to grant experience: " + result.errorMessage);
+                log_->error("Failed to grant experience: " + result.errorMessage);
             }
         }
         else
         {
-            gameServices_.getLogger().logError("Invalid data type for EXPERIENCE_GRANT event");
+            log_->error("Invalid data type for EXPERIENCE_GRANT event");
         }
     }
     catch (const std::exception &e)
@@ -82,12 +84,12 @@ ExperienceEventHandler::handleExperienceRemoveEvent(const Event &event)
             }
             else
             {
-                gameServices_.getLogger().logError("Failed to remove experience: " + result.errorMessage);
+                log_->error("Failed to remove experience: " + result.errorMessage);
             }
         }
         else
         {
-            gameServices_.getLogger().logError("Invalid data type for EXPERIENCE_REMOVE event");
+            log_->error("Invalid data type for EXPERIENCE_REMOVE event");
         }
     }
     catch (const std::exception &e)
@@ -142,9 +144,8 @@ ExperienceEventHandler::handleExperienceUpdateEvent(const Event &event)
                     }
                 }
 
-                gameServices_.getLogger().log("Sent experience update packet to all clients for character " +
-                                                  std::to_string(expEvent.characterId),
-                    GREEN);
+                log_->info("Sent experience update packet to all clients for character " +
+                                                  std::to_string(expEvent.characterId));
             }
             catch (const std::exception &e)
             {
@@ -153,7 +154,7 @@ ExperienceEventHandler::handleExperienceUpdateEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().logError("Invalid data type for EXPERIENCE_UPDATE event");
+            log_->error("Invalid data type for EXPERIENCE_UPDATE event");
         }
     }
     catch (const std::exception &e)
@@ -237,6 +238,18 @@ ExperienceEventHandler::handleLevelUpEvent(const Event &event)
                         " level=" + std::to_string(expEvent.newLevel) +
                         " exp=" + std::to_string(expEvent.newExperience),
                     GREEN);
+
+                // Request fresh attributes from game-server (stats scale with level via class_stat_formula)
+                nlohmann::json attrsReq;
+                attrsReq["header"]["eventType"] = "getCharacterAttributes";
+                attrsReq["header"]["clientId"] = 0;
+                attrsReq["header"]["hash"] = "";
+                attrsReq["body"]["characterId"] = expEvent.characterId;
+                gameServerWorker_.sendDataToGameServer(attrsReq.dump() + "\n");
+
+                log_->info(
+                    "[LEVEL_UP] Requested attribute refresh for character " +
+                        std::to_string(expEvent.characterId));
             }
             catch (const std::exception &e)
             {
@@ -245,7 +258,7 @@ ExperienceEventHandler::handleLevelUpEvent(const Event &event)
         }
         else
         {
-            gameServices_.getLogger().logError("Invalid data type for LEVEL_UP event");
+            log_->error("Invalid data type for LEVEL_UP event");
         }
     }
     catch (const std::exception &e)

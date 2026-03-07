@@ -192,6 +192,7 @@ class HarvestManager
   private:
     ItemManager &itemManager_;
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
 
     // Event queue for sending harvest events to clients
     EventQueue *eventQueue_;

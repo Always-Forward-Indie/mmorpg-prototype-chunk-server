@@ -1,15 +1,18 @@
 #include "events/handlers/BaseEventHandler.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <nlohmann/json.hpp>
+#include <spdlog/logger.h>
 
 BaseEventHandler::BaseEventHandler(
     NetworkManager &networkManager,
     GameServerWorker &gameServerWorker,
-    GameServices &gameServices)
+    GameServices &gameServices,
+    const std::string &loggerSubsystem)
     : networkManager_(networkManager),
       gameServerWorker_(gameServerWorker),
       gameServices_(gameServices)
 {
+    log_ = gameServices_.getLogger().getSystem(loggerSubsystem);
 }
 
 std::shared_ptr<boost::asio::ip::tcp::socket>
@@ -43,7 +46,7 @@ BaseEventHandler::sendErrorResponse(
 {
     if (!clientSocket || !clientSocket->is_open())
     {
-        gameServices_.getLogger().logError("Cannot send error response: invalid or closed socket for client " + std::to_string(clientId));
+        log_->error("Cannot send error response: invalid or closed socket for client " + std::to_string(clientId));
         return;
     }
 
@@ -80,7 +83,7 @@ BaseEventHandler::sendSuccessResponse(
 {
     if (!clientSocket || !clientSocket->is_open())
     {
-        gameServices_.getLogger().logError("Cannot send success response: invalid or closed socket for client " + std::to_string(clientId));
+        log_->error("Cannot send success response: invalid or closed socket for client " + std::to_string(clientId));
         return;
     }
 
@@ -123,39 +126,24 @@ BaseEventHandler::sendGameServerResponse(const std::string &status, const nlohma
 void
 BaseEventHandler::broadcastToAllClients(const std::string &responseData, int excludeClientId)
 {
-    std::vector<ClientDataStruct> clientDataMap;
-    try
-    {
-        clientDataMap = gameServices_.getClientManager().getClientsList();
-    }
-    catch (const std::exception &ex)
-    {
-        gameServices_.getLogger().logError("Error getting client list for broadcast: " + std::string(ex.what()));
-        return;
-    }
+    // CRITICAL-8 fix:
+    // 1. ONE shared_ptr allocation for the whole broadcast (not N string copies)
+    // 2. ONE shared_lock acquisition instead of N individual getClientSocket() calls
+    // At 2000 clients x 100 broadcasts/s: 100 lock acquisitions vs previous 200,000
+    auto sharedData = std::make_shared<const std::string>(responseData);
+    auto sockets = gameServices_.getClientManager().getActiveSockets(excludeClientId);
 
-    for (const auto &clientDataItem : clientDataMap)
+    for (auto &sock : sockets)
     {
-        // Skip excluded client
-        if (excludeClientId != -1 && clientDataItem.clientId == excludeClientId)
-        {
-            continue;
-        }
-
-        // Get socket for this client using ClientManager
-        auto itemSocket = gameServices_.getClientManager().getClientSocket(clientDataItem.clientId);
-
-        // Validate socket before using
-        if (itemSocket && itemSocket->is_open())
+        if (sock && sock->is_open())
         {
             try
             {
-                networkManager_.sendResponse(itemSocket, responseData);
+                networkManager_.sendResponse(sock, sharedData);
             }
             catch (const std::exception &ex)
             {
-                gameServices_.getLogger().logError("Error broadcasting to client " +
-                                                   std::to_string(clientDataItem.clientId) + ": " + ex.what());
+                gameServices_.getLogger().logError("Error broadcasting to client: " + std::string(ex.what()));
             }
         }
     }
@@ -172,7 +160,7 @@ BaseEventHandler::sendErrorResponseWithTimestamps(
 {
     if (!clientSocket || !clientSocket->is_open())
     {
-        gameServices_.getLogger().logError("Cannot send error response: invalid or closed socket for client " + std::to_string(clientId));
+        log_->error("Cannot send error response: invalid or closed socket for client " + std::to_string(clientId));
         return;
     }
 
@@ -202,7 +190,7 @@ BaseEventHandler::sendSuccessResponseWithTimestamps(
 {
     if (!clientSocket || !clientSocket->is_open())
     {
-        gameServices_.getLogger().logError("Cannot send success response: invalid or closed socket for client " + std::to_string(clientId));
+        log_->error("Cannot send success response: invalid or closed socket for client " + std::to_string(clientId));
         return;
     }
 
@@ -230,30 +218,22 @@ BaseEventHandler::broadcastToAllClientsWithTimestamps(
     const TimestampStruct &timestamps,
     int excludeClientId)
 {
-    std::string responseData = networkManager_.generateResponseMessage(status, response, timestamps);
+    // CRITICAL-8 fix: one allocation + one shared_lock acquisition for the whole broadcast
+    std::string rawData = networkManager_.generateResponseMessage(status, response, timestamps);
+    auto sharedData = std::make_shared<const std::string>(rawData);
+    auto sockets = gameServices_.getClientManager().getActiveSockets(excludeClientId);
 
-    auto clientsList = gameServices_.getClientManager().getClientsList();
-    for (const auto &clientDataItem : clientsList)
+    for (auto &sock : sockets)
     {
-        if (excludeClientId != -1 && clientDataItem.clientId == excludeClientId)
-        {
-            continue;
-        }
-
-        // Get socket for this client using ClientManager
-        auto itemSocket = gameServices_.getClientManager().getClientSocket(clientDataItem.clientId);
-
-        // Validate socket before using
-        if (itemSocket && itemSocket->is_open())
+        if (sock && sock->is_open())
         {
             try
             {
-                networkManager_.sendResponse(itemSocket, responseData);
+                networkManager_.sendResponse(sock, sharedData);
             }
             catch (const std::exception &ex)
             {
-                gameServices_.getLogger().logError("Error broadcasting to client " +
-                                                   std::to_string(clientDataItem.clientId) + ": " + ex.what());
+                gameServices_.getLogger().logError("Error in broadcastWithTimestamps: " + std::string(ex.what()));
             }
         }
     }

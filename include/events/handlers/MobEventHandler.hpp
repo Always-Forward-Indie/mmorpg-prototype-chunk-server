@@ -54,6 +54,15 @@ class MobEventHandler : public BaseEventHandler
     void handleMobTargetLostEvent(const Event &event);
 
     /**
+     * @brief Handle mob health update event (e.g. leash HP regeneration)
+     *
+     * Broadcasts current HP to all clients so health bars stay in sync.
+     *
+     * @param event Event containing mobUID, mobId, currentHealth, maxHealth
+     */
+    void handleMobHealthUpdateEvent(const Event &event);
+
+    /**
      * @brief Handle set all mobs list event
      *
      * Loads all mobs data into the mob manager
@@ -88,6 +97,17 @@ class MobEventHandler : public BaseEventHandler
      * @param event Event containing mob skills mapping
      */
     void handleSetMobsSkillsEvent(const Event &event);
+
+    /**
+     * @brief Handle lightweight per-tick mob movement update.
+     *
+     * Sends compact position+velocity packets to clients.
+     * Full mob data is already known from spawnMobsInZone — only uid/pos/velocity
+     * are transmitted here to minimize bandwidth.
+     *
+     * @param event Event containing vector<MobMoveUpdateStruct>
+     */
+    void handleMobMoveUpdateEvent(const Event &event);
 
   private:
     /**

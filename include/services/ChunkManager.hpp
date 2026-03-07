@@ -19,6 +19,7 @@ public:
 
 private:
     Logger& logger_;
+    std::shared_ptr<spdlog::logger> log_;
 
     // Store the chunks in memory as map with chunkId as key
     std::map<int, ChunkInfoStruct> chunks_;

@@ -5,11 +5,13 @@
 #include "utils/TimestampUtils.hpp"
 #include <algorithm>
 #include <cmath>
+#include <spdlog/logger.h>
 
 ExperienceManager::ExperienceManager(GameServices *gameServices)
     : gameServices_(gameServices), experiencePacketCallback_(nullptr), statsUpdatePacketCallback_(nullptr),
       saveProgressCallback_(nullptr)
 {
+    log_ = gameServices_->getLogger().getSystem("experience");
 }
 
 ExperienceGrantResult
@@ -63,7 +65,7 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         characterData.expForNextLevel = result.experienceEvent.expForNextLevel;
 
         // Тестируем новый метод получения опыта из гейм-сервера
-        gameServices_->getLogger().log("Testing getExperienceForLevelFromGameServer for level " + std::to_string(newLevel + 1), YELLOW);
+        log_->info("Testing getExperienceForLevelFromGameServer for level " + std::to_string(newLevel + 1));
         int expFromGameServer = getExperienceForLevelFromGameServer(newLevel + 1);
         gameServices_->getLogger().log("Experience for level " + std::to_string(newLevel + 1) +
                                            " from game server: " + std::to_string(expFromGameServer),
@@ -342,9 +344,8 @@ ExperienceManager::handleLevelUp(int characterId, int oldLevel, int newLevel, Ex
         {
             std::string newAbility = "ability_level_" + std::to_string(level);
             result.newAbilities.push_back(newAbility);
-            gameServices_->getLogger().log("Character " + std::to_string(characterId) +
-                                               " gained new ability: " + newAbility,
-                YELLOW);
+            log_->info("Character " + std::to_string(characterId) +
+                                               " gained new ability: " + newAbility);
         }
     }
 }
@@ -367,9 +368,8 @@ ExperienceManager::getExperienceForLevelFromGameServer(int level)
     else
     {
         // Кеш не загружен, используем локальный расчет как fallback
-        gameServices_->getLogger().log("Experience cache not loaded, using local calculation for level " +
-                                           std::to_string(level),
-            YELLOW);
+        log_->info("Experience cache not loaded, using local calculation for level " +
+                                           std::to_string(level));
         return getExperienceForLevel(level);
     }
 }

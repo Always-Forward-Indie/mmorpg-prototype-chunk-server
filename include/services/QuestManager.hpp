@@ -157,4 +157,5 @@ class QuestManager
     GameServerWorker *gameServerWorker_ = nullptr;
     NetworkManager *networkManager_ = nullptr;
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
 };

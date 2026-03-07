@@ -6,10 +6,12 @@
 #include "utils/Logger.hpp"
 #include <algorithm>
 #include <chrono>
+#include <spdlog/logger.h>
 
 SkillSystem::SkillSystem(GameServices *gameServices)
     : gameServices_(gameServices)
 {
+    log_ = gameServices_->getLogger().getSystem("skill");
     combatCalculator_ = std::make_unique<CombatCalculator>();
 }
 
@@ -34,18 +36,18 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
         std::optional<SkillStruct> skillOpt;
         if (casterType == CasterType::PLAYER)
         {
-            gameServices_->getLogger().log("Getting character skill: " + skillSlug + " for player " + std::to_string(casterId), GREEN);
+            log_->info("Getting character skill: " + skillSlug + " for player " + std::to_string(casterId));
             skillOpt = getCharacterSkill(casterId, skillSlug);
         }
         else
         {
-            gameServices_->getLogger().log("Getting mob skill: " + skillSlug + " for mob " + std::to_string(casterId), GREEN);
+            log_->info("Getting mob skill: " + skillSlug + " for mob " + std::to_string(casterId));
             skillOpt = getMobSkill(casterId, skillSlug);
         }
 
         if (!skillOpt.has_value())
         {
-            gameServices_->getLogger().logError("Skill not found in useSkill: " + skillSlug + " for caster " + std::to_string(casterId));
+            log_->error("Skill not found in useSkill: " + skillSlug + " for caster " + std::to_string(casterId));
             result.errorMessage = "Skill not found: " + skillSlug;
             return result;
         }
@@ -53,36 +55,36 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
         const SkillStruct &skill = skillOpt.value();
         gameServices_->getLogger().log("Skill found in useSkill: " + std::string(skill.skillName) + " (" + skill.skillSlug + ")", GREEN);
 
-        // Проверяем доступность скила
-        if (!isSkillAvailable(casterId, skillSlug))
+        // HIGH-1: atomic check-AND-set under a single unique_lock — prevents two
+        // concurrent calls from both passing the cooldown check simultaneously.
+        if (!trySetCooldown(casterId, skillSlug, skill.cooldownMs))
         {
             result.errorMessage = "Skill is on cooldown or not available";
             return result;
         }
 
-        // Проверяем ресурсы
-        if (!validateResources(casterId, skill))
+        // Проверяем ресурсы и сразу списываем ману атомарно
+        if (!tryConsumeResources(casterId, skill, casterType)) // MEDIUM-2: pass casterType
         {
             result.errorMessage = "Insufficient resources";
             return result;
         }
 
         // Проверяем цель
-        if (!validateTarget(casterId, targetId, targetType))
+        if (!validateTarget(casterId, targetId, targetType, casterType)) // MEDIUM-2: pass casterType
         {
             result.errorMessage = "Invalid target";
             return result;
         }
 
         // Проверяем дистанцию
-        if (!isInRange(skill, casterId, targetId, targetType))
+        if (!isInRange(skill, casterId, targetId, targetType, casterType)) // MEDIUM-2: pass casterType
         {
             result.errorMessage = "Target is out of range";
             return result;
         }
 
-        // Потребляем ресурсы
-        consumeResources(casterId, skill);
+        // Mana already consumed by tryConsumeResources above.
 
         // Выполняем расчеты
         if (casterType == CasterType::PLAYER)
@@ -93,7 +95,7 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
             {
                 auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
                 result.damageResult = combatCalculator_->calculateSkillDamage(skill, casterData, targetData);
-                result.healAmount = combatCalculator_->calculateBaseDamage(skill, casterData.attributes); // Временно для лечения
+                result.healAmount = combatCalculator_->calculateHealAmount(skill, casterData.attributes); // Heal uses dedicated formula (no armour reduction)
             }
             else if (targetType == CombatTargetType::MOB)
             {
@@ -109,9 +111,6 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
 
             result.damageResult = combatCalculator_->calculateMobSkillDamage(skill, mobData, targetData);
         }
-
-        // Устанавливаем кулдаун
-        setCooldown(casterId, skillSlug, skill.cooldownMs);
 
         result.success = true;
         // result.skillUsed = *skill; // Убираем это поле пока
@@ -143,22 +142,22 @@ SkillSystem::getCharacterSkill(int characterId, const std::string &skillSlug)
 {
     try
     {
-        gameServices_->getLogger().log("Getting character skill " + skillSlug + " for character " + std::to_string(characterId), GREEN);
+        log_->info("Getting character skill " + skillSlug + " for character " + std::to_string(characterId));
         auto characterData = gameServices_->getCharacterManager().getCharacterData(characterId);
         gameServices_->getLogger().log("Character " + std::to_string(characterId) + " has " + std::to_string(characterData.skills.size()) + " skills", GREEN);
 
         for (const auto &skill : characterData.skills)
         {
-            gameServices_->getLogger().log("Checking skill: " + skill.skillSlug + " against " + skillSlug, GREEN);
+            log_->info("Checking skill: " + skill.skillSlug + " against " + skillSlug);
             if (skill.skillSlug == skillSlug)
             {
-                gameServices_->getLogger().log("Skill found: " + skill.skillName + " (" + skill.skillSlug + ")", GREEN);
+                log_->info("Skill found: " + skill.skillName + " (" + skill.skillSlug + ")");
                 // Возвращаем копию скила
                 return skill;
             }
         }
 
-        gameServices_->getLogger().logError("Skill " + skillSlug + " not found for character " + std::to_string(characterId));
+        log_->error("Skill " + skillSlug + " not found for character " + std::to_string(characterId));
     }
     catch (const std::exception &e)
     {
@@ -173,22 +172,22 @@ SkillSystem::getMobSkill(int mobId, const std::string &skillSlug)
 {
     try
     {
-        gameServices_->getLogger().log("Getting mob skill " + skillSlug + " for mob " + std::to_string(mobId), GREEN);
+        log_->info("Getting mob skill " + skillSlug + " for mob " + std::to_string(mobId));
         auto mobData = gameServices_->getMobInstanceManager().getMobInstance(mobId);
         gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " has " + std::to_string(mobData.skills.size()) + " skills", GREEN);
 
         for (const auto &skill : mobData.skills)
         {
-            gameServices_->getLogger().log("Checking mob skill: " + skill.skillSlug + " against " + skillSlug, GREEN);
+            log_->info("Checking mob skill: " + skill.skillSlug + " against " + skillSlug);
             if (skill.skillSlug == skillSlug)
             {
-                gameServices_->getLogger().log("Mob skill found: " + skill.skillName + " (" + skill.skillSlug + ")", GREEN);
+                log_->info("Mob skill found: " + skill.skillName + " (" + skill.skillSlug + ")");
                 // Возвращаем копию скила
                 return skill;
             }
         }
 
-        gameServices_->getLogger().logError("Skill " + skillSlug + " not found for mob " + std::to_string(mobId));
+        log_->error("Skill " + skillSlug + " not found for mob " + std::to_string(mobId));
     }
     catch (const std::exception &e)
     {
@@ -203,29 +202,38 @@ SkillSystem::setCooldown(int casterId, const std::string &skillSlug, int cooldow
 {
     auto now = std::chrono::steady_clock::now();
     auto endTime = now + std::chrono::milliseconds(cooldownMs);
+    std::unique_lock<std::shared_mutex> lock(cooldownsMutex_);
     cooldowns_[casterId][skillSlug] = endTime;
+}
+
+bool
+SkillSystem::trySetCooldown(int casterId, const std::string &skillSlug, int cooldownMs)
+{
+    // HIGH-1: single unique_lock covers both the check and the set.
+    // No other thread can sneak in between, eliminating the TOCTOU race.
+    auto now = std::chrono::steady_clock::now();
+    std::unique_lock<std::shared_mutex> lock(cooldownsMutex_);
+    auto &entry = cooldowns_[casterId][skillSlug];
+    if (now < entry)
+        return false; // still on cooldown
+    entry = now + std::chrono::milliseconds(cooldownMs);
+    return true;
 }
 
 bool
 SkillSystem::isOnCooldown(int casterId, const std::string &skillSlug)
 {
+    std::shared_lock<std::shared_mutex> lock(cooldownsMutex_);
     auto it = cooldowns_.find(casterId);
     if (it == cooldowns_.end())
-    {
         return false;
-    }
-
     auto skillIt = it->second.find(skillSlug);
     if (skillIt == it->second.end())
-    {
         return false;
-    }
-
-    auto now = std::chrono::steady_clock::now();
-    return now < skillIt->second;
+    return std::chrono::steady_clock::now() < skillIt->second;
 }
 
-const SkillStruct *
+std::optional<std::reference_wrapper<const SkillStruct>>
 SkillSystem::getBestSkillForMob(const MobDataStruct &mobData,
     const CharacterDataStruct &targetData,
     float distance)
@@ -272,14 +280,16 @@ SkillSystem::getBestSkillForMob(const MobDataStruct &mobData,
         }
     }
 
-    return bestSkill;
+    if (!bestSkill)
+        return std::nullopt;
+    return std::cref(*bestSkill);
 }
 
 void
 SkillSystem::updateCooldowns()
 {
     auto now = std::chrono::steady_clock::now();
-
+    std::unique_lock<std::shared_mutex> lock(cooldownsMutex_);
     for (auto &casterCooldowns : cooldowns_)
     {
         auto it = casterCooldowns.second.begin();
@@ -332,14 +342,14 @@ SkillSystem::determineCasterType(int casterId)
 }
 
 bool
-SkillSystem::isInRange(const SkillStruct &skill, int casterId, int targetId, CombatTargetType targetType)
+SkillSystem::isInRange(const SkillStruct &skill, int casterId, int targetId, CombatTargetType targetType, CasterType casterType)
 {
     try
     {
         PositionStruct casterPos, targetPos;
 
         // Получаем позицию кастера
-        CasterType casterType = determineCasterType(casterId);
+        // MEDIUM-2: reuse pre-computed casterType, no extra determineCasterType() call
         if (casterType == CasterType::PLAYER)
         {
             auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
@@ -386,7 +396,7 @@ SkillSystem::isInRange(const SkillStruct &skill, int casterId, int targetId, Com
 }
 
 bool
-SkillSystem::validateTarget(int casterId, int targetId, CombatTargetType targetType)
+SkillSystem::validateTarget(int casterId, int targetId, CombatTargetType targetType, CasterType /*casterType*/)
 {
     // Базовые проверки
     if (targetType == CombatTargetType::SELF)
@@ -422,63 +432,16 @@ SkillSystem::validateTarget(int casterId, int targetId, CombatTargetType targetT
 }
 
 bool
-SkillSystem::validateResources(int casterId, const SkillStruct &skill)
+SkillSystem::tryConsumeResources(int casterId, const SkillStruct &skill, CasterType casterType)
 {
     if (skill.costMp <= 0)
-    {
-        return true; // Нет затрат маны
-    }
+        return true; // Нет затрат — всегда успех
 
-    try
-    {
-        CasterType casterType = determineCasterType(casterId);
-
-        if (casterType == CasterType::PLAYER)
-        {
-            auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
-            return casterData.characterCurrentMana >= skill.costMp;
-        }
-        else if (casterType == CasterType::MOB)
-        {
-            auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
-            return mobData.currentMana >= skill.costMp;
-        }
-    }
-    catch (...)
-    {
-        return false;
-    }
+    // MEDIUM-2: casterType passed in, skip determineCasterType() call
+    if (casterType == CasterType::PLAYER)
+        return gameServices_->getCharacterManager().trySpendMana(casterId, skill.costMp);
+    else if (casterType == CasterType::MOB)
+        return gameServices_->getMobInstanceManager().trySpendMana(casterId, skill.costMp);
 
     return false;
-}
-
-void
-SkillSystem::consumeResources(int casterId, const SkillStruct &skill)
-{
-    if (skill.costMp <= 0)
-    {
-        return; // Нет затрат
-    }
-
-    try
-    {
-        CasterType casterType = determineCasterType(casterId);
-
-        if (casterType == CasterType::PLAYER)
-        {
-            auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
-            int newMana = std::max(0, casterData.characterCurrentMana - skill.costMp);
-            gameServices_->getCharacterManager().updateCharacterMana(casterId, newMana);
-        }
-        else if (casterType == CasterType::MOB)
-        {
-            auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
-            int newMana = std::max(0, mobData.currentMana - skill.costMp);
-            gameServices_->getMobInstanceManager().updateMobMana(casterId, newMana);
-        }
-    }
-    catch (const std::exception &e)
-    {
-        gameServices_->getLogger().logError("Error consuming resources: " + std::string(e.what()));
-    }
 }

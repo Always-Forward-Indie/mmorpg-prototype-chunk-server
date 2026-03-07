@@ -177,6 +177,10 @@ JSONParser::parseCharacterData(const char *data, size_t length)
             {
                 skillData.maxRange = skill["maxRange"].get<float>();
             }
+            if (skill.contains("areaRadius") && skill["areaRadius"].is_number())
+            {
+                skillData.areaRadius = skill["areaRadius"].get<float>();
+            }
             characterData.skills.push_back(skillData);
         }
     }
@@ -541,6 +545,39 @@ JSONParser::parseMobsList(const char *data, size_t length)
             {
                 mobData.isDead = mob["isDead"].get<bool>();
             }
+
+            // Per-mob AI config (migration 011)
+            if (mob.contains("aggroRange") && mob["aggroRange"].is_number())
+                mobData.aggroRange = mob["aggroRange"].get<float>();
+            if (mob.contains("attackRange") && mob["attackRange"].is_number())
+                mobData.attackRange = mob["attackRange"].get<float>();
+            if (mob.contains("attackCooldown") && mob["attackCooldown"].is_number())
+                mobData.attackCooldown = mob["attackCooldown"].get<float>();
+            if (mob.contains("chaseMultiplier") && mob["chaseMultiplier"].is_number())
+                mobData.chaseMultiplier = mob["chaseMultiplier"].get<float>();
+            if (mob.contains("patrolSpeed") && mob["patrolSpeed"].is_number())
+                mobData.patrolSpeed = mob["patrolSpeed"].get<float>();
+
+            // Social behaviour (migration 012)
+            if (mob.contains("isSocial") && mob["isSocial"].is_boolean())
+                mobData.isSocial = mob["isSocial"].get<bool>();
+            if (mob.contains("chaseDuration") && mob["chaseDuration"].is_number())
+                mobData.chaseDuration = mob["chaseDuration"].get<float>();
+
+            // Rank / difficulty tier (migration 023)
+            if (mob.contains("rankId") && mob["rankId"].is_number_integer())
+                mobData.rankId = mob["rankId"].get<int>();
+            if (mob.contains("rankCode") && mob["rankCode"].is_string())
+                mobData.rankCode = mob["rankCode"].get<std::string>();
+            if (mob.contains("rankMult") && mob["rankMult"].is_number())
+                mobData.rankMult = mob["rankMult"].get<float>();
+
+            // AI depth: flee + archetype (migration 016)
+            if (mob.contains("fleeHpThreshold") && mob["fleeHpThreshold"].is_number())
+                mobData.fleeHpThreshold = mob["fleeHpThreshold"].get<float>();
+            if (mob.contains("aiArchetype") && mob["aiArchetype"].is_string())
+                mobData.aiArchetype = mob["aiArchetype"].get<std::string>();
+
             mobsList.push_back(mobData);
         }
     }
@@ -668,6 +705,10 @@ JSONParser::parseItemsList(const char *data, size_t length)
             {
                 itemData.isHarvest = item["isHarvest"].get<bool>();
             }
+            if (item.contains("isUsable") && item["isUsable"].is_boolean())
+            {
+                itemData.isUsable = item["isUsable"].get<bool>();
+            }
             if (item.contains("weight") && item["weight"].is_number())
             {
                 itemData.weight = item["weight"].get<float>();
@@ -783,6 +824,18 @@ JSONParser::parseMobLootInfo(const char *data, size_t length)
             {
                 lootData.dropChance = loot["dropChance"].get<float>();
             }
+            if (loot.contains("isHarvestOnly") && loot["isHarvestOnly"].is_boolean())
+            {
+                lootData.isHarvestOnly = loot["isHarvestOnly"].get<bool>();
+            }
+            if (loot.contains("minQuantity") && loot["minQuantity"].is_number_integer())
+            {
+                lootData.minQuantity = loot["minQuantity"].get<int>();
+            }
+            if (loot.contains("maxQuantity") && loot["maxQuantity"].is_number_integer())
+            {
+                lootData.maxQuantity = loot["maxQuantity"].get<int>();
+            }
 
             mobLootInfo.push_back(lootData);
         }
@@ -866,6 +919,10 @@ JSONParser::parseMobsSkillsMapping(const char *data, size_t length)
                         if (skillData.contains("maxRange") && skillData["maxRange"].is_number())
                         {
                             skill.maxRange = skillData["maxRange"].get<float>();
+                        }
+                        if (skillData.contains("areaRadius") && skillData["areaRadius"].is_number())
+                        {
+                            skill.areaRadius = skillData["areaRadius"].get<float>();
                         }
 
                         skills.push_back(skill);
@@ -1487,6 +1544,78 @@ JSONParser::parsePlayerFlags(const char *data, size_t length)
     catch (const std::exception &)
     {
         result.clear();
+    }
+    return result;
+}
+
+std::vector<ActiveEffectStruct>
+JSONParser::parsePlayerActiveEffects(const char *data, size_t length)
+{
+    std::vector<ActiveEffectStruct> result;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].contains("effects"))
+            return result;
+
+        for (const auto &ej : j["body"]["effects"])
+        {
+            ActiveEffectStruct eff;
+            eff.id = ej.value("id", int64_t(0));
+            eff.effectId = ej.value("effectId", 0);
+            eff.effectSlug = ej.value("effectSlug", std::string(""));
+            eff.effectTypeSlug = ej.value("effectTypeSlug", std::string("damage"));
+            eff.attributeId = ej.value("attributeId", 0);
+            eff.attributeSlug = ej.value("attributeSlug", std::string(""));
+            eff.value = ej.value("value", 0.0f);
+            eff.sourceType = ej.value("sourceType", std::string(""));
+            eff.expiresAt = ej.value("expiresAt", int64_t(0));
+            eff.tickMs = ej.value("tickMs", 0);
+            // Schedule first tick immediately on load; non-tick effects: nextTickAt stays default
+            if (eff.tickMs > 0)
+                eff.nextTickAt = std::chrono::steady_clock::now();
+            result.push_back(std::move(eff));
+        }
+    }
+    catch (const std::exception &)
+    {
+        result.clear();
+    }
+    return result;
+}
+std::pair<int, std::vector<CharacterAttributeStruct>>
+JSONParser::parseCharacterAttributesRefresh(const char *data, size_t length)
+{
+    std::pair<int, std::vector<CharacterAttributeStruct>> result{0, {}};
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+        if (!jsonData.contains("body") || !jsonData["body"].is_object())
+            return result;
+
+        result.first = jsonData["body"].value("characterId", 0);
+
+        if (jsonData["body"].contains("attributesData") && jsonData["body"]["attributesData"].is_array())
+        {
+            for (const auto &attr : jsonData["body"]["attributesData"])
+            {
+                CharacterAttributeStruct entry;
+                if (attr.contains("id") && attr["id"].is_number_integer())
+                    entry.id = attr["id"].get<int>();
+                if (attr.contains("name") && attr["name"].is_string())
+                    entry.name = attr["name"].get<std::string>();
+                if (attr.contains("slug") && attr["slug"].is_string())
+                    entry.slug = attr["slug"].get<std::string>();
+                if (attr.contains("value") && attr["value"].is_number_integer())
+                    entry.value = attr["value"].get<int>();
+                result.second.push_back(std::move(entry));
+            }
+        }
+    }
+    catch (const std::exception &)
+    {
+        result.first = 0;
+        result.second.clear();
     }
     return result;
 }

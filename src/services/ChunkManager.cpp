@@ -1,6 +1,7 @@
 #include "services/ChunkManager.hpp"
 
-ChunkManager::ChunkManager(Logger& logger) : logger_(logger) { }
+ChunkManager::ChunkManager(Logger& logger) : logger_(logger) {
+    log_ = logger.getSystem("chunk"); }
 
 void ChunkManager::loadChunkInfo(ChunkInfoStruct chunkInfo)
 {

@@ -4,12 +4,15 @@
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
 // Forward declarations
+namespace spdlog { class logger; }
 class GameServices;
 class CombatCalculator;
 
@@ -58,9 +61,18 @@ class SkillSystem
     bool isOnCooldown(int casterId, const std::string &skillSlug);
 
     /**
-     * @brief Получить лучший скил для моба (AI)
+     * @brief HIGH-1 fix: Atomically check that the skill is NOT on cooldown and
+     *        immediately set it if so.  Returns true (cooldown set, proceed with
+     *        skill execution) or false (already on cooldown, reject).  Both
+     *        check and set happen under the same unique_lock, eliminating the
+     *        TOCTOU window between isSkillAvailable() and setCooldown().
      */
-    const SkillStruct *getBestSkillForMob(const MobDataStruct &mobData,
+    bool trySetCooldown(int casterId, const std::string &skillSlug, int cooldownMs);
+
+    /**
+     * @brief Получить лучший скил для моба (AI). Возвращает nullopt если подходящего скила нет.
+     */
+    std::optional<std::reference_wrapper<const SkillStruct>> getBestSkillForMob(const MobDataStruct &mobData,
         const CharacterDataStruct &targetData,
         float distance);
 
@@ -69,12 +81,22 @@ class SkillSystem
      */
     void updateCooldowns();
 
+    /**
+     * @brief Предоставить доступ к CombatCalculator для AoE и других внешних расчётов.
+     */
+    CombatCalculator *getCombatCalculator() const
+    {
+        return combatCalculator_.get();
+    }
+
   private:
     GameServices *gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
     std::unique_ptr<CombatCalculator> combatCalculator_;
 
     // Кулдауны: entityId -> (skillSlug -> timepoint)
     std::unordered_map<int, std::unordered_map<std::string, std::chrono::steady_clock::time_point>> cooldowns_;
+    mutable std::shared_mutex cooldownsMutex_; // protects cooldowns_
 
     /**
      * @brief Определить тип кастера (игрок или моб)
@@ -89,21 +111,18 @@ class SkillSystem
 
     /**
      * @brief Проверить дистанцию
+     * MEDIUM-2: accepts pre-computed casterType to avoid redundant determineCasterType() call
      */
-    bool isInRange(const SkillStruct &skill, int casterId, int targetId, CombatTargetType targetType);
+    bool isInRange(const SkillStruct &skill, int casterId, int targetId, CombatTargetType targetType, CasterType casterType);
 
     /**
      * @brief Валидировать цель
      */
-    bool validateTarget(int casterId, int targetId, CombatTargetType targetType);
+    bool validateTarget(int casterId, int targetId, CombatTargetType targetType, CasterType casterType);
 
     /**
-     * @brief Проверить ресурсы
+     * @brief Атомарная проверка и списание маны. Возвращает false если маны недостаточно (без списания).
+     * MEDIUM-2: accepts pre-computed casterType
      */
-    bool validateResources(int casterId, const SkillStruct &skill);
-
-    /**
-     * @brief Потратить ресурсы
-     */
-    void consumeResources(int casterId, const SkillStruct &skill);
+    bool tryConsumeResources(int casterId, const SkillStruct &skill, CasterType casterType);
 };

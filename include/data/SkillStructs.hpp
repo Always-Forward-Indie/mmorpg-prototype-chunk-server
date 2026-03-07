@@ -17,11 +17,12 @@ struct SkillStruct
     float flatAdd = 0.0f; // Плоская добавка
 
     // Характеристики скила
-    int cooldownMs = 0;    // Время восстановления в мс
-    int gcdMs = 0;         // Глобальный КД в мс
-    int castMs = 0;        // Время каста в мс
-    int costMp = 0;        // Стоимость маны
-    float maxRange = 0.0f; // Максимальная дальность
+    int cooldownMs = 0;      // Время восстановления в мс
+    int gcdMs = 0;           // Глобальный КД в мс
+    int castMs = 0;          // Время каста в мс
+    int costMp = 0;          // Стоимость маны
+    float maxRange = 0.0f;   // Максимальная дальность
+    float areaRadius = 0.0f; // Радиус AoE (0 = single target)
 };
 
 // Структура для атрибута entity (персонажа или моба)

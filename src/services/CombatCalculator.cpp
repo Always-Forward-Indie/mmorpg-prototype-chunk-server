@@ -2,9 +2,62 @@
 #include <algorithm>
 #include <cmath>
 
-CombatCalculator::CombatCalculator()
-    : gen_(rd_()), dis_(0.0f, 1.0f)
+CombatCalculator::CombatCalculator(GameConfigService *configService)
+    : gen_(rd_()), dis_(0.0f, 1.0f), gameConfig_(configService)
 {
+}
+
+void
+CombatCalculator::setGameConfigService(GameConfigService *configService)
+{
+    gameConfig_ = configService;
+}
+
+float
+CombatCalculator::cfg(const std::string &key, float defaultValue) const
+{
+    if (!gameConfig_)
+        return defaultValue;
+    return gameConfig_->getFloat(key, defaultValue);
+}
+
+std::vector<CharacterAttributeStruct>
+CombatCalculator::mergeEffects(const CharacterDataStruct &character) const
+{
+    auto attrs = character.attributes; // copy base attributes
+
+    if (character.activeEffects.empty())
+        return attrs;
+
+    const int64_t nowSec = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+                               .count();
+
+    for (const auto &eff : character.activeEffects)
+    {
+        if (eff.attributeSlug.empty())
+            continue; // non-stat effect
+        if (eff.expiresAt != 0 && eff.expiresAt <= nowSec)
+            continue; // expired
+        // DoT/HoT are not stat modifiers — handled by tickEffects()
+        if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
+            continue;
+
+        auto it = std::find_if(attrs.begin(), attrs.end(), [&](const CharacterAttributeStruct &a)
+            { return a.slug == eff.attributeSlug; });
+        if (it != attrs.end())
+        {
+            it->value += static_cast<int>(eff.value);
+        }
+        else
+        {
+            CharacterAttributeStruct newAttr;
+            newAttr.slug = eff.attributeSlug;
+            newAttr.value = static_cast<int>(eff.value);
+            attrs.push_back(std::move(newAttr));
+        }
+    }
+    return attrs;
 }
 
 DamageCalculationStruct
@@ -16,23 +69,34 @@ CombatCalculator::calculateSkillDamage(
     DamageCalculationStruct result;
     result.damageType = (skill.school == "physical") ? "physical" : "magical";
 
+    // Apply non-expired active effects to base attributes
+    const auto effAtk = mergeEffects(attacker);
+    const auto effTgt = mergeEffects(target);
+
+    // Level difference modifier
+    const int rawDiff = attacker.characterLevel - target.characterLevel;
+    const int cap = static_cast<int>(cfg("combat.level_diff_cap", 10.0f));
+    const int levelDiff = std::clamp(rawDiff, -cap, cap);
+    const float hitMod = levelDiff * cfg("combat.level_diff_hit_per_level", 0.02f);
+    const float dmgMod = 1.0f + levelDiff * cfg("combat.level_diff_damage_per_level", 0.04f);
+
     // Проверка промаха
-    result.isMissed = rollMiss(attacker.attributes, target.attributes);
+    result.isMissed = rollMiss(effAtk, effTgt, hitMod);
     if (result.isMissed)
     {
         return result;
     }
 
-    // Расчет базового урона
-    result.baseDamage = calculateBaseDamage(skill, attacker.attributes);
+    // Расчет базового урона (с разбросом ±variance из конфига)
+    result.baseDamage = calculateBaseDamage(skill, effAtk);
 
     // Проверка критического удара
-    result.isCritical = rollCriticalHit(attacker.attributes);
+    result.isCritical = rollCriticalHit(effAtk);
     if (result.isCritical)
     {
-        float critMultiplier = getAttributeValue(attacker.attributes, "crit_multiplier") / 100.0f;
-        if (critMultiplier == 0)
-            critMultiplier = 2.0f; // Дефолтный множитель
+        float critMultiplier = getAttributeValue(effAtk, "crit_multiplier") / 100.0f;
+        if (critMultiplier <= 0.0f)
+            critMultiplier = cfg("combat.default_crit_multiplier", 2.0f);
         result.scaledDamage = static_cast<int>(result.baseDamage * critMultiplier);
     }
     else
@@ -41,25 +105,36 @@ CombatCalculator::calculateSkillDamage(
     }
 
     // Проверка блокирования
-    result.isBlocked = rollBlock(target.attributes);
+    result.isBlocked = rollBlock(effTgt);
     if (result.isBlocked)
     {
-        int blockValue = getAttributeValue(target.attributes, "block_value");
+        int blockValue = getAttributeValue(effTgt, "block_value");
         result.scaledDamage = std::max(0, result.scaledDamage - blockValue);
     }
+
+    // Бонус/штраф за разницу уровней (после блока, до защиты)
+    result.scaledDamage = std::max(0, static_cast<int>(result.scaledDamage * dmgMod));
 
     // Применение защиты
     int defenseValue;
     if (result.damageType == "physical")
     {
-        defenseValue = getAttributeValue(target.attributes, "physical_defense");
+        defenseValue = getAttributeValue(effTgt, "physical_defense");
     }
     else
     {
-        defenseValue = getAttributeValue(target.attributes, "magical_defense");
+        defenseValue = getAttributeValue(effTgt, "magical_defense");
     }
 
-    result.totalDamage = applyDefense(result.scaledDamage, defenseValue, result.damageType);
+    result.totalDamage = applyDefense(result.scaledDamage, defenseValue, result.damageType, target.characterLevel);
+
+    // Сопротивление школы: {school}_resistance — дополнительный % от пост-защитного урона
+    {
+        int resistRaw = getAttributeValue(effTgt, skill.school + "_resistance");
+        const float maxResCap = cfg("combat.max_resistance_cap", 75.0f);
+        const float resistPct = std::min(static_cast<float>(resistRaw), maxResCap) / 100.0f;
+        result.totalDamage = std::max(0, static_cast<int>(result.totalDamage * (1.0f - resistPct)));
+    }
 
     return result;
 }
@@ -73,49 +148,91 @@ CombatCalculator::calculateMobSkillDamage(
     DamageCalculationStruct result;
     result.damageType = (skill.school == "physical") ? "physical" : "magical";
 
-    // Для моба используем упрощенную систему промахов
-    if (dis_(gen_) < 0.05f)
-    { // 5% шанс промаха
-        result.isMissed = true;
+    // Apply non-expired active effects to target's base attributes
+    const auto effTgt = mergeEffects(target);
+
+    // Level difference modifier (mob level - character level)
+    const int rawDiff = attacker.level - target.characterLevel;
+    const int cap = static_cast<int>(cfg("combat.level_diff_cap", 10.0f));
+    const int levelDiff = std::clamp(rawDiff, -cap, cap);
+    const float hitMod = levelDiff * cfg("combat.level_diff_hit_per_level", 0.02f);
+    const float dmgMod = 1.0f + levelDiff * cfg("combat.level_diff_damage_per_level", 0.04f);
+
+    // Промах: accuracy моба vs evasion игрока — симметрично calculateSkillDamage
+    result.isMissed = rollMiss(attacker.attributes, effTgt, hitMod);
+    if (result.isMissed)
+    {
         return result;
     }
 
-    // Расчет базового урона
+    // Базовый урон
     result.baseDamage = calculateBaseDamage(skill, attacker.attributes);
 
-    // Для мобов критический удар рассчитывается проще
-    if (dis_(gen_) < 0.15f)
-    { // 15% шанс крита для мобов
-        result.isCritical = true;
-        result.scaledDamage = static_cast<int>(result.baseDamage * 2.0f);
+    // Критический удар из атрибутов моба (crit_chance, crit_multiplier)
+    result.isCritical = rollCriticalHit(attacker.attributes);
+    if (result.isCritical)
+    {
+        float critMultiplier = getAttributeValue(attacker.attributes, "crit_multiplier") / 100.0f;
+        if (critMultiplier <= 0.0f)
+            critMultiplier = cfg("combat.default_crit_multiplier", 2.0f);
+        result.scaledDamage = static_cast<int>(result.baseDamage * critMultiplier);
     }
     else
     {
         result.scaledDamage = result.baseDamage;
     }
 
-    // Проверка блокирования
-    result.isBlocked = rollBlock(target.attributes);
+    // Блок только у персонажа (мобы не блокируют)
+    result.isBlocked = rollBlock(effTgt);
     if (result.isBlocked)
     {
-        int blockValue = getAttributeValue(target.attributes, "block_value");
+        int blockValue = getAttributeValue(effTgt, "block_value");
         result.scaledDamage = std::max(0, result.scaledDamage - blockValue);
     }
+
+    // Бонус/штраф за разницу уровней
+    result.scaledDamage = std::max(0, static_cast<int>(result.scaledDamage * dmgMod));
 
     // Применение защиты
     int defenseValue;
     if (result.damageType == "physical")
     {
-        defenseValue = getAttributeValue(target.attributes, "physical_defense");
+        defenseValue = getAttributeValue(effTgt, "physical_defense");
     }
     else
     {
-        defenseValue = getAttributeValue(target.attributes, "magical_defense");
+        defenseValue = getAttributeValue(effTgt, "magical_defense");
     }
 
-    result.totalDamage = applyDefense(result.scaledDamage, defenseValue, result.damageType);
+    result.totalDamage = applyDefense(result.scaledDamage, defenseValue, result.damageType, target.characterLevel);
+
+    // Сопротивление школы: {school}_resistance — дополнительный % от пост-защитного урона
+    {
+        int resistRaw = getAttributeValue(effTgt, skill.school + "_resistance");
+        const float maxResCap = cfg("combat.max_resistance_cap", 75.0f);
+        const float resistPct = std::min(static_cast<float>(resistRaw), maxResCap) / 100.0f;
+        result.totalDamage = std::max(0, static_cast<int>(result.totalDamage * (1.0f - resistPct)));
+    }
 
     return result;
+}
+
+int
+CombatCalculator::calculateHealAmount(
+    const SkillStruct &skill,
+    const std::vector<CharacterAttributeStruct> &casterAttributes)
+{
+    // Healing scales off skill.scaleStat (e.g. "healing_power", "spirit", "intellect")
+    // but is NOT reduced by the target's armour or resistances.
+    // A separate heal-variance config key (default 0.10 = ±10%) ensures heals are
+    // slightly randomised but more predictable than damage.
+    int scaleStat = getAttributeValue(casterAttributes, skill.scaleStat);
+    int rawHeal = static_cast<int>(skill.flatAdd + (scaleStat * skill.coeff));
+    rawHeal = std::max(1, rawHeal);
+
+    const float variance = cfg("combat.heal_variance", 0.10f);
+    float factor = 1.0f + (dis_(gen_) * 2.0f - 1.0f) * variance;
+    return std::max(1, static_cast<int>(rawHeal * factor));
 }
 
 int
@@ -124,8 +241,13 @@ CombatCalculator::calculateBaseDamage(
     const std::vector<CharacterAttributeStruct> &attackerAttributes)
 {
     int scaleStatValue = getAttributeValue(attackerAttributes, skill.scaleStat);
-    int baseDamage = static_cast<int>(skill.flatAdd + (scaleStatValue * skill.coeff));
-    return std::max(1, baseDamage); // Минимум 1 урона
+    int rawDamage = static_cast<int>(skill.flatAdd + (scaleStatValue * skill.coeff));
+    rawDamage = std::max(1, rawDamage);
+
+    // Разброс урона ±N%: каждый удар не должен быть детерминированным числом
+    const float variance = cfg("combat.damage_variance", 0.12f);
+    float factor = 1.0f + (dis_(gen_) * 2.0f - 1.0f) * variance; // [1-v, 1+v]
+    return std::max(1, static_cast<int>(rawDamage * factor));
 }
 
 int
@@ -134,12 +256,23 @@ CombatCalculator::calculateBaseDamage(
     const std::vector<MobAttributeStruct> &attackerAttributes)
 {
     int scaleStatValue = getAttributeValue(attackerAttributes, skill.scaleStat);
-    int baseDamage = static_cast<int>(skill.flatAdd + (scaleStatValue * skill.coeff));
-    return std::max(1, baseDamage); // Минимум 1 урона
+    int rawDamage = static_cast<int>(skill.flatAdd + (scaleStatValue * skill.coeff));
+    rawDamage = std::max(1, rawDamage);
+
+    const float variance = cfg("combat.damage_variance", 0.12f);
+    float factor = 1.0f + (dis_(gen_) * 2.0f - 1.0f) * variance;
+    return std::max(1, static_cast<int>(rawDamage * factor));
 }
 
 bool
 CombatCalculator::rollCriticalHit(const std::vector<CharacterAttributeStruct> &attackerAttributes)
+{
+    int critChance = getAttributeValue(attackerAttributes, "crit_chance");
+    return dis_(gen_) < (critChance / 100.0f);
+}
+
+bool
+CombatCalculator::rollCriticalHit(const std::vector<MobAttributeStruct> &attackerAttributes)
 {
     int critChance = getAttributeValue(attackerAttributes, "crit_chance");
     return dis_(gen_) < (critChance / 100.0f);
@@ -155,14 +288,37 @@ CombatCalculator::rollBlock(const std::vector<CharacterAttributeStruct> &targetA
 bool
 CombatCalculator::rollMiss(
     const std::vector<CharacterAttributeStruct> &attackerAttributes,
-    const std::vector<CharacterAttributeStruct> &targetAttributes)
+    const std::vector<CharacterAttributeStruct> &targetAttributes,
+    float hitModifier)
 {
     int accuracy = getAttributeValue(attackerAttributes, "accuracy");
     int evasion = getAttributeValue(targetAttributes, "evasion");
 
-    // Базовый шанс попадания 95%, модифицируется точностью и уклонением
-    float hitChance = 0.95f + (accuracy - evasion) * 0.01f;
-    hitChance = std::clamp(hitChance, 0.05f, 0.95f); // Ограничиваем от 5% до 95%
+    const float baseHit = cfg("combat.base_hit_chance", 0.95f);
+    const float minHit = cfg("combat.hit_chance_min", 0.05f);
+    const float maxHit = cfg("combat.hit_chance_max", 0.95f);
+
+    float hitChance = baseHit + (accuracy - evasion) * 0.01f + hitModifier;
+    hitChance = std::clamp(hitChance, minHit, maxHit);
+
+    return dis_(gen_) > hitChance;
+}
+
+bool
+CombatCalculator::rollMiss(
+    const std::vector<MobAttributeStruct> &attackerAttributes,
+    const std::vector<CharacterAttributeStruct> &targetAttributes,
+    float hitModifier)
+{
+    int accuracy = getAttributeValue(attackerAttributes, "accuracy");
+    int evasion = getAttributeValue(targetAttributes, "evasion");
+
+    const float baseHit = cfg("combat.base_hit_chance", 0.95f);
+    const float minHit = cfg("combat.hit_chance_min", 0.05f);
+    const float maxHit = cfg("combat.hit_chance_max", 0.95f);
+
+    float hitChance = baseHit + (accuracy - evasion) * 0.01f + hitModifier;
+    hitChance = std::clamp(hitChance, minHit, maxHit);
 
     return dis_(gen_) > hitChance;
 }
@@ -194,11 +350,17 @@ CombatCalculator::getAttributeValue(const std::vector<MobAttributeStruct> &attri
 }
 
 int
-CombatCalculator::applyDefense(int damage, int defenseValue, const std::string &damageType)
+CombatCalculator::applyDefense(int damage, int defenseValue, const std::string &damageType, int targetLevel)
 {
-    // Простая формула защиты: каждая единица защиты уменьшает урон на 1%
-    float damageReduction = defenseValue * 0.01f;
-    damageReduction = std::clamp(damageReduction, 0.0f, 0.75f); // Максимум 75% защиты
+    // Формула убывающей доходности: reduction = armor / (armor + K * targetLevel)
+    // K и cap читаются из GameConfigService (если недоступен — используются хардкодные значения).
+    const float K = cfg("combat.defense_formula_k", 7.5f);
+    const float cap = cfg("combat.defense_cap", 0.85f);
+
+    const int effectiveLevel = std::max(1, targetLevel);
+    float damageReduction = static_cast<float>(defenseValue) /
+                            (static_cast<float>(defenseValue) + K * static_cast<float>(effectiveLevel));
+    damageReduction = std::clamp(damageReduction, 0.0f, cap);
 
     int finalDamage = static_cast<int>(damage * (1.0f - damageReduction));
     return std::max(1, finalDamage); // Минимум 1 урона

@@ -1,11 +1,15 @@
 #pragma once
 
 #include "data/DataStructs.hpp"
+#include "services/MobAIController.hpp"
 #include "utils/Logger.hpp"
 #include <map>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <shared_mutex>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // Forward declarations
@@ -13,6 +17,7 @@ class MobInstanceManager;
 class SpawnZoneManager;
 class CharacterManager;
 class EventQueue;
+class MobManager;
 
 /**
  * @brief Manages mob movement within zones
@@ -72,9 +77,14 @@ class MobMovementManager
     void setCombatSystem(class CombatSystem *combatSystem);
 
     /**
+     * @brief Set reference to MobManager for skill template lookups (plan §2.1)
+     */
+    void setMobManager(MobManager *mobManager);
+
+    /**
      * @brief Handle mob aggro and retaliation when attacked by player
      */
-    void handleMobAttacked(int mobUID, int attackerPlayerId);
+    void handleMobAttacked(int mobUID, int attackerPlayerId, int damage = 0);
 
     /**
      * @brief Get movement data for specific mob (public version)
@@ -101,8 +111,31 @@ class MobMovementManager
      */
     const MobAIConfig &getAIConfig() const;
 
+    // ---- helpers used by MobAIController (must be public) ----
+
+    /**
+     * @brief Write full movement data for a mob (thread-safe write lock).
+     */
+    void updateMobMovementData(int mobUID, const MobMovementData &data);
+
+    /**
+     * @brief Send mob-target-lost event to all clients.
+     */
+    void sendMobTargetLost(const MobDataStruct &mob, int lostTargetPlayerId);
+
+    /**
+     * @brief True if mob is close enough to its zone to search new targets.
+     */
+    bool canSearchNewTargets(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
+
+    /**
+     * @brief Euclidean distance between two positions.
+     */
+    static float calculateDistance(const PositionStruct &a, const PositionStruct &b);
+
   private:
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
     MobInstanceManager *mobInstanceManager_;
     SpawnZoneManager *spawnZoneManager_;
     class CharacterManager *characterManager_;
@@ -122,30 +155,41 @@ class MobMovementManager
     // AI configuration
     MobAIConfig aiConfig_;
 
+    // Log-guard for chase movement: tracks which mob UIDs have had their
+    // "reached attack range" message emitted to avoid continuous spam.
+    // Protected by logMutex_ (not the heavy shared_mutex).
+    std::mutex logMutex_;
+    std::unordered_set<int> inRangeSet_;
+
+    // AI controller owns combat-state logic, aggro and attack execution.
+    MobAIController mobAIController_;
+
     /**
      * @brief Calculate new position for mob
      *
      * @param mob Mob data
      * @param zone Zone data
-     * @param otherMobs Other mobs in zone for collision detection
+     * @param otherMobs Lightweight {uid, position} pairs for collision detection
+     * @param params Pre-fetched movement params for the zone (avoids repeated lock+lookup)
      * @return New position and direction, or nullopt if no valid movement
      */
     std::optional<MobMovementResult> calculateNewPosition(
         const MobDataStruct &mob,
         const SpawnZoneStruct &zone,
-        const std::vector<MobDataStruct> &otherMobs);
+        const std::vector<std::pair<int, PositionStruct>> &otherMobs,
+        const MobMovementParams &params);
 
     /**
      * @brief Check if position is valid (within bounds, no collisions)
      */
     bool isValidPosition(
-        float x, float y, const SpawnZoneStruct &zone, const std::vector<MobDataStruct> &otherMobs, const MobDataStruct &currentMob);
+        float x, float y, const SpawnZoneStruct &zone, const std::vector<std::pair<int, PositionStruct>> &otherMobs, const MobDataStruct &currentMob, const MobMovementParams &params);
 
     /**
      * @brief Check if position is valid for chase movement (no zone boundaries, only collision check)
      */
     bool isValidPositionForChase(
-        float x, float y, const std::vector<MobDataStruct> &otherMobs, const MobDataStruct &currentMob);
+        float x, float y, const std::vector<std::pair<int, PositionStruct>> &otherMobs, const MobDataStruct &currentMob, const MobMovementParams &params);
 
     /**
      * @brief Get default movement parameters for zone
@@ -153,9 +197,20 @@ class MobMovementManager
     MobMovementParams getDefaultMovementParams();
 
     /**
-     * @brief Update movement data for specific mob
+     * @brief Atomically update ONLY direction/timing fields of mob movement data.
+     *
+     * Avoids the RMW race: between our last re-read of MobMovementData and the
+     * final write, another thread (e.g. handleMobAttacked) may have written
+     * targetPlayerId / combatState. A full-struct overwrite would silently undo
+     * those writes. This method only touches the fields changed by movement
+     * calculation, leaving all AI/combat state fields intact.
      */
-    void updateMobMovementData(int mobUID, const MobMovementData &data);
+    void updateMobMovementPositionFields(int mobUID,
+        float dirX,
+        float dirY,
+        float lastMoveTime,
+        float nextMoveTime,
+        float currentSpeed);
 
     /**
      * @brief Get movement data for specific mob (internal use)
@@ -163,18 +218,14 @@ class MobMovementManager
     MobMovementData getMobMovementDataInternal(int mobUID);
 
     /**
-     * @brief Check for nearby players and handle aggro
-     */
-    void handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct &zone, MobMovementData &movementData);
-
-    /**
      * @brief Calculate movement towards target player
      */
     std::optional<MobMovementResult> calculateChaseMovement(
         const MobDataStruct &mob,
         const SpawnZoneStruct &zone,
-        const std::vector<MobDataStruct> &otherMobs,
-        int targetPlayerId);
+        const std::vector<std::pair<int, PositionStruct>> &otherMobs,
+        int targetPlayerId,
+        const MobMovementParams &params);
 
     /**
      * @brief Calculate movement back to spawn zone
@@ -182,43 +233,14 @@ class MobMovementManager
     std::optional<MobMovementResult> calculateReturnToSpawnMovement(
         const MobDataStruct &mob,
         const SpawnZoneStruct &zone,
-        const std::vector<MobDataStruct> &otherMobs,
-        const PositionStruct &spawnPosition);
-
-    /**
-     * @brief Check if mob can attack target player
-     */
-    bool canAttackPlayer(const MobDataStruct &mob, int targetPlayerId, const MobMovementData &movementData);
-
-    /**
-     * @brief Check if target player is alive and valid
-     */
-    bool isTargetAlive(int targetPlayerId);
-
-    /**
-     * @brief Execute mob attack on player (integrated with CombatSystem)
-     */
-    void executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData);
-
-    /**
-     * @brief Send mob target lost event to clients
-     */
-    void sendMobTargetLost(const MobDataStruct &mob, int lostTargetPlayerId);
-
-    /**
-     * @brief Calculate distance between two positions
-     */
-    float calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2);
+        const std::vector<std::pair<int, PositionStruct>> &otherMobs,
+        const PositionStruct &spawnPosition,
+        const MobMovementParams &params);
 
     /**
      * @brief Initialize movement data for a mob with AI config
      */
     void initializeMobMovementData(int mobUID);
-
-    /**
-     * @brief Update combat state for mob based on current situation
-     */
-    void updateMobCombatState(MobDataStruct &mob, MobMovementData &movementData, float currentTime);
 
     /**
      * @brief Check if mob can perform action based on current combat state
@@ -236,9 +258,21 @@ class MobMovementManager
     bool shouldReturnToSpawn(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
 
     /**
-     * @brief Check if mob can search for new targets based on zone boundaries
+     * @brief Compute the next patrol-move timestamp for a mob (plan §5.5).
+     *
+     * Centralises the "normal (patrol) movement timing" logic that was
+     * previously duplicated in moveMobsInZone and moveSingleMob.
+     *
+     * @param currentTime  Current game time (seconds)
+     * @param mob          Mob template — provides patrolSpeed
+     * @param movementData Used for speedMultiplier fallback
+     * @param params       Zone movement params (speedTime ranges)
+     * @return             Absolute time after which the next move is allowed
      */
-    bool canSearchNewTargets(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
+    float calculateNextMoveTime(float currentTime,
+        const MobDataStruct &mob,
+        const MobMovementData &movementData,
+        const MobMovementParams &params);
 
     /**
      * @brief Check if mob should stop chasing based on zone boundaries

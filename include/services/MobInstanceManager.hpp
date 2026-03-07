@@ -19,6 +19,8 @@ struct MobHealthUpdateResult
     bool success;        // Operation successful
     bool mobDied;        // Mob died from this update
     bool wasAlreadyDead; // Mob was already dead
+    int newHealth = 0;   // Health after update
+    int currentMana = 0; // Mana at time of update
 };
 
 /**
@@ -64,6 +66,23 @@ class MobInstanceManager
     std::vector<MobDataStruct> getMobInstancesInZone(int zoneId) const;
 
     /**
+     * @brief Get lightweight {uid, position} pairs for all mobs in a zone.
+     *
+     * Use instead of getMobInstancesInZone when only position/uid data is needed
+     * (e.g. for collision detection), to avoid deep-copying attribute and skill vectors.
+     */
+    std::vector<std::pair<int, PositionStruct>> getMobPositionsInZone(int zoneId) const;
+
+    /**
+     * @brief Apply attributes to all live instances matching mob_id.
+     *        Called after setMobsAttributes arrives from game-server so that
+     *        already-spawned instances gain their attribute values.
+     *
+     * @param attrs Flat list of MobAttributeStruct (each carries mob_id)
+     */
+    void applyBulkAttributes(const std::vector<MobAttributeStruct> &attrs);
+
+    /**
      * @brief Update mob position
      *
      * @param mobUID Unique identifier of the mob instance
@@ -80,6 +99,27 @@ class MobInstanceManager
      * @return MobHealthUpdateResult with operation details
      */
     MobHealthUpdateResult updateMobHealth(int mobUID, int health);
+
+    /**
+     * @brief Atomically subtract damage from mob HP (no stale-read race).
+     *        Fires death/loot event internally if the mob dies.
+     */
+    MobHealthUpdateResult applyDamageToMob(int mobUID, int damageAmount);
+
+    /**
+     * @brief Atomically add healing to mob HP, clamped to maxHealth.
+     */
+    MobHealthUpdateResult applyHealToMob(int mobUID, int healAmount);
+
+    /**
+     * @brief Atomically subtract mana cost, clamped to 0. Returns new mana value.
+     */
+    int applyManaCostToMob(int mobUID, int costAmount);
+
+    /**
+     * @brief Atomically check-and-deduct mana. Returns true and deducts if current >= amount; false otherwise.
+     */
+    bool trySpendMana(int mobUID, int amount);
 
     /**
      * @brief Update mob mana
@@ -114,6 +154,16 @@ class MobInstanceManager
     std::unordered_map<int, MobDataStruct> getAllMobInstances() const;
 
     /**
+     * @brief Get all alive mob instances within a given radius of a position.
+     *
+     * @param centerX  World X coordinate of the AoE center
+     * @param centerY  World Y coordinate of the AoE center
+     * @param radius   Search radius in world units
+     * @return Vector of mob instances (alive, within radius)
+     */
+    std::vector<MobDataStruct> getMobsInRange(float centerX, float centerY, float radius) const;
+
+    /**
      * @brief Get count of alive mobs in zone
      *
      * @param zoneId Zone identifier
@@ -130,6 +180,7 @@ class MobInstanceManager
 
   private:
     Logger &logger_;
+    std::shared_ptr<spdlog::logger> log_;
 
     // Event queue for sending mob death events
     EventQueue *eventQueue_;
@@ -139,6 +190,10 @@ class MobInstanceManager
 
     // Index by zone for faster zone-based queries
     std::map<int, std::vector<int>> mobsByZone_;
+
+    // Throttle map for position log spam prevention.
+    // Protected by mutex_ (already held in updateMobPosition).
+    std::unordered_map<int, float> positionLogThrottleMap_;
 
     // Mutex for thread safety
     mutable std::shared_mutex mutex_;

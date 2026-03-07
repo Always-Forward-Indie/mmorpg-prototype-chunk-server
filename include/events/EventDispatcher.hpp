@@ -3,6 +3,7 @@
 #include "chunk_server/ChunkServer.hpp"
 #include "events/Event.hpp"
 #include "events/EventQueue.hpp"
+#include <mutex>
 
 class EventDispatcher
 {
@@ -38,6 +39,8 @@ class EventDispatcher
 
     std::vector<Event> eventsBatch_;
     constexpr static int BATCH_SIZE = 10;
+    mutable std::mutex dispatchMutex_; ///< CRITICAL-3: serialises concurrent dispatch() calls from io_context threads
 
     GameServices &gameServices_;
+    std::shared_ptr<spdlog::logger> log_;
 };
