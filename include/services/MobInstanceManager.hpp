@@ -104,7 +104,7 @@ class MobInstanceManager
      * @brief Atomically subtract damage from mob HP (no stale-read race).
      *        Fires death/loot event internally if the mob dies.
      */
-    MobHealthUpdateResult applyDamageToMob(int mobUID, int damageAmount);
+    MobHealthUpdateResult applyDamageToMob(int mobUID, int damageAmount, int killerId = 0);
 
     /**
      * @brief Atomically add healing to mob HP, clamped to maxHealth.
@@ -152,6 +152,27 @@ class MobInstanceManager
      * @return Map of all mob instances (UID -> MobDataStruct)
      */
     std::unordered_map<int, MobDataStruct> getAllMobInstances() const;
+
+    /**
+     * @brief Get a snapshot of all currently living (not dead) mob instances.
+     *
+     * Returns a copy — does not hold the internal lock after the call.
+     * Used by ChampionManager::tickSurvivalEvolution to iterate without deadlocks.
+     *
+     * @return Vector of all non-dead mob instances
+     */
+    std::vector<MobDataStruct> getAllLivingInstances() const;
+
+    /**
+     * @brief Replace the stored instance with the supplied struct (same uid).
+     *
+     * Used by ChampionManager::evolveSurvivalMob to apply stat/name changes.
+     * Silently ignores the call if the uid is not registered.
+     *
+     * @param updated Mob data to store (uid must match an existing instance)
+     * @return true if updated, false if uid not found
+     */
+    bool updateMobInstance(const MobDataStruct &updated);
 
     /**
      * @brief Get all alive mob instances within a given radius of a position.

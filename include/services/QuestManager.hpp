@@ -79,6 +79,13 @@ class QuestManager
     std::vector<nlohmann::json> turnInQuest(int characterId, const std::string &questSlug, int clientId);
 
     /**
+     * @brief Fail/abandon a quest. Sets state to "failed" and persists.
+     * Works for quests in active, offered, or completed state.
+     * @return true on success, false if quest not found / already turned_in or failed.
+     */
+    bool failQuest(int characterId, const std::string &questSlug);
+
+    /**
      * @brief Manually advance quest step by slug (from action group).
      */
     void advanceQuestStepBySlug(int characterId, const std::string &questSlug);
@@ -89,6 +96,20 @@ class QuestManager
     void onItemObtained(int characterId, int itemId, int quantity);
     void onNPCTalked(int characterId, int npcId);
     void onPositionReached(int characterId, float x, float y);
+
+    // === Flag helpers ===
+
+    /**
+     * @brief Read a boolean player flag from the character's in-memory flag list.
+     * @return The stored value, or false if the flag is not set.
+     */
+    bool getFlagBool(int characterId, const std::string &key) const;
+
+    /**
+     * @brief Set a boolean player flag: updates in-memory cache and queues
+     *        persistence to the game-server.
+     */
+    void setFlagBool(int characterId, const std::string &key, bool value);
 
     // === Persistence ===
 

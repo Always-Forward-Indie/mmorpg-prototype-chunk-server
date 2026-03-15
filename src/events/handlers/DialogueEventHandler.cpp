@@ -169,8 +169,9 @@ DialogueEventHandler::handleSetPlayerFlagsEvent(const Event &event)
             return;
         }
 
-        // Store flags in CharacterDataStruct (CharacterManager will need setCharacterFlags method)
-        // For now, build PlayerContextStruct key-value maps via CharacterManager update
+        // Store flags in CharacterDataStruct so buildPlayerContext can use them
+        gameServices_.getCharacterManager().setCharacterFlags(characterId, flags);
+
         gameServices_.getLogger().log("[DialogueEventHandler] SET_PLAYER_FLAGS: " +
                                       std::to_string(flags.size()) + " flags for character " +
                                       std::to_string(characterId));
@@ -206,6 +207,12 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
         if (characterId <= 0 || clientId <= 0)
         {
             log_->error("[DialogueEventHandler] NPC_INTERACT: invalid characterId or clientId");
+            return;
+        }
+
+        if (!isPlayerAlive(characterId))
+        {
+            log_->warn("[DialogueEventHandler] Dead character {} attempted NPC interaction", characterId);
             return;
         }
 
@@ -257,7 +264,38 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
             return;
         }
 
-        // Build player context
+        // Reputation check: block dialogue if player is enemy (rep < -500) with NPC's faction
+        if (!npc.factionSlug.empty())
+        {
+            const int rep = gameServices_.getReputationManager().getReputation(characterId, npc.factionSlug);
+            if (rep < -500)
+            {
+                log_->info("[DialogueEventHandler] NPC_INTERACT: char {} blocked by reputation (faction={}, rep={})",
+                    characterId,
+                    npc.factionSlug,
+                    rep);
+                if (clientSocket)
+                {
+                    auto clientData = gameServices_.getClientManager().getClientData(clientId);
+                    nlohmann::json resp = ResponseBuilder()
+                                              .setHeader("message", "Blocked by reputation")
+                                              .setHeader("hash", clientData.hash)
+                                              .setHeader("clientId", clientId)
+                                              .setHeader("eventType", "dialogueError")
+                                              .setBody("errorCode", "BLOCKED_BY_REPUTATION")
+                                              .setBody("factionSlug", npc.factionSlug)
+                                              .build();
+                    networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("error", resp));
+                }
+                return;
+            }
+        }
+
+        // Fire onNPCTalked BEFORE building ctx so talk-step quests advance
+        // and the updated state is visible in condition evaluation for this interaction.
+        gameServices_.getQuestManager().onNPCTalked(characterId, request.npcId);
+
+        // Build player context (after onNPCTalked so quest step/state is up to date)
         PlayerContextStruct ctx = buildPlayerContext(charData);
 
         // Select best dialogue for this NPC
@@ -286,9 +324,6 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
 
         // Close any existing session for this character
         gameServices_.getDialogueSessionManager().closeSessionByCharacter(characterId);
-
-        // Fire onNPCTalked trigger for talk-step quests
-        gameServices_.getQuestManager().onNPCTalked(characterId, request.npcId);
 
         // Create new session
         DialogueSessionStruct &session = gameServices_.getDialogueSessionManager().createSession(
@@ -518,6 +553,18 @@ DialogueEventHandler::buildPlayerContext(const CharacterDataStruct &charData) co
     // Fill quest states from QuestManager
     gameServices_.getQuestManager().fillQuestContext(charData.characterId, ctx);
 
+    // Fill item quantities for inventory-based conditions (item_<id> keys)
+    const auto &inventory = gameServices_.getInventoryManager().getPlayerInventory(charData.characterId);
+    for (const auto &invItem : inventory)
+    {
+        std::string key = "item_" + std::to_string(invItem.itemId);
+        ctx.flagsInt[key] = invItem.quantity;
+    }
+
+    // Stage 4: fill reputation and mastery for dialogue conditions
+    gameServices_.getReputationManager().fillReputationContext(charData.characterId, ctx);
+    gameServices_.getMasteryManager().fillMasteryContext(charData.characterId, ctx);
+
     return ctx;
 }
 
@@ -669,10 +716,11 @@ DialogueEventHandler::sendDialogueNode(
     body["type"] = node.type;
     body["speakerNpcId"] = node.speakerNpcId;
 
-    if (node.type == "choice_hub")
-        body["choices"] = buildChoicesJson(dialogue, node.id, ctx);
-    else
-        body["choices"] = nlohmann::json::array();
+    // Always send outgoing choices for all interactive node types.
+    // For 'line' nodes with no choices or a single no-key edge the client
+    // shows a generic "Continue" button; for 'choice_hub' / 'line' with
+    // multiple keyed edges the client renders explicit choice buttons.
+    body["choices"] = buildChoicesJson(dialogue, node.id, ctx);
 
     nlohmann::json packet = ResponseBuilder()
                                 .setHeader("eventType", "DIALOGUE_NODE")

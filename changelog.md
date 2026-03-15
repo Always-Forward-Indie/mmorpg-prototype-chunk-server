@@ -1,3 +1,40 @@
+v0.1.0
+15.03.2026
+================
+New:
+13 new service managers added: EquipmentManager (equipment slots, carry weight), VendorManager (vendor shop data), TradeSessionManager (player-to-player trading), RespawnZoneManager, GameZoneManager (PvP/safe zones), StatusEffectTemplateManager (DoT/HoT/buff templates), RegenManager (HP/MP regeneration ticks), PityManager (drop pity counters), BestiaryManager (enemy kill tracker), ChampionManager (timed champion spawns), ReputationManager (faction reputation), MasteryManager (weapon/skill mastery), ZoneEventManager (zone event templates).
+New event handlers: VendorEventHandler (buy/sell/repair/restock), EquipmentEventHandler (equip/unequip/get equipment).
+New data structures: EquipSlot enum, ItemUseEffectStruct, Vendor* structs (VendorInventoryItemStruct, VendorNPCDataStruct, OpenVendorShopRequestStruct, BuyItemRequestStruct, SellItemRequestStruct, BuyBatchRequestStruct, SellBatchRequestStruct, VendorStockUpdateStruct), Repair* structs (OpenRepairShopRequestStruct, RepairItemRequestStruct, RepairAllRequestStruct), Trade* structs (TradeOfferItemStruct, TradeSessionStruct, TradeRequestStruct, TradeOfferUpdateStruct, TradeConfirmCancelStruct), Equipment* structs (EquipItemRequestStruct, EquipmentSlotItemStruct, CharacterEquipmentStruct, SaveEquipmentChangeStruct), DurabilityEntryStruct / DurabilityUpdateStruct, SaveCurrencyTransactionStruct / SaveDurabilityChangeStruct, RespawnZoneStruct, GameZoneStruct, TimedChampionTemplate, StatusEffectModifierDef, StatusEffectTemplate, RespawnRequestStruct, TimedChampionKilledStruct.
+New event types dispatched: PLAYER_RESPAWN, SET_MOB_WEAKNESSES_RESISTANCES, INVENTORY_UPDATE, ITEM_DROP_BY_PLAYER, ITEM_REMOVE, USE_ITEM, SET_RESPAWN_ZONES, SET_STATUS_EFFECT_TEMPLATES, SET_GAME_ZONES, SET_TIMED_CHAMPION_TEMPLATES, SET_PLAYER_INVENTORY, SET_PLAYER_PITY, SET_PLAYER_BESTIARY, GET_BESTIARY_ENTRY, SET_PLAYER_REPUTATIONS, SET_PLAYER_MASTERIES, SET_ZONE_EVENT_TEMPLATES, SAVE_REPUTATION, SAVE_MASTERY, INVENTORY_ITEM_ID_SYNC, all vendor/trade/equipment events (BUY_ITEM, SELL_ITEM, EQUIP_ITEM, UNEQUIP_ITEM, GET_EQUIPMENT, TRADE_REQUEST, TRADE_ACCEPT, TRADE_DECLINE, TRADE_OFFER_UPDATE, TRADE_CONFIRM, TRADE_CANCEL, REPAIR_ITEM, REPAIR_ALL, etc.).
+CombatSystem — applySkillEffects(): applies DoT/HoT/buff/debuff active effects from skills onto characters.
+CharacterManager — new methods: addActiveEffect(), restoreManaToCharacter(), markCharacterInCombat(), setCharacterFlags(), processEffectTicks(), setLastValidatedMovement().
+InventoryManager — removeItemFromInventoryById(): remove item by inventory row ID (for vendor sell / trade flows).
+InventoryManager — setSaveInventoryCallback(): immediate DB persistence on every item add/remove.
+docs/ folder added with protocol documentation.
+
+Improvements:
+CombatSystem — cast time anti-spam guard (blocks new skill cast while in cast time); animation duration capped to attack cycle; weapon durability deduction on hit; mastery experience gain on mob hit; experience debt on player death (instead of immediate XP loss); equipment durability penalty on death; effect ticks processing each game loop iteration.
+SkillSystem — Global Cooldown (GCD) enforcement; trySetCooldown() extracted as separate method; mana consumed atomically before cooldown check (refunded if on cooldown); mob-as-caster now uses full player-equivalent damage pipeline.
+MobAIController — combat initiation packet sent before the result packet so client can play cast/swing animation; hit delay includes cast + swing time; skill range check converted to correct world-unit scale.
+MobManager — loadWeaknessesResistances(), getWeaknessesForMob(), getResistancesForMob() added.
+MobMovementManager — always sends mob update on combat-state transitions even if the mob did not move (fixes mob appearing frozen on CHASING→PREPARING_ATTACK).
+SpawnZoneManager — rare mob spawn support; social mob group support; zone AABB bounds loaded from DB.
+LootManager — champion/rare mob loot multiplier; zone-event loot multiplier; pity system (soft pity at 300 kills, hard pity at 800, hint at 500); item reservation with expiry; instanced item ownership transfer; periodic cleanup of expired ground drops (5 min).
+CharacterEventHandler (join) — sends ground items snapshot; sends all spawn zones with live mob state; sends zone_entered notification with zone slug/level range/PvP/safe flags.
+ItemEventHandler — dead player cannot pick up items; carry weight update after pickup; item JSON now includes reservedForCharacterId / reservationSecondsLeft / droppedByCharacterId; removed redundant name/description fields from item JSON (slug is the canonical identifier).
+QuestManager — loadPlayerQuests() sends full quest journal to client immediately on login; fillQuestContext() now populates questCurrentStep alongside questStates; offerQuest() pre-fills collect progress when player already holds required items; offerQuest() runs checkStepCompletion immediately; turnInQuest() rewritten with snapshot-before-release pattern to eliminate mutex deadlock.
+InventoryManager — fixed same-thread deadlock: write lock released before calling QuestManager.onItemObtained(); logging now uses item slug instead of name.
+CharacterStatsNotificationService — stats packet now includes: carry weight (current / limit / overweight flag); effective attributes (base + equipment bonuses + active-effect stat modifiers + passive skill modifiers + item soul tier bonus); active effects display list.
+ChunkServer (main loop) — wired up persistence callbacks for inventory, durability, item kill count (soul), attribute refresh trigger on durability warning, pity, bestiary, champion, reputation, mastery; periodic task to save all online player HP/MP every 10 s; HP/MP regeneration task (every 4 s driven by config keys); periodic ground-item cleanup task (every 60 s); main loop tick set to 100 ms.
+CMakeLists.txt — new source files registered.
+
+Bug Fixes:
+Fixed mob state update not being sent to client when mob transitioned states without moving.
+Fixed InventoryManager → QuestManager deadlock caused by holding exclusive inventory mutex while calling onItemObtained.
+Fixed QuestManager → InventoryManager deadlock in turnInQuest caused by holding quest mutex while granting item rewards.
+
+---
+
 v0.0.3
 07.03.2026
 ================

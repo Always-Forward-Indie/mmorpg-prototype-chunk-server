@@ -64,6 +64,7 @@ CombatResponseBuilder::buildSkillExecutionBroadcast(const SkillExecutionResult &
     body["skillSlug"] = result.skillSlug;
     body["skillEffectType"] = result.skillEffectType;
     body["skillSchool"] = result.skillSchool;
+    body["hitDelay"] = result.hitDelay;
 
     if (result.success)
     {

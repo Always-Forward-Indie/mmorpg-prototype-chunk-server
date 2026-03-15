@@ -8,11 +8,13 @@
 #include "events/handlers/ClientEventHandler.hpp"
 #include "events/handlers/CombatEventHandler.hpp"
 #include "events/handlers/DialogueEventHandler.hpp"
+#include "events/handlers/EquipmentEventHandler.hpp"
 #include "events/handlers/HarvestEventHandler.hpp"
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/handlers/MobEventHandler.hpp"
 #include "events/handlers/NPCEventHandler.hpp"
 #include "events/handlers/SkillEventHandler.hpp"
+#include "events/handlers/VendorEventHandler.hpp"
 #include "events/handlers/ZoneEventHandler.hpp"
 #include "network/GameServerWorker.hpp"
 #include "network/NetworkManager.hpp"
@@ -81,6 +83,8 @@ class EventHandler
      * @brief Get reference to dialogue event handler.
      */
     DialogueEventHandler &getDialogueEventHandler();
+    VendorEventHandler &getVendorEventHandler();
+    EquipmentEventHandler &getEquipmentEventHandler();
 
   private:
     /**
@@ -96,7 +100,16 @@ class EventHandler
      */
     void handleSetGameConfigEvent(const Event &event);
     void handleSetPlayerActiveEffectsEvent(const Event &event);
+    void handleSetPlayerInventoryEvent(const Event &event);
+    void handleInventoryItemIdSyncEvent(const Event &event);
     void handleSetCharacterAttributesRefreshEvent(const Event &event);
+    void handleSetStatusEffectTemplatesEvent(const Event &event);
+    void handleSetPlayerPityEvent(const Event &event);
+    void handleSetPlayerBestiaryEvent(const Event &event);
+    void handleGetBestiaryEntryEvent(const Event &event);
+    void handleSetPlayerReputationsEvent(const Event &event);
+    void handleSetPlayerMasteriesEvent(const Event &event);
+    void handleSetZoneEventTemplatesEvent(const Event &event);
 
     // Specialized event handlers for different event categories
     std::unique_ptr<ClientEventHandler> clientEventHandler_;
@@ -111,6 +124,8 @@ class EventHandler
     std::unique_ptr<SkillEventHandler> skillEventHandler_;
     std::unique_ptr<ExperienceEventHandler> experienceEventHandler_;
     std::unique_ptr<DialogueEventHandler> dialogueEventHandler_;
+    std::unique_ptr<VendorEventHandler> vendorEventHandler_;
+    std::unique_ptr<EquipmentEventHandler> equipmentEventHandler_;
 
     // References for logging and error handling
     NetworkManager &networkManager_;

@@ -49,6 +49,19 @@ set(SOURCE_FILES
     src/services/ExperienceCacheManager.cpp
     src/services/ClientManager.cpp
     src/services/GameConfigService.cpp
+    src/services/VendorManager.cpp
+    src/services/TradeSessionManager.cpp
+    src/services/EquipmentManager.cpp
+    src/services/RespawnZoneManager.cpp
+    src/services/GameZoneManager.cpp
+    src/services/StatusEffectTemplateManager.cpp
+    src/services/RegenManager.cpp
+    src/services/PityManager.cpp
+    src/services/BestiaryManager.cpp
+    src/services/ChampionManager.cpp
+    src/services/ReputationManager.cpp
+    src/services/MasteryManager.cpp
+    src/services/ZoneEventManager.cpp
     src/network/GameServerWorker.cpp
     src/network/NetworkManager.cpp
     src/network/ClientSession.cpp
@@ -68,6 +81,8 @@ set(SOURCE_FILES
     src/events/handlers/ItemEventHandler.cpp
     src/events/handlers/HarvestEventHandler.cpp
     src/events/handlers/DialogueEventHandler.cpp
+    src/events/handlers/VendorEventHandler.cpp
+    src/events/handlers/EquipmentEventHandler.cpp
     src/events/ExperienceEventHandler.cpp
     src/data/AttackSystem.cpp
     src/utils/Scheduler.cpp
@@ -112,6 +127,10 @@ set(HEADER_FILES
     include/services/DialogueConditionEvaluator.hpp
     include/services/DialogueActionExecutor.hpp
     include/services/QuestManager.hpp
+    include/services/VendorManager.hpp
+    include/services/TradeSessionManager.hpp
+    include/services/RespawnZoneManager.hpp
+    include/services/GameZoneManager.hpp
     include/network/GameServerWorker.hpp
     include/network/NetworkManager.hpp
     include/network/ClientSession.hpp
@@ -131,6 +150,7 @@ set(HEADER_FILES
     include/events/handlers/ItemEventHandler.hpp
     include/events/handlers/HarvestEventHandler.hpp
     include/events/handlers/DialogueEventHandler.hpp
+    include/events/handlers/VendorEventHandler.hpp
     include/events/ExperienceEventHandler.hpp
     include/data/DataStructs.hpp
     include/data/SkillStructs.hpp

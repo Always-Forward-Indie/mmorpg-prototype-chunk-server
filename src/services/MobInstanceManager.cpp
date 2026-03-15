@@ -4,8 +4,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <unordered_map>
 #include <spdlog/logger.h>
+#include <unordered_map>
 
 MobInstanceManager::MobInstanceManager(Logger &logger)
     : logger_(logger), eventQueue_(nullptr)
@@ -249,7 +249,7 @@ MobInstanceManager::updateMobMana(int mobUID, int mana)
 }
 
 MobHealthUpdateResult
-MobInstanceManager::applyDamageToMob(int mobUID, int damageAmount)
+MobInstanceManager::applyDamageToMob(int mobUID, int damageAmount, int killerId)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
@@ -284,6 +284,7 @@ MobInstanceManager::applyDamageToMob(int mobUID, int damageAmount)
             mobLootData["positionY"] = it->second.position.positionY;
             mobLootData["positionZ"] = it->second.position.positionZ;
             mobLootData["zoneId"] = it->second.zoneId;
+            mobLootData["killerId"] = killerId;
             eventQueue_->push(Event(Event::MOB_LOOT_GENERATION, 0, mobLootData));
         }
     }
@@ -382,6 +383,31 @@ MobInstanceManager::getAllMobInstances() const
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     return mobInstances_;
+}
+
+std::vector<MobDataStruct>
+MobInstanceManager::getAllLivingInstances() const
+{
+    std::vector<MobDataStruct> result;
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    result.reserve(mobInstances_.size());
+    for (const auto &[uid, mob] : mobInstances_)
+    {
+        if (!mob.isDead)
+            result.push_back(mob);
+    }
+    return result;
+}
+
+bool
+MobInstanceManager::updateMobInstance(const MobDataStruct &updated)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = mobInstances_.find(updated.uid);
+    if (it == mobInstances_.end())
+        return false;
+    it->second = updated;
+    return true;
 }
 
 std::vector<MobDataStruct>

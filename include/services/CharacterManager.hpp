@@ -4,6 +4,7 @@
 #include <iostream>
 #include <shared_mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <utils/Logger.hpp>
 #include <vector>
 
@@ -33,6 +34,7 @@ class CharacterManager
 
     // set character position
     void setCharacterPosition(int characterID, PositionStruct position);
+    void setLastValidatedMovement(int characterID, PositionStruct position, int64_t srvMs);
 
     // Get characters list
     std::vector<CharacterDataStruct> getCharactersList();
@@ -77,13 +79,28 @@ class CharacterManager
     // Store active effects received from game-server on login
     void setCharacterActiveEffects(int characterID, std::vector<ActiveEffectStruct> effects);
 
+    // Add a single active effect. If an effect with the same effectSlug already exists,
+    // its expiresAt is refreshed (no stacking). Handles both stat modifiers and HoT/DoT.
+    void addActiveEffect(int characterID, const ActiveEffectStruct &effect);
+
+    // Atomically restore mana: reads mana, adds amount, clamps to maxMana, writes back. Returns new mana.
+    int restoreManaToCharacter(int characterID, int amount);
+
+    // Mark a character as recently in combat (called when they take or deal damage).
+    // Suppresses HP/MP regeneration for configurable duration after the last hit.
+    void markCharacterInCombat(int characterID);
+
+    // Store player flags received from game-server on login (dialogue/quest conditions)
+    void setCharacterFlags(int characterID, std::vector<PlayerFlagStruct> flags);
+
     // Replace attributes in-place (used for refresh after level-up / equip change)
     void replaceCharacterAttributes(int characterID, std::vector<CharacterAttributeStruct> attributes);
 
     // Tick all active DoT/HoT effects for every loaded character.
     // Applies health changes in-place and removes effects that have expired.
-    // Returns tick events to be broadcast to clients.
-    std::vector<EffectTickResult> processEffectTicks();
+    // Returns tick events to broadcast, and the set of character IDs whose
+    // expired effects were removed (so callers can send stats_update).
+    std::pair<std::vector<EffectTickResult>, std::unordered_set<int>> processEffectTicks();
 
     // Remove all expired active effects from a character (expiresAt != 0 && <= now).
     void removeExpiredActiveEffects(int characterID);

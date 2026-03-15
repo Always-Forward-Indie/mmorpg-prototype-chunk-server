@@ -12,7 +12,10 @@
 #include <vector>
 
 // Forward declarations
-namespace spdlog { class logger; }
+namespace spdlog
+{
+class logger;
+}
 class GameServices;
 class CombatCalculator;
 
@@ -66,8 +69,14 @@ class SkillSystem
      *        skill execution) or false (already on cooldown, reject).  Both
      *        check and set happen under the same unique_lock, eliminating the
      *        TOCTOU window between isSkillAvailable() and setCooldown().
+     *
+     * @param gcdMs   If > 0, also checks the per-caster Global Cooldown (stored
+     *                under the internal "__gcd__" key) and sets it atomically
+     *                alongside the per-skill cooldown.  Pass 0 to skip GCD.
+     * @param outOnGCD  Set to true when the rejection reason is GCD (vs per-skill
+     *                  cooldown), so callers can send the right error message.
      */
-    bool trySetCooldown(int casterId, const std::string &skillSlug, int cooldownMs);
+    bool trySetCooldown(int casterId, const std::string &skillSlug, int cooldownMs, int gcdMs = 0, bool *outOnGCD = nullptr);
 
     /**
      * @brief Получить лучший скил для моба (AI). Возвращает nullopt если подходящего скила нет.

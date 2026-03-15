@@ -230,6 +230,33 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 }
             }
 
+            // Save HP/Mana to game server on disconnect
+            if (passedClientData.characterId > 0)
+            {
+                try
+                {
+                    CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(passedClientData.characterId);
+                    nlohmann::json hpManaPacket;
+                    hpManaPacket["header"]["eventType"] = "saveHpMana";
+                    hpManaPacket["header"]["clientId"] = 0;
+                    hpManaPacket["header"]["hash"] = "";
+                    hpManaPacket["body"]["characters"] = nlohmann::json::array();
+                    nlohmann::json hpEntry;
+                    hpEntry["characterId"] = passedClientData.characterId;
+                    hpEntry["currentHp"] = charData.characterCurrentHealth;
+                    hpEntry["currentMana"] = charData.characterCurrentMana;
+                    hpManaPacket["body"]["characters"].push_back(hpEntry);
+                    gameServerWorker_.sendDataToGameServer(hpManaPacket.dump() + "\n");
+                    log_->info("[DISCONNECT] Saved HP/Mana for characterId: " + std::to_string(passedClientData.characterId));
+                }
+                catch (const std::exception &ex)
+                {
+                    gameServices_.getLogger().logError(
+                        "[DISCONNECT] Failed to save HP/Mana for characterId: " +
+                        std::to_string(passedClientData.characterId) + " - " + ex.what());
+                }
+            }
+
             // Remove character data
             gameServices_.getCharacterManager().removeCharacter(passedClientData.characterId);
 
@@ -246,6 +273,19 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 {
                     gameServices_.getLogger().logError(
                         "[DISCONNECT] Quest flush error for characterId: " +
+                        std::to_string(passedClientData.characterId) + " - " + ex.what());
+                }
+
+                // Stage 4: unload reputation and mastery data
+                try
+                {
+                    gameServices_.getReputationManager().unloadCharacterReputations(passedClientData.characterId);
+                    gameServices_.getMasteryManager().unloadCharacterMasteries(passedClientData.characterId);
+                }
+                catch (const std::exception &ex)
+                {
+                    gameServices_.getLogger().logError(
+                        "[DISCONNECT] Rep/Mastery unload error for characterId: " +
                         std::to_string(passedClientData.characterId) + " - " + ex.what());
                 }
             }

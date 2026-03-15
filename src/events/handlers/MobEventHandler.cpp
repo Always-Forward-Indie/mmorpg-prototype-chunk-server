@@ -123,6 +123,41 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
 }
 
 void
+MobEventHandler::sendSpawnZonesToClient(int clientID, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket)
+{
+    if (!clientSocket || !clientSocket->is_open())
+        return;
+
+    auto allSpawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
+    log_->info("[MobEventHandler] Server-push: sending {} spawn zones to client {}", allSpawnZones.size(), clientID);
+
+    for (const auto &[zoneId, spawnZone] : allSpawnZones)
+    {
+        nlohmann::json zoneJson = spawnZoneToJson(spawnZone);
+
+        std::vector<MobDataStruct> mobsList = gameServices_.getMobInstanceManager().getMobInstancesInZone(spawnZone.zoneId);
+        nlohmann::json mobsArray = nlohmann::json::array();
+        for (const auto &mob : mobsList)
+        {
+            nlohmann::json mobJson = mobToJson(mob);
+            mobJson["combatState"] = static_cast<int>(gameServices_.getMobMovementManager().getMobMovementData(mob.uid).combatState);
+            mobsArray.push_back(mobJson);
+        }
+
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("message", "Spawning mobs success!")
+                                      .setHeader("hash", "")
+                                      .setHeader("clientId", clientID)
+                                      .setHeader("eventType", "spawnMobsInZone")
+                                      .setBody("spawnZone", zoneJson)
+                                      .setBody("mobs", mobsArray)
+                                      .build();
+
+        networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", response));
+    }
+}
+
+void
 MobEventHandler::handleZoneMoveMobsEvent(const Event &event)
 {
     const auto &data = event.getData();
@@ -397,6 +432,36 @@ MobEventHandler::handleSetMobsSkillsEvent(const Event &event)
     catch (const std::exception &ex)
     {
         gameServices_.getLogger().logError("Error processing mob skills event: " + std::string(ex.what()));
+    }
+}
+
+void
+MobEventHandler::handleSetMobWeaknessesResistancesEvent(const Event &event)
+{
+    using WeakResMap = std::pair<std::unordered_map<int, std::vector<std::string>>,
+        std::unordered_map<int, std::vector<std::string>>>;
+    const auto &data = event.getData();
+
+    try
+    {
+        if (std::holds_alternative<WeakResMap>(data))
+        {
+            const auto &[weaknesses, resistances] = std::get<WeakResMap>(data);
+            gameServices_.getMobManager().setWeaknessesResistances(weaknesses, resistances);
+            log_->info("Loaded mob weaknesses and resistances from the event handler!");
+        }
+        else
+        {
+            log_->error("Invalid data format for SET_MOB_WEAKNESSES_RESISTANCES event");
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        gameServices_.getLogger().logError("Error processing mob weaknesses event: " + std::string(ex.what()));
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("Error processing mob weaknesses event: " + std::string(ex.what()));
     }
 }
 

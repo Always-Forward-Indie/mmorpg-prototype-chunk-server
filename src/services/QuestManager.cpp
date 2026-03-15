@@ -80,15 +80,27 @@ void
 QuestManager::loadPlayerQuests(int characterId,
     const std::vector<PlayerQuestProgressStruct> &quests)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto &progress = playerProgress_[characterId];
-    progress.clear();
-    for (const auto &pq : quests)
     {
-        progress[pq.questId] = pq;
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto &progress = playerProgress_[characterId];
+        progress.clear();
+        for (const auto &pq : quests)
+            progress[pq.questId] = pq;
     }
+
     logger_.log("[QuestManager] Loaded " + std::to_string(quests.size()) +
                 " quests for character " + std::to_string(characterId));
+
+    // Send the current state of every loaded quest to the client so the
+    // quest journal is populated immediately on login.
+    // We do this AFTER releasing the mutex because both getQuestById() and
+    // sendQuestUpdate() each acquire it internally.
+    for (const auto &pq : quests)
+    {
+        const QuestStruct *quest = getQuestById(pq.questId);
+        if (quest)
+            sendQuestUpdate(characterId, pq, *quest);
+    }
 }
 
 void
@@ -109,8 +121,20 @@ QuestManager::fillQuestContext(int characterId, PlayerContextStruct &ctx) const
 
     for (const auto &[questId, pq] : it->second)
     {
-        if (!pq.questSlug.empty())
-            ctx.questStates[pq.questSlug] = pq.state;
+        // Prefer runtime slug; fall back to static quest data if empty
+        // (guards against old data loaded before the slug fix was deployed)
+        std::string slug = pq.questSlug;
+        if (slug.empty())
+        {
+            auto qit = questsById_.find(questId);
+            if (qit != questsById_.end())
+                slug = qit->second->slug;
+        }
+        if (!slug.empty())
+        {
+            ctx.questStates[slug] = pq.state;
+            ctx.questCurrentStep[slug] = pq.currentStep;
+        }
         ctx.questProgress[questId] = pq.progress;
     }
 }
@@ -137,7 +161,7 @@ QuestManager::offerQuest(int characterId, const std::string &questSlug)
     if (charData.characterLevel < quest.minLevel)
     {
         log_->info("[QuestManager] Character " + std::to_string(characterId) +
-                    " level too low for quest '" + questSlug + "'");
+                   " level too low for quest '" + questSlug + "'");
         return false;
     }
 
@@ -173,7 +197,24 @@ QuestManager::offerQuest(int characterId, const std::string &questSlug)
         if (step0.stepType == "kill")
             pq.progress["killed"] = 0;
         else if (step0.stepType == "collect")
-            pq.progress["have"] = 0;
+        {
+            int alreadyHave = 0;
+            int requiredItemId = step0.params.value("item_id", -1);
+            int required = step0.params.value("count", 1);
+            if (requiredItemId > 0)
+            {
+                const auto &inv = services_->getInventoryManager().getPlayerInventory(characterId);
+                for (const auto &slot : inv)
+                {
+                    if (slot.itemId == requiredItemId)
+                    {
+                        alreadyHave = slot.quantity;
+                        break;
+                    }
+                }
+            }
+            pq.progress["have"] = std::min(alreadyHave, required);
+        }
         else if (step0.stepType == "talk")
             pq.progress["done"] = false;
         else if (step0.stepType == "reach")
@@ -185,8 +226,12 @@ QuestManager::offerQuest(int characterId, const std::string &questSlug)
     // Send update to client
     sendQuestUpdate(characterId, progress[quest.id], quest);
 
+    // Step 0 might already be satisfied on offer (e.g. player already holds
+    // the required collect items).  Drive the first auto-check right away.
+    checkStepCompletion(characterId, progress[quest.id]);
+
     log_->info("[QuestManager] Quest '" + questSlug + "' offered to character " +
-                std::to_string(characterId));
+               std::to_string(characterId));
     return true;
 }
 
@@ -194,43 +239,52 @@ std::vector<nlohmann::json>
 QuestManager::turnInQuest(int characterId, const std::string &questSlug, int clientId)
 {
     std::vector<nlohmann::json> notifications;
-    std::lock_guard<std::mutex> lock(mutex_);
 
-    auto qit = questsBySlug_.find(questSlug);
-    if (qit == questsBySlug_.end())
+    // Snapshot everything we need from shared state while holding the lock,
+    // then release it BEFORE calling any external service.
+    // This prevents a deadlock cycle:
+    //   turnInQuest (holds mutex_) → addItemToInventory → onItemObtained → mutex_ (already held)
+    PlayerQuestProgressStruct pqSnapshot;
+    QuestStruct questSnapshot;
+
     {
-        log_->error("[QuestManager] turnInQuest: unknown quest '" + questSlug + "'");
-        return notifications;
-    }
-    const QuestStruct &quest = qit->second;
+        std::lock_guard<std::mutex> lock(mutex_);
 
-    auto &progress = playerProgress_[characterId];
-    auto pit = progress.find(quest.id);
+        auto qit = questsBySlug_.find(questSlug);
+        if (qit == questsBySlug_.end())
+        {
+            log_->error("[QuestManager] turnInQuest: unknown quest '" + questSlug + "'");
+            return notifications;
+        }
+        const QuestStruct &quest = qit->second;
 
-    if (pit == progress.end() || pit->second.state != "completed")
-    {
-        log_->info("[QuestManager] Cannot turn in quest '" + questSlug +
-                    "': not in completed state");
-        return notifications;
-    }
+        auto &progress = playerProgress_[characterId];
+        auto pit = progress.find(quest.id);
 
-    pit->second.state = "turned_in";
-    pit->second.isDirty = true;
-    pit->second.updatedAt = std::chrono::steady_clock::now();
+        if (pit == progress.end() || pit->second.state != "completed")
+        {
+            log_->info("[QuestManager] Cannot turn in quest '" + questSlug +
+                       "': not in completed state");
+            return notifications;
+        }
 
-    // Grant rewards - we need to unlock mutex temporarily to call services
-    // We'll build the notification list here and grant outside the lock
-    // (rewards are granted below after collecting info)
+        pit->second.state = "turned_in";
+        pit->second.isDirty = true;
+        pit->second.updatedAt = std::chrono::steady_clock::now();
 
-    // Build quest_turned_in notification
+        // Take copies before releasing the lock
+        pqSnapshot = pit->second;
+        questSnapshot = quest;
+    } // mutex_ released here
+
+    // Build notifications
     nlohmann::json turnInNotif;
     turnInNotif["type"] = "quest_turned_in";
-    turnInNotif["questId"] = quest.id;
-    turnInNotif["clientQuestKey"] = quest.clientQuestKey;
+    turnInNotif["questId"] = questSnapshot.id;
+    turnInNotif["clientQuestKey"] = questSnapshot.clientQuestKey;
     notifications.push_back(std::move(turnInNotif));
 
-    // Collect reward descriptions
-    for (const auto &reward : quest.rewards)
+    for (const auto &reward : questSnapshot.rewards)
     {
         if (reward.rewardType == "exp")
         {
@@ -256,29 +310,100 @@ QuestManager::turnInQuest(int characterId, const std::string &questSlug, int cli
         }
     }
 
-    // Send QUEST_UPDATE to the client (state = turned_in)
-    sendQuestUpdate(characterId, pit->second, quest);
+    // Send QUEST_UPDATE (no mutex held — sendQuestUpdate acquires nothing in QuestManager)
+    sendQuestUpdate(characterId, pqSnapshot, questSnapshot);
 
     log_->info("[QuestManager] Quest '" + questSlug + "' turned in by character " +
-                std::to_string(characterId));
+               std::to_string(characterId));
 
-    // Grant rewards (unlocked - services accessed)
-    // Note: we hold the QuestManager mutex here; services' managers have their own locks
-    for (const auto &reward : quest.rewards)
+    // Remove collected quest items from inventory before granting rewards.
+    // Iterate over every "collect" step and consume the required items.
+    for (const auto &step : questSnapshot.steps)
+    {
+        if (step.stepType == "collect")
+        {
+            int requiredItemId = step.params.value("item_id", -1);
+            int required = step.params.value("count", 1);
+            if (requiredItemId > 0 && required > 0)
+            {
+                services_->getInventoryManager().removeItemFromInventory(
+                    characterId, requiredItemId, required);
+            }
+        }
+    }
+
+    // Grant rewards — mutex_ is NOT held here, so calls back into QuestManager
+    // (e.g. onItemObtained) will not deadlock.
+    for (const auto &reward : questSnapshot.rewards)
     {
         if (reward.rewardType == "exp" && reward.amount > 0)
         {
             services_->getExperienceManager().grantExperience(
-                characterId, static_cast<int>(reward.amount), "quest_reward", quest.id);
+                characterId, static_cast<int>(reward.amount), "quest_reward", questSnapshot.id);
         }
         else if (reward.rewardType == "item" && reward.itemId > 0)
         {
             services_->getInventoryManager().addItemToInventory(
                 characterId, reward.itemId, reward.quantity);
         }
+        else if (reward.rewardType == "gold" && reward.amount > 0)
+        {
+            const ItemDataStruct *goldItem =
+                services_->getItemManager().getItemBySlug("gold_coin");
+            if (goldItem)
+            {
+                services_->getInventoryManager().addItemToInventory(
+                    characterId, goldItem->id, static_cast<int>(reward.amount));
+            }
+            else
+            {
+                log_->error("[QuestManager] turnInQuest: 'gold_coin' item not found — gold reward skipped");
+            }
+        }
     }
 
     return notifications;
+}
+
+bool
+QuestManager::failQuest(int characterId, const std::string &questSlug)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto qit = questsBySlug_.find(questSlug);
+    if (qit == questsBySlug_.end())
+    {
+        log_->error("[QuestManager] failQuest: unknown quest '" + questSlug + "'");
+        return false;
+    }
+    const QuestStruct &quest = qit->second;
+
+    auto &progress = playerProgress_[characterId];
+    auto pit = progress.find(quest.id);
+
+    if (pit == progress.end())
+    {
+        log_->info("[QuestManager] failQuest: quest '" + questSlug + "' not in progress for character " +
+                   std::to_string(characterId));
+        return false;
+    }
+
+    const std::string &currentState = pit->second.state;
+    if (currentState == "turned_in" || currentState == "failed")
+    {
+        log_->info("[QuestManager] failQuest: quest '" + questSlug + "' already in terminal state " + currentState);
+        return false;
+    }
+
+    pit->second.state = "failed";
+    pit->second.isDirty = true;
+    pit->second.updatedAt = std::chrono::steady_clock::now();
+
+    sendQuestUpdate(characterId, pit->second, quest);
+
+    log_->info("[QuestManager] Quest '" + questSlug + "' failed for character " +
+               std::to_string(characterId));
+    return true;
 }
 
 void
@@ -293,6 +418,9 @@ QuestManager::advanceQuestStepBySlug(int characterId, const std::string &questSl
     auto &progress = playerProgress_[characterId];
     auto pit = progress.find(qit->second.id);
     if (pit == progress.end())
+        return;
+
+    if (pit->second.state != "active")
         return;
 
     advanceStep(characterId, pit->second);
@@ -507,7 +635,11 @@ QuestManager::checkStepCompletion(int characterId, PlayerQuestProgressStruct &pq
     }
 
     if (stepDone)
+    {
+        if (step.completionMode == "manual")
+            return; // Do not auto-advance; a dialogue action (advance_quest_step) will trigger it
         advanceStep(characterId, pq);
+    }
 }
 
 void
@@ -537,11 +669,36 @@ QuestManager::advanceStep(int characterId, PlayerQuestProgressStruct &pq)
     if (newStep.stepType == "kill")
         pq.progress["killed"] = 0;
     else if (newStep.stepType == "collect")
-        pq.progress["have"] = 0;
+    {
+        // Seed "have" with items the player already carries so they don't have
+        // to re-collect things they legitimately picked up before this step.
+        int alreadyHave = 0;
+        int requiredItemId = newStep.params.value("item_id", -1);
+        int required = newStep.params.value("count", 1);
+        if (requiredItemId > 0 && services_)
+        {
+            const auto &inv = services_->getInventoryManager().getPlayerInventory(characterId);
+            for (const auto &slot : inv)
+            {
+                if (slot.itemId == requiredItemId)
+                {
+                    alreadyHave = slot.quantity;
+                    break;
+                }
+            }
+        }
+        pq.progress["have"] = std::min(alreadyHave, required);
+    }
     else if (newStep.stepType == "talk" || newStep.stepType == "reach")
         pq.progress["done"] = false;
 
     sendQuestUpdate(characterId, pq, quest);
+
+    // The new step might already be satisfied (e.g. the player already carries
+    // the required items for a collect step, or has already talked to the NPC
+    // via a flag set earlier).  Check immediately so the quest advances without
+    // requiring a redundant trigger event.
+    checkStepCompletion(characterId, pq);
 }
 
 void
@@ -592,11 +749,13 @@ QuestManager::sendQuestUpdate(int characterId,
     body["currentStep"] = pq.currentStep;
     body["progress"] = pq.progress;
 
+    body["totalSteps"] = static_cast<int>(quest.steps.size());
     if (pq.currentStep < static_cast<int>(quest.steps.size()))
     {
         const QuestStepStruct &step = quest.steps[pq.currentStep];
         body["clientStepKey"] = step.clientStepKey;
         body["stepType"] = step.stepType;
+        body["completionMode"] = step.completionMode;
         body["required"] = step.params;
     }
 
@@ -619,6 +778,50 @@ QuestManager::sendQuestUpdate(int characterId,
 // =============================================================================
 // Persistence
 // =============================================================================
+
+bool
+QuestManager::getFlagBool(int characterId, const std::string &key) const
+{
+    const auto charData = services_->getCharacterManager().getCharacterData(characterId);
+    for (const auto &f : charData.flags)
+    {
+        if (f.flagKey == key && f.boolValue.has_value())
+            return f.boolValue.value();
+    }
+    return false;
+}
+
+void
+QuestManager::setFlagBool(int characterId, const std::string &key, bool value)
+{
+    // Queue persistence to game-server
+    UpdatePlayerFlagStruct fu;
+    fu.characterId = characterId;
+    fu.flagKey = key;
+    fu.boolValue = value;
+    queueFlagUpdate(fu);
+
+    // Update in-memory cache so same-session reads see the new value immediately
+    auto charData = services_->getCharacterManager().getCharacterData(characterId);
+    bool found = false;
+    for (auto &f : charData.flags)
+    {
+        if (f.flagKey == key)
+        {
+            f.boolValue = value;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+    {
+        PlayerFlagStruct nf;
+        nf.flagKey = key;
+        nf.boolValue = value;
+        charData.flags.push_back(std::move(nf));
+    }
+    services_->getCharacterManager().setCharacterFlags(characterId, std::move(charData.flags));
+}
 
 void
 QuestManager::queueFlagUpdate(const UpdatePlayerFlagStruct &flagUpdate)

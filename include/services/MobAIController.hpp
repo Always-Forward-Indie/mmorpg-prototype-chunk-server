@@ -3,6 +3,7 @@
 #include "data/DataStructs.hpp"
 #include "utils/Logger.hpp"
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 // Forward declarations
@@ -66,11 +67,6 @@ class MobAIController
     MobInstanceManager *mobInstanceManager_;
     MobManager *mobManager_;
 
-    // Log throttle: prevents per-tick log spam for "target moved away" messages.
-    // Protected by logMutex_.
-    std::mutex logMutex_;
-    std::unordered_map<int, float> logThrottleMap_;
-
     // ---- private helpers ----
 
     /**
@@ -87,7 +83,7 @@ class MobAIController
      * @brief Fire the actual attack via CombatSystem, update lastAttackTime.
      *        Uses movementData.pendingSkillSlug if set; clears it after use.
      */
-    void executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData);
+    void executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData, float hitDelay = 0.0f);
 
     /**
      * @brief Select the best skill for the mob to use against the target.
@@ -95,7 +91,7 @@ class MobAIController
      *        Filters by maxRange, per-skill cooldown.
      *        Prefers skills with cooldownMs > 0 over basic attacks.
      */
-    const SkillStruct *selectAttackSkill(const MobDataStruct &mob,
+    std::optional<SkillStruct> selectAttackSkill(const MobDataStruct &mob,
         const MobMovementData &movementData,
         float distanceToTarget);
 

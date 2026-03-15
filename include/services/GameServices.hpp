@@ -1,4 +1,6 @@
 #pragma once
+#include "services/BestiaryManager.hpp"
+#include "services/ChampionManager.hpp"
 #include "services/CharacterManager.hpp"
 #include "services/CharacterStatsNotificationService.hpp"
 #include "services/ChunkManager.hpp"
@@ -6,20 +8,31 @@
 #include "services/DialogueConditionEvaluator.hpp"
 #include "services/DialogueManager.hpp"
 #include "services/DialogueSessionManager.hpp"
+#include "services/EquipmentManager.hpp"
 #include "services/ExperienceCacheManager.hpp"
 #include "services/ExperienceManager.hpp"
 #include "services/GameConfigService.hpp"
+#include "services/GameZoneManager.hpp"
 #include "services/HarvestManager.hpp"
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
 #include "services/LootManager.hpp"
+#include "services/MasteryManager.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
 #include "services/NPCManager.hpp"
+#include "services/PityManager.hpp"
 #include "services/QuestManager.hpp"
+#include "services/RegenManager.hpp"
+#include "services/ReputationManager.hpp"
+#include "services/RespawnZoneManager.hpp"
 #include "services/SkillManager.hpp"
 #include "services/SpawnZoneManager.hpp"
+#include "services/StatusEffectTemplateManager.hpp"
+#include "services/TradeSessionManager.hpp"
+#include "services/VendorManager.hpp"
+#include "services/ZoneEventManager.hpp"
 #include "utils/Logger.hpp"
 
 class GameServices
@@ -48,7 +61,20 @@ class GameServices
           experienceManager_(this),
           experienceCacheManager_(this),
           statsNotificationService_(this),
-          gameConfigService_(logger_)
+          gameConfigService_(logger_),
+          vendorManager_(itemManager_, logger_),
+          tradeSessionManager_(logger_),
+          equipmentManager_(inventoryManager_, itemManager_, characterManager_, logger_),
+          respawnZoneManager_(logger_),
+          gameZoneManager_(logger_),
+          statusEffectTemplateManager_(logger_),
+          regenManager_(this),
+          pityManager_(logger_),
+          bestiaryManager_(logger_),
+          championManager_(this),
+          reputationManager_(logger_),
+          masteryManager_(this),
+          zoneEventManager_(this)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
@@ -58,6 +84,13 @@ class GameServices
 
         // Set up harvest manager dependencies
         harvestManager_.setInventoryManager(&inventoryManager_);
+
+        // Set up equipment manager dependencies
+        equipmentManager_.setGameConfigService(&gameConfigService_);
+
+        // Wire loot manager dependencies (pity)
+        lootManager_.setPityManager(&pityManager_);
+        lootManager_.setGameServices(this);
     }
 
     Logger &getLogger()
@@ -144,6 +177,58 @@ class GameServices
     {
         return gameConfigService_;
     }
+    VendorManager &getVendorManager()
+    {
+        return vendorManager_;
+    }
+    TradeSessionManager &getTradeSessionManager()
+    {
+        return tradeSessionManager_;
+    }
+    EquipmentManager &getEquipmentManager()
+    {
+        return equipmentManager_;
+    }
+    RespawnZoneManager &getRespawnZoneManager()
+    {
+        return respawnZoneManager_;
+    }
+    GameZoneManager &getGameZoneManager()
+    {
+        return gameZoneManager_;
+    }
+    StatusEffectTemplateManager &getStatusEffectTemplateManager()
+    {
+        return statusEffectTemplateManager_;
+    }
+    RegenManager &getRegenManager()
+    {
+        return regenManager_;
+    }
+    PityManager &getPityManager()
+    {
+        return pityManager_;
+    }
+    BestiaryManager &getBestiaryManager()
+    {
+        return bestiaryManager_;
+    }
+    ChampionManager &getChampionManager()
+    {
+        return championManager_;
+    }
+    ReputationManager &getReputationManager()
+    {
+        return reputationManager_;
+    }
+    MasteryManager &getMasteryManager()
+    {
+        return masteryManager_;
+    }
+    ZoneEventManager &getZoneEventManager()
+    {
+        return zoneEventManager_;
+    }
 
   private:
     Logger &logger_;
@@ -167,4 +252,17 @@ class GameServices
     ExperienceManager experienceManager_;
     ExperienceCacheManager experienceCacheManager_;
     CharacterStatsNotificationService statsNotificationService_;
+    VendorManager vendorManager_;
+    TradeSessionManager tradeSessionManager_;
+    EquipmentManager equipmentManager_;
+    RespawnZoneManager respawnZoneManager_;
+    GameZoneManager gameZoneManager_;
+    StatusEffectTemplateManager statusEffectTemplateManager_;
+    RegenManager regenManager_;
+    PityManager pityManager_;
+    BestiaryManager bestiaryManager_;
+    ChampionManager championManager_;
+    ReputationManager reputationManager_;
+    MasteryManager masteryManager_;
+    ZoneEventManager zoneEventManager_;
 };

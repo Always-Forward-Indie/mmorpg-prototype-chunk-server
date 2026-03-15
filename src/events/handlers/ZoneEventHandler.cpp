@@ -69,3 +69,75 @@ ZoneEventHandler::handleGetSpawnZoneDataEvent(const Event &event)
     // Implementation placeholder - can be extended based on requirements
     log_->info("HandleGetSpawnZoneDataEvent called - implementation placeholder");
 }
+
+void
+ZoneEventHandler::handleSetRespawnZonesEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        if (std::holds_alternative<std::vector<RespawnZoneStruct>>(data))
+        {
+            std::vector<RespawnZoneStruct> zones = std::get<std::vector<RespawnZoneStruct>>(data);
+            gameServices_.getRespawnZoneManager().loadRespawnZones(zones);
+            log_->info("[ZoneEventHandler] Loaded {} respawn zones", zones.size());
+        }
+        else
+        {
+            log_->error("[ZoneEventHandler] handleSetRespawnZonesEvent: unexpected data variant");
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("[ZoneEventHandler] handleSetRespawnZonesEvent: " + std::string(ex.what()));
+    }
+}
+
+void
+ZoneEventHandler::handleSetGameZonesEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        if (std::holds_alternative<std::vector<GameZoneStruct>>(data))
+        {
+            std::vector<GameZoneStruct> zones = std::get<std::vector<GameZoneStruct>>(data);
+            gameServices_.getGameZoneManager().loadGameZones(zones);
+            log_->info("[ZoneEventHandler] Loaded {} game zones", zones.size());
+        }
+        else
+        {
+            log_->error("[ZoneEventHandler] handleSetGameZonesEvent: unexpected data variant");
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("[ZoneEventHandler] handleSetGameZonesEvent: " + std::string(ex.what()));
+    }
+}
+
+void
+ZoneEventHandler::handleSetTimedChampionTemplatesEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        if (std::holds_alternative<std::vector<TimedChampionTemplate>>(data))
+        {
+            auto templates = std::get<std::vector<TimedChampionTemplate>>(data);
+            gameServices_.getChampionManager().loadTimedChampions(templates);
+            log_->info("[ZoneEventHandler] Loaded {} timed champion templates", templates.size());
+        }
+        else
+        {
+            log_->error("[ZoneEventHandler] handleSetTimedChampionTemplatesEvent: unexpected data variant");
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("[ZoneEventHandler] handleSetTimedChampionTemplatesEvent: " + std::string(ex.what()));
+    }
+}

@@ -1,6 +1,9 @@
 #pragma once
 #include "events/handlers/BaseEventHandler.hpp"
 #include "services/GameServices.hpp"
+#include <chrono>
+#include <mutex>
+#include <unordered_map>
 
 /**
  * @brief Handler for item and loot related events
@@ -76,9 +79,61 @@ class ItemEventHandler : public BaseEventHandler
      */
     void handleGetPlayerInventoryEvent(const Event &event);
 
+    /**
+     * @brief Handle inventory update event
+     *
+     * Pushes the current inventory state to the client whenever
+     * an item is added or removed at runtime (e.g. quest rewards,
+     * looting). The event payload already contains the pre-built
+     * full-inventory JSON assembled by InventoryManager.
+     *
+     * @param event Event containing characterId (as clientID) + full inventory JSON
+     */
+    void handleInventoryUpdateEvent(const Event &event);
+
+    /**
+     * @brief Handle player drop item event (ITEM_DROP_BY_PLAYER).
+     *        Validates ownership, removes from inventory, places on ground and broadcasts.
+     */
+    void handleItemDropByPlayerEvent(const Event &event);
+
+    /**
+     * @brief Handle ITEM_REMOVE broadcast — tell all clients to despawn items
+     *        that were cleaned up server-side.
+     */
+    void handleItemRemoveEvent(const Event &event);
+
+    /**
+     * @brief Handle USE_ITEM event — player uses a potion/scroll/food.
+     *        Applies instant heal/mana or adds timed ActiveEffect.
+     */
+    void handleUseItemEvent(const Event &event);
+
+    /**
+     * @brief Send the current world ground-items snapshot to a single client.
+     *        Called on character join so the client can spawn existing world items.
+     * @param clientId  Target client ID
+     * @param socket    Target socket
+     */
+    void sendGroundItemsToClient(int clientId,
+        std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+
   private:
     GameServices &gameServices_;
     std::shared_ptr<spdlog::logger> log_;
+
+    // Per-character item-use cooldown tracker.
+    // Key: characterId → (itemId → time when cooldown expires)
+    // Protected by itemCooldownMutex_ — handleUseItemEvent may be called
+    // from concurrent event-processing threads.
+    mutable std::mutex itemCooldownMutex_;
+    std::unordered_map<int, std::unordered_map<int, std::chrono::steady_clock::time_point>> itemCooldowns_;
+
+    /**
+     * @brief Check and set item use cooldown atomically.
+     * @return true if the item can be used (cooldown set), false if still on cooldown.
+     */
+    bool trySetItemCooldown(int characterId, int itemId, int cooldownSeconds);
 
     /**
      * @brief Convert DroppedItemStruct to JSON

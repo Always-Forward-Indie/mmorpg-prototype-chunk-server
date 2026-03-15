@@ -2,6 +2,7 @@
 #include "services/MobInstanceManager.hpp"
 #include "utils/Generators.hpp"
 #include <algorithm>
+#include <ctime>
 #include <spdlog/logger.h>
 
 SpawnZoneManager::SpawnZoneManager(
@@ -102,6 +103,16 @@ SpawnZoneManager::loadMobsInSpawnZones(
             // Social behaviour (migration 012)
             mobData.isSocial = row.isSocial;
             mobData.chaseDuration = row.chaseDuration;
+
+            // Survival / Rare mob groundwork (Stage 3, migration 038)
+            mobData.canEvolve = row.canEvolve;
+            mobData.isRare = row.isRare;
+            mobData.rareSpawnChance = row.rareSpawnChance;
+            mobData.rareSpawnCondition = row.rareSpawnCondition;
+
+            // Social systems (Stage 4, migration 039)
+            mobData.factionSlug = row.factionSlug;
+            mobData.repDeltaPerKill = row.repDeltaPerKill;
 
             mobSpawnZones_[mobData.zoneId].spawnedMobsList.push_back(mobData);
         }
@@ -245,27 +256,19 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             if (mob.id == 0 || mob.name.empty())
             {
                 log_->info("[SPAWN_DELAY] Mob template ID " + std::to_string(zone->second.spawnMobId) +
-                            " not loaded yet, delaying spawn");
+                           " not loaded yet, delaying spawn");
                 return mobs; // Exit early, try again later
             }
 
             mob.zoneId = zoneId;
 
-            // Центр зоны и размеры (правильные)
-            float centerX = zone->second.posX;
-            float centerY = zone->second.posY;
-            float centerZ = zone->second.posZ;
-            float sizeX = zone->second.sizeX; // Ширина бокса
-            float sizeY = zone->second.sizeY; // Длина бокса
-            float sizeZ = zone->second.sizeZ; // Высота бокса
-
-            // Правильные границы зоны
-            float minX = centerX - (sizeX / 2.0f);
-            float maxX = centerX + (sizeX / 2.0f);
-            float minY = centerY - (sizeY / 2.0f);
-            float maxY = centerY + (sizeY / 2.0f);
-            float minZ = centerZ - (sizeZ / 2.0f);
-            float maxZ = centerZ + (sizeZ / 2.0f);
+            // Границы зоны: posX/Y/Z = min_spawn, sizeX/Y/Z = max_spawn (два угла AABB из БД)
+            float minX = zone->second.posX;
+            float maxX = zone->second.sizeX;
+            float minY = zone->second.posY;
+            float maxY = zone->second.sizeY;
+            float minZ = zone->second.posZ;
+            float maxZ = zone->second.sizeZ;
 
             // Minimum separation = radiusA + radiusB + gap between edges.
             // For a homogeneous zone all mobs share the same template radius.
@@ -321,6 +324,7 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
 
             // Генерация уникального ID
             mob.uid = Generators::generateUniqueMobUID();
+            mob.spawnEpochSec = static_cast<int64_t>(std::time(nullptr));
 
             // Добавляем моба в список
             mobSpawnZones_[zoneId].spawnedMobsUIDList.push_back(mob.uid);

@@ -43,10 +43,6 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handlePing(context, socket);
     }
-    else if (context.eventType == "getSpawnZones")
-    {
-        handleGetSpawnZones(context, socket);
-    }
     else if (context.eventType == "getConnectedCharacters")
     {
         handleGetConnectedClients(context, socket);
@@ -99,6 +95,90 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleDialogueClose(context, socket);
     }
+    else if (context.eventType == "openVendorShop")
+    {
+        handleOpenVendorShop(context, socket);
+    }
+    else if (context.eventType == "buyItem")
+    {
+        handleBuyItem(context, socket);
+    }
+    else if (context.eventType == "sellItem")
+    {
+        handleSellItem(context, socket);
+    }
+    else if (context.eventType == "buyItemBatch")
+    {
+        handleBuyItemBatch(context, socket);
+    }
+    else if (context.eventType == "sellItemBatch")
+    {
+        handleSellItemBatch(context, socket);
+    }
+    else if (context.eventType == "openRepairShop")
+    {
+        handleOpenRepairShop(context, socket);
+    }
+    else if (context.eventType == "repairItem")
+    {
+        handleRepairItem(context, socket);
+    }
+    else if (context.eventType == "repairAll")
+    {
+        handleRepairAll(context, socket);
+    }
+    else if (context.eventType == "tradeRequest")
+    {
+        handleTradeRequest(context, socket);
+    }
+    else if (context.eventType == "tradeAccept")
+    {
+        handleTradeAccept(context, socket);
+    }
+    else if (context.eventType == "tradeDecline")
+    {
+        handleTradeDecline(context, socket);
+    }
+    else if (context.eventType == "tradeOfferUpdate")
+    {
+        handleTradeOfferUpdate(context, socket);
+    }
+    else if (context.eventType == "tradeConfirm")
+    {
+        handleTradeConfirm(context, socket);
+    }
+    else if (context.eventType == "tradeCancel")
+    {
+        handleTradeCancel(context, socket);
+    }
+    else if (context.eventType == "equipItem")
+    {
+        handleEquipItem(context, socket);
+    }
+    else if (context.eventType == "unequipItem")
+    {
+        handleUnequipItem(context, socket);
+    }
+    else if (context.eventType == "getEquipment")
+    {
+        handleGetEquipment(context, socket);
+    }
+    else if (context.eventType == "respawnRequest")
+    {
+        handleRespawnRequest(context, socket);
+    }
+    else if (context.eventType == "dropItem")
+    {
+        handleDropItemByPlayer(context, socket);
+    }
+    else if (context.eventType == "useItem")
+    {
+        handleUseItem(context, socket);
+    }
+    else if (context.eventType == "getBestiaryEntry")
+    {
+        handleGetBestiaryEntry(context, socket);
+    }
     else
     {
         log_->error("Unknown event type: " + context.eventType);
@@ -139,6 +219,7 @@ EventDispatcher::handleJoinGameClient(const EventContext &context, std::shared_p
     // Create client data safely without copying invalid socket references
     ClientDataStruct clientData;
     clientData.clientId = context.clientData.clientId;
+    clientData.accountId = context.clientData.clientId; // clientId == accountId (DB owner_id) in this system
     clientData.hash = context.clientData.hash;
     clientData.characterId = context.clientData.characterId;
     // Socket field removed from ClientDataStruct to prevent socket references in EventData
@@ -433,70 +514,6 @@ EventDispatcher::handlePing(const EventContext &context, std::shared_ptr<boost::
     {
         // Log that we're skipping ping for a disconnected client
         log_->info("Skipping ping event for disconnected client ID: " + std::to_string(context.clientData.clientId));
-    }
-}
-
-void
-EventDispatcher::handleGetSpawnZones(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
-{
-    if (!chunkServer_)
-    {
-        log_->error("ChunkServer is nullptr in EventDispatcher!");
-        return;
-    }
-
-    // Validate the socket parameter before creating events
-    std::shared_ptr<boost::asio::ip::tcp::socket> validSocket = nullptr;
-    if (socket)
-    {
-        try
-        {
-            if (socket->is_open())
-            {
-                validSocket = socket;
-            }
-        }
-        catch (const std::exception &e)
-        {
-            // Socket is invalid, use nullptr
-            validSocket = nullptr;
-        }
-    }
-
-    // Only create and queue events if we have a valid socket
-    if (validSocket)
-    {
-        // Get ALL spawn zones instead of just zone ID 1
-        auto allSpawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
-
-        gameServices_.getLogger().log("Sending " + std::to_string(allSpawnZones.size()) +
-                                          " spawn zones to client " + std::to_string(context.clientData.clientId),
-            BLUE);
-
-        // Send each spawn zone to the client
-        for (const auto &[zoneId, spawnZone] : allSpawnZones)
-        {
-            Event getSpawnZonesEvent(Event::SPAWN_MOBS_IN_ZONE, context.clientData.clientId, spawnZone, context.timestamps);
-            eventsBatch_.push_back(getSpawnZonesEvent);
-
-            if (eventsBatch_.size() >= BATCH_SIZE)
-            {
-                eventQueue_.pushBatch(eventsBatch_);
-                eventsBatch_.clear();
-            }
-        }
-
-        // Flush any remaining events in batch
-        if (!eventsBatch_.empty())
-        {
-            eventQueue_.pushBatch(eventsBatch_);
-            eventsBatch_.clear();
-        }
-    }
-    else
-    {
-        // Log that we're skipping the event for a disconnected client
-        log_->info("Skipping get spawn zones event for disconnected client ID: " + std::to_string(context.clientData.clientId));
     }
 }
 
@@ -1015,7 +1032,7 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
         }
 
         log_->info("Sent character experience data for character " +
-                                          std::to_string(characterData.characterId));
+                   std::to_string(characterData.characterId));
     }
     catch (const std::exception &e)
     {
@@ -1134,5 +1151,559 @@ EventDispatcher::handleDialogueClose(const EventContext &context, std::shared_pt
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("[EventDispatcher] handleDialogueClose exception: " + std::string(e.what()));
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Vendor / Repair / Trade handlers
+// ──────────────────────────────────────────────────────────────────────────────
+
+void
+EventDispatcher::handleOpenVendorShop(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        OpenVendorShopRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::OPEN_VENDOR_SHOP, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleOpenVendorShop: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleBuyItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        BuyItemRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.itemId = j["body"].value("itemId", 0);
+        req.quantity = j["body"].value("quantity", 1);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::BUY_ITEM, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleBuyItem: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleSellItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        SellItemRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.inventoryItemId = j["body"].value("inventoryItemId", 0);
+        req.quantity = j["body"].value("quantity", 1);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::SELL_ITEM, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleSellItem: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleBuyItemBatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        BuyBatchRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+
+        if (j["body"].contains("items") && j["body"]["items"].is_array())
+        {
+            for (const auto &entry : j["body"]["items"])
+            {
+                BuyBatchItemEntry e;
+                e.itemId = entry.value("itemId", 0);
+                e.quantity = entry.value("quantity", 1);
+                req.items.push_back(e);
+            }
+        }
+        eventsBatch_.push_back(Event(Event::BUY_ITEM_BATCH, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleBuyItemBatch: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleSellItemBatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        SellBatchRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+
+        if (j["body"].contains("items") && j["body"]["items"].is_array())
+        {
+            for (const auto &entry : j["body"]["items"])
+            {
+                SellBatchItemEntry e;
+                e.inventoryItemId = entry.value("inventoryItemId", 0);
+                e.quantity = entry.value("quantity", 1);
+                req.items.push_back(e);
+            }
+        }
+        eventsBatch_.push_back(Event(Event::SELL_ITEM_BATCH, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleSellItemBatch: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleOpenRepairShop(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        OpenRepairShopRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::OPEN_REPAIR_SHOP, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleOpenRepairShop: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleRepairItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        RepairItemRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.inventoryItemId = j["body"].value("inventoryItemId", 0);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::REPAIR_ITEM, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleRepairItem: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleRepairAll(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        RepairAllRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::REPAIR_ALL, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleRepairAll: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleTradeRequest(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        TradeRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.targetCharacterId = j["body"].value("targetCharacterId", 0);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::TRADE_REQUEST, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleTradeRequest: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleTradeAccept(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        TradeRespondStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        // sessionId field carries the initiator's characterId as string
+        req.sessionId = j["body"].value("fromCharacterId", "");
+        req.accept = true;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::TRADE_ACCEPT, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleTradeAccept: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleTradeDecline(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        TradeRespondStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.sessionId = j["body"].value("fromCharacterId", "");
+        req.accept = false;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::TRADE_DECLINE, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleTradeDecline: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleTradeOfferUpdate(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        TradeOfferUpdateStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.sessionId = j["body"].value("sessionId", "");
+        req.gold = j["body"].value("gold", 0);
+        req.timestamps = context.timestamps;
+
+        if (j["body"].contains("items") && j["body"]["items"].is_array())
+        {
+            for (const auto &item : j["body"]["items"])
+            {
+                TradeOfferItemStruct oi;
+                oi.inventoryItemId = item.value("inventoryItemId", 0);
+                oi.itemId = item.value("itemId", 0);
+                oi.quantity = item.value("quantity", 1);
+                req.items.push_back(oi);
+            }
+        }
+        eventsBatch_.push_back(Event(Event::TRADE_OFFER_UPDATE, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleTradeOfferUpdate: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleTradeConfirm(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        TradeConfirmCancelStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.sessionId = j["body"].value("sessionId", "");
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::TRADE_CONFIRM, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleTradeConfirm: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleTradeCancel(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        TradeConfirmCancelStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.sessionId = j["body"].value("sessionId", "");
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::TRADE_CANCEL, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleTradeCancel: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleEquipItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        EquipItemRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.inventoryItemId = j["body"].value("inventoryItemId", 0);
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::EQUIP_ITEM, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleEquipItem: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleUnequipItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        UnequipItemRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.equipSlotSlug = j["body"].value("equipSlotSlug", "");
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::UNEQUIP_ITEM, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleUnequipItem: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleGetEquipment(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        GetEquipmentRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::GET_EQUIPMENT, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleGetEquipment: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleRespawnRequest(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        RespawnRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::PLAYER_RESPAWN, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleRespawnRequest: " + std::string(e.what()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// handleDropItemByPlayer — player drops item from inventory onto the ground
+// ---------------------------------------------------------------------------
+void
+EventDispatcher::handleDropItemByPlayer(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json body = j["body"];
+
+        int itemId = body.value("itemId", 0);
+        int quantity = body.value("quantity", 1);
+
+        if (itemId <= 0)
+        {
+            log_->error("[EventDispatcher] dropItem: missing itemId from client " +
+                        std::to_string(context.clientData.clientId));
+            return;
+        }
+
+        ItemDropByPlayerRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.playerId = context.clientData.clientId;
+        req.itemId = itemId;
+        req.quantity = quantity;
+        req.playerPosition = context.positionData;
+
+        eventsBatch_.push_back(Event(Event::ITEM_DROP_BY_PLAYER, req.playerId, req, context.timestamps));
+
+        log_->info("[EventDispatcher] dropItem queued: character=" +
+                   std::to_string(req.characterId) +
+                   " itemId=" + std::to_string(itemId) +
+                   " qty=" + std::to_string(quantity));
+    }
+    catch (const std::exception &e)
+    {
+        log_->error("[EventDispatcher] handleDropItemByPlayer: " + std::string(e.what()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// handleUseItem — player uses a consumable item (potion, scroll, food…)
+// ---------------------------------------------------------------------------
+void
+EventDispatcher::handleUseItem(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json body = j["body"];
+
+        int itemId = body.value("itemId", 0);
+
+        if (itemId <= 0)
+        {
+            log_->error("[EventDispatcher] useItem: missing itemId from client " +
+                        std::to_string(context.clientData.clientId));
+            return;
+        }
+
+        ItemUseRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.playerId = context.clientData.clientId;
+        req.itemId = itemId;
+
+        eventsBatch_.push_back(Event(Event::USE_ITEM, req.playerId, req, context.timestamps));
+
+        log_->info("[EventDispatcher] useItem queued: character=" +
+                   std::to_string(req.characterId) +
+                   " itemId=" + std::to_string(itemId));
+    }
+    catch (const std::exception &e)
+    {
+        log_->error("[EventDispatcher] handleUseItem: " + std::string(e.what()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// handleGetBestiaryEntry — client requests bestiary data for a mob template
+// ---------------------------------------------------------------------------
+void
+EventDispatcher::handleGetBestiaryEntry(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(context.fullMessage);
+        int mobTemplateId = j["body"].value("mobTemplateId", 0);
+
+        if (mobTemplateId <= 0)
+        {
+            log_->error("[EventDispatcher] getBestiaryEntry: missing mobTemplateId");
+            return;
+        }
+
+        nlohmann::json payload;
+        payload["characterId"] = context.characterData.characterId;
+        payload["clientId"] = context.clientData.clientId;
+        payload["mobTemplateId"] = mobTemplateId;
+
+        eventsBatch_.push_back(Event(Event::GET_BESTIARY_ENTRY, context.clientData.clientId, payload, context.timestamps));
+
+        log_->info("[EventDispatcher] getBestiaryEntry queued: character=" +
+                   std::to_string(context.characterData.characterId) +
+                   " mob=" + std::to_string(mobTemplateId));
+    }
+    catch (const std::exception &e)
+    {
+        log_->error("[EventDispatcher] handleGetBestiaryEntry: " + std::string(e.what()));
     }
 }

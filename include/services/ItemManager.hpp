@@ -2,6 +2,7 @@
 #include "data/DataStructs.hpp"
 #include "utils/Logger.hpp"
 #include <map>
+#include <optional>
 #include <shared_mutex>
 
 class ItemManager
@@ -39,6 +40,13 @@ class ItemManager
      * @return ItemDataStruct or empty struct if not found
      */
     ItemDataStruct getItemById(int itemId) const;
+
+    /**
+     * @brief Get item by slug
+     * @param slug Item slug (e.g. "gold_coin")
+     * @return Pointer to ItemDataStruct or nullptr if not found
+     */
+    const ItemDataStruct *getItemBySlug(const std::string &slug) const;
 
     /**
      * @brief Get mob loot information

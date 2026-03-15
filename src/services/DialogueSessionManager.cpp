@@ -74,11 +74,16 @@ DialogueSessionManager::closeSession(const std::string &sessionId)
     if (it == sessions_.end())
         return;
 
+    // Copy the id and characterId BEFORE erasing the node, because the
+    // caller may have passed session->sessionId (a reference into the map
+    // value).  Erasing the iterator invalidates that reference, turning
+    // any subsequent use of the parameter into a heap-use-after-free.
+    std::string sid = it->first;
     int characterId = it->second.characterId;
     sessions_.erase(it);
     characterToSession_.erase(characterId);
 
-    log_->info("[DialogueSession] Closed session " + sessionId);
+    log_->info("[DialogueSession] Closed session " + sid);
 }
 
 void

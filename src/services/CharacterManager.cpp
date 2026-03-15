@@ -4,9 +4,9 @@
 #include <cmath>
 #include <iostream>
 #include <random>
+#include <spdlog/logger.h>
 #include <unordered_map>
 #include <vector>
-#include <spdlog/logger.h>
 
 CharacterManager::CharacterManager(Logger &logger)
     : logger_(logger)
@@ -127,7 +127,14 @@ CharacterManager::loadCharacterData(CharacterDataStruct characterData)
         auto it = charactersMap_.find(characterData.characterId);
         if (it != charactersMap_.end())
         {
-            it->second = characterData; // full struct copy
+            // Preserve chunk-server-only movement validation state.
+            // loadCharacterData is called from ExperienceManager and CombatSystem with a
+            // snapshot taken earlier; any movement accepted between that snapshot and now
+            // would be lost in a full overwrite, causing the next speed-check to compare
+            // the new position against a stale lastValidatedPosition.
+            characterData.lastValidatedPosition = it->second.lastValidatedPosition;
+            characterData.lastMoveSrvMs = it->second.lastMoveSrvMs;
+            it->second = characterData;
         }
         else
         {
@@ -236,6 +243,18 @@ CharacterManager::setCharacterPosition(int characterID, PositionStruct position)
     auto it = charactersMap_.find(characterID);
     if (it != charactersMap_.end())
         it->second.characterPosition = position;
+}
+
+void
+CharacterManager::setLastValidatedMovement(int characterID, PositionStruct position, int64_t srvMs)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it != charactersMap_.end())
+    {
+        it->second.lastValidatedPosition = position;
+        it->second.lastMoveSrvMs = srvMs;
+    }
 }
 
 void
@@ -382,7 +401,78 @@ CharacterManager::setCharacterActiveEffects(int characterID, std::vector<ActiveE
         return;
     }
     log_->error("[CharacterManager] setCharacterActiveEffects: character " +
-                     std::to_string(characterID) + " not found");
+                std::to_string(characterID) + " not found");
+}
+
+void
+CharacterManager::addActiveEffect(int characterID, const ActiveEffectStruct &effect)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+    {
+        log_->error("[CharacterManager] addActiveEffect: character " + std::to_string(characterID) + " not found");
+        return;
+    }
+
+    auto &effects = it->second.activeEffects;
+    // Refresh if an effect with the same slug already exists (no stacking)
+    auto existing = std::find_if(effects.begin(), effects.end(), [&effect](const ActiveEffectStruct &e)
+        { return e.effectSlug == effect.effectSlug; });
+    if (existing != effects.end())
+    {
+        existing->expiresAt = effect.expiresAt;
+        existing->value = effect.value;
+        existing->nextTickAt = effect.nextTickAt;
+        log_->info("[CharacterManager] Refreshed effect '" + effect.effectSlug + "' for character " + std::to_string(characterID));
+    }
+    else
+    {
+        effects.push_back(effect);
+        log_->info("[CharacterManager] Added effect '" + effect.effectSlug + "' for character " + std::to_string(characterID));
+    }
+}
+
+int
+CharacterManager::restoreManaToCharacter(int characterID, int amount)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it != charactersMap_.end())
+    {
+        int newMana = std::min(it->second.characterMaxMana,
+            it->second.characterCurrentMana + amount);
+        it->second.characterCurrentMana = newMana;
+        return newMana;
+    }
+    log_->error("[CharacterManager] restoreManaToCharacter: character " + std::to_string(characterID) + " not found");
+    return 0;
+}
+
+void
+CharacterManager::markCharacterInCombat(int characterID)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it != charactersMap_.end())
+        it->second.lastInCombatAt = std::chrono::steady_clock::now();
+}
+
+void
+CharacterManager::setCharacterFlags(int characterID, std::vector<PlayerFlagStruct> flags)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it != charactersMap_.end())
+    {
+        it->second.flags = std::move(flags);
+        logger_.log("[CharacterManager] Set " +
+                    std::to_string(it->second.flags.size()) +
+                    " flags for character " + std::to_string(characterID));
+        return;
+    }
+    log_->error("[CharacterManager] setCharacterFlags: character " +
+                std::to_string(characterID) + " not found");
 }
 void
 CharacterManager::replaceCharacterAttributes(int characterID, std::vector<CharacterAttributeStruct> attributes)
@@ -398,73 +488,97 @@ CharacterManager::replaceCharacterAttributes(int characterID, std::vector<Charac
         return;
     }
     log_->error("[CharacterManager] replaceCharacterAttributes: character " +
-                     std::to_string(characterID) + " not found");
+                std::to_string(characterID) + " not found");
 }
 
-std::vector<EffectTickResult>
+std::pair<std::vector<EffectTickResult>, std::unordered_set<int>>
 CharacterManager::processEffectTicks()
 {
     std::vector<EffectTickResult> results;
+    std::unordered_set<int> expiredCharacters;
     const auto now = std::chrono::steady_clock::now();
     const int64_t nowSec = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch())
                                .count();
 
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    for (auto &[id, character] : charactersMap_)
+    // Intermediate representation for phase-2 HP application.
+    struct PendingTick
     {
-        for (auto &eff : character.activeEffects)
+        int characterId;
+        std::string effectSlug;
+        std::string effectTypeSlug;
+        float value; // abs amount per tick
+    };
+    std::vector<PendingTick> pending;
+
+    // ── Phase 1: wide unique_lock ─────────────────────────────────────────────
+    // Advance nextTickAt, remove expired effects, collect pending HP-change work.
+    // No external calls are made here — the lock window is kept to pure in-memory
+    // iteration so concurrent shared_lock readers (e.g. getCharactersList) are
+    // blocked for the shortest possible time.
+    {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        for (auto &[id, character] : charactersMap_)
         {
-            if (eff.tickMs <= 0)
-                continue; // not a tick effect
-            if (eff.effectTypeSlug != "dot" && eff.effectTypeSlug != "hot")
-                continue;
-            if (character.characterCurrentHealth <= 0)
-                continue; // already dead — skip ticks
-            if (now < eff.nextTickAt)
-                continue; // not yet time
-
-            // Advance nextTickAt by one interval (non-accumulating drift)
-            eff.nextTickAt += std::chrono::milliseconds(eff.tickMs);
-            // Guard: if server stalled and we're way behind, reset to now
-            if (eff.nextTickAt < now)
-                eff.nextTickAt = now + std::chrono::milliseconds(eff.tickMs);
-
-            EffectTickResult tick;
-            tick.characterId = character.characterId;
-            tick.effectSlug = eff.effectSlug;
-            tick.effectTypeSlug = eff.effectTypeSlug;
-            tick.value = std::abs(eff.value);
-
-            if (eff.effectTypeSlug == "dot")
+            for (auto &eff : character.activeEffects)
             {
-                int dmg = static_cast<int>(tick.value);
-                int newHp = std::max(0, character.characterCurrentHealth - dmg);
-                character.characterCurrentHealth = newHp;
-                tick.newHealth = newHp;
-                tick.newMana = character.characterCurrentMana;
-                tick.targetDied = (newHp <= 0);
+                if (eff.tickMs <= 0)
+                    continue; // not a tick effect
+                if (eff.effectTypeSlug != "dot" && eff.effectTypeSlug != "hot")
+                    continue;
+                if (character.characterCurrentHealth <= 0)
+                    continue; // already dead — skip ticks
+                if (now < eff.nextTickAt)
+                    continue; // not yet time
+
+                // Advance nextTickAt by one interval (non-accumulating drift)
+                eff.nextTickAt += std::chrono::milliseconds(eff.tickMs);
+                if (eff.nextTickAt < now)
+                    eff.nextTickAt = now + std::chrono::milliseconds(eff.tickMs);
+
+                pending.push_back({character.characterId, eff.effectSlug, eff.effectTypeSlug, std::abs(eff.value)});
             }
-            else // hot
-            {
-                int heal = static_cast<int>(tick.value);
-                int newHp = std::min(character.characterMaxHealth,
-                    character.characterCurrentHealth + heal);
-                character.characterCurrentHealth = newHp;
-                tick.newHealth = newHp;
-                tick.newMana = character.characterCurrentMana;
-                tick.targetDied = false;
-            }
-            results.push_back(tick);
+
+            // Remove expired effects
+            const std::size_t countBefore = character.activeEffects.size();
+            character.activeEffects.erase(
+                std::remove_if(character.activeEffects.begin(), character.activeEffects.end(), [&](const ActiveEffectStruct &e)
+                    { return e.expiresAt != 0 && e.expiresAt <= nowSec; }),
+                character.activeEffects.end());
+            if (character.activeEffects.size() < countBefore)
+                expiredCharacters.insert(character.characterId);
         }
+    } // unique_lock released here
 
-        // Remove expired effects (including exhausted DoTs whose expiresAt has passed)
-        character.activeEffects.erase(
-            std::remove_if(character.activeEffects.begin(), character.activeEffects.end(), [&](const ActiveEffectStruct &eff)
-                { return eff.expiresAt != 0 && eff.expiresAt <= nowSec; }),
-            character.activeEffects.end());
+    // ── Phase 2: per-call narrow locks ───────────────────────────────────────
+    // Apply HP deltas one character at a time. Each call acquires its own
+    // unique_lock internally, allowing other threads to interleave between ticks.
+    for (const auto &pt : pending)
+    {
+        EffectTickResult tick;
+        tick.characterId = pt.characterId;
+        tick.effectSlug = pt.effectSlug;
+        tick.effectTypeSlug = pt.effectTypeSlug;
+        tick.value = pt.value;
+
+        if (pt.effectTypeSlug == "dot")
+        {
+            auto hr = applyDamageToCharacter(pt.characterId, static_cast<int>(pt.value));
+            tick.newHealth = hr.newHealth;
+            tick.newMana = hr.currentMana;
+            tick.targetDied = hr.died;
+        }
+        else // hot
+        {
+            auto hr = applyHealToCharacter(pt.characterId, static_cast<int>(pt.value));
+            tick.newHealth = hr.newHealth;
+            tick.newMana = hr.currentMana;
+            tick.targetDied = false;
+        }
+        results.push_back(tick);
     }
-    return results;
+
+    return {results, expiredCharacters};
 }
 
 void

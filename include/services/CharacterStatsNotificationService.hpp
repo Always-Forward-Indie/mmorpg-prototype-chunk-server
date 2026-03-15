@@ -5,7 +5,10 @@
 #include <nlohmann/json.hpp>
 
 // Forward declarations
-namespace spdlog { class logger; }
+namespace spdlog
+{
+class logger;
+}
 class GameServices;
 
 /**
@@ -26,6 +29,39 @@ class CharacterStatsNotificationService
      * @param characterId The ID of the character whose stats changed
      */
     void sendStatsUpdate(int characterId);
+
+    /**
+     * @brief Send a world notification to a specific character.
+     *
+     * Broadcasts a `world_notification` packet via the shared stats callback.
+     * Clients filter by `characterId` in the body.
+     *
+     * @param characterId     Target character
+     * @param notificationType Short tag identifying the notification (e.g. "fellowship_bonus")
+     * @param text            Human-readable text to display
+     * @param data            Optional extra JSON payload (default: empty object)
+     */
+    void sendWorldNotification(int characterId,
+        const std::string &notificationType,
+        const std::string &text,
+        const nlohmann::json &data = nlohmann::json::object());
+
+    /**
+     * @brief Send a world notification to all players currently inside a game zone.
+     *
+     * Iterates all connected characters, checks their position against the
+     * GameZoneManager AABB, and sends a personal notification to each match.
+     * O(n_players) — acceptable for prototype scale.
+     *
+     * @param gameZoneId      Target game zone (zones.id)
+     * @param notificationType Short machine-readable type string
+     * @param text            Human-readable announcement text
+     * @param data            Optional extra JSON payload
+     */
+    void sendWorldNotificationToGameZone(int gameZoneId,
+        const std::string &notificationType,
+        const std::string &text,
+        const nlohmann::json &data = nlohmann::json::object());
 
     /**
      * @brief Set the callback function for sending stats update packets

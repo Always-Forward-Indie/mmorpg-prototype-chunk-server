@@ -99,6 +99,15 @@ class MobEventHandler : public BaseEventHandler
     void handleSetMobsSkillsEvent(const Event &event);
 
     /**
+     * @brief Handle set mob weaknesses and resistances event
+     *
+     * Loads mob weaknesses and resistances into the mob manager
+     *
+     * @param event Event containing per-mob weaknesses and resistances maps
+     */
+    void handleSetMobWeaknessesResistancesEvent(const Event &event);
+
+    /**
      * @brief Handle lightweight per-tick mob movement update.
      *
      * Sends compact position+velocity packets to clients.
@@ -108,6 +117,17 @@ class MobEventHandler : public BaseEventHandler
      * @param event Event containing vector<MobMoveUpdateStruct>
      */
     void handleMobMoveUpdateEvent(const Event &event);
+
+    /**
+     * @brief Push all spawn zones and their current live mobs to a single client.
+     *
+     * Called server-side on character join so the client does not need to issue
+     * a separate getSpawnZones request.
+     *
+     * @param clientID    Target client ID (used in response header)
+     * @param clientSocket Target client socket
+     */
+    void sendSpawnZonesToClient(int clientID, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket);
 
   private:
     /**

@@ -61,6 +61,13 @@ SkillManager::useCharacterSkill(int casterId, const std::string &skillSlug, int 
             return result;
         }
 
+        // Passive skills are always-on and cannot be cast actively.
+        if (skill->isPassive)
+        {
+            result.errorMessage = "Cannot cast a passive skill";
+            return result;
+        }
+
         // 3. Проверить доступность скила
         if (!isSkillAvailable(casterId, *skill, casterData))
         {
@@ -155,6 +162,13 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
         if (!skill)
         {
             result.errorMessage = "Skill not found";
+            return result;
+        }
+
+        // Passive skills are always-on and cannot be cast actively.
+        if (skill->isPassive)
+        {
+            result.errorMessage = "Cannot cast a passive skill";
             return result;
         }
 

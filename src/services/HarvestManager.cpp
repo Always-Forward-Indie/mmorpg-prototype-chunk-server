@@ -65,7 +65,7 @@ HarvestManager::startHarvest(int characterId, int corpseUID, const PositionStruc
     if (!validation.isValid)
     {
         log_->error("[HARVEST] Harvest validation failed for character " +
-                         std::to_string(characterId) + ": " + validation.failureReason);
+                    std::to_string(characterId) + ": " + validation.failureReason);
         return false;
     }
 
@@ -75,7 +75,7 @@ HarvestManager::startHarvest(int characterId, int corpseUID, const PositionStruc
         if (activeHarvests_.find(characterId) != activeHarvests_.end())
         {
             log_->error("[HARVEST] Character " + std::to_string(characterId) +
-                             " is already harvesting");
+                        " is already harvesting");
             return false;
         }
     }
@@ -390,13 +390,13 @@ HarvestManager::generateHarvestLoot(int mobId)
             loot.emplace_back(lootInfo.itemId, quantity);
 
             logger_.log("[HARVEST] Generated harvest loot: " + std::to_string(quantity) +
-                        "x " + itemInfo.name + " (chance: " +
+                        "x " + itemInfo.slug + " (chance: " +
                         std::to_string(lootInfo.dropChance * 100) + "%, roll: " +
                         std::to_string(roll * 100) + "%)");
         }
         else
         {
-            logger_.log("[HARVEST] Failed to generate loot for " + itemInfo.name +
+            logger_.log("[HARVEST] Failed to generate loot for " + itemInfo.slug +
                         " (chance: " + std::to_string(lootInfo.dropChance * 100) +
                         "%, roll: " + std::to_string(roll * 100) + "%)");
         }

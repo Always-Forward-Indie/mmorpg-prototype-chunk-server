@@ -29,6 +29,18 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         int oldExperience = characterData.characterExperiencePoints;
         int oldLevel = characterData.characterLevel;
 
+        // ── Experience Debt: redirect up to 50% of each XP gain to pay debt ─
+        if (experienceAmount > 0 && characterData.experienceDebt > 0)
+        {
+            int toDebt = std::min(experienceAmount / 2, characterData.experienceDebt);
+            characterData.experienceDebt -= toDebt;
+            experienceAmount -= toDebt;
+            log_->info("[ExperienceDebt] character {} paid {} debt, remaining: {}",
+                characterId,
+                toDebt,
+                characterData.experienceDebt);
+        }
+
         // Вычисляем новые значения
         int newExperience = oldExperience + experienceAmount;
         newExperience = std::max(0, newExperience); // Не даем опыту стать отрицательным
@@ -345,7 +357,7 @@ ExperienceManager::handleLevelUp(int characterId, int oldLevel, int newLevel, Ex
             std::string newAbility = "ability_level_" + std::to_string(level);
             result.newAbilities.push_back(newAbility);
             log_->info("Character " + std::to_string(characterId) +
-                                               " gained new ability: " + newAbility);
+                       " gained new ability: " + newAbility);
         }
     }
 }
@@ -369,7 +381,7 @@ ExperienceManager::getExperienceForLevelFromGameServer(int level)
     {
         // Кеш не загружен, используем локальный расчет как fallback
         log_->info("Experience cache not loaded, using local calculation for level " +
-                                           std::to_string(level));
+                   std::to_string(level));
         return getExperienceForLevel(level);
     }
 }

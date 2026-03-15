@@ -150,6 +150,14 @@ class BaseEventHandler
      */
     void broadcastToAllClients(const std::string &responseData, int excludeClientId = -1);
 
+    /**
+     * @brief Check whether a character is alive (HP > 0)
+     *
+     * @param characterId The character to check
+     * @return true if alive, false if dead or not found
+     */
+    bool isPlayerAlive(int characterId);
+
     // Protected member variables for derived classes
     std::shared_ptr<spdlog::logger> log_;
     NetworkManager &networkManager_;

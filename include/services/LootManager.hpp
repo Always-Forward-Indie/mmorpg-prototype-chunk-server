@@ -9,6 +9,8 @@
 // Forward declarations
 class EventQueue;
 class InventoryManager;
+class PityManager;
+class GameServices;
 
 class LootManager
 {
@@ -28,13 +30,57 @@ class LootManager
     void setInventoryManager(InventoryManager *inventoryManager);
 
     /**
-     * @brief Generate loot when a mob dies
-     * @param mobId Template mob ID (from MobDataStruct.id)
-     * @param mobUID Unique mob instance UID
+     * @brief Set callback to nullify item owner when a player drops an item onto the ground.
+     *        Sends nullifyItemOwner event to game server (SET character_id = NULL).
+     */
+    void setNullifyItemOwnerCallback(std::function<void(const std::string &)> callback);
+
+    /**
+     * @brief Set callback to delete a ground item row when it expires without being picked up.
+     *        Sends deleteInventoryItem event to game server.
+     */
+    void setDeleteInventoryItemCallback(std::function<void(const std::string &)> callback);
+
+    /**
+     * @brief Set callback to transfer item ownership to a new character on pickup.
+     *        Sends transferInventoryItem event to game server.
+     */
+    void setTransferInventoryItemCallback(std::function<void(const std::string &)> callback);
+
+    /**
+     * @brief Set PityManager reference (enables pity-based drop chance modification).
+     */
+    void setPityManager(PityManager *pityManager);
+
+    /**
+     * @brief Set GameServices pointer (used to read config and send notifications).
+     */
+    void setGameServices(GameServices *gameServices);
+
+    /**
+     * @brief Generate loot when a mob dies.
+     * @param mobId    Template mob ID (from MobDataStruct.id)
+     * @param mobUID   Unique mob instance UID
      * @param position Position where mob died
+     * @param killerId Character ID of the player who dealt the killing blow (0 = no player)
      * @return Vector of dropped items
      */
-    std::vector<DroppedItemStruct> generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct &position);
+    std::vector<DroppedItemStruct> generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct &position, int killerId = 0);
+
+    /**
+     * @brief Drop an inventory item from a player onto the ground.
+     *        The item is NOT reserved — it is immediately free for all to pick up.
+     *        If inventoryItemId > 0, the DB row is kept alive with character_id = NULL
+     *        (nullifyItemOwner event fires). On pickup, character_id is restored.
+     *        On expiry, the row is deleted.
+     * @param characterId Character dropping the item
+     * @param inventoryItemId player_inventory.id of the source row (0 = fresh item)
+     * @param itemId Item ID to drop
+     * @param quantity Quantity to drop
+     * @param position Position of the player
+     * @return The created DroppedItemStruct (uid == 0 on failure)
+     */
+    DroppedItemStruct dropItemByPlayer(int characterId, int inventoryItemId, int itemId, int quantity, const PositionStruct &position);
 
     /**
      * @brief Get all dropped items in the world
@@ -82,6 +128,17 @@ class LootManager
 
     // Inventory manager for adding items to player inventories
     InventoryManager *inventoryManager_;
+
+    // Optional: Pity manager for modified rare-drop chances
+    PityManager *pityManager_ = nullptr;
+
+    // Optional: GameServices for reading config and sending notifications
+    GameServices *gameServices_ = nullptr;
+
+    // Callbacks for game-server persistence of item-instance ownership
+    std::function<void(const std::string &)> nullifyItemOwnerCallback_;
+    std::function<void(const std::string &)> deleteInventoryItemCallback_;
+    std::function<void(const std::string &)> transferInventoryItemCallback_;
 
     // Store all dropped items (itemUID -> DroppedItemStruct)
     std::map<int, DroppedItemStruct> droppedItems_;

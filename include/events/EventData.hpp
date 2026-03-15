@@ -4,6 +4,7 @@
 #include "data/DataStructs.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -80,6 +81,8 @@ using EventData = std::variant<
     DroppedItemStruct,
     PlayerInventoryItemStruct,
     ItemPickupRequestStruct,
+    ItemDropByPlayerRequestStruct,
+    ItemUseRequestStruct,
     HarvestRequestStruct,
     HarvestProgressStruct,
     HarvestCompleteStruct,
@@ -101,6 +104,7 @@ using EventData = std::variant<
     std::vector<ItemDataStruct>,
     std::vector<MobLootInfoStruct>,
     std::vector<DroppedItemStruct>,
+    std::vector<int>, // e.g. removed dropped item UIDs for ITEM_REMOVE broadcast
     std::vector<HarvestableCorpseStruct>,
     std::vector<HarvestProgressStruct>,
     std::vector<ClientDataStruct>,
@@ -124,5 +128,46 @@ using EventData = std::variant<
     std::vector<PlayerQuestProgressStruct>,
     std::vector<PlayerFlagStruct>,
     std::vector<ActiveEffectStruct>,                       // Active buffs/debuffs for a character (on join)
+    std::vector<PlayerInventoryItemStruct>,                // Inventory items loaded from DB (on join)
     std::pair<int, std::vector<CharacterAttributeStruct>>, // Attribute refresh: {characterId, attrs}
-    std::vector<MobMoveUpdateStruct>>;                     // Lightweight mob movement updates
+    std::vector<MobMoveUpdateStruct>,                      // Lightweight mob movement updates
+    // Vendor / Trade / Repair / Durability payloads
+    VendorNPCDataStruct,
+    VendorStockUpdateStruct,
+    OpenVendorShopRequestStruct,
+    BuyItemRequestStruct,
+    SellItemRequestStruct,
+    BuyBatchRequestStruct,
+    SellBatchRequestStruct,
+    OpenRepairShopRequestStruct,
+    RepairItemRequestStruct,
+    RepairAllRequestStruct,
+    TradeRequestStruct,
+    TradeRespondStruct,
+    TradeOfferUpdateStruct,
+    TradeConfirmCancelStruct,
+    DurabilityUpdateStruct,
+    SaveCurrencyTransactionStruct,
+    SaveDurabilityChangeStruct,
+    // Equipment system payloads
+    EquipItemRequestStruct,
+    UnequipItemRequestStruct,
+    GetEquipmentRequestStruct,
+    SaveEquipmentChangeStruct,
+    std::vector<VendorNPCDataStruct>,
+    std::vector<VendorStockUpdateStruct>,
+    // Respawn system payloads
+    RespawnZoneStruct,
+    RespawnRequestStruct,
+    std::vector<RespawnZoneStruct>,
+    // Status effect template payloads
+    std::vector<StatusEffectTemplate>,
+    // Game zone payloads
+    std::vector<GameZoneStruct>,
+    // Timed champion payloads (Stage 3)
+    TimedChampionTemplate,
+    std::vector<TimedChampionTemplate>,
+    TimedChampionKilledStruct,
+    // Mob weaknesses and resistances: {mobTemplateId -> [elementSlugs], ...} x2
+    std::pair<std::unordered_map<int, std::vector<std::string>>,
+        std::unordered_map<int, std::vector<std::string>>>>;

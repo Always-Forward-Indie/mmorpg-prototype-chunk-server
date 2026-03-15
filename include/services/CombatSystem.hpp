@@ -9,7 +9,10 @@
 #include <mutex>
 
 // Forward declarations
-namespace spdlog { class logger; }
+namespace spdlog
+{
+class logger;
+}
 class GameServices;
 class SkillSystem;
 class CombatResponseBuilder;
@@ -58,7 +61,13 @@ class CombatSystem
      *                                (выбранный MobAIController при подготовке атаки).
      *                                Если пуст — CombatSystem выбирает лучший скил сам.
      */
-    void processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug = "");
+    void processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug = "", float hitDelay = 0.0f);
+
+    /**
+     * @brief Отправить combatInitiation broadcast при начале атаки/каста моба.
+     *        Вызывается из MobAIController при входе в PREPARING_ATTACK.
+     */
+    void broadcastMobSkillInitiation(int mobId, int targetPlayerId, const SkillStruct &skill);
 
     /**
      * @brief Установить callback для отправки broadcast пакетов
@@ -75,6 +84,22 @@ class CombatSystem
      */
     std::vector<int> getAvailableTargets(int attackerId, const SkillStruct &skill);
 
+    /**
+     * @brief Set callback for persisting durability changes to the game server
+     */
+    void setSaveDurabilityCallback(std::function<void(const std::string &)> callback);
+
+    /**
+     * @brief Set callback for triggering character attribute refresh (e.g. on durability threshold crossing)
+     * Invoked with characterId when a durability warning boundary is crossed.
+     */
+    void setRefreshAttributesCallback(std::function<void(int characterId)> callback);
+
+    /**
+     * @brief Set callback for persisting Item Soul kill_count to the game server.
+     */
+    void setSaveItemKillCountCallback(std::function<void(const std::string &)> callback);
+
   private:
     GameServices *gameServices_;
     std::shared_ptr<spdlog::logger> log_;
@@ -88,10 +113,22 @@ class CombatSystem
     // Callback для отправки broadcast пакетов
     std::function<void(const nlohmann::json &)> broadcastCallback_;
 
+    // Callback for persisting durability changes to game server
+    std::function<void(const std::string &)> saveDurabilityCallback_;
+
+    // Callback for triggering attribute refresh when durability crosses warning threshold
+    std::function<void(int)> refreshAttributesCallback_;
+
+    // Callback for persisting Item Soul kill_count to game server
+    std::function<void(const std::string &)> saveItemKillCountCallback_;
+
+    /** Fire refreshAttributesCallback_ if durability just crossed the warning threshold. */
+    void checkAndTriggerDurabilityWarning(int characterId, int oldDur, int newDur, int maxDur);
+
     /**
      * @brief Применить эффекты скила
      */
-    void applySkillEffects(const SkillUsageResult &result, int casterId, int targetId, CombatTargetType targetType);
+    void applySkillEffects(const SkillUsageResult &result, int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType);
 
     /**
      * @brief Обработать смерть цели
@@ -113,4 +150,14 @@ class CombatSystem
      *  применить урон, отправить broadcast на каждую цель.
      */
     void executeAoESkillUsage(int casterId, const std::string &skillSlug);
+
+    /**
+     * @brief Send a durability change to the game server for persistence.
+     */
+    void saveDurabilityChange(int characterId, int inventoryItemId, int durabilityCurrent);
+
+    /**
+     * @brief Send an Item Soul kill_count change to the game server for persistence.
+     */
+    void saveItemKillCountChange(int characterId, int inventoryItemId, int killCount);
 };

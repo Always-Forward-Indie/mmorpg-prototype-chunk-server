@@ -85,12 +85,43 @@ struct ItemAttributeStruct
     std::string apply_on = "equip"; // 'equip' | 'use'
 };
 
+// Equipment slot identifiers (must match equip_slots table slugs)
+enum class EquipSlot : int
+{
+    NONE = 0,
+    HEAD = 1,
+    CHEST = 2,
+    LEGS = 3,
+    FEET = 4,
+    HANDS = 5,
+    WAIST = 6,
+    NECKLACE = 7,
+    RING_1 = 8,
+    RING_2 = 9,
+    MAIN_HAND = 10,
+    OFF_HAND = 11,
+    CLOAK = 12
+};
+
+// -----------------------------------------------------------------------
+// Item use effect — one row from item_use_effects table.
+// Describes what happens when the player uses an isUsable item.
+// -----------------------------------------------------------------------
+struct ItemUseEffectStruct
+{
+    std::string effectSlug;    // unique slug, e.g. "hp_restore", "strength_buff"
+    std::string attributeSlug; // which attribute is affected, e.g. "hp", "mp", "strength"
+    float value = 0.0f;        // amount: flat heal / mana / stat modifier value
+    bool isInstant = true;     // true = one-shot effect; false = timed buff (HoT/stat)
+    int durationSeconds = 0;   // 0 if instant; > 0 = buff duration in seconds
+    int tickMs = 0;            // 0 if instant; > 0 = tick interval (HoT in ms)
+    int cooldownSeconds = 30;  // per-item cooldown (0 = no cooldown)
+};
+
 struct ItemDataStruct
 {
     int id = 0;
-    std::string name = "";
-    std::string slug = "";
-    std::string description = "";
+    std::string slug = ""; // used as localisation key on the client
     bool isQuestItem = false;
     int itemType = 0;
     std::string itemTypeName = "";
@@ -113,7 +144,15 @@ struct ItemDataStruct
     std::string equipSlotName = "";
     std::string equipSlotSlug = "";
     int levelRequirement = 0;
+    bool isTwoHanded = false;         // true = equipping blocks off_hand slot
+    std::vector<int> allowedClassIds; // empty = no class restriction
+    int setId = 0;                    // 0 = not part of any set
+    std::string setSlug = "";         // slug of the item set
     std::vector<ItemAttributeStruct> attributes;
+    std::vector<ItemUseEffectStruct> useEffects; // populated for isUsable items
+
+    // Stage 4 — Mastery (migration 039)
+    std::string masterySlug; ///< Mastery that grows when this weapon is used (e.g. 'sword_mastery')
 };
 
 struct MobLootInfoStruct
@@ -125,6 +164,7 @@ struct MobLootInfoStruct
     bool isHarvestOnly = false; // true = only drops from harvesting, not regular kill
     int minQuantity = 1;
     int maxQuantity = 1;
+    std::string lootTier = "common"; ///< 'common' | 'uncommon' | 'rare' | 'very_rare' (migration 040)
 };
 
 // Structure for tracking harvestable corpses
@@ -204,9 +244,13 @@ struct DroppedItemStruct
     int uid = 0; // Unique instance ID for the dropped item
     int itemId = 0;
     int quantity = 1;
+    int inventoryItemId = 0; // player_inventory.id of the source row (0 = new item, e.g. mob loot)
     PositionStruct position;
     std::chrono::steady_clock::time_point dropTime;
-    int droppedByMobUID = 0; // UID of the mob that dropped it
+    int droppedByMobUID = 0;                                 // UID of the mob that dropped it (0 = player drop)
+    int droppedByCharacterId = 0;                            // character that dropped it (0 = mob drop)
+    int reservedForCharacterId = 0;                          // 0 = free for all; > 0 = only this character can pick up until reservationExpiry
+    std::chrono::steady_clock::time_point reservationExpiry; // after this time, anyone can pick up
     bool canBePickedUp = true;
 };
 
@@ -216,6 +260,10 @@ struct PlayerInventoryItemStruct
     int characterId = 0;
     int itemId = 0;
     int quantity = 1;
+    int slotIndex = -1;        // bag position (-1 = unassigned)
+    int durabilityCurrent = 0; // 0 = not applicable / full
+    bool isEquipped = false;   // true when in character_equipment table
+    int killCount = 0;         // Item Soul: accumulated kills with this weapon instance
 };
 
 // Item pickup request structure
@@ -226,6 +274,24 @@ struct ItemPickupRequestStruct
     int droppedItemUID = 0;
     PositionStruct playerPosition;
     TimestampStruct timestamps; // Lag compensation timestamps
+};
+
+// Player drops an item from inventory onto the ground
+struct ItemDropByPlayerRequestStruct
+{
+    int characterId = 0; // Server-side character ID from session
+    int playerId = 0;    // Client-side player ID for security verification
+    int itemId = 0;      // Item ID to drop
+    int quantity = 1;    // Quantity to drop
+    PositionStruct playerPosition;
+};
+
+// Player uses an item from inventory (potion, scroll, food, etc.)
+struct ItemUseRequestStruct
+{
+    int characterId = 0; // Server-side character ID from session
+    int playerId = 0;    // Client-side player ID for security verification
+    int itemId = 0;      // Item ID to use
 };
 
 // ============= PLAYER FLAG STRUCT =============
@@ -297,6 +363,7 @@ struct CharacterDataStruct
     int expForNextLevel = 0;
     std::string characterName = "";
     std::string characterClass = "";
+    int classId = 0; // DB id for class restriction checks
     std::string characterRace = "";
     PositionStruct characterPosition;
     std::vector<CharacterAttributeStruct> attributes;
@@ -308,11 +375,28 @@ struct CharacterDataStruct
 
     // Active buffs/debuffs (populated on character join, checked vs expiresAt at runtime)
     std::vector<ActiveEffectStruct> activeEffects;
+
+    // Experience debt: accumulated on death; 50% of earned XP pays it off before going to real progress
+    int experienceDebt = 0;
+
+    // Respawn bind point (0,0,0 = not set, use nearest respawn zone)
+    PositionStruct respawnPosition;
+
+    // Server-authoritative movement validation state
+    // lastMoveSrvMs == 0 means uninitialized (first packet after join/respawn accepted unconditionally)
+    PositionStruct lastValidatedPosition;
+    int64_t lastMoveSrvMs = 0;
+
+    // Runtime-only: last time this character took or dealt damage (combat timestamp).
+    // Used by RegenManager to suppress regen during/after combat.
+    // zero-initialised = "never been in combat" → regen is allowed immediately on join.
+    std::chrono::steady_clock::time_point lastInCombatAt = {};
 };
 
 struct ClientDataStruct
 {
     int clientId = 0;
+    int accountId = 0; // DB owner_id / account id (== clientId in this system, explicit field for anti-alt checks)
     std::string hash = "";
     int characterId = 0;
     TimestampStruct timestamps; // Lag compensation timestamps
@@ -364,6 +448,28 @@ struct MobDataStruct
     // AI depth (migration 016)
     float fleeHpThreshold = 0.0f;      // 0.0 = never flees; 0.25 = flee at 25% HP
     std::string aiArchetype = "melee"; // melee | caster | ranged | support
+
+    // Champion / rare mob flags (Stage 3, migration 038)
+    bool isChampion = false;     ///< True after spawnChampion(); triggers onChampionKilled
+    bool canEvolve = false;      ///< Loaded from mob_templates.can_evolve (Survival Champion)
+    bool hasEvolved = false;     ///< Runtime: evolved once — do not evolve again
+    int64_t spawnEpochSec = 0;   ///< Unix timestamp of spawn moment (for Survival threshold)
+    float lootMultiplier = 1.0f; ///< Applied in LootManager: multiplies drop chances
+
+    // Rare mob groundwork (migration 038, logic deferred until day/night cycle)
+    bool isRare = false;            ///< True if this is a rare spawn mob
+    float rareSpawnChance = 0.0f;   ///< Spawn chance per check [0..1]
+    std::string rareSpawnCondition; ///< 'night' | 'day' | 'zone_event' | empty = any time
+
+    // Stage 4 — Reputation (migration 039)
+    std::string factionSlug; ///< Faction this mob belongs to (e.g. 'wolves', 'bandits')
+    int repDeltaPerKill = 0; ///< Reputation delta awarded to killer on death (can be negative)
+
+    // Bestiary static metadata (migration 040)
+    std::string biomeSlug;   ///< e.g. 'forest', 'dungeon', 'swamp'
+    std::string mobTypeSlug; ///< e.g. 'beast', 'undead', 'humanoid', 'elemental'
+    int hpMin = 0;           ///< Min HP observable in the wild (for bestiary Tier-1)
+    int hpMax = 0;           ///< Max HP observable in the wild
 
     // Define the equality operator
     bool operator==(const MobDataStruct &other) const
@@ -514,6 +620,7 @@ struct MobMovementData
     // Network optimization
     PositionStruct lastSentPosition;      // Последняя отправленная позиция
     float currentSpeedUnitsPerSec = 0.0f; // Last computed movement speed (units/second) for client interpolation
+    bool forceNextUpdate = false;         // When true, skip distance threshold check once (set by forceMobStateUpdate)
 
     // Leash regen tick tracker: time of last HP restoration while RETURNING.
     // Zero = regen not yet started for current leash.
@@ -527,6 +634,11 @@ struct MobMovementData
     // Used to pick the highest-threat target when the mob searches for a new target.
     // Cleared when the mob begins returning to spawn.
     std::unordered_map<int, int> threatTable;
+
+    // Fellowship tracking: characterId -> time of last attack on this mob instance.
+    // Used by CombatSystem::handleMobDeath to grant fellowship XP bonus.
+    // Cleared alongside threatTable when the mob leashes.
+    std::unordered_map<int, std::chrono::steady_clock::time_point> attackerTimestamps;
 
     // Skill-driven combat timing (plan §2.1).
     // Slug of the skill chosen at CHASING→PREPARING_ATTACK.
@@ -594,12 +706,14 @@ struct ZoneBounds
     float minX, maxX, minY, maxY;
 
     // Constructor from SpawnZoneStruct
+    // posX/posY = min_spawn_x/y  (AABB min corner)
+    // sizeX/sizeY = max_spawn_x/y (AABB max corner)
     ZoneBounds(const SpawnZoneStruct &zone)
     {
-        minX = zone.posX - (zone.sizeX / 2.0f);
-        maxX = zone.posX + (zone.sizeX / 2.0f);
-        minY = zone.posY - (zone.sizeY / 2.0f);
-        maxY = zone.posY + (zone.sizeY / 2.0f);
+        minX = zone.posX;
+        maxX = zone.sizeX;
+        minY = zone.posY;
+        maxY = zone.sizeY;
     }
 
     // Check if point is inside zone
@@ -805,6 +919,9 @@ struct NPCDataStruct
     std::string questId = "";
     int radius = 200; // Interaction/spawn radius. Used for dialogue range check.
 
+    // Stage 4 — Reputation (migration 039)
+    std::string factionSlug; ///< Faction this NPC belongs to (for rep-gated dialogue & vendor discount)
+
     // Define the equality operator
     bool operator==(const NPCDataStruct &other) const
     {
@@ -881,7 +998,12 @@ struct PlayerContextStruct
     std::unordered_map<std::string, bool> flagsBool;          ///< flag_key → bool_value
     std::unordered_map<std::string, int> flagsInt;            ///< flag_key → int_value
     std::unordered_map<std::string, std::string> questStates; ///< quest_slug → state string
+    std::unordered_map<std::string, int> questCurrentStep;    ///< quest_slug → current step index (0-based)
     std::unordered_map<int, nlohmann::json> questProgress;    ///< quest_id → progress json
+
+    // Stage 4 additions
+    std::unordered_map<std::string, int> reputations; ///< faction_slug → value
+    std::unordered_map<std::string, float> masteries; ///< mastery_slug → value [0..100]
 };
 
 // ============= QUEST SYSTEM STRUCTS =============
@@ -901,7 +1023,8 @@ struct QuestStepStruct
     int id = 0;
     int questId = 0;
     int stepIndex = 0;
-    std::string stepType = ""; ///< "kill" | "collect" | "talk" | "reach" | "custom"
+    std::string stepType = "";           ///< "kill" | "collect" | "talk" | "reach" | "custom"
+    std::string completionMode = "auto"; ///< "auto" = auto-advance on condition met; "manual" = advance only via dialogue action
     nlohmann::json params;
     std::string clientStepKey = "";
 };
@@ -974,4 +1097,383 @@ struct UpdatePlayerFlagStruct
     std::string flagKey = "";
     std::optional<bool> boolValue;
     std::optional<int> intValue;
+};
+
+// ============= VENDOR SYSTEM STRUCTS =============
+
+/// One item slot in a vendor's shop inventory
+struct VendorInventoryItemStruct
+{
+    int itemId = 0;
+    int stockCurrent = -1; // -1 = unlimited
+    int stockMax = -1;     // -1 = unlimited
+    int restockAmount = 0;
+    int restockIntervalSec = 3600;
+    int priceOverrideBuy = 0;  // 0 = use item.vendorPriceBuy
+    int priceOverrideSell = 0; // 0 = use item.vendorPriceSell
+};
+
+/// Vendor NPC data loaded from DB at chunk startup
+struct VendorNPCDataStruct
+{
+    int npcId = 0;
+    std::vector<VendorInventoryItemStruct> items;
+};
+
+/// Client → chunk: open vendor shop window
+struct OpenVendorShopRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: buy item from vendor
+struct BuyItemRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    int itemId = 0;
+    int quantity = 1;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: sell item to vendor
+struct SellItemRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    int inventoryItemId = 0; // player_inventory.id
+    int quantity = 1;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: one entry in a batch buy request
+struct BuyBatchItemEntry
+{
+    int itemId = 0;
+    int quantity = 1;
+};
+
+/// Client → chunk: buy up to MAX_VENDOR_BATCH_SIZE items in a single round-trip
+struct BuyBatchRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    std::vector<BuyBatchItemEntry> items;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: one entry in a batch sell request
+struct SellBatchItemEntry
+{
+    int inventoryItemId = 0; // player_inventory.id
+    int quantity = 1;
+};
+
+/// Client → chunk: sell up to MAX_VENDOR_BATCH_SIZE items in a single round-trip
+struct SellBatchRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    std::vector<SellBatchItemEntry> items;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Game-server → chunk: update stock count for one vendor item (after restock)
+struct VendorStockUpdateStruct
+{
+    int npcId = 0;
+    int itemId = 0;
+    int newStock = -1;
+};
+
+// ============= REPAIR SHOP STRUCTS =============
+
+/// Client → chunk: open blacksmith repair shop
+struct OpenRepairShopRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: repair one item
+struct RepairItemRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    int inventoryItemId = 0; // player_inventory.id
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: repair all equipped durable items
+struct RepairAllRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+// ============= P2P TRADE STRUCTS =============
+
+/// One item slot in a trade offer
+struct TradeOfferItemStruct
+{
+    int inventoryItemId = 0; // player_inventory.id
+    int itemId = 0;          // denorm for client display
+    int quantity = 1;
+};
+
+/// Active P2P trade session (in-memory only)
+struct TradeSessionStruct
+{
+    std::string sessionId = ""; ///< "trade_{charA}_{charB}_{ts_ms}"
+    int charAId = 0;
+    int charBId = 0;
+    int clientAId = 0;
+    int clientBId = 0;
+    std::vector<TradeOfferItemStruct> offerA; ///< items offered by charA
+    std::vector<TradeOfferItemStruct> offerB; ///< items offered by charB
+    int goldA = 0;                            ///< gold offered by charA
+    int goldB = 0;                            ///< gold offered by charB
+    bool confirmedA = false;
+    bool confirmedB = false;
+    std::chrono::steady_clock::time_point lastActivity;
+    static constexpr int TTL_SECONDS = 60;
+};
+
+/// Client → chunk: initiate P2P trade request
+struct TradeRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int targetCharacterId = 0;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: accept / decline trade invite
+struct TradeRespondStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    std::string sessionId = "";
+    bool accept = false;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: update own offer in active session
+struct TradeOfferUpdateStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    std::string sessionId = "";
+    std::vector<TradeOfferItemStruct> items;
+    int gold = 0;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: confirm or cancel active session
+struct TradeConfirmCancelStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    std::string sessionId = "";
+    TimestampStruct timestamps;
+};
+
+// ============= EQUIPMENT SYSTEM STRUCTS =============
+
+/// Client → chunk: equip an inventory item
+struct EquipItemRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int inventoryItemId = 0; // player_inventory.id
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: unequip item in a specific slot
+struct UnequipItemRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    std::string equipSlotSlug = "";
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: request current equipment state
+struct GetEquipmentRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    TimestampStruct timestamps;
+};
+
+/// In-memory state of one equipment slot
+struct EquipmentSlotItemStruct
+{
+    int inventoryItemId = 0;
+    int itemId = 0;
+    std::string itemSlug = "";
+    int durabilityCurrent = 0;
+    int durabilityMax = 0;
+    bool isDurabilityWarning = false;
+    bool blockedByTwoHanded = false; // only meaningful on off_hand when empty
+};
+
+/// In-memory equipment state for one character
+struct CharacterEquipmentStruct
+{
+    int characterId = 0;
+    // slug → slot item (slot is present & non-zero inventoryItemId = occupied)
+    std::unordered_map<std::string, EquipmentSlotItemStruct> slots;
+    bool twoHandedActive = false; // true when main_hand holds a two-handed weapon
+};
+
+/// Chunk → game-server: persist an equip or unequip operation
+struct SaveEquipmentChangeStruct
+{
+    int characterId = 0;
+    std::string action = ""; // "equip" | "unequip"
+    int inventoryItemId = 0; // player_inventory.id  (0 when unequipping by slot)
+    std::string equipSlotSlug = "";
+};
+
+// ============= DURABILITY UPDATE (server → client) =============
+
+/// One item's durability snapshot sent to client
+struct DurabilityEntryStruct
+{
+    int inventoryItemId = 0;
+    int itemId = 0;
+    int durabilityCurrent = 0;
+    int durabilityMax = 0;
+};
+
+/// Batch durability update event (chunk → client)
+struct DurabilityUpdateStruct
+{
+    int characterId = 0;
+    std::vector<DurabilityEntryStruct> entries;
+};
+
+// ============= PERSISTENCE STRUCTS for trading/durability =============
+
+/// Chunk → game-server: save a vendor currency transaction
+struct SaveCurrencyTransactionStruct
+{
+    int characterId = 0;
+    int npcId = 0;
+    int itemId = 0;
+    int quantity = 0;
+    int totalPrice = 0;
+    std::string transactionType = ""; ///< "buy" | "sell" | "repair"
+};
+
+/// Chunk → game-server: persist durability_current for one item
+struct SaveDurabilityChangeStruct
+{
+    int characterId = 0;
+    int inventoryItemId = 0;
+    int durabilityCurrent = 0;
+};
+
+// ============= RESPAWN ZONES =============
+
+/// A safe respawn point in the world (town / camp / shrine)
+struct RespawnZoneStruct
+{
+    int id = 0;
+    std::string name = "";
+    PositionStruct position; ///< World coordinates of the respawn point
+    int zoneId = 0;          ///< Game zone this point belongs to
+    bool isDefault = false;  ///< Fallback when no closer zone is found
+};
+
+// ============= GAME ZONES =============
+
+/// A named world zone with AABB bounds used for zone detection and exploration rewards.
+struct GameZoneStruct
+{
+    int id = 0;
+    std::string slug;
+    std::string name;
+    int minLevel = 0;
+    int maxLevel = 0;
+    bool isPvp = false;
+    bool isSafeZone = false;
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    int explorationXpReward = 100;
+    int championThresholdKills = 100; ///< Kills of a mob type in this zone before champion spawns
+};
+
+// ============= TIMED CHAMPION TEMPLATES =============
+
+/// A world boss that spawns on an interval schedule (loaded from timed_champion_templates table).
+struct TimedChampionTemplate
+{
+    int id = 0;
+    std::string slug;        ///< Unique identifier (e.g. "alpha_wolf")
+    int gameZoneId = 0;      ///< zones.id  (game zone, not spawn zone)
+    int mobTemplateId = 0;   ///< mob_templates.id of the base mob
+    int intervalHours = 6;   ///< Respawn interval in hours
+    int windowMinutes = 15;  ///< How long champion stays before despawning
+    int64_t nextSpawnAt = 0; ///< Unix timestamp of next spawn
+    std::string announceKey; ///< Localisation key for pre-spawn announcement
+};
+
+// ============= STATUS EFFECT TEMPLATES =============
+
+/// A single modifier row from status_effect_modifiers
+struct StatusEffectModifierDef
+{
+    std::string modifierType;  ///< "flat" | "percent" | "percent_all"
+    std::string attributeSlug; ///< "" when modifierType == "percent_all"
+    double value = 0.0;        ///< Magnitude (negative = penalty)
+};
+
+/// Full template for a named status effect (loaded from DB at startup)
+struct StatusEffectTemplate
+{
+    std::string slug;     ///< e.g. "resurrection_sickness"
+    std::string category; ///< "buff" | "debuff" | "dot" | "hot" | "cc"
+    int durationSec = 0;  ///< 0 = permanent
+    std::vector<StatusEffectModifierDef> modifiers;
+};
+
+/// Client → chunk-server: player requests respawn after death
+struct RespawnRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    TimestampStruct timestamps;
+};
+
+/// Chunk-server → game-server: a timed champion was killed (need DB update).
+struct TimedChampionKilledStruct
+{
+    std::string slug; ///< timed_champion_templates.slug
+    int killerCharId = 0;
+    int64_t killedAt = 0; ///< Unix timestamp
 };

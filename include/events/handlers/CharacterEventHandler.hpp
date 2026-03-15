@@ -8,6 +8,8 @@
 
 // Forward declaration to avoid circular include
 class NPCEventHandler;
+class ItemEventHandler;
+class MobEventHandler;
 
 /**
  * @brief Structure to hold pending join requests
@@ -47,6 +49,16 @@ class CharacterEventHandler : public BaseEventHandler
      * @param npcEventHandler Pointer to NPC event handler
      */
     void setNPCEventHandler(NPCEventHandler *npcEventHandler);
+
+    /**
+     * @brief Set item event handler for sending ground items snapshot on join
+     */
+    void setItemEventHandler(ItemEventHandler *itemEventHandler);
+
+    /**
+     * @brief Set mob event handler for server-push spawn zones on join
+     */
+    void setMobEventHandler(MobEventHandler *mobEventHandler);
 
     /**
      * @brief Handle character join event
@@ -103,6 +115,16 @@ class CharacterEventHandler : public BaseEventHandler
     void handleSetCharacterAttributesEvent(const Event &event);
 
     /**
+     * @brief Handle player respawn request
+     *
+     * Verifies player is dead, teleports to nearest respawn zone, restores HP/Mana,
+     * applies Resurrection Sickness, and converts pending XP penalty to experience debt.
+     *
+     * @param event Event containing RespawnRequestStruct
+     */
+    void handlePlayerRespawnEvent(const Event &event);
+
+    /**
      * @brief Initialize player skills after successful character join
      *
      * @param characterData Character data containing skills
@@ -149,4 +171,13 @@ class CharacterEventHandler : public BaseEventHandler
 
     // Reference to NPC event handler for NPC spawn data
     NPCEventHandler *npcEventHandler_;
+
+    // Reference to item event handler for ground items snapshot on join
+    ItemEventHandler *itemEventHandler_;
+
+    // Reference to mob event handler for server-push spawn zones on join
+    MobEventHandler *mobEventHandler_;
+
+    // Last known GameZone id per characterId — used to detect zone transitions
+    std::unordered_map<int, int> lastZoneByCharacter_;
 };

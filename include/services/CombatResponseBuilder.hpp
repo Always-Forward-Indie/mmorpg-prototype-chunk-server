@@ -6,7 +6,10 @@
 #include <nlohmann/json.hpp>
 
 // Forward declarations
-namespace spdlog { class logger; }
+namespace spdlog
+{
+class logger;
+}
 class GameServices;
 
 /**
@@ -47,6 +50,7 @@ struct SkillExecutionResult
     std::string skillSlug;
     std::string skillEffectType; // damage, heal, buff, debuff, etc.
     std::string skillSchool;     // physical, fire, ice, etc.
+    float hitDelay = 0.0f;       ///< seconds after receiving this packet before showing the hit effect
 };
 
 /**

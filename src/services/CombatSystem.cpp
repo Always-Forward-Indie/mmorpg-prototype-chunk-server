@@ -8,11 +8,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <functional>
+#include <nlohmann/json.hpp>
 #include <optional>
+#include <spdlog/logger.h>
 #include <tuple>
 #include <vector>
-#include <spdlog/logger.h>
 
 // Static counter for unique action IDs
 static std::atomic<uint64_t> nextActionId{1};
@@ -105,8 +107,25 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         // Проверяем базовые требования (без потребления ресурсов)
         if (skillSystem_->isOnCooldown(casterId, skillSlug))
         {
+            log_->warn("[initiateSkillUsage] Skill '" + skillSlug + "' is on cooldown for caster " +
+                       std::to_string(casterId));
             result.errorMessage = "Skill is on cooldown";
             return result;
+        }
+
+        // Проверяем, что у кастера нет активного каста (защита от спама во время cast time).
+        // Только для скилов с castMs > 0 — мгновенные можно спамить свободно.
+        if (skill.castMs > 0)
+        {
+            std::lock_guard<std::mutex> lock(actionsMutex_);
+            auto it = ongoingActions_.find(casterId);
+            if (it != ongoingActions_.end() && it->second->state == CombatActionState::CASTING)
+            {
+                log_->warn("[initiateSkillUsage] Caster " + std::to_string(casterId) +
+                           " is already casting '" + it->second->skillSlug + "' — rejecting new cast '" + skillSlug + "'");
+                result.errorMessage = "Already casting";
+                return result;
+            }
         }
 
         // HIGH-8: mana check without exceptions
@@ -157,8 +176,20 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         action->state = (skill.castMs > 0) ? CombatActionState::CASTING : CombatActionState::EXECUTING;
         action->startTime = std::chrono::steady_clock::now();
         action->endTime = action->startTime + std::chrono::milliseconds(skill.castMs);
-        action->animationName = "skill_" + skillSlug; // TODO: получать из базы
-        action->animationDuration = std::max(1.0f, action->castTime);
+        action->animationName = skill.animationName.empty() ? "skill_" + skillSlug : skill.animationName;
+        {
+            // animationDuration = cast + swing, but capped to just below
+            // the full attack cycle so the next attack's animation never overlaps.
+            constexpr float kMargin = 0.05f;
+            float kSwing = static_cast<float>(skill.swingMs) / 1000.0f;
+            float cdSec = static_cast<float>(std::max(skill.cooldownMs, skill.gcdMs)) / 1000.0f;
+            if (cdSec < 0.5f)
+                cdSec = 0.5f; // mirrors the minimum in MobAIController
+            float cycleTime = action->castTime + kSwing + cdSec;
+            action->animationDuration = std::min(action->castTime + kSwing, cycleTime - kMargin);
+            if (action->animationDuration < kSwing)
+                action->animationDuration = kSwing;
+        }
 
         // Сохраняем ongoing action
         {
@@ -247,7 +278,7 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         }
 
         // Применяем эффекты
-        applySkillEffects(skillResult, casterId, targetId, targetType);
+        applySkillEffects(skillResult, casterId, skillSlug, targetId, targetType);
 
         // Проверяем смерть цели
         if (skillResult.damageResult.totalDamage > 0)
@@ -258,6 +289,9 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
                 {
                     auto hpResult = gameServices_->getCharacterManager().applyDamageToCharacter(
                         targetId, skillResult.damageResult.totalDamage);
+
+                    // Suppress regen after taking a hit
+                    gameServices_->getCharacterManager().markCharacterInCombat(targetId);
 
                     result.finalTargetHealth = hpResult.newHealth;
                     result.finalTargetMana = hpResult.currentMana;
@@ -285,12 +319,56 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
                     else
                     {
                         auto updateResult = gameServices_->getMobInstanceManager().applyDamageToMob(
-                            targetId, skillResult.damageResult.totalDamage);
+                            targetId, skillResult.damageResult.totalDamage, casterId);
 
                         result.finalTargetHealth = updateResult.newHealth;
                         result.finalTargetMana = updateResult.currentMana;
                         result.targetDied = updateResult.mobDied;
                         result.healthPopulated = true;
+
+                        // Durability: player's weapon loses durability on hit
+                        try
+                        {
+                            auto weapon = gameServices_->getInventoryManager().getEquippedWeapon(casterId);
+                            if (weapon.has_value())
+                            {
+                                const auto &wItem = gameServices_->getItemManager().getItemById(weapon->itemId);
+                                if (wItem.isDurable && wItem.durabilityMax > 0)
+                                {
+                                    int loss = static_cast<int>(gameServices_->getGameConfigService().getFloat("durability.weapon_loss_per_hit", 1.0f));
+                                    int cur = (weapon->durabilityCurrent > 0) ? weapon->durabilityCurrent : wItem.durabilityMax;
+                                    int newDur = std::max(0, cur - loss);
+                                    gameServices_->getInventoryManager().updateDurability(casterId, weapon->id, newDur);
+                                    saveDurabilityChange(casterId, weapon->id, newDur);
+                                    checkAndTriggerDurabilityWarning(casterId, cur, newDur, wItem.durabilityMax);
+                                }
+                            }
+                        }
+                        catch (const std::exception &e)
+                        {
+                            log_->warn("[COMBAT] Weapon durability update error: " + std::string(e.what()));
+                        }
+
+                        // --- Mastery: player attack on mob → mastery experience ---
+                        try
+                        {
+                            auto weapon = gameServices_->getInventoryManager().getEquippedWeapon(casterId);
+                            if (weapon.has_value())
+                            {
+                                const auto &wItem = gameServices_->getItemManager().getItemById(weapon->itemId);
+                                if (!wItem.masterySlug.empty())
+                                {
+                                    const auto charData = gameServices_->getCharacterManager().getCharacterData(casterId);
+                                    auto mobInst = gameServices_->getMobInstanceManager().getMobInstance(targetId);
+                                    gameServices_->getMasteryManager().onPlayerAttack(
+                                        casterId, wItem.masterySlug, charData.characterLevel, mobInst.level);
+                                }
+                            }
+                        }
+                        catch (const std::exception &e)
+                        {
+                            log_->warn("[Mastery] Error on player attack: " + std::string(e.what()));
+                        }
 
                         if (updateResult.mobDied)
                         {
@@ -464,6 +542,12 @@ CombatSystem::updateOngoingActions()
                 toExecute.emplace_back(action->casterId, action->skillSlug, action->targetId, action->targetType, action->actionName);
                 it = ongoingActions_.erase(it);
             }
+            else if (action->state == CombatActionState::EXECUTING)
+            {
+                // Instant skills (castMs=0) are executed synchronously in dispatchSkillAction
+                // and leave a stale EXECUTING entry. Clean it up here.
+                it = ongoingActions_.erase(it);
+            }
             else
             {
                 ++it;
@@ -490,7 +574,13 @@ CombatSystem::tickEffects()
     try
     {
         auto &charMgr = gameServices_->getCharacterManager();
-        auto ticks = charMgr.processEffectTicks(); // applies HP changes under CharacterManager lock
+        auto [ticks, expiredCharacters] = charMgr.processEffectTicks(); // applies HP changes under CharacterManager lock
+
+        // Notify clients whose stat-modifier effects expired
+        for (int cid : expiredCharacters)
+        {
+            gameServices_->getStatsNotificationService().sendStatsUpdate(cid);
+        }
 
         if (ticks.empty())
             return;
@@ -584,7 +674,7 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
                 }
             }
 
-            auto upResult = gameServices_->getMobInstanceManager().applyDamageToMob(mob.uid, dmg);
+            auto upResult = gameServices_->getMobInstanceManager().applyDamageToMob(mob.uid, dmg, casterId);
 
             SkillExecutionResult execResult;
             execResult.success = true;
@@ -626,6 +716,9 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
 
             auto hpAoE = gameServices_->getCharacterManager().applyDamageToCharacter(
                 target.characterId, dmgResult.totalDamage);
+
+            // Suppress regen for AoE targets
+            gameServices_->getCharacterManager().markCharacterInCombat(target.characterId);
 
             SkillExecutionResult execResult;
             execResult.success = true;
@@ -672,12 +765,84 @@ CombatSystem::getAvailableTargets(int attackerId, const SkillStruct &skill)
 }
 
 void
-CombatSystem::applySkillEffects(const SkillUsageResult &result, int casterId, int targetId, CombatTargetType targetType)
+CombatSystem::applySkillEffects(const SkillUsageResult &result, int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType)
 {
-    // Базовые эффекты уже применены в executeCombatAction
-    // Здесь можно добавить дополнительные эффекты: баффы, дебаффы, DoT и т.д.
+    // Retrieve the skill definition to access its effect list.
+    std::optional<SkillStruct> skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
+    if (!skillOpt.has_value())
+        return;
+    const SkillStruct &skill = skillOpt.value();
+    if (skill.effects.empty())
+        return;
 
-    // TODO: Система эффектов/баффов
+    // Determine which entity receives the effect.
+    // buff / hot / stat → typically the caster (self-buff) or the target (enemy debuff/dot).
+    // Convention: effectTypeSlug "dot" / "debuff" → target; "buff" / "hot" → caster for SELF,
+    // or targetId for PLAYER target (support heals). Unknown → skip.
+
+    const int64_t nowSec = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+                               .count();
+
+    for (const auto &ed : skill.effects)
+    {
+        if (ed.effectSlug.empty() || ed.effectTypeSlug.empty())
+            continue;
+
+        // Determine recipient
+        int recipientId = -1;
+        if (ed.effectTypeSlug == "dot" || ed.effectTypeSlug == "debuff")
+        {
+            // Dots / debuffs land on the target (only players for now)
+            if (targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF)
+                recipientId = targetId;
+            // TODO: mobs don't have activeEffects yet — skip mob targets
+        }
+        else // buff / hot
+        {
+            // Self-buffs land on the caster; support heals land on the target player
+            if (targetType == CombatTargetType::SELF)
+                recipientId = casterId;
+            else if (targetType == CombatTargetType::PLAYER && (ed.effectTypeSlug == "hot" || ed.effectTypeSlug == "buff"))
+                recipientId = targetId;
+            else
+                recipientId = casterId; // default: buff stays on caster
+        }
+
+        if (recipientId <= 0)
+            continue;
+
+        // Verify recipient is a player character
+        {
+            auto charData = gameServices_->getCharacterManager().getCharacterData(recipientId);
+            if (charData.characterId == 0)
+                continue; // not a player
+        }
+
+        ActiveEffectStruct eff;
+        eff.effectSlug = ed.effectSlug;
+        eff.effectTypeSlug = ed.effectTypeSlug;
+        eff.attributeSlug = ed.attributeSlug;
+        eff.value = ed.value;
+        eff.sourceType = "skill";
+        eff.expiresAt = (ed.durationSeconds > 0) ? (nowSec + ed.durationSeconds) : 0;
+        eff.tickMs = ed.tickMs;
+
+        if (ed.tickMs > 0)
+        {
+            eff.nextTickAt = std::chrono::steady_clock::now() +
+                             std::chrono::milliseconds(ed.tickMs);
+        }
+
+        gameServices_->getCharacterManager().addActiveEffect(recipientId, eff);
+
+        // Notify client: buff bar and effective stats need refreshing
+        gameServices_->getStatsNotificationService().sendStatsUpdate(recipientId);
+
+        log_->info("[applySkillEffects] Applied '" + ed.effectSlug +
+                   "' (" + ed.effectTypeSlug + ") on char " + std::to_string(recipientId) +
+                   " from skill '" + skill.skillSlug + "'");
+    }
 }
 
 void
@@ -704,18 +869,57 @@ CombatSystem::handleTargetDeath(int targetId, CombatTargetType targetType)
 
             if (penaltyAmount > 0)
             {
-                auto result = experienceManager.removeExperience(targetId, penaltyAmount, "death_penalty");
-                gameServices_->getLogger().log("Player " + std::to_string(targetId) + " died and lost " +
-                                               std::to_string(penaltyAmount) + " experience");
+                // Set experience debt instead of removing XP immediately.
+                // The debt will be paid off gradually as the player earns XP (50% per gain).
+                characterData.experienceDebt += penaltyAmount;
+                gameServices_->getCharacterManager().loadCharacterData(characterData);
+                gameServices_->getLogger().log("Player " + std::to_string(targetId) + " died — experience debt set to " +
+                                               std::to_string(characterData.experienceDebt));
             }
             else
             {
-                log_->info("Player " + std::to_string(targetId) + " died but no experience was lost");
+                log_->info("Player " + std::to_string(targetId) + " died but no experience debt was added");
             }
         }
         catch (const std::exception &e)
         {
             gameServices_->getLogger().logError("Error handling player death experience penalty: " + std::string(e.what()));
+        }
+
+        // Durability: death penalty — reduce all equipped durable items
+        try
+        {
+            float penaltyPct = gameServices_->getGameConfigService().getFloat("durability.death_penalty_pct", 0.05f);
+            auto equipped = gameServices_->getInventoryManager().getEquippedItems(targetId);
+            for (const auto &invSlot : equipped)
+            {
+                const auto &iData = gameServices_->getItemManager().getItemById(invSlot.itemId);
+                if (!iData.isDurable || iData.durabilityMax <= 0)
+                    continue;
+                int penalty = static_cast<int>(std::ceil(iData.durabilityMax * penaltyPct));
+                int cur = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : iData.durabilityMax;
+                int newDur = std::max(0, cur - penalty);
+                gameServices_->getInventoryManager().updateDurability(targetId, invSlot.id, newDur);
+                saveDurabilityChange(targetId, invSlot.id, newDur);
+                checkAndTriggerDurabilityWarning(targetId, cur, newDur, iData.durabilityMax);
+            }
+        }
+        catch (const std::exception &e)
+        {
+            log_->warn("[COMBAT] Death durability penalty error: " + std::string(e.what()));
+        }
+
+        // Send final stats snapshot after all death penalties (XP, durability) are applied.
+        // This covers DoT/AoE/mob-attack death paths that have no sendStatsUpdate after
+        // handleTargetDeath. The direct-skill path sends an additional one shortly after,
+        // which is harmless (client just replaces state with the latest values).
+        try
+        {
+            gameServices_->getStatsNotificationService().sendStatsUpdate(targetId);
+        }
+        catch (const std::exception &e)
+        {
+            log_->warn("[COMBAT] Death stats update error: " + std::string(e.what()));
         }
     }
     else if (targetType == CombatTargetType::MOB)
@@ -778,6 +982,120 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
             log_->info("Killer " + std::to_string(killerId) + " is not a player character, no experience granted");
         }
 
+        // --- Fellowship Bonus ---
+        // If another player attacked this mob within the config window, both that
+        // player and the killer receive a small bonus XP for fighting together.
+        try
+        {
+            auto &cfg = gameServices_->getGameConfigService();
+            const float bonusPct = cfg.getFloat("fellowship.bonus_pct", 0.07f);
+            const int windowSec = cfg.getInt("fellowship.attack_window_sec", 15);
+
+            auto mobMovData = gameServices_->getMobMovementManager().getMobMovementData(mobId);
+            const auto now = std::chrono::steady_clock::now();
+
+            std::vector<int> fellows;
+            for (const auto &[charId, lastAttack] : mobMovData.attackerTimestamps)
+            {
+                if (charId == killerId)
+                    continue;
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastAttack).count();
+                if (elapsed <= windowSec)
+                    fellows.push_back(charId);
+            }
+
+            // Anti-alt: resolve killer's accountId and exclude co-attackers from the same account
+            const int killerAccountId = gameServices_->getClientManager().getClientDataByCharacterId(killerId).accountId;
+            if (killerAccountId > 0)
+            {
+                fellows.erase(
+                    std::remove_if(fellows.begin(), fellows.end(), [&](int fellowId)
+                        {
+                            int fellowAccountId = gameServices_->getClientManager().getClientDataByCharacterId(fellowId).accountId;
+                            return (fellowAccountId > 0 && fellowAccountId == killerAccountId); }),
+                    fellows.end());
+            }
+
+            if (!fellows.empty())
+            {
+                auto &expMgr = gameServices_->getExperienceManager();
+                const int scaledBaseXp = static_cast<int>(mobData.baseExperience * mobData.rankMult);
+
+                // Bonus to killer
+                {
+                    auto killerData = gameServices_->getCharacterManager().getCharacterData(killerId);
+                    if (killerData.characterId != 0)
+                    {
+                        int bonus = static_cast<int>(
+                            expMgr.calculateMobExperience(mobData.level, killerData.characterLevel, scaledBaseXp) * bonusPct);
+                        if (bonus > 0)
+                        {
+                            expMgr.grantExperience(killerId, bonus, "fellowship_bonus", mobId);
+                            gameServices_->getStatsNotificationService().sendWorldNotification(
+                                killerId, "fellowship_bonus", "+" + std::to_string(bonus) + " Fellowship XP");
+                        }
+                    }
+                }
+
+                // Bonus to each fellow
+                for (int fellowId : fellows)
+                {
+                    auto fellowData = gameServices_->getCharacterManager().getCharacterData(fellowId);
+                    if (fellowData.characterId == 0)
+                        continue;
+                    int bonus = static_cast<int>(
+                        expMgr.calculateMobExperience(mobData.level, fellowData.characterLevel, scaledBaseXp) * bonusPct);
+                    if (bonus > 0)
+                    {
+                        expMgr.grantExperience(fellowId, bonus, "fellowship_bonus", mobId);
+                        gameServices_->getStatsNotificationService().sendWorldNotification(
+                            fellowId, "fellowship_bonus", "+" + std::to_string(bonus) + " Fellowship XP");
+                        log_->info("[Fellowship] +" + std::to_string(bonus) + " XP \u2192 char " + std::to_string(fellowId));
+                    }
+                }
+
+                log_->info("[Fellowship] Mob " + std::to_string(mobId) + " had " +
+                           std::to_string(fellows.size()) + " fellow attacker(s)");
+            }
+        }
+        catch (const std::exception &e)
+        {
+            log_->warn("[Fellowship] Error: " + std::string(e.what()));
+        }
+
+        // --- Item Soul: increment kill_count on killer's equipped weapon ---
+        try
+        {
+            auto weapon = gameServices_->getInventoryManager().getEquippedWeapon(killerId);
+            if (weapon.has_value())
+            {
+                const auto &wItem = gameServices_->getItemManager().getItemById(weapon->itemId);
+                if (wItem.isEquippable)
+                {
+                    int newKillCount = weapon->killCount + 1;
+                    gameServices_->getInventoryManager().updateItemKillCount(killerId, weapon->id, newKillCount);
+
+                    // Debounce: only flush to DB at tier boundaries or every N kills to
+                    // avoid hammering the game-server on every mob death.
+                    const auto &cfg = gameServices_->getGameConfigService();
+                    const int flushEvery = cfg.getInt("item_soul.db_flush_every_kills", 5);
+                    const int t1 = cfg.getInt("item_soul.tier1_kills", 50);
+                    const int t2 = cfg.getInt("item_soul.tier2_kills", 200);
+                    const int t3 = cfg.getInt("item_soul.tier3_kills", 500);
+                    const bool tierCrossed = (newKillCount == t1 || newKillCount == t2 || newKillCount == t3);
+                    if (newKillCount % flushEvery == 0 || tierCrossed)
+                        saveItemKillCountChange(killerId, weapon->id, newKillCount);
+
+                    log_->info("[ItemSoul] Weapon invId=" + std::to_string(weapon->id) +
+                               " killCount=" + std::to_string(newKillCount));
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            log_->warn("[ItemSoul] Error updating kill_count: " + std::string(e.what()));
+        }
+
         // Quest trigger: notify QuestManager that the mob was killed
         try
         {
@@ -785,6 +1103,59 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
         }
         catch (...)
         {
+        }
+
+        // --- Bestiary: record kill for progression ---
+        try
+        {
+            if (mobData.id > 0)
+                gameServices_->getBestiaryManager().recordKill(killerId, mobData.id);
+        }
+        catch (const std::exception &e)
+        {
+            log_->warn("[Bestiary] Error recording kill: " + std::string(e.what()));
+        }
+
+        // --- Threshold Champion kill counter ---
+        try
+        {
+            if (!mobData.isChampion && mobData.id > 0)
+            {
+                auto gameZone = gameServices_->getGameZoneManager().getZoneForPosition(mobData.position);
+                if (gameZone.has_value())
+                    gameServices_->getChampionManager().recordMobKill(gameZone->id, mobData.id);
+            }
+        }
+        catch (const std::exception &e)
+        {
+            log_->warn("[Champion] Error recording mob kill: " + std::string(e.what()));
+        }
+
+        // --- Champion death notification ---
+        if (mobData.isChampion)
+        {
+            try
+            {
+                gameServices_->getChampionManager().onChampionKilled(mobId, killerId, mobData.slug);
+            }
+            catch (const std::exception &e)
+            {
+                log_->warn("[Champion] Error handling champion death: " + std::string(e.what()));
+            }
+        }
+
+        // --- Reputation: mob kill → faction rep change ---
+        try
+        {
+            if (!mobData.factionSlug.empty() && mobData.repDeltaPerKill != 0)
+            {
+                gameServices_->getReputationManager().changeReputation(
+                    killerId, mobData.factionSlug, mobData.repDeltaPerKill);
+            }
+        }
+        catch (const std::exception &e)
+        {
+            log_->warn("[Reputation] Error on mob kill: " + std::string(e.what()));
         }
 
         // Вызываем общую логику смерти цели (для совместимости)
@@ -819,7 +1190,39 @@ CombatSystem::handleMobAggro(int attackerId, int targetId, int damage)
 }
 
 void
-CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug)
+CombatSystem::broadcastMobSkillInitiation(int mobId, int targetPlayerId, const SkillStruct &skill)
+{
+    if (!responseBuilder_ || !broadcastCallback_)
+        return;
+
+    SkillInitiationResult r;
+    r.success = true;
+    r.casterId = mobId;
+    r.targetId = targetPlayerId;
+    r.targetType = CombatTargetType::PLAYER;
+    r.skillName = skill.skillName;
+    r.skillSlug = skill.skillSlug;
+    r.skillEffectType = skill.skillEffectType;
+    r.skillSchool = skill.school;
+    r.castTime = static_cast<float>(skill.castMs) / 1000.0f;
+    r.animationName = skill.animationName.empty() ? "skill_" + skill.skillSlug : skill.animationName;
+    {
+        constexpr float kMargin = 0.05f;
+        float kSwing = static_cast<float>(skill.swingMs) / 1000.0f;
+        float cdSec = static_cast<float>(std::max(skill.cooldownMs, skill.gcdMs)) / 1000.0f;
+        if (cdSec < 0.5f)
+            cdSec = 0.5f;
+        float cycleTime = r.castTime + kSwing + cdSec;
+        r.animationDuration = std::min(r.castTime + kSwing, cycleTime - kMargin);
+        if (r.animationDuration < kSwing)
+            r.animationDuration = kSwing;
+    }
+    broadcastCallback_(responseBuilder_->buildSkillInitiationBroadcast(r));
+    log_->info("[AI] combatInitiation sent for mob " + std::to_string(mobId) + " skill: " + skill.skillName);
+}
+
+void
+CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug, float hitDelay)
 {
     try
     {
@@ -850,8 +1253,15 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
         }
 
         // Проверяем дистанцию до цели
-        float dx = mobData.position.positionX - targetPlayer.characterPosition.positionX;
-        float dy = mobData.position.positionY - targetPlayer.characterPosition.positionY;
+        // Берём актуальную позицию моба из MobMovementManager, а не из устаревшего
+        // снимка MobInstanceManager (который не обновляется пока моб стоит).
+        auto mobMoveData = gameServices_->getMobMovementManager().getMobMovementData(mobId);
+        const PositionStruct &mobPos = (mobMoveData.combatState != MobCombatState::PATROLLING ||
+                                           mobMoveData.targetPlayerId != 0)
+                                           ? mobMoveData.lastSentPosition
+                                           : mobData.position;
+        float dx = mobPos.positionX - targetPlayer.characterPosition.positionX;
+        float dy = mobPos.positionY - targetPlayer.characterPosition.positionY;
         float distance = std::sqrt(dx * dx + dy * dy);
 
         gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " targeting player " + std::to_string(targetPlayerId) + " at distance " + std::to_string(distance));
@@ -872,7 +1282,7 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
             if (!forcedOpt)
             {
                 log_->info("[WARN] Mob " + std::to_string(mobId) +
-                                               " forced skill [" + forcedSkillSlug + "] not found — falling back to auto-select");
+                           " forced skill [" + forcedSkillSlug + "] not found — falling back to auto-select");
             }
         }
 
@@ -887,33 +1297,8 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
 
         gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " will use skill: " + bestSkill.skillName + " on player " + std::to_string(targetPlayerId));
 
-        // Сначала инициируем скил
-        gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " initiating skill: " + bestSkill.skillSlug + " on player " + std::to_string(targetPlayerId));
-
-        // Создаем результат инициации вручную, так как у мобов скилы хранятся в шаблонах
-        SkillInitiationResult initiationResult;
-        initiationResult.success = true;
-        initiationResult.casterId = mobId;
-        initiationResult.targetId = targetPlayer.characterId;
-        initiationResult.targetType = CombatTargetType::PLAYER;
-        initiationResult.skillName = bestSkill.skillName;
-        initiationResult.skillSlug = bestSkill.skillSlug;
-        initiationResult.skillEffectType = bestSkill.skillEffectType;
-        initiationResult.skillSchool = bestSkill.school;
-        initiationResult.castTime = static_cast<float>(bestSkill.castMs) / 1000.0f;
-        initiationResult.animationName = "skill_" + bestSkill.skillSlug;
-        initiationResult.animationDuration = std::max(1.0f, initiationResult.castTime);
-
-        // Отправляем broadcast пакет инициации
-        if (responseBuilder_ && broadcastCallback_)
-        {
-            log_->info("Mob " + std::to_string(mobId) + " sending initiation broadcast for skill: " + bestSkill.skillName);
-            auto initiationBroadcast = responseBuilder_->buildSkillInitiationBroadcast(initiationResult);
-            broadcastCallback_(initiationBroadcast);
-            log_->info("AI skill initiation broadcast sent for: " + bestSkill.skillName);
-        }
-
-        // Затем выполняем скил напрямую через SkillSystem
+        // combatInitiation was already sent by broadcastMobSkillInitiation() when
+        // MobAIController entered PREPARING_ATTACK. Here we only execute the attack.
         gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " executing skill: " + bestSkill.skillSlug + " on player " + std::to_string(targetPlayerId));
         auto skillResult = skillSystem_->useSkill(mobId, bestSkill.skillSlug, targetPlayer.characterId, CombatTargetType::PLAYER);
 
@@ -929,6 +1314,7 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
         result.skillSchool = bestSkill.school;
         result.skillResult = skillResult;
         result.errorMessage = skillResult.errorMessage;
+        result.hitDelay = hitDelay;
 
         if (result.success)
         {
@@ -940,6 +1326,9 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
                     auto hpResult = gameServices_->getCharacterManager().applyDamageToCharacter(
                         targetPlayer.characterId, skillResult.damageResult.totalDamage);
 
+                    // Suppress regen: mob hit the player
+                    gameServices_->getCharacterManager().markCharacterInCombat(targetPlayer.characterId);
+
                     result.finalTargetHealth = hpResult.newHealth;
                     result.finalTargetMana = hpResult.currentMana;
                     result.targetDied = hpResult.died;
@@ -948,6 +1337,28 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
                     gameServices_->getLogger().log("Mob " + mobData.name + " dealt " + std::to_string(skillResult.damageResult.totalDamage) +
                                                    " damage to " + targetPlayer.characterName +
                                                    " (Health: " + std::to_string(hpResult.newHealth) + "/" + std::to_string(targetPlayer.characterMaxHealth) + ")");
+
+                    // Durability: equipped armor loses durability on received hit
+                    try
+                    {
+                        int armorLoss = static_cast<int>(gameServices_->getGameConfigService().getFloat("durability.armor_loss_per_hit", 1.0f));
+                        auto equipped = gameServices_->getInventoryManager().getEquippedItems(targetPlayer.characterId);
+                        for (const auto &invSlot : equipped)
+                        {
+                            const auto &iData = gameServices_->getItemManager().getItemById(invSlot.itemId);
+                            if (!iData.isDurable || iData.equipSlotSlug == "weapon" || iData.durabilityMax <= 0)
+                                continue;
+                            int cur = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : iData.durabilityMax;
+                            int newDur = std::max(0, cur - armorLoss);
+                            gameServices_->getInventoryManager().updateDurability(targetPlayer.characterId, invSlot.id, newDur);
+                            saveDurabilityChange(targetPlayer.characterId, invSlot.id, newDur);
+                            checkAndTriggerDurabilityWarning(targetPlayer.characterId, cur, newDur, iData.durabilityMax);
+                        }
+                    }
+                    catch (const std::exception &e)
+                    {
+                        log_->warn("[COMBAT] Armor durability update error: " + std::string(e.what()));
+                    }
 
                     if (result.targetDied)
                     {
@@ -978,8 +1389,8 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
             }
 
             log_->info("Mob " + mobData.name + " used " + bestSkill.skillName +
-                                           " on " + targetPlayer.characterName +
-                                           " for " + std::to_string(result.skillResult.damageResult.totalDamage) + " damage");
+                       " on " + targetPlayer.characterName +
+                       " for " + std::to_string(result.skillResult.damageResult.totalDamage) + " damage");
 
             // Отправляем broadcast пакеты для AI атаки
             if (responseBuilder_ && broadcastCallback_)
@@ -1003,4 +1414,65 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
     {
         gameServices_->getLogger().logError("Error in AI attack with target: " + std::string(e.what()));
     }
+}
+
+void
+CombatSystem::setSaveDurabilityCallback(std::function<void(const std::string &)> callback)
+{
+    saveDurabilityCallback_ = std::move(callback);
+}
+
+void
+CombatSystem::setRefreshAttributesCallback(std::function<void(int)> callback)
+{
+    refreshAttributesCallback_ = std::move(callback);
+}
+
+void
+CombatSystem::checkAndTriggerDurabilityWarning(int characterId, int oldDur, int newDur, int maxDur)
+{
+    if (!refreshAttributesCallback_ || maxDur <= 0)
+        return;
+    float threshold = gameServices_->getGameConfigService().getFloat("durability.warning_threshold_pct", 0.30f);
+    bool wasAbove = (static_cast<float>(oldDur) / maxDur) >= threshold;
+    bool nowBelow = (static_cast<float>(newDur) / maxDur) < threshold;
+    // Also trigger when item becomes fully broken (or repaired back to full in future)
+    if ((wasAbove && nowBelow) || (oldDur > 0 && newDur == 0))
+        refreshAttributesCallback_(characterId);
+}
+
+void
+CombatSystem::setSaveItemKillCountCallback(std::function<void(const std::string &)> callback)
+{
+    saveItemKillCountCallback_ = std::move(callback);
+}
+
+void
+CombatSystem::saveItemKillCountChange(int characterId, int inventoryItemId, int killCount)
+{
+    if (!saveItemKillCountCallback_)
+        return;
+    nlohmann::json packet;
+    packet["header"]["eventType"] = "saveItemKillCount";
+    packet["header"]["clientId"] = 0;
+    packet["header"]["hash"] = "";
+    packet["body"]["characterId"] = characterId;
+    packet["body"]["inventoryItemId"] = inventoryItemId;
+    packet["body"]["killCount"] = killCount;
+    saveItemKillCountCallback_(packet.dump() + "\n");
+}
+
+void
+CombatSystem::saveDurabilityChange(int characterId, int inventoryItemId, int durabilityCurrent)
+{
+    if (!saveDurabilityCallback_)
+        return;
+    nlohmann::json packet;
+    packet["header"]["eventType"] = "saveDurabilityChange";
+    packet["header"]["clientId"] = 0;
+    packet["header"]["hash"] = "";
+    packet["body"]["characterId"] = characterId;
+    packet["body"]["inventoryItemId"] = inventoryItemId;
+    packet["body"]["durabilityCurrent"] = durabilityCurrent;
+    saveDurabilityCallback_(packet.dump() + "\n");
 }

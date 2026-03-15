@@ -96,6 +96,22 @@ ItemManager::getItemById(int itemId) const
     return ItemDataStruct();
 }
 
+const ItemDataStruct *
+ItemManager::getItemBySlug(const std::string &slug) const
+{
+    std::shared_lock<std::shared_mutex> lock(itemsMutex_);
+    for (const auto &[id, item] : items_)
+    {
+        if (item.slug == slug)
+        {
+            // items_ is populated at startup and never mutated at runtime,
+            // so returning a raw pointer is safe for the lifetime of the server.
+            return &item;
+        }
+    }
+    return nullptr;
+}
+
 std::map<int, std::vector<MobLootInfoStruct>>
 ItemManager::getMobLootInfo() const
 {

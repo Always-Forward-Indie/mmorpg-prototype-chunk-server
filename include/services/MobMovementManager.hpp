@@ -18,6 +18,7 @@ class SpawnZoneManager;
 class CharacterManager;
 class EventQueue;
 class MobManager;
+class GameServices;
 
 /**
  * @brief Manages mob movement within zones
@@ -82,6 +83,11 @@ class MobMovementManager
     void setMobManager(MobManager *mobManager);
 
     /**
+     * @brief Set reference to GameServices for zone-event speed multipliers
+     */
+    void setGameServices(GameServices *gs);
+
+    /**
      * @brief Handle mob aggro and retaliation when attacked by player
      */
     void handleMobAttacked(int mobUID, int attackerPlayerId, int damage = 0);
@@ -141,6 +147,7 @@ class MobMovementManager
     class CharacterManager *characterManager_;
     class EventQueue *eventQueue_;
     class CombatSystem *combatSystem_;
+    GameServices *gameServices_ = nullptr;
 
     // Random number generator
     std::mt19937 rng_;

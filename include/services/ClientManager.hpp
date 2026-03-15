@@ -42,6 +42,9 @@ class ClientManager
     // Get basic client data by client ID
     ClientDataStruct getClientData(int clientID);
 
+    // Get client data by character ID (for accountId lookups)
+    ClientDataStruct getClientDataByCharacterId(int characterId);
+
     // Get Client Socket by client ID
     std::shared_ptr<boost::asio::ip::tcp::socket> getClientSocket(int clientID);
 

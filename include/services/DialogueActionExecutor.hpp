@@ -19,9 +19,11 @@ class GameServices;
  *   set_flag          – set a player flag (bool or int increment)
  *   offer_quest       – put a quest in "offered" / "active" state
  *   turn_in_quest     – complete and reward a quest
+ *   fail_quest        – fail/abandon a quest
  *   advance_quest_step – manually advance quest step
  *   give_item         – add item to player inventory
  *   give_exp          – grant experience
+ *   give_gold         – grant gold coins (item id resolved by slug "gold_coin")
  */
 class DialogueActionExecutor
 {
@@ -69,6 +71,10 @@ class DialogueActionExecutor
         int clientId,
         ActionResult &result);
 
+    void executeFailQuest(const nlohmann::json &action,
+        int characterId,
+        ActionResult &result);
+
     void executeAdvanceQuestStep(const nlohmann::json &action,
         int characterId,
         ActionResult &result);
@@ -81,6 +87,28 @@ class DialogueActionExecutor
     void executeGiveExp(const nlohmann::json &action,
         int characterId,
         int clientId,
+        ActionResult &result);
+
+    void executeGiveGold(const nlohmann::json &action,
+        int characterId,
+        int clientId,
+        ActionResult &result);
+
+    void executeOpenVendorShop(const nlohmann::json &action,
+        int characterId,
+        int clientId,
+        ActionResult &result);
+
+    void executeOpenRepairShop(const nlohmann::json &action,
+        int characterId,
+        int clientId,
+        ActionResult &result);
+
+    // Stage 4: change faction reputation via dialogue action
+    // {"type":"change_reputation", "faction":"bandits", "delta":50}
+    void executeChangeReputation(const nlohmann::json &action,
+        int characterId,
+        PlayerContextStruct &ctx,
         ActionResult &result);
 
     GameServices &services_;

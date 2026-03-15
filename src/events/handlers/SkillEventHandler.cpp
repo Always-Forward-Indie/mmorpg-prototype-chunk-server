@@ -58,7 +58,7 @@ SkillEventHandler::handleInitializePlayerSkillsDirect(const PlayerSkillInitStruc
         sendSkillsResponse(response, clientID, clientSocket);
 
         log_->info("Player skills initialized successfully for client " +
-                                          std::to_string(clientID));
+                   std::to_string(clientID));
     }
     catch (const std::exception &ex)
     {
@@ -126,6 +126,7 @@ SkillEventHandler::buildSkillsResponse(const PlayerSkillInitStruct &skillInitDat
             skillData["castMs"] = skill.castMs;
             skillData["costMp"] = skill.costMp;
             skillData["maxRange"] = skill.maxRange;
+            skillData["isPassive"] = skill.isPassive;
 
             skillsArray.push_back(skillData);
             log_->info("Successfully processed skill " + std::to_string(i));

@@ -18,7 +18,6 @@ class EventDispatcher
     void handleMoveCharacter(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleDisconnect(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handlePing(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
-    void handleGetSpawnZones(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleGetConnectedClients(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handlePlayerAttack(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handlePickupDroppedItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
@@ -32,6 +31,31 @@ class EventDispatcher
     void handleNPCInteract(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleDialogueChoice(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleDialogueClose(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // Vendor / Repair / Trade
+    void handleOpenVendorShop(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleBuyItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleSellItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleBuyItemBatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleSellItemBatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleOpenRepairShop(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleRepairItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleRepairAll(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleTradeRequest(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleTradeAccept(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleTradeDecline(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleTradeOfferUpdate(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleTradeConfirm(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleTradeCancel(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // Equipment
+    void handleEquipItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleUnequipItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleGetEquipment(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // Respawn
+    void handleRespawnRequest(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // Item drop by player and use
+    void handleDropItemByPlayer(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleUseItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleGetBestiaryEntry(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;

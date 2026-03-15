@@ -15,6 +15,20 @@ BaseEventHandler::BaseEventHandler(
     log_ = gameServices_.getLogger().getSystem(loggerSubsystem);
 }
 
+bool
+BaseEventHandler::isPlayerAlive(int characterId)
+{
+    try
+    {
+        const auto &charData = gameServices_.getCharacterManager().getCharacterData(characterId);
+        return charData.characterCurrentHealth > 0;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 std::shared_ptr<boost::asio::ip::tcp::socket>
 BaseEventHandler::getClientSocket(const Event &event)
 {

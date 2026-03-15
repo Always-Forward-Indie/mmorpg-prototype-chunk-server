@@ -26,6 +26,34 @@ class ZoneEventHandler : public BaseEventHandler
     void handleSetAllSpawnZonesEvent(const Event &event);
 
     /**
+     * @brief Handle set respawn zones list event (game-server → chunk-server)
+     *
+     * Loads all respawn zones into RespawnZoneManager.
+     *
+     * @param event Event containing std::vector<RespawnZoneStruct>
+     */
+    void handleSetRespawnZonesEvent(const Event &event);
+
+    /**
+     * @brief Handle set game zones list event (game-server → chunk-server).
+     *
+     * Loads AABB zone data into GameZoneManager for zone detection and
+     * exploration-reward logic.
+     *
+     * @param event Event containing std::vector<GameZoneStruct>
+     */
+    void handleSetGameZonesEvent(const Event &event);
+
+    /**
+     * @brief Handle set timed champion templates event (game-server → chunk-server).
+     *
+     * Loads timed champion templates into ChampionManager.
+     *
+     * @param event Event containing std::vector<TimedChampionTemplate>
+     */
+    void handleSetTimedChampionTemplatesEvent(const Event &event);
+
+    /**
      * @brief Handle get spawn zone data event
      *
      * Retrieves specific spawn zone data

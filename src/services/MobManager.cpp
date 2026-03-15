@@ -50,6 +50,18 @@ MobManager::setListOfMobs(
             mobData.isSocial = row.isSocial;
             mobData.chaseDuration = row.chaseDuration;
 
+            // Survival / Rare mob groundwork (Stage 3, migration 038)
+            mobData.canEvolve = row.canEvolve;
+            mobData.isRare = row.isRare;
+            mobData.rareSpawnChance = row.rareSpawnChance;
+            mobData.rareSpawnCondition = row.rareSpawnCondition;
+
+            // Bestiary metadata (migration 040)
+            mobData.biomeSlug = row.biomeSlug;
+            mobData.mobTypeSlug = row.mobTypeSlug;
+            mobData.hpMin = row.hpMin;
+            mobData.hpMax = row.hpMax;
+
             mobs_[mobData.id] = mobData;
         }
     }
@@ -212,4 +224,34 @@ MobManager::updateMobMana(const int mobUid, int newMana)
         }
     }
     log_->error("Mob " + std::to_string(mobUid) + " not found when updating mana");
+}
+
+// ── Bestiary static data ──────────────────────────────────────────────────────
+
+void
+MobManager::setWeaknessesResistances(
+    std::unordered_map<int, std::vector<std::string>> weaknesses,
+    std::unordered_map<int, std::vector<std::string>> resistances)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    weaknesses_ = std::move(weaknesses);
+    resistances_ = std::move(resistances);
+    log_->info("[MobManager] Loaded weaknesses for " + std::to_string(weaknesses_.size()) +
+               " mobs, resistances for " + std::to_string(resistances_.size()) + " mobs");
+}
+
+std::vector<std::string>
+MobManager::getWeaknessesForMob(int mobId) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto it = weaknesses_.find(mobId);
+    return (it != weaknesses_.end()) ? it->second : std::vector<std::string>{};
+}
+
+std::vector<std::string>
+MobManager::getResistancesForMob(int mobId) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto it = resistances_.find(mobId);
+    return (it != resistances_.end()) ? it->second : std::vector<std::string>{};
 }

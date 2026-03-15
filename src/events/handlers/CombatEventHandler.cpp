@@ -171,6 +171,15 @@ CombatEventHandler::handleSkillUsage(const Event &event)
             return;
         }
 
+        if (!isPlayerAlive(clientData.characterId))
+        {
+            auto errorResponse = responseBuilder_->buildErrorResponse("Cannot use skills while dead", "skillUsage", clientID);
+            std::string errorData = networkManager_.generateResponseMessage("error", errorResponse);
+            if (clientSocket)
+                networkManager_.sendResponse(clientSocket, errorData);
+            return;
+        }
+
         if (!std::holds_alternative<nlohmann::json>(data))
         {
             auto errorResponse = responseBuilder_->buildErrorResponse("Invalid request format!", "skillUsage", clientID);
@@ -406,12 +415,30 @@ CombatEventHandler::dispatchSkillAction(int characterId,
     broadcastSkillInitiation(initiationResult);
 
     if (!initiationResult.success)
+    {
+        log_->warn("[dispatchSkillAction] Skill initiation failed for char " + std::to_string(characterId) +
+                   " skill='" + skillSlug + "': " + initiationResult.errorMessage);
         return;
+    }
 
     // No cast time — execute immediately; otherwise updateOngoingActions() will fire later
     if (initiationResult.castTime <= 0.0f)
     {
+        log_->info("[dispatchSkillAction] Executing instant skill '" + skillSlug +
+                   "' for char " + std::to_string(characterId) +
+                   " -> target " + std::to_string(targetId));
         auto executionResult = combatSystem_->executeSkillUsage(characterId, skillSlug, targetId, targetType);
+        if (!executionResult.success)
+        {
+            log_->warn("[dispatchSkillAction] Skill execution failed for char " + std::to_string(characterId) +
+                       " skill='" + skillSlug + "': " + executionResult.errorMessage);
+        }
+        else
+        {
+            log_->info("[dispatchSkillAction] Skill '" + skillSlug + "' executed OK for char " +
+                       std::to_string(characterId) + " -> target " + std::to_string(targetId) +
+                       " damage=" + std::to_string(executionResult.skillResult.damageResult.totalDamage));
+        }
         broadcastSkillExecution(executionResult);
     }
 }

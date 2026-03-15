@@ -131,6 +131,18 @@ ClientManager::getClientData(int clientID)
     return ClientDataStruct();
 }
 
+ClientDataStruct
+ClientManager::getClientDataByCharacterId(int characterId)
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    for (const auto &client : clientsList_)
+    {
+        if (client.characterId == characterId)
+            return client;
+    }
+    return ClientDataStruct();
+}
+
 std::shared_ptr<boost::asio::ip::tcp::socket>
 ClientManager::getClientSocket(int clientID)
 {
@@ -183,6 +195,7 @@ ClientManager::setClientCharacterId(int clientID, int characterId)
     logger_.log("Client ID " + std::to_string(clientID) + " not found, creating minimal client entry for character ID: " + std::to_string(characterId));
     ClientDataStruct newClient;
     newClient.clientId = clientID;
+    newClient.accountId = clientID; // clientId == accountId in this system
     newClient.characterId = characterId;
     clientsList_.push_back(newClient);
     logger_.log("Created and set character ID " + std::to_string(characterId) + " for new client ID: " + std::to_string(clientID));
@@ -393,7 +406,7 @@ ClientManager::cleanupDeadSockets()
         if (dead)
         {
             log_->info("[ClientManager] cleanupDeadSockets: removing dead socket for client " +
-                        std::to_string(it->first));
+                       std::to_string(it->first));
             // Also remove from clientsList_ to keep both containers consistent
             for (auto jt = clientsList_.begin(); jt != clientsList_.end(); ++jt)
             {

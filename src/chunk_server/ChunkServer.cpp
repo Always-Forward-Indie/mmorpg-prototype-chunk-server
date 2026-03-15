@@ -1,6 +1,8 @@
 #include "chunk_server/ChunkServer.hpp"
+#include "services/CombatSystem.hpp"
 #include <chrono>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <unordered_map>
 #include <unordered_set>
 #ifdef __GLIBC__
@@ -45,6 +47,9 @@ ChunkServer::ChunkServer(GameServices &gameServices,
     // Set EventQueue for HarvestManager to send harvest events to clients
     gameServices_.getHarvestManager().setEventQueue(&eventQueueGameServer_);
 
+    // Set InventoryManager for HarvestManager to add harvested items to player inventories
+    gameServices_.getHarvestManager().setInventoryManager(&gameServices_.getInventoryManager());
+
     // Set manager references for HarvestManager to broadcast harvest events
     gameServices_.getHarvestManager().setManagerReferences(&gameServices_.getClientManager(), &networkManager_);
 
@@ -65,6 +70,95 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 
     // Wire up saveCharacterProgress: immediately persist exp/level to game server DB on grant
     gameServices_.getExperienceManager().setSaveProgressCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire up inventory persistence: send item changes to game server DB immediately
+    gameServices_.getInventoryManager().setSaveInventoryCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire up LootManager callbacks for item instance ownership changes
+    gameServices_.getLootManager().setNullifyItemOwnerCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    gameServices_.getLootManager().setDeleteInventoryItemCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    gameServices_.getLootManager().setTransferInventoryItemCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire up durability persistence: send durability changes to game server DB immediately
+    if (auto *cs = eventHandler_.getCombatEventHandler().getCombatSystem())
+    {
+        cs->setSaveDurabilityCallback(
+            [this](const std::string &data)
+            { gameServerWorker_.sendDataToGameServer(data); });
+
+        // Wire up Item Soul kill_count persistence: send kill count changes to game server DB
+        cs->setSaveItemKillCountCallback(
+            [this](const std::string &data)
+            { gameServerWorker_.sendDataToGameServer(data); });
+
+        // Wire up attribute refresh trigger: when durability crosses warning threshold,
+        // ask game server to recompute character attributes so the stat penalty applies.
+        cs->setRefreshAttributesCallback(
+            [this](int characterId)
+            {
+                nlohmann::json pkt;
+                pkt["header"]["eventType"] = "getCharacterAttributes";
+                pkt["header"]["clientId"] = 0;
+                pkt["header"]["hash"] = "";
+                pkt["body"]["characterId"] = characterId;
+                gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+            });
+    }
+
+    // Wire up PityManager persistence callbacks
+    gameServices_.getPityManager().setSaveCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire up BestiaryManager persistence callbacks
+    gameServices_.getBestiaryManager().setSaveCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire up BestiaryManager tier-unlock notification
+    gameServices_.getBestiaryManager().setNotifyCallback(
+        [this](int charId, int mobTemplateId, int tierNum, const std::string &catSlug)
+        {
+            try
+            {
+                nlohmann::json notifData;
+                notifData["mobTemplateId"] = mobTemplateId;
+                notifData["unlockedTier"] = tierNum;
+                notifData["categorySlug"] = catSlug;
+                gameServices_.getStatsNotificationService()
+                    .sendWorldNotification(charId, "bestiary_tier_unlocked", "", notifData);
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError(
+                    "[Bestiary] notifyCallback error: " + std::string(ex.what()));
+            }
+        });
+
+    // Wire up ChampionManager → GameServerWorker for timed champion persistence
+    gameServices_.getChampionManager().setSendToGameServerCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire up ReputationManager persistence callbacks
+    gameServices_.getReputationManager().setSaveCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire up MasteryManager persistence callbacks
+    gameServices_.getMasteryManager().setSaveCallback(
         [this](const std::string &data)
         { gameServerWorker_.sendDataToGameServer(data); });
 }
@@ -194,7 +288,7 @@ ChunkServer::mainEventLoopCH()
                 else
                 {
                     log_->info("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
-                                                  " - spawn disabled or no mob ID set");
+                               " - spawn disabled or no mob ID set");
                 }
             }
 
@@ -357,10 +451,17 @@ ChunkServer::mainEventLoopCH()
                             if (moved)
                             {
                                 aggroMobsMovedCount++;
+                            }
 
-                                // Get updated mob position after movement
+                            // Always check shouldSendMobUpdate, not just when the mob moved.
+                            // forceMobStateUpdate() sets forceNextUpdate=true on combat-state
+                            // transitions (CHASING→PREPARING_ATTACK, etc.) but moveSingleMob
+                            // returns false in those states because the mob can't move.
+                            // Without this check the client never receives the state-change
+                            // position packet and the mob appears frozen / not attacking.
+                            {
                                 auto updatedMob = gameServices_.getMobInstanceManager().getMobInstance(mob.uid);
-                                if (updatedMob.uid > 0) // Valid mob
+                                if (updatedMob.uid > 0)
                                 {
                                     PositionStruct currentPos = updatedMob.position;
                                     if (gameServices_.getMobMovementManager().shouldSendMobUpdate(mob.uid, currentPos))
@@ -456,7 +557,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("Error updating combat actions: " + std::string(ex.what()));
             }
         },
-        1000, // Run every 1 second - frequent enough for responsive combat
+        100, // Every 100 ms — needed for responsive instant-skill execution and cast-time resolution
         std::chrono::steady_clock::now(),
         6 // unique task ID
     );
@@ -535,6 +636,26 @@ ChunkServer::mainEventLoopCH()
 
     scheduler_.scheduleTask(harvestUpdateTask);
 
+    // Task for cleaning up expired ground items (player/mob drops older than 5 minutes)
+    Task droppedItemCleanupTask(
+        [&]
+        {
+            try
+            {
+                gameServices_.getLootManager().cleanupOldDroppedItems(300); // 5 minutes
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("Error cleaning up dropped items: " + std::string(ex.what()));
+            }
+        },
+        60000, // Run every 60 seconds
+        std::chrono::steady_clock::now(),
+        17 // unique task ID
+    );
+
+    scheduler_.scheduleTask(droppedItemCleanupTask);
+
     // Task for cleaning up dead mobs and triggering respawn
     Task deadMobCleanupTask(
         [&]
@@ -610,7 +731,7 @@ ChunkServer::mainEventLoopCH()
             if (totalDeadMobsRemoved > 0)
             {
                 log_->info("[CLEANUP] Cleaned up " + std::to_string(totalDeadMobsRemoved) +
-                                              " dead mobs across all zones");
+                           " dead mobs across all zones");
             }
         },
         5000,                                                                    // Every 5 seconds - check if corpse duration has expired
@@ -809,7 +930,7 @@ ChunkServer::mainEventLoopCH()
     );
     scheduler_.scheduleTask(cleanupDeadSocketsTask);
 
-    // ARCH-4: Periodic task: save all online player HP and Mana to the database every 30 seconds.
+    // ARCH-4: Periodic task: save all online player HP and Mana to the database every 10 seconds.
     // Prevents loss of current health/mana on unexpected server restart or crash.
     Task saveHpManaTask(
         [this]
@@ -847,11 +968,92 @@ ChunkServer::mainEventLoopCH()
                     " character(s)",
                 GREEN);
         },
-        30000,                                                                   // Every 30 seconds
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000), // First run after 30s
+        10000,                                                                   // Every 10 seconds
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(10 * 1000), // First run after 10s
         14                                                                       // unique task ID
     );
     scheduler_.scheduleTask(saveHpManaTask);
+
+    // HP/MP regeneration task — fires every 4 seconds by default.
+    // Actual regen amounts are driven by config keys (regen.*) read live each tick.
+    // The tick interval itself uses the config value at start-up; if not yet loaded
+    // the fallback of 4000 ms applies.
+    const int regenIntervalMs = gameServices_.getGameConfigService().getInt("regen.tickIntervalMs", 4000);
+    Task regenTickTask(
+        [this]
+        {
+            try
+            {
+                gameServices_.getRegenManager().tickRegen();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[Regen] tickRegen error: " + std::string(ex.what()));
+            }
+        },
+        regenIntervalMs,
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(regenIntervalMs),
+        15 // unique task ID
+    );
+    scheduler_.scheduleTask(regenTickTask);
+
+    // Timed champion tick — checks spawn windows and sends pre-announcements every 30 s
+    Task timedChampionTickTask(
+        [this]
+        {
+            try
+            {
+                gameServices_.getChampionManager().tickTimedChampions();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[Champion] tickTimedChampions error: " + std::string(ex.what()));
+            }
+        },
+        30000,
+        std::chrono::steady_clock::now() + std::chrono::seconds(30),
+        16 // unique task ID
+    );
+    scheduler_.scheduleTask(timedChampionTickTask);
+
+    // Survival champion evolution tick — checks long-lived mobs every 5 minutes
+    Task survivalEvolutionTickTask(
+        [this]
+        {
+            try
+            {
+                gameServices_.getChampionManager().tickSurvivalEvolution();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[Champion] tickSurvivalEvolution error: " + std::string(ex.what()));
+            }
+        },
+        300000,
+        std::chrono::steady_clock::now() + std::chrono::seconds(300),
+        18 // unique task ID
+    );
+    scheduler_.scheduleTask(survivalEvolutionTickTask);
+
+    // Zone event scheduler tick — checks timed/random event triggers every 30 s
+    Task zoneEventTickTask(
+        [this]
+        {
+            try
+            {
+                gameServices_.getZoneEventManager().tickEventScheduler();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[ZoneEvent] tickEventScheduler error: " + std::string(ex.what()));
+            }
+        },
+        30000,
+        std::chrono::steady_clock::now() + std::chrono::seconds(30),
+        19 // unique task ID
+    );
+    scheduler_.scheduleTask(zoneEventTickTask);
+
     try
     {
         log_->info("Starting Game Server Event Loop...");

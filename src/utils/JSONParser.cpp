@@ -76,6 +76,12 @@ JSONParser::parseCharacterData(const char *data, size_t length)
     }
 
     if (jsonData.contains("body") && jsonData["body"].is_object() &&
+        jsonData["body"].contains("classId") && jsonData["body"]["classId"].is_number_integer())
+    {
+        characterData.classId = jsonData["body"]["classId"].get<int>();
+    }
+
+    if (jsonData.contains("body") && jsonData["body"].is_object() &&
         jsonData["body"].contains("race") && jsonData["body"]["race"].is_string())
     {
         characterData.characterRace = jsonData["body"]["race"].get<std::string>();
@@ -181,8 +187,48 @@ JSONParser::parseCharacterData(const char *data, size_t length)
             {
                 skillData.areaRadius = skill["areaRadius"].get<float>();
             }
+            if (skill.contains("swingMs") && skill["swingMs"].is_number_integer())
+            {
+                skillData.swingMs = skill["swingMs"].get<int>();
+            }
+            if (skill.contains("animationName") && skill["animationName"].is_string())
+            {
+                skillData.animationName = skill["animationName"].get<std::string>();
+            }
+            if (skill.contains("isPassive") && skill["isPassive"].is_boolean())
+            {
+                skillData.isPassive = skill["isPassive"].get<bool>();
+            }
+            // Parse skill effect definitions (buff/debuff/dot/hot applied on cast)
+            if (skill.contains("effects") && skill["effects"].is_array())
+            {
+                for (const auto &eff : skill["effects"])
+                {
+                    SkillEffectDefinitionStruct ed;
+                    if (eff.contains("effectSlug") && eff["effectSlug"].is_string())
+                        ed.effectSlug = eff["effectSlug"].get<std::string>();
+                    if (eff.contains("effectTypeSlug") && eff["effectTypeSlug"].is_string())
+                        ed.effectTypeSlug = eff["effectTypeSlug"].get<std::string>();
+                    if (eff.contains("attributeSlug") && eff["attributeSlug"].is_string())
+                        ed.attributeSlug = eff["attributeSlug"].get<std::string>();
+                    if (eff.contains("value") && eff["value"].is_number())
+                        ed.value = eff["value"].get<float>();
+                    if (eff.contains("durationSeconds") && eff["durationSeconds"].is_number_integer())
+                        ed.durationSeconds = eff["durationSeconds"].get<int>();
+                    if (eff.contains("tickMs") && eff["tickMs"].is_number_integer())
+                        ed.tickMs = eff["tickMs"].get<int>();
+                    skillData.effects.push_back(ed);
+                }
+            }
             characterData.skills.push_back(skillData);
         }
+    }
+
+    // experience debt (sent by game server on character join)
+    if (jsonData.contains("body") && jsonData["body"].is_object() &&
+        jsonData["body"].contains("experienceDebt") && jsonData["body"]["experienceDebt"].is_number_integer())
+    {
+        characterData.experienceDebt = jsonData["body"]["experienceDebt"].get<int>();
     }
 
     return characterData;
@@ -213,6 +259,22 @@ JSONParser::parsePositionData(const char *data, size_t length)
         jsonData["body"].contains("rotZ") && (jsonData["body"]["rotZ"].is_number_float() || jsonData["body"]["rotZ"].is_number_integer()))
     {
         positionData.rotationZ = jsonData["body"]["rotZ"].get<float>();
+    }
+
+    // Fallback: Unreal-style nested playerPosition object { x, y, z }
+    if (positionData.positionX == 0.0f && positionData.positionY == 0.0f && positionData.positionZ == 0.0f)
+    {
+        if (jsonData.contains("body") && jsonData["body"].is_object() &&
+            jsonData["body"].contains("playerPosition") && jsonData["body"]["playerPosition"].is_object())
+        {
+            const auto &pos = jsonData["body"]["playerPosition"];
+            if (pos.contains("x") && pos["x"].is_number())
+                positionData.positionX = pos["x"].get<float>();
+            if (pos.contains("y") && pos["y"].is_number())
+                positionData.positionY = pos["y"].get<float>();
+            if (pos.contains("z") && pos["z"].is_number())
+                positionData.positionZ = pos["z"].get<float>();
+        }
     }
 
     return positionData;
@@ -578,6 +640,32 @@ JSONParser::parseMobsList(const char *data, size_t length)
             if (mob.contains("aiArchetype") && mob["aiArchetype"].is_string())
                 mobData.aiArchetype = mob["aiArchetype"].get<std::string>();
 
+            // Survival / Rare mob groundwork (Stage 3, migration 038)
+            if (mob.contains("canEvolve") && mob["canEvolve"].is_boolean())
+                mobData.canEvolve = mob["canEvolve"].get<bool>();
+            if (mob.contains("isRare") && mob["isRare"].is_boolean())
+                mobData.isRare = mob["isRare"].get<bool>();
+            if (mob.contains("rareSpawnChance") && mob["rareSpawnChance"].is_number())
+                mobData.rareSpawnChance = mob["rareSpawnChance"].get<float>();
+            if (mob.contains("rareSpawnCondition") && mob["rareSpawnCondition"].is_string())
+                mobData.rareSpawnCondition = mob["rareSpawnCondition"].get<std::string>();
+
+            // Social systems (Stage 4, migration 039)
+            if (mob.contains("factionSlug") && mob["factionSlug"].is_string())
+                mobData.factionSlug = mob["factionSlug"].get<std::string>();
+            if (mob.contains("repDeltaPerKill") && mob["repDeltaPerKill"].is_number_integer())
+                mobData.repDeltaPerKill = mob["repDeltaPerKill"].get<int>();
+
+            // Bestiary metadata (migration 040)
+            if (mob.contains("biomeSlug") && mob["biomeSlug"].is_string())
+                mobData.biomeSlug = mob["biomeSlug"].get<std::string>();
+            if (mob.contains("mobTypeSlug") && mob["mobTypeSlug"].is_string())
+                mobData.mobTypeSlug = mob["mobTypeSlug"].get<std::string>();
+            if (mob.contains("hpMin") && mob["hpMin"].is_number_integer())
+                mobData.hpMin = mob["hpMin"].get<int>();
+            if (mob.contains("hpMax") && mob["hpMax"].is_number_integer())
+                mobData.hpMax = mob["hpMax"].get<int>();
+
             mobsList.push_back(mobData);
         }
     }
@@ -657,17 +745,9 @@ JSONParser::parseItemsList(const char *data, size_t length)
             {
                 itemData.id = item["id"].get<int>();
             }
-            if (item.contains("name") && item["name"].is_string())
-            {
-                itemData.name = item["name"].get<std::string>();
-            }
             if (item.contains("slug") && item["slug"].is_string())
             {
                 itemData.slug = item["slug"].get<std::string>();
-            }
-            if (item.contains("description") && item["description"].is_string())
-            {
-                itemData.description = item["description"].get<std::string>();
             }
             if (item.contains("isQuestItem") && item["isQuestItem"].is_boolean())
             {
@@ -757,6 +837,26 @@ JSONParser::parseItemsList(const char *data, size_t length)
             {
                 itemData.levelRequirement = item["levelRequirement"].get<int>();
             }
+            if (item.contains("isTwoHanded") && item["isTwoHanded"].is_boolean())
+            {
+                itemData.isTwoHanded = item["isTwoHanded"].get<bool>();
+            }
+            if (item.contains("allowedClassIds") && item["allowedClassIds"].is_array())
+            {
+                for (const auto &classIdEntry : item["allowedClassIds"])
+                {
+                    if (classIdEntry.is_number_integer())
+                        itemData.allowedClassIds.push_back(classIdEntry.get<int>());
+                }
+            }
+            if (item.contains("setId") && item["setId"].is_number_integer())
+            {
+                itemData.setId = item["setId"].get<int>();
+            }
+            if (item.contains("setSlug") && item["setSlug"].is_string())
+            {
+                itemData.setSlug = item["setSlug"].get<std::string>();
+            }
 
             // Parse attributes
             if (item.contains("attributes") && item["attributes"].is_array())
@@ -787,6 +887,34 @@ JSONParser::parseItemsList(const char *data, size_t length)
                     itemData.attributes.push_back(itemAttribute);
                 }
             }
+
+            // Parse use effects
+            if (item.contains("useEffects") && item["useEffects"].is_array())
+            {
+                for (const auto &ue : item["useEffects"])
+                {
+                    ItemUseEffectStruct useEffect;
+                    if (ue.contains("effectSlug") && ue["effectSlug"].is_string())
+                        useEffect.effectSlug = ue["effectSlug"].get<std::string>();
+                    if (ue.contains("attributeSlug") && ue["attributeSlug"].is_string())
+                        useEffect.attributeSlug = ue["attributeSlug"].get<std::string>();
+                    if (ue.contains("value") && ue["value"].is_number())
+                        useEffect.value = ue["value"].get<float>();
+                    if (ue.contains("isInstant") && ue["isInstant"].is_boolean())
+                        useEffect.isInstant = ue["isInstant"].get<bool>();
+                    if (ue.contains("durationSeconds") && ue["durationSeconds"].is_number_integer())
+                        useEffect.durationSeconds = ue["durationSeconds"].get<int>();
+                    if (ue.contains("tickMs") && ue["tickMs"].is_number_integer())
+                        useEffect.tickMs = ue["tickMs"].get<int>();
+                    if (ue.contains("cooldownSeconds") && ue["cooldownSeconds"].is_number_integer())
+                        useEffect.cooldownSeconds = ue["cooldownSeconds"].get<int>();
+                    itemData.useEffects.push_back(useEffect);
+                }
+            }
+
+            // Social systems (Stage 4, migration 039)
+            if (item.contains("masterySlug") && item["masterySlug"].is_string())
+                itemData.masterySlug = item["masterySlug"].get<std::string>();
 
             itemsList.push_back(itemData);
         }
@@ -836,12 +964,53 @@ JSONParser::parseMobLootInfo(const char *data, size_t length)
             {
                 lootData.maxQuantity = loot["maxQuantity"].get<int>();
             }
+            if (loot.contains("lootTier") && loot["lootTier"].is_string())
+                lootData.lootTier = loot["lootTier"].get<std::string>();
 
             mobLootInfo.push_back(lootData);
         }
     }
 
     return mobLootInfo;
+}
+
+std::pair<std::unordered_map<int, std::vector<std::string>>,
+    std::unordered_map<int, std::vector<std::string>>>
+JSONParser::parseMobWeaknessesResistances(const char *data, size_t length)
+{
+    std::unordered_map<int, std::vector<std::string>> weaknesses;
+    std::unordered_map<int, std::vector<std::string>> resistances;
+
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].contains("data") || !j["body"]["data"].is_array())
+            return {weaknesses, resistances};
+
+        for (const auto &entry : j["body"]["data"])
+        {
+            int mobId = entry.value("mobId", 0);
+            if (mobId <= 0)
+                continue;
+
+            if (entry.contains("weaknesses") && entry["weaknesses"].is_array())
+            {
+                for (const auto &el : entry["weaknesses"])
+                    if (el.is_string())
+                        weaknesses[mobId].push_back(el.get<std::string>());
+            }
+            if (entry.contains("resistances") && entry["resistances"].is_array())
+            {
+                for (const auto &el : entry["resistances"])
+                    if (el.is_string())
+                        resistances[mobId].push_back(el.get<std::string>());
+            }
+        }
+    }
+    catch (const std::exception &)
+    {
+    }
+    return {std::move(weaknesses), std::move(resistances)};
 }
 
 std::vector<std::pair<int, std::vector<SkillStruct>>>
@@ -923,6 +1092,35 @@ JSONParser::parseMobsSkillsMapping(const char *data, size_t length)
                         if (skillData.contains("areaRadius") && skillData["areaRadius"].is_number())
                         {
                             skill.areaRadius = skillData["areaRadius"].get<float>();
+                        }
+                        if (skillData.contains("swingMs") && skillData["swingMs"].is_number_integer())
+                        {
+                            skill.swingMs = skillData["swingMs"].get<int>();
+                        }
+                        if (skillData.contains("animationName") && skillData["animationName"].is_string())
+                        {
+                            skill.animationName = skillData["animationName"].get<std::string>();
+                        }
+                        // Parse skill effect definitions
+                        if (skillData.contains("effects") && skillData["effects"].is_array())
+                        {
+                            for (const auto &eff : skillData["effects"])
+                            {
+                                SkillEffectDefinitionStruct ed;
+                                if (eff.contains("effectSlug") && eff["effectSlug"].is_string())
+                                    ed.effectSlug = eff["effectSlug"].get<std::string>();
+                                if (eff.contains("effectTypeSlug") && eff["effectTypeSlug"].is_string())
+                                    ed.effectTypeSlug = eff["effectTypeSlug"].get<std::string>();
+                                if (eff.contains("attributeSlug") && eff["attributeSlug"].is_string())
+                                    ed.attributeSlug = eff["attributeSlug"].get<std::string>();
+                                if (eff.contains("value") && eff["value"].is_number())
+                                    ed.value = eff["value"].get<float>();
+                                if (eff.contains("durationSeconds") && eff["durationSeconds"].is_number_integer())
+                                    ed.durationSeconds = eff["durationSeconds"].get<int>();
+                                if (eff.contains("tickMs") && eff["tickMs"].is_number_integer())
+                                    ed.tickMs = eff["tickMs"].get<int>();
+                                skill.effects.push_back(ed);
+                            }
                         }
 
                         skills.push_back(skill);
@@ -1208,6 +1406,10 @@ JSONParser::parseNPCsList(const char *data, size_t length)
                 if (npcJson.contains("questId") && npcJson["questId"].is_string())
                     npc.questId = npcJson["questId"].get<std::string>();
 
+                // Social systems (Stage 4, migration 039)
+                if (npcJson.contains("factionSlug") && npcJson["factionSlug"].is_string())
+                    npc.factionSlug = npcJson["factionSlug"].get<std::string>();
+
                 // Parse position
                 if (npcJson.contains("posX") && npcJson["posX"].is_number())
                     npc.position.positionX = npcJson["posX"].get<float>();
@@ -1428,6 +1630,7 @@ JSONParser::parseQuestsList(const char *data, size_t length)
                     step.questId = q.id;
                     step.stepIndex = sj.value("stepIndex", 0);
                     step.stepType = sj.value("stepType", "");
+                    step.completionMode = sj.value("completionMode", "auto");
                     step.clientStepKey = sj.value("clientStepKey", "");
                     if (sj.contains("params"))
                     {
@@ -1583,6 +1786,40 @@ JSONParser::parsePlayerActiveEffects(const char *data, size_t length)
     }
     return result;
 }
+
+std::vector<PlayerInventoryItemStruct>
+JSONParser::parsePlayerInventory(const char *data, size_t length)
+{
+    std::vector<PlayerInventoryItemStruct> result;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].contains("items"))
+            return result;
+
+        int characterId = j["body"].value("characterId", 0);
+        for (const auto &ij : j["body"]["items"])
+        {
+            PlayerInventoryItemStruct item;
+            item.id = static_cast<int>(ij.value("id", int64_t(0)));
+            item.characterId = characterId;
+            item.itemId = ij.value("itemId", 0);
+            item.quantity = ij.value("quantity", 1);
+            item.slotIndex = ij.value("slotIndex", -1);
+            item.durabilityCurrent = ij.value("durabilityCurrent", 0);
+            item.isEquipped = ij.value("isEquipped", false);
+            item.killCount = ij.value("killCount", 0);
+            if (item.itemId > 0)
+                result.push_back(std::move(item));
+        }
+    }
+    catch (const std::exception &)
+    {
+        result.clear();
+    }
+    return result;
+}
+
 std::pair<int, std::vector<CharacterAttributeStruct>>
 JSONParser::parseCharacterAttributesRefresh(const char *data, size_t length)
 {
@@ -1618,4 +1855,173 @@ JSONParser::parseCharacterAttributesRefresh(const char *data, size_t length)
         result.second.clear();
     }
     return result;
+}
+
+std::vector<RespawnZoneStruct>
+JSONParser::parseRespawnZonesList(const char *data, size_t length)
+{
+    std::vector<RespawnZoneStruct> zones;
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+        if (!jsonData.contains("body") || !jsonData["body"].contains("respawnZonesData") ||
+            !jsonData["body"]["respawnZonesData"].is_array())
+            return zones;
+
+        for (const auto &z : jsonData["body"]["respawnZonesData"])
+        {
+            RespawnZoneStruct zone;
+            if (z.contains("id") && z["id"].is_number_integer())
+                zone.id = z["id"].get<int>();
+            if (z.contains("name") && z["name"].is_string())
+                zone.name = z["name"].get<std::string>();
+            if (z.contains("x") && z["x"].is_number())
+                zone.position.positionX = z["x"].get<float>();
+            if (z.contains("y") && z["y"].is_number())
+                zone.position.positionY = z["y"].get<float>();
+            if (z.contains("z") && z["z"].is_number())
+                zone.position.positionZ = z["z"].get<float>();
+            if (z.contains("zoneId") && z["zoneId"].is_number_integer())
+                zone.zoneId = z["zoneId"].get<int>();
+            if (z.contains("isDefault") && z["isDefault"].is_boolean())
+                zone.isDefault = z["isDefault"].get<bool>();
+            zones.push_back(std::move(zone));
+        }
+    }
+    catch (const std::exception &)
+    {
+        zones.clear();
+    }
+    return zones;
+}
+
+std::vector<GameZoneStruct>
+JSONParser::parseGameZonesList(const char *data, size_t length)
+{
+    std::vector<GameZoneStruct> zones;
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+        if (!jsonData.contains("body") || !jsonData["body"].contains("gameZonesData") ||
+            !jsonData["body"]["gameZonesData"].is_array())
+            return zones;
+
+        for (const auto &z : jsonData["body"]["gameZonesData"])
+        {
+            GameZoneStruct zone;
+            if (z.contains("id") && z["id"].is_number_integer())
+                zone.id = z["id"].get<int>();
+            if (z.contains("slug") && z["slug"].is_string())
+                zone.slug = z["slug"].get<std::string>();
+            if (z.contains("name") && z["name"].is_string())
+                zone.name = z["name"].get<std::string>();
+            if (z.contains("minLevel") && z["minLevel"].is_number_integer())
+                zone.minLevel = z["minLevel"].get<int>();
+            if (z.contains("maxLevel") && z["maxLevel"].is_number_integer())
+                zone.maxLevel = z["maxLevel"].get<int>();
+            if (z.contains("isPvp") && z["isPvp"].is_boolean())
+                zone.isPvp = z["isPvp"].get<bool>();
+            if (z.contains("isSafeZone") && z["isSafeZone"].is_boolean())
+                zone.isSafeZone = z["isSafeZone"].get<bool>();
+            if (z.contains("minX") && z["minX"].is_number())
+                zone.minX = z["minX"].get<float>();
+            if (z.contains("maxX") && z["maxX"].is_number())
+                zone.maxX = z["maxX"].get<float>();
+            if (z.contains("minY") && z["minY"].is_number())
+                zone.minY = z["minY"].get<float>();
+            if (z.contains("maxY") && z["maxY"].is_number())
+                zone.maxY = z["maxY"].get<float>();
+            if (z.contains("explorationXpReward") && z["explorationXpReward"].is_number_integer())
+                zone.explorationXpReward = z["explorationXpReward"].get<int>();
+            if (z.contains("championThresholdKills") && z["championThresholdKills"].is_number_integer())
+                zone.championThresholdKills = z["championThresholdKills"].get<int>();
+            zones.push_back(std::move(zone));
+        }
+    }
+    catch (const std::exception &)
+    {
+        zones.clear();
+    }
+    return zones;
+}
+
+std::vector<StatusEffectTemplate>
+JSONParser::parseStatusEffectTemplates(const char *data, size_t length)
+{
+    std::vector<StatusEffectTemplate> templates;
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+        if (!jsonData.contains("body") || !jsonData["body"].contains("templates") ||
+            !jsonData["body"]["templates"].is_array())
+            return templates;
+
+        for (const auto &t : jsonData["body"]["templates"])
+        {
+            StatusEffectTemplate tmpl;
+            if (t.contains("effectSlug") && t["effectSlug"].is_string())
+                tmpl.slug = t["effectSlug"].get<std::string>();
+            if (t.contains("category") && t["category"].is_string())
+                tmpl.category = t["category"].get<std::string>();
+            if (t.contains("durationSec") && t["durationSec"].is_number_integer())
+                tmpl.durationSec = t["durationSec"].get<int>();
+
+            if (t.contains("modifiers") && t["modifiers"].is_array())
+            {
+                for (const auto &m : t["modifiers"])
+                {
+                    StatusEffectModifierDef mod;
+                    if (m.contains("modifierType") && m["modifierType"].is_string())
+                        mod.modifierType = m["modifierType"].get<std::string>();
+                    if (m.contains("attributeSlug") && m["attributeSlug"].is_string())
+                        mod.attributeSlug = m["attributeSlug"].get<std::string>();
+                    if (m.contains("value") && m["value"].is_number())
+                        mod.value = m["value"].get<double>();
+                    tmpl.modifiers.push_back(std::move(mod));
+                }
+            }
+
+            if (!tmpl.slug.empty())
+                templates.push_back(std::move(tmpl));
+        }
+    }
+    catch (const std::exception &)
+    {
+        templates.clear();
+    }
+    return templates;
+}
+
+std::vector<TimedChampionTemplate>
+JSONParser::parseTimedChampionTemplates(const char *data, size_t length)
+{
+    std::vector<TimedChampionTemplate> templates;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        const auto &arr = j.at("body").at("timedChampionTemplates");
+        if (!arr.is_array())
+            return templates;
+
+        for (const auto &t : arr)
+        {
+            TimedChampionTemplate tmpl;
+            tmpl.id = t.value("id", 0);
+            tmpl.slug = t.value("slug", std::string{});
+            tmpl.gameZoneId = t.value("gameZoneId", 0);
+            tmpl.mobTemplateId = t.value("mobTemplateId", 0);
+            tmpl.intervalHours = t.value("intervalHours", 6);
+            tmpl.windowMinutes = t.value("windowMinutes", 15);
+            tmpl.nextSpawnAt = t.value("nextSpawnAt", int64_t{0});
+            tmpl.announceKey = t.value("announceKey", std::string{});
+
+            if (!tmpl.slug.empty() && tmpl.mobTemplateId > 0)
+                templates.push_back(std::move(tmpl));
+        }
+    }
+    catch (const std::exception &)
+    {
+        templates.clear();
+    }
+    return templates;
 }

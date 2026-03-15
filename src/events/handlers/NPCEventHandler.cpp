@@ -30,6 +30,20 @@ NPCEventHandler::handleSetAllNPCsListEvent(const Event &event)
             gameServices_.getLogger().log(
                 "Received and stored " + std::to_string(npcs.size()) + " NPCs from game server",
                 GREEN);
+
+            // Push NPC data to players who connected before this event arrived
+            // (race condition: JOIN_CHARACTER processed before SET_ALL_NPCS_LIST)
+            auto connectedClients = gameServices_.getClientManager().getClientsList();
+            for (const auto &client : connectedClients)
+            {
+                if (client.characterId == 0)
+                    continue;
+                CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(client.characterId);
+                if (charData.characterId == 0)
+                    continue;
+                sendNPCSpawnDataToClient(client.clientId, charData.characterPosition, 50000.0f);
+                log_->info("Sent late NPC spawn data to already-connected client " + std::to_string(client.clientId));
+            }
         }
         else
         {

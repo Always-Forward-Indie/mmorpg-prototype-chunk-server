@@ -40,6 +40,12 @@ HarvestEventHandler::handleHarvestStartRequest(const Event &event)
                 return;
             }
 
+            if (!isPlayerAlive(request.characterId))
+            {
+                log_->warn("[HarvestEventHandler] Dead character {} attempted harvest", request.characterId);
+                return;
+            }
+
             log_->info("HarvestEventHandler: Using character ID from request: " + std::to_string(request.characterId));
 
             // Проверяем существование трупа
@@ -336,8 +342,8 @@ HarvestEventHandler::handleHarvestComplete(int playerId, int corpseId)
                 itemData["itemId"] = itemId;
                 itemData["itemSlug"] = itemInfo.slug;
                 itemData["quantity"] = quantity;
-                itemData["name"] = itemInfo.name;
-                itemData["description"] = itemInfo.description;
+                itemData["name"] = itemInfo.slug;
+                itemData["description"] = "";
                 itemData["rarityId"] = itemInfo.rarityId;
                 itemData["rarityName"] = itemInfo.rarityName;
                 itemData["itemType"] = itemInfo.itemTypeName;
@@ -474,8 +480,8 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                     itemData["itemId"] = itemId;
                     itemData["itemSlug"] = itemInfo.slug;
                     itemData["quantity"] = quantity;
-                    itemData["name"] = itemInfo.name;
-                    itemData["description"] = itemInfo.description;
+                    itemData["name"] = itemInfo.slug;
+                    itemData["description"] = "";
                     itemData["rarityId"] = itemInfo.rarityId;
                     itemData["rarityName"] = itemInfo.rarityName;
                     itemData["itemType"] = itemInfo.itemTypeName;
@@ -493,8 +499,8 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                     itemData["itemId"] = itemId;
                     itemData["itemSlug"] = itemInfo.slug;
                     itemData["quantity"] = quantity;
-                    itemData["name"] = itemInfo.name;
-                    itemData["description"] = itemInfo.description;
+                    itemData["name"] = itemInfo.slug;
+                    itemData["description"] = "";
                     itemData["rarityId"] = itemInfo.rarityId;
                     itemData["rarityName"] = itemInfo.rarityName;
                     itemData["itemType"] = itemInfo.itemTypeName;
@@ -674,8 +680,8 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
                 itemData["itemId"] = itemId;
                 itemData["itemSlug"] = itemInfo.slug;
                 itemData["quantity"] = quantity;
-                itemData["name"] = itemInfo.name;
-                itemData["description"] = itemInfo.description;
+                itemData["name"] = itemInfo.slug;
+                itemData["description"] = "";
                 itemData["rarityId"] = itemInfo.rarityId;
                 itemData["rarityName"] = itemInfo.rarityName;
                 itemData["itemType"] = itemInfo.itemTypeName;

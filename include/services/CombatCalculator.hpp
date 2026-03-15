@@ -145,6 +145,13 @@ class CombatCalculator
      */
     int applyDefense(int damage, int defenseValue, const std::string &damageType, int targetLevel);
 
+    /**
+     * @brief Применить неистёкшие stat-modifier эффекты к базовым атрибутам.
+     *        DoT/HoT пропускаются (они обрабатываются отдельно через tickEffects).
+     *        Используется перед любым расчётом урона/лечения.
+     */
+    std::vector<CharacterAttributeStruct> mergeEffects(const CharacterDataStruct &character) const;
+
   private:
     std::random_device rd_;
     std::mt19937 gen_;
@@ -153,12 +160,4 @@ class CombatCalculator
 
     /// @brief Reads float constant from config if loaded, otherwise returns defaultValue.
     float cfg(const std::string &key, float defaultValue) const;
-
-    /**
-     * @brief Returns a copy of character attributes with non-expired active effects applied.
-     *
-     * Iterates character.activeEffects; skips entries where expiresAt != 0 and expiresAt <= now.
-     * Adds effect.value to the matching attribute slug, or appends a new entry if not found.
-     */
-    std::vector<CharacterAttributeStruct> mergeEffects(const CharacterDataStruct &character) const;
 };

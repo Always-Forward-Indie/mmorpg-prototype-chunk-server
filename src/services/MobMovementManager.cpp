@@ -5,6 +5,7 @@
 #include "events/EventQueue.hpp"
 #include "services/CharacterManager.hpp"
 #include "services/CombatSystem.hpp"
+#include "services/GameServices.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/SpawnZoneManager.hpp"
@@ -74,6 +75,12 @@ MobMovementManager::setMobManager(MobManager *mobManager)
 }
 
 void
+MobMovementManager::setGameServices(GameServices *gs)
+{
+    gameServices_ = gs;
+}
+
+void
 MobMovementManager::setZoneMovementParams(int zoneId, const MobMovementParams &params)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -112,6 +119,18 @@ MobMovementManager::moveMobsInZone(int zoneId)
         if (paramIt != zoneMovementParams_.end())
         {
             params = paramIt->second;
+        }
+    }
+
+    // Zone event mob speed multiplier (Stage 4)
+    if (gameServices_)
+    {
+        float speedMult = gameServices_->getZoneEventManager().getMobSpeedMultiplier(zoneId);
+        if (speedMult != 1.0f)
+        {
+            params.baseSpeedMin *= speedMult;
+            params.baseSpeedMax *= speedMult;
+            params.maxStepSizeAbsolute *= speedMult;
         }
     }
 
@@ -275,6 +294,18 @@ MobMovementManager::moveMobsInZone(int zoneId)
 
             anyMobMoved = true;
         }
+        else
+        {
+            // Same race-condition guard as in moveSingleMob: re-run the state machine
+            // when chase movement was stopped so CHASING → PREPARING_ATTACK fires even
+            // when the player moved between the pre-movement state-machine read and the
+            // movement distance check.
+            auto freshData = getMobMovementDataInternal(mob.uid);
+            if (freshData.combatState == MobCombatState::CHASING && freshData.targetPlayerId > 0)
+            {
+                mobAIController_.updateMobCombatState(mob, freshData, currentTime);
+            }
+        }
     }
 
     return anyMobMoved;
@@ -436,6 +467,21 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
         return true;
     }
 
+    // Movement was stopped (mob reached attack range, collision, or other reason).
+    // Re-run the combat state machine so CHASING → PREPARING_ATTACK fires immediately
+    // when the mob stopped because it is within attack range.  This is necessary
+    // because the earlier updateMobCombatState call and calculateChaseMovement each
+    // call getCharacterById independently; a concurrent network-thread position update
+    // between those two reads can leave the mob frozen in CHASING even though it is
+    // already within attack range.
+    {
+        auto freshData = getMobMovementDataInternal(mobUID);
+        if (freshData.combatState == MobCombatState::CHASING && freshData.targetPlayerId > 0)
+        {
+            mobAIController_.updateMobCombatState(mob, freshData, currentTime);
+        }
+    }
+
     return false;
 }
 
@@ -449,14 +495,14 @@ MobMovementManager::calculateNewPosition(
     // Get movement data for this mob
     auto movementData = getMobMovementDataInternal(mob.uid);
 
-    // Calculate zone boundaries
-    float minX = zone.posX - (zone.sizeX / 2.0f);
-    float maxX = zone.posX + (zone.sizeX / 2.0f);
-    float minY = zone.posY - (zone.sizeY / 2.0f);
-    float maxY = zone.posY + (zone.sizeY / 2.0f);
+    // Calculate zone boundaries (posX/Y = min_spawn, sizeX/Y = max_spawn — два угла AABB из БД)
+    float minX = zone.posX;
+    float maxX = zone.sizeX;
+    float minY = zone.posY;
+    float maxY = zone.sizeY;
 
     // Check if mob is at border
-    float borderThreshold = std::max(zone.sizeX, zone.sizeY) * params.borderThresholdPercent;
+    float borderThreshold = std::max(maxX - minX, maxY - minY) * params.borderThresholdPercent;
     bool atBorder = (mob.position.positionX <= minX + borderThreshold ||
                      mob.position.positionX >= maxX - borderThreshold ||
                      mob.position.positionY <= minY + borderThreshold ||
@@ -477,7 +523,7 @@ MobMovementManager::calculateNewPosition(
     // Calculate step size
     std::uniform_real_distribution<float> baseSpeed(params.baseSpeedMin, params.baseSpeedMax);
     std::uniform_real_distribution<float> randFactor(0.85f, 1.2f);
-    float maxStepSize = std::min((zone.sizeX + zone.sizeY) * params.maxStepSizePercent, params.maxStepSizeAbsolute);
+    float maxStepSize = std::min(((maxX - minX) + (maxY - minY)) * params.maxStepSizePercent, params.maxStepSizeAbsolute);
     float stepSize = std::clamp(baseSpeed(rng_) * movementData.stepMultiplier * randFactor(rng_),
         params.minMoveDistance * 0.75f,
         maxStepSize);
@@ -499,8 +545,10 @@ MobMovementManager::calculateNewPosition(
         if (atBorder)
         {
             // Move towards center when at border
-            float angleToCenter = atan2(zone.posY - mob.position.positionY,
-                zone.posX - mob.position.positionX);
+            float centerX = (minX + maxX) * 0.5f;
+            float centerY = (minY + maxY) * 0.5f;
+            float angleToCenter = atan2(centerY - mob.position.positionY,
+                centerX - mob.position.positionX);
             std::uniform_real_distribution<float> borderAngle(params.borderAngleMin, params.borderAngleMax);
             newAngle = angleToCenter + (borderAngle(rng_) * (M_PI / 180.0f));
         }
@@ -613,11 +661,11 @@ bool
 MobMovementManager::isValidPosition(
     float x, float y, const SpawnZoneStruct &zone, const std::vector<std::pair<int, PositionStruct>> &otherMobs, const MobDataStruct &currentMob, const MobMovementParams &params)
 {
-    // Check zone boundaries
-    float minX = zone.posX - (zone.sizeX / 2.0f);
-    float maxX = zone.posX + (zone.sizeX / 2.0f);
-    float minY = zone.posY - (zone.sizeY / 2.0f);
-    float maxY = zone.posY + (zone.sizeY / 2.0f);
+    // Check zone boundaries (posX/Y = min_spawn, sizeX/Y = max_spawn — два угла AABB из БД)
+    float minX = zone.posX;
+    float maxX = zone.sizeX;
+    float minY = zone.posY;
+    float maxY = zone.sizeY;
 
     if (x < minX || x > maxX || y < minY || y > maxY)
     {
@@ -700,9 +748,13 @@ MobMovementManager::shouldSendMobUpdate(int mobUID, const PositionStruct &curren
         auto it = mobMovementData_.find(mobUID);
         if (it != mobMovementData_.end())
         {
-            float distance = calculateDistance(currentPosition, it->second.lastSentPosition);
-            if (distance < aiConfig_.minimumMoveDistance)
-                return false; // No write needed — bail out without exclusive lock
+            // Skip the distance check if a forced update is pending.
+            if (!it->second.forceNextUpdate)
+            {
+                float distance = calculateDistance(currentPosition, it->second.lastSentPosition);
+                if (distance < aiConfig_.minimumMoveDistance)
+                    return false; // No write needed — bail out without exclusive lock
+            }
         }
     }
 
@@ -720,9 +772,10 @@ MobMovementManager::shouldSendMobUpdate(int mobUID, const PositionStruct &curren
     }
 
     float distance = calculateDistance(currentPosition, it->second.lastSentPosition);
-    if (distance < aiConfig_.minimumMoveDistance)
+    if (!it->second.forceNextUpdate && distance < aiConfig_.minimumMoveDistance)
         return false; // Another thread may have already updated lastSentPosition
 
+    it->second.forceNextUpdate = false;
     it->second.lastSentPosition = currentPosition;
 
     if (it->second.combatState != MobCombatState::PATROLLING)
@@ -747,9 +800,10 @@ MobMovementManager::forceMobStateUpdate(int mobUID)
     auto it = mobMovementData_.find(mobUID);
     if (it != mobMovementData_.end())
     {
-        // Reset the last sent position to force next update
-        it->second.lastSentPosition.positionX = -999999.0f;
-        it->second.lastSentPosition.positionY = -999999.0f;
+        // Mark that the next shouldSendPositionUpdate call must bypass the
+        // distance threshold. Do NOT touch lastSentPosition — that would
+        // produce a spurious multi-million "distance moved" log entry.
+        it->second.forceNextUpdate = true;
 
         const char *stateNames[] = {"PATROLLING", "CHASING", "PREPARING_ATTACK", "ATTACKING", "ATTACK_COOLDOWN", "RETURNING", "EVADING", "FLEEING"};
         int stateIndex = static_cast<int>(it->second.combatState);
@@ -878,12 +932,14 @@ MobMovementManager::calculateChaseMovement(
         return std::nullopt;
     }
 
-    constexpr float ATTACK_BUFFER = 10.0f;
-
     // 4) If within attack range → stop movement (combat state system will handle attacks)
+    // NOTE: previously there was a constant ATTACK_BUFFER = 10.0f added here, which caused
+    // a dead zone: the mob would stop moving at (attackRange + 10) but the combat state
+    // machine only transitions to PREPARING_ATTACK at (attackRange). The mob would
+    // stand still without attacking until the player closed the gap manually.
     {
         std::lock_guard<std::mutex> lg(logMutex_);
-        if (distance <= mob.attackRange + ATTACK_BUFFER)
+        if (distance <= mob.attackRange)
         {
             if (inRangeSet_.insert(mob.uid).second)
             {
@@ -910,9 +966,17 @@ MobMovementManager::calculateChaseMovement(
     dx /= distance;
     dy /= distance;
 
-    // 7) Compute step size limited by attackRange (params passed from caller)
+    // 7) Compute step size limited by attackRange (params passed from caller).
+    // Overshoot the attack-range boundary by a small buffer so floating-point
+    // rounding cannot land the mob at attackRange+epsilon (just outside), which
+    // would prevent updateMobCombatState from triggering the attack.
+    // The mob targets (attackRange - kAttackEntryBuffer) as its stop point, ensuring
+    // it lands clearly inside attack range. Step-4 above still returns nullopt any
+    // time the mob is already within attackRange, so the buffer has no effect once
+    // the mob is already close.
+    const float kAttackEntryBuffer = 2.0f;
     float maxStep = std::min(params.baseSpeedMax * 1.5f, params.maxStepSizeAbsolute);
-    float overshoot = distance - mob.attackRange;
+    float overshoot = distance - std::max(0.0f, mob.attackRange - kAttackEntryBuffer);
     float stepSize = std::min(maxStep, overshoot);
     if (stepSize <= 0.0f)
     {

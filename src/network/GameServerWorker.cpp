@@ -205,6 +205,11 @@ GameServerWorker::processGameServerData(std::string_view data)
         auto lootInfo = jsonParser_.parseMobLootInfo(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_MOB_LOOT_INFO, clientData.clientId, lootInfo);
     }
+    else if (eventType == "setMobWeaknessesResistances")
+    {
+        auto weakRes = jsonParser_.parseMobWeaknessesResistances(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_MOB_WEAKNESSES_RESISTANCES, clientData.clientId, std::move(weakRes));
+    }
     else if (eventType == "getExpLevelTable")
     {
         auto expTable = jsonParser_.parseExpLevelTable(data.data(), data.size());
@@ -240,15 +245,75 @@ GameServerWorker::processGameServerData(std::string_view data)
         nlohmann::json bodyJson = jsonParser_.parseCombatActionData(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_GAME_CONFIG, clientData.clientId, bodyJson);
     }
+    else if (eventType == "setVendorData")
+    {
+        nlohmann::json bodyJson = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_VENDOR_DATA, clientData.clientId, bodyJson);
+    }
     else if (eventType == "setPlayerActiveEffects")
     {
         auto effects = jsonParser_.parsePlayerActiveEffects(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_PLAYER_ACTIVE_EFFECTS, clientData.clientId, effects);
     }
+    else if (eventType == "setPlayerInventoryData")
+    {
+        auto items = jsonParser_.parsePlayerInventory(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_PLAYER_INVENTORY, clientData.clientId, items);
+    }
+    else if (eventType == "inventoryItemIdSync")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::INVENTORY_ITEM_ID_SYNC, clientData.clientId, body);
+    }
     else if (eventType == "setCharacterAttributesRefresh")
     {
         auto payload = jsonParser_.parseCharacterAttributesRefresh(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_CHARACTER_ATTRIBUTES_REFRESH, clientData.clientId, payload);
+    }
+    else if (eventType == "setRespawnZonesList")
+    {
+        auto zones = jsonParser_.parseRespawnZonesList(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_RESPAWN_ZONES, clientData.clientId, zones);
+    }
+    else if (eventType == "setGameZonesList")
+    {
+        auto zones = jsonParser_.parseGameZonesList(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_GAME_ZONES, clientData.clientId, zones);
+    }
+    else if (eventType == "setStatusEffectTemplates")
+    {
+        auto templates = jsonParser_.parseStatusEffectTemplates(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_STATUS_EFFECT_TEMPLATES, clientData.clientId, templates);
+    }
+    else if (eventType == "setPlayerPityData")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_PLAYER_PITY, clientData.clientId, body);
+    }
+    else if (eventType == "setPlayerBestiaryData")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_PLAYER_BESTIARY, clientData.clientId, body);
+    }
+    else if (eventType == "setTimedChampionTemplatesList")
+    {
+        auto templates = jsonParser_.parseTimedChampionTemplates(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_TIMED_CHAMPION_TEMPLATES, clientData.clientId, templates);
+    }
+    else if (eventType == "setPlayerReputationsData")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_PLAYER_REPUTATIONS, clientData.clientId, body);
+    }
+    else if (eventType == "setPlayerMasteriesData")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_PLAYER_MASTERIES, clientData.clientId, body);
+    }
+    else if (eventType == "setZoneEventTemplatesList")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_ZONE_EVENT_TEMPLATES, clientData.clientId, body);
     }
     else
     {

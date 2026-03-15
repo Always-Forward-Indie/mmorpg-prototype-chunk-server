@@ -23,12 +23,20 @@ EventHandler::EventHandler(
     skillEventHandler_ = std::make_unique<SkillEventHandler>(networkManager, gameServerWorker, gameServices);
     experienceEventHandler_ = std::make_unique<ExperienceEventHandler>(networkManager, gameServerWorker, gameServices);
     dialogueEventHandler_ = std::make_unique<DialogueEventHandler>(networkManager, gameServerWorker, gameServices);
+    vendorEventHandler_ = std::make_unique<VendorEventHandler>(networkManager, gameServerWorker, gameServices);
+    equipmentEventHandler_ = std::make_unique<EquipmentEventHandler>(networkManager, gameServerWorker, gameServices);
 
     // Set skill event handler reference in character event handler
     characterEventHandler_->setSkillEventHandler(skillEventHandler_.get());
 
     // Set NPC event handler reference in character event handler
     characterEventHandler_->setNPCEventHandler(npcEventHandler_.get());
+
+    // Set item event handler reference in character event handler (ground items snapshot on join)
+    characterEventHandler_->setItemEventHandler(itemEventHandler_.get());
+
+    // Set mob event handler reference in character event handler (server-push spawn zones on join)
+    characterEventHandler_->setMobEventHandler(mobEventHandler_.get());
 }
 
 void
@@ -74,6 +82,9 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::MOVE_CHARACTER:
             characterEventHandler_->handleMoveCharacterEvent(event);
+            break;
+        case Event::PLAYER_RESPAWN:
+            characterEventHandler_->handlePlayerRespawnEvent(event);
             break;
 
         // Mob Events
@@ -126,6 +137,9 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::SET_MOB_LOOT_INFO:
             itemEventHandler_->handleSetMobLootInfoEvent(event);
             break;
+        case Event::SET_MOB_WEAKNESSES_RESISTANCES:
+            mobEventHandler_->handleSetMobWeaknessesResistancesEvent(event);
+            break;
         case Event::SET_EXP_LEVEL_TABLE:
             handleSetExpLevelTableEvent(event);
             break;
@@ -143,6 +157,18 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::GET_PLAYER_INVENTORY:
             itemEventHandler_->handleGetPlayerInventoryEvent(event);
+            break;
+        case Event::INVENTORY_UPDATE:
+            itemEventHandler_->handleInventoryUpdateEvent(event);
+            break;
+        case Event::ITEM_DROP_BY_PLAYER:
+            itemEventHandler_->handleItemDropByPlayerEvent(event);
+            break;
+        case Event::ITEM_REMOVE:
+            itemEventHandler_->handleItemRemoveEvent(event);
+            break;
+        case Event::USE_ITEM:
+            itemEventHandler_->handleUseItemEvent(event);
             break;
 
         // Harvest Events
@@ -178,12 +204,24 @@ EventHandler::dispatchEvent(const Event &event)
             }
             break;
 
-        // Zone Events
+        // ── Zone Events ────────────────────────────────────────────────────────
         case Event::SET_ALL_SPAWN_ZONES:
             zoneEventHandler_->handleSetAllSpawnZonesEvent(event);
             break;
         case Event::GET_SPAWN_ZONE_DATA:
             zoneEventHandler_->handleGetSpawnZoneDataEvent(event);
+            break;
+        case Event::SET_RESPAWN_ZONES:
+            zoneEventHandler_->handleSetRespawnZonesEvent(event);
+            break;
+        case Event::SET_STATUS_EFFECT_TEMPLATES:
+            handleSetStatusEffectTemplatesEvent(event);
+            break;
+        case Event::SET_GAME_ZONES:
+            zoneEventHandler_->handleSetGameZonesEvent(event);
+            break;
+        case Event::SET_TIMED_CHAMPION_TEMPLATES:
+            zoneEventHandler_->handleSetTimedChampionTemplatesEvent(event);
             break;
 
         // Combat Events
@@ -268,6 +306,39 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::SET_PLAYER_ACTIVE_EFFECTS:
             handleSetPlayerActiveEffectsEvent(event);
             break;
+        case Event::SET_PLAYER_INVENTORY:
+            handleSetPlayerInventoryEvent(event);
+            break;
+        case Event::SET_PLAYER_PITY:
+            handleSetPlayerPityEvent(event);
+            break;
+        case Event::SET_PLAYER_BESTIARY:
+            handleSetPlayerBestiaryEvent(event);
+            break;
+        case Event::GET_BESTIARY_ENTRY:
+            handleGetBestiaryEntryEvent(event);
+            break;
+
+        // ── Stage-4 social systems ─────────────────────────────────────────────
+        case Event::SET_PLAYER_REPUTATIONS:
+            handleSetPlayerReputationsEvent(event);
+            break;
+        case Event::SET_PLAYER_MASTERIES:
+            handleSetPlayerMasteriesEvent(event);
+            break;
+        case Event::SET_ZONE_EVENT_TEMPLATES:
+            handleSetZoneEventTemplatesEvent(event);
+            break;
+        case Event::SAVE_REPUTATION:
+            // outgoing only — no handler needed
+            break;
+        case Event::SAVE_MASTERY:
+            // outgoing only — no handler needed
+            break;
+
+        case Event::INVENTORY_ITEM_ID_SYNC:
+            handleInventoryItemIdSyncEvent(event);
+            break;
         case Event::SET_CHARACTER_ATTRIBUTES_REFRESH:
             handleSetCharacterAttributesRefreshEvent(event);
             break;
@@ -281,6 +352,70 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::DIALOGUE_CLOSE:
             dialogueEventHandler_->handleDialogueCloseEvent(event);
+            break;
+
+        // ── Vendor / Repair / Trade / Durability events ────────────────────
+        case Event::SET_VENDOR_DATA:
+            vendorEventHandler_->handleSetVendorDataEvent(event);
+            break;
+        case Event::VENDOR_STOCK_UPDATE:
+            vendorEventHandler_->handleVendorStockUpdateEvent(event);
+            break;
+        case Event::OPEN_VENDOR_SHOP:
+            vendorEventHandler_->handleOpenVendorShopEvent(event);
+            break;
+        case Event::BUY_ITEM:
+            vendorEventHandler_->handleBuyItemEvent(event);
+            break;
+        case Event::SELL_ITEM:
+            vendorEventHandler_->handleSellItemEvent(event);
+            break;
+        case Event::BUY_ITEM_BATCH:
+            vendorEventHandler_->handleBuyItemBatchEvent(event);
+            break;
+        case Event::SELL_ITEM_BATCH:
+            vendorEventHandler_->handleSellItemBatchEvent(event);
+            break;
+        case Event::OPEN_REPAIR_SHOP:
+            vendorEventHandler_->handleOpenRepairShopEvent(event);
+            break;
+        case Event::REPAIR_ITEM:
+            vendorEventHandler_->handleRepairItemEvent(event);
+            break;
+        case Event::REPAIR_ALL:
+            vendorEventHandler_->handleRepairAllEvent(event);
+            break;
+        case Event::TRADE_REQUEST:
+            vendorEventHandler_->handleTradeRequestEvent(event);
+            break;
+        case Event::TRADE_ACCEPT:
+            vendorEventHandler_->handleTradeAcceptEvent(event);
+            break;
+        case Event::TRADE_DECLINE:
+            vendorEventHandler_->handleTradeDeclineEvent(event);
+            break;
+        case Event::TRADE_OFFER_UPDATE:
+            vendorEventHandler_->handleTradeOfferUpdateEvent(event);
+            break;
+        case Event::TRADE_CONFIRM:
+            vendorEventHandler_->handleTradeConfirmEvent(event);
+            break;
+        case Event::TRADE_CANCEL:
+            vendorEventHandler_->handleTradeCancelEvent(event);
+            break;
+        case Event::DURABILITY_UPDATE:
+            // Outbound-only event (chunk → client), no handler needed
+            break;
+
+        // ── Equipment events ──────────────────────────────────────────────────
+        case Event::EQUIP_ITEM:
+            equipmentEventHandler_->handleEquipItemEvent(event);
+            break;
+        case Event::UNEQUIP_ITEM:
+            equipmentEventHandler_->handleUnequipItemEvent(event);
+            break;
+        case Event::GET_EQUIPMENT:
+            equipmentEventHandler_->handleGetEquipmentEvent(event);
             break;
 
         default:
@@ -316,6 +451,18 @@ DialogueEventHandler &
 EventHandler::getDialogueEventHandler()
 {
     return *dialogueEventHandler_;
+}
+
+VendorEventHandler &
+EventHandler::getVendorEventHandler()
+{
+    return *vendorEventHandler_;
+}
+
+EquipmentEventHandler &
+EventHandler::getEquipmentEventHandler()
+{
+    return *equipmentEventHandler_;
 }
 
 void
@@ -386,6 +533,15 @@ EventHandler::handleSetGameConfigEvent(const Event &event)
 
         gameServices_.getGameConfigService().setConfig(configMap);
 
+        // Push bestiary tier thresholds to BestiaryManager
+        const auto &cfg = gameServices_.getGameConfigService();
+        gameServices_.getBestiaryManager().setThresholds({cfg.getInt("bestiary.tier1_kills", 1),
+            cfg.getInt("bestiary.tier2_kills", 5),
+            cfg.getInt("bestiary.tier3_kills", 15),
+            cfg.getInt("bestiary.tier4_kills", 30),
+            cfg.getInt("bestiary.tier5_kills", 75),
+            cfg.getInt("bestiary.tier6_kills", 150)});
+
         gameServices_.getLogger().log("Game config loaded: " +
                                           std::to_string(configMap.size()) + " entries.",
             GREEN);
@@ -409,35 +565,168 @@ EventHandler::handleSetPlayerActiveEffectsEvent(const Event &event)
         }
 
         auto effects = std::get<std::vector<ActiveEffectStruct>>(data);
-        int clientId = event.getClientID();
-
-        // Resolve characterId from clientId
-        auto characters = gameServices_.getCharacterManager().getCharactersList();
-        int characterId = 0;
-        for (const auto &c : characters)
-        {
-            if (c.clientId == clientId)
-            {
-                characterId = c.characterId;
-                break;
-            }
-        }
+        // Game server sets header clientId = characterId (same convention as inventory)
+        int characterId = event.getClientID();
 
         if (characterId <= 0)
         {
-            log_->error("[EH] SET_PLAYER_ACTIVE_EFFECTS: no character for clientId " +
-                                               std::to_string(clientId));
+            log_->error("[EH] SET_PLAYER_ACTIVE_EFFECTS: invalid characterId " +
+                        std::to_string(characterId));
             return;
         }
 
         gameServices_.getCharacterManager().setCharacterActiveEffects(characterId, std::move(effects));
 
+        // Re-apply permanent passive-skill effects so they survive every reload.
+        const auto skills = gameServices_.getCharacterManager().getCharacterSkills(characterId);
+        for (const auto &skill : skills)
+        {
+            if (!skill.isPassive)
+                continue;
+            for (const auto &ed : skill.effects)
+            {
+                ActiveEffectStruct eff;
+                eff.effectSlug = ed.effectSlug;
+                eff.effectTypeSlug = ed.effectTypeSlug;
+                eff.attributeSlug = ed.attributeSlug;
+                eff.value = ed.value;
+                eff.sourceType = "skill_passive";
+                eff.expiresAt = 0; // permanent
+                eff.tickMs = 0;    // passives never tick
+                gameServices_.getCharacterManager().addActiveEffect(characterId, eff);
+            }
+        }
+
+        // Refresh HUD: active effects may modify attributes (stat buffs/debuffs).
+        gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+
         log_->info("[EH] SET_PLAYER_ACTIVE_EFFECTS: stored effects for character " +
-                                          std::to_string(characterId));
+                   std::to_string(characterId));
     }
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("Error processing SET_PLAYER_ACTIVE_EFFECTS event: " + std::string(e.what()));
+    }
+}
+
+void
+EventHandler::handleSetPlayerInventoryEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<std::vector<PlayerInventoryItemStruct>>(data))
+        {
+            log_->error("SET_PLAYER_INVENTORY: unexpected data type");
+            return;
+        }
+        const auto &items = std::get<std::vector<PlayerInventoryItemStruct>>(data);
+        int characterId = event.getClientID(); // game server sets clientId = characterId
+
+        gameServices_.getInventoryManager().loadPlayerInventory(characterId, items);
+
+        // Build equipment state from the freshly loaded inventory
+        gameServices_.getEquipmentManager().buildFromInventory(characterId);
+
+        log_->info("[EH] SET_PLAYER_INVENTORY: loaded " + std::to_string(items.size()) +
+                   " items for character " + std::to_string(characterId));
+
+        // Immediately push inventory to client to avoid race: client may have already
+        // requested inventory before this DB response arrived (gets empty list).
+        auto characters = gameServices_.getCharacterManager().getCharactersList();
+        int clientId = 0;
+        for (const auto &c : characters)
+        {
+            if (c.characterId == characterId)
+            {
+                clientId = c.clientId;
+                break;
+            }
+        }
+
+        if (clientId <= 0)
+        {
+            log_->info("[EH] SET_PLAYER_INVENTORY: character " + std::to_string(characterId) +
+                       " has no active client yet, skipping push");
+            return;
+        }
+
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (!clientSocket || !clientSocket->is_open())
+        {
+            log_->error("[EH] SET_PLAYER_INVENTORY: socket not available for clientId " +
+                        std::to_string(clientId));
+            return;
+        }
+
+        nlohmann::json itemsArray = nlohmann::json::array();
+        for (const auto &item : items)
+        {
+            itemsArray.push_back(gameServices_.getInventoryManager().inventoryItemToJson(item));
+        }
+
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("message", "Inventory retrieved successfully!")
+                                      .setHeader("hash", "")
+                                      .setHeader("clientId", clientId)
+                                      .setHeader("eventType", "getPlayerInventory")
+                                      .setBody("characterId", characterId)
+                                      .setBody("items", itemsArray)
+                                      .build();
+
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", response));
+
+        log_->info("[EH] SET_PLAYER_INVENTORY: pushed " + std::to_string(items.size()) +
+                   " items to clientId=" + std::to_string(clientId) +
+                   " (characterId=" + std::to_string(characterId) + ")");
+
+        // Send current equipment state alongside inventory so the client
+        // can display equipped items immediately on character join.
+        equipmentEventHandler_->sendEquipmentState(clientId, characterId, TimestampStruct{});
+
+        // Send carry weight so the client can display currentWeight/weightLimit
+        // in the inventory UI immediately on connect.
+        equipmentEventHandler_->sendWeightStatus(clientId, characterId);
+
+        // Send full stats snapshot: inventory is now loaded so effective attributes
+        // (base + equipment bonuses) and weight are calculated correctly.
+        gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_PLAYER_INVENTORY event: " + std::string(e.what()));
+    }
+}
+
+void
+EventHandler::handleInventoryItemIdSyncEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("[INVENTORY_ID_SYNC] unexpected data type");
+            return;
+        }
+        const auto &j = std::get<nlohmann::json>(data);
+        int characterId = j.value("characterId", 0);
+        int itemId = j.value("itemId", 0);
+        int64_t newId = j.value("inventoryItemId", (int64_t)0);
+
+        if (characterId <= 0 || itemId <= 0 || newId <= 0)
+            return;
+
+        gameServices_.getInventoryManager().updateInventoryItemId(characterId, itemId, newId);
+
+        log_->info("[INVENTORY_ID_SYNC] char=" + std::to_string(characterId) +
+                   " itemId=" + std::to_string(itemId) +
+                   " assignedId=" + std::to_string(newId));
+    }
+    catch (const std::exception &e)
+    {
+        log_->error("[INVENTORY_ID_SYNC] exception: " + std::string(e.what()));
     }
 }
 
@@ -480,7 +769,7 @@ EventHandler::handleSetCharacterAttributesRefreshEvent(const Event &event)
         if (clientId <= 0)
         {
             log_->info("[EH] SET_CHARACTER_ATTRIBUTES_REFRESH: character " +
-                                              std::to_string(characterId) + " has no active client, skipping push");
+                       std::to_string(characterId) + " has no active client, skipping push");
             return;
         }
 
@@ -488,7 +777,7 @@ EventHandler::handleSetCharacterAttributesRefreshEvent(const Event &event)
         if (!clientSocket || !clientSocket->is_open())
         {
             log_->error("[EH] SET_CHARACTER_ATTRIBUTES_REFRESH: socket not available for clientId " +
-                                               std::to_string(clientId));
+                        std::to_string(clientId));
             return;
         }
 
@@ -524,5 +813,306 @@ EventHandler::handleSetCharacterAttributesRefreshEvent(const Event &event)
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("Error processing SET_CHARACTER_ATTRIBUTES_REFRESH event: " + std::string(e.what()));
+    }
+}
+
+void
+EventHandler::handleSetStatusEffectTemplatesEvent(const Event &event)
+{
+    try
+    {
+        log_->info("Processing SET_STATUS_EFFECT_TEMPLATES event");
+
+        const auto &data = event.getData();
+        if (!std::holds_alternative<std::vector<StatusEffectTemplate>>(data))
+        {
+            log_->error("SET_STATUS_EFFECT_TEMPLATES: unexpected data type");
+            return;
+        }
+
+        const auto &templates = std::get<std::vector<StatusEffectTemplate>>(data);
+        gameServices_.getStatusEffectTemplateManager().loadTemplates(templates);
+
+        gameServices_.getLogger().log(
+            "Status effect templates loaded: " + std::to_string(templates.size()) + " entries.", GREEN);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError(
+            "Error processing SET_STATUS_EFFECT_TEMPLATES event: " + std::string(e.what()));
+    }
+}
+
+// ── SET_PLAYER_PITY ────────────────────────────────────────────────────────
+void
+EventHandler::handleSetPlayerPityEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_PLAYER_PITY: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+        if (characterId <= 0)
+        {
+            log_->error("SET_PLAYER_PITY: missing characterId");
+            return;
+        }
+
+        std::vector<std::pair<int, int>> counters;
+        if (body.contains("entries") && body["entries"].is_array())
+        {
+            for (const auto &e : body["entries"])
+                counters.emplace_back(e.value("itemId", 0), e.value("killCount", 0));
+        }
+
+        gameServices_.getPityManager().loadPityData(characterId, counters);
+        log_->info("[EH] SET_PLAYER_PITY: loaded " + std::to_string(counters.size()) +
+                   " counters for character " + std::to_string(characterId));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_PLAYER_PITY: " + std::string(e.what()));
+    }
+}
+
+// ── SET_PLAYER_BESTIARY ────────────────────────────────────────────────────
+void
+EventHandler::handleSetPlayerBestiaryEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_PLAYER_BESTIARY: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+        if (characterId <= 0)
+        {
+            log_->error("SET_PLAYER_BESTIARY: missing characterId");
+            return;
+        }
+
+        std::vector<std::pair<int, int>> kills;
+        if (body.contains("entries") && body["entries"].is_array())
+        {
+            for (const auto &e : body["entries"])
+                kills.emplace_back(e.value("mobTemplateId", 0), e.value("killCount", 0));
+        }
+
+        gameServices_.getBestiaryManager().loadBestiaryData(characterId, kills);
+        log_->info("[EH] SET_PLAYER_BESTIARY: loaded " + std::to_string(kills.size()) +
+                   " bestiary entries for character " + std::to_string(characterId));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_PLAYER_BESTIARY: " + std::string(e.what()));
+    }
+}
+
+// ── GET_BESTIARY_ENTRY ─────────────────────────────────────────────────────
+void
+EventHandler::handleGetBestiaryEntryEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("GET_BESTIARY_ENTRY: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+        int clientId = body.value("clientId", event.getClientID());
+        int mobTemplateId = body.value("mobTemplateId", 0);
+
+        if (characterId <= 0 || mobTemplateId <= 0)
+        {
+            log_->error("GET_BESTIARY_ENTRY: invalid characterId or mobTemplateId");
+            return;
+        }
+
+        // Resolve mob static data
+        MobDataStruct mobStatic = gameServices_.getMobManager().getMobById(mobTemplateId);
+        const std::string &mobSlug = mobStatic.slug;
+
+        // Resolve weaknesses and resistances
+        std::vector<std::string> weaknesses = gameServices_.getMobManager().getWeaknessesForMob(mobTemplateId);
+        std::vector<std::string> resistances = gameServices_.getMobManager().getResistancesForMob(mobTemplateId);
+
+        // Resolve loot rows for this mob template
+        std::vector<MobLootInfoStruct> lootRows = gameServices_.getItemManager().getLootForMob(mobTemplateId);
+
+        // Item slug resolver
+        auto itemSlugFn = [this](int itemId) -> std::string
+        {
+            try
+            {
+                return gameServices_.getItemManager().getItemById(itemId).slug;
+            }
+            catch (...)
+            {
+                return "";
+            }
+        };
+
+        nlohmann::json entry = gameServices_.getBestiaryManager().buildEntryJson(
+            characterId, mobTemplateId, mobSlug, mobStatic, weaknesses, resistances, lootRows, itemSlugFn);
+
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (!clientSocket || !clientSocket->is_open())
+        {
+            log_->error("GET_BESTIARY_ENTRY: no socket for clientId=" + std::to_string(clientId));
+            return;
+        }
+
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("message", "Bestiary entry retrieved")
+                                      .setHeader("hash", "")
+                                      .setHeader("clientId", clientId)
+                                      .setHeader("eventType", "getBestiaryEntry")
+                                      .setBody("characterId", characterId)
+                                      .setBody("entry", entry)
+                                      .build();
+
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", response));
+
+        log_->info("[EH] GET_BESTIARY_ENTRY: sent mob=" + std::to_string(mobTemplateId) +
+                   " to clientId=" + std::to_string(clientId));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing GET_BESTIARY_ENTRY: " + std::string(e.what()));
+    }
+}
+
+// ── SET_PLAYER_REPUTATIONS ─────────────────────────────────────────────────
+void
+EventHandler::handleSetPlayerReputationsEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_PLAYER_REPUTATIONS: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+        if (characterId <= 0)
+        {
+            log_->error("SET_PLAYER_REPUTATIONS: missing characterId");
+            return;
+        }
+
+        std::unordered_map<std::string, int> reps;
+        if (body.contains("entries") && body["entries"].is_array())
+        {
+            for (const auto &e : body["entries"])
+                reps[e.value("factionSlug", "")] = e.value("value", 0);
+        }
+
+        gameServices_.getReputationManager().loadCharacterReputations(characterId, reps);
+        log_->info("[EH] SET_PLAYER_REPUTATIONS: loaded " + std::to_string(reps.size()) +
+                   " entries for character " + std::to_string(characterId));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_PLAYER_REPUTATIONS: " + std::string(e.what()));
+    }
+}
+
+// ── SET_PLAYER_MASTERIES ───────────────────────────────────────────────────
+void
+EventHandler::handleSetPlayerMasteriesEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_PLAYER_MASTERIES: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+        if (characterId <= 0)
+        {
+            log_->error("SET_PLAYER_MASTERIES: missing characterId");
+            return;
+        }
+
+        std::unordered_map<std::string, float> masteries;
+        if (body.contains("entries") && body["entries"].is_array())
+        {
+            for (const auto &e : body["entries"])
+                masteries[e.value("masterySlug", "")] = e.value("value", 0.0f);
+        }
+
+        gameServices_.getMasteryManager().loadCharacterMasteries(characterId, masteries);
+        log_->info("[EH] SET_PLAYER_MASTERIES: loaded " + std::to_string(masteries.size()) +
+                   " entries for character " + std::to_string(characterId));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_PLAYER_MASTERIES: " + std::string(e.what()));
+    }
+}
+
+// ── SET_ZONE_EVENT_TEMPLATES ───────────────────────────────────────────────
+void
+EventHandler::handleSetZoneEventTemplatesEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_ZONE_EVENT_TEMPLATES: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+
+        std::vector<ZoneEventManager::ZoneEventTemplate> templates;
+        if (body.contains("templates") && body["templates"].is_array())
+        {
+            for (const auto &t : body["templates"])
+            {
+                ZoneEventManager::ZoneEventTemplate tmpl;
+                tmpl.id = t.value("id", 0);
+                tmpl.slug = t.value("slug", "");
+                tmpl.gameZoneId = t.value("gameZoneId", 0);
+                tmpl.triggerType = t.value("triggerType", "manual");
+                tmpl.durationSec = t.value("durationSec", 300);
+                tmpl.lootMultiplier = t.value("lootMultiplier", 1.0f);
+                tmpl.spawnRateMultiplier = t.value("spawnRateMultiplier", 1.0f);
+                tmpl.mobSpeedMultiplier = t.value("mobSpeedMultiplier", 1.0f);
+                tmpl.announceKey = t.value("announceKey", "");
+                tmpl.intervalHours = t.value("intervalHours", 0);
+                tmpl.randomChancePerHour = t.value("randomChancePerHour", 0.0f);
+                tmpl.hasInvasionWave = t.value("hasInvasionWave", false);
+                tmpl.invasionMobTemplateId = t.value("invasionMobTemplateId", 0);
+                tmpl.invasionWaveCount = t.value("invasionWaveCount", 0);
+                if (!tmpl.slug.empty())
+                    templates.push_back(std::move(tmpl));
+            }
+        }
+
+        gameServices_.getZoneEventManager().loadTemplates(templates);
+        log_->info("[EH] SET_ZONE_EVENT_TEMPLATES: loaded " + std::to_string(templates.size()) + " templates");
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_ZONE_EVENT_TEMPLATES: " + std::string(e.what()));
     }
 }

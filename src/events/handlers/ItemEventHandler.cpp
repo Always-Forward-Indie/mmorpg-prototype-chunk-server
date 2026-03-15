@@ -27,7 +27,7 @@ ItemEventHandler::handleSetItemsListEvent(const Event &event)
             for (const auto &item : itemsList)
             {
                 gameServices_.getLogger().log("Item ID: " + std::to_string(item.id) +
-                                              ", Name: " + item.name +
+                                              ", Name: " + item.slug +
                                               ", Type: " + item.itemTypeName +
                                               ", Attributes: " + std::to_string(item.attributes.size()));
             }
@@ -134,6 +134,12 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
         {
             ItemPickupRequestStruct pickupRequest = std::get<ItemPickupRequestStruct>(data);
 
+            if (!isPlayerAlive(pickupRequest.characterId))
+            {
+                log_->warn("[ITEM_PICKUP_EVENT] Dead character {} attempted pickup", pickupRequest.characterId);
+                return;
+            }
+
             gameServices_.getLogger().log("[ITEM_PICKUP_EVENT] Processing pickup request - Character: " +
                                           std::to_string(pickupRequest.characterId) +
                                           ", Player ID (verified): " + std::to_string(pickupRequest.playerId) +
@@ -162,6 +168,28 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                 // Broadcast to all clients in the area
                 std::string responseData = networkManager_.generateResponseMessage("success", response);
                 broadcastToAllClients(responseData);
+
+                // Update carry weight for the player who picked up the item
+                auto charData = gameServices_.getCharacterManager().getCharacterData(pickupRequest.characterId);
+                if (charData.clientId > 0)
+                {
+                    auto weightSocket = gameServices_.getClientManager().getClientSocket(charData.clientId);
+                    if (weightSocket && weightSocket->is_open())
+                    {
+                        float currentWeight = gameServices_.getInventoryManager().getTotalWeight(pickupRequest.characterId);
+                        float weightLimit = gameServices_.getEquipmentManager().getCarryWeightLimit(pickupRequest.characterId);
+                        nlohmann::json weightResponse = ResponseBuilder()
+                                                            .setHeader("message", "success")
+                                                            .setHeader("eventType", "WEIGHT_STATUS")
+                                                            .setHeader("clientId", charData.clientId)
+                                                            .setBody("characterId", pickupRequest.characterId)
+                                                            .setBody("currentWeight", currentWeight)
+                                                            .setBody("weightLimit", weightLimit)
+                                                            .setBody("isOverweight", currentWeight > weightLimit)
+                                                            .build();
+                        networkManager_.sendResponse(weightSocket, networkManager_.generateResponseMessage("success", weightResponse));
+                    }
+                }
             }
             else
             {
@@ -269,12 +297,28 @@ ItemEventHandler::droppedItemToJson(const DroppedItemStruct &droppedItem)
     // Get item info
     ItemDataStruct itemInfo = gameServices_.getItemManager().getItemById(droppedItem.itemId);
 
+    // Calculate seconds remaining on reservation (0 if free for all)
+    int64_t reservationSecondsLeft = 0;
+    if (droppedItem.reservedForCharacterId != 0)
+    {
+        auto now = std::chrono::steady_clock::now();
+        if (now < droppedItem.reservationExpiry)
+        {
+            reservationSecondsLeft = std::chrono::duration_cast<std::chrono::seconds>(
+                droppedItem.reservationExpiry - now)
+                                         .count();
+        }
+    }
+
     nlohmann::json droppedItemJson = {
         {"uid", droppedItem.uid},
         {"itemId", droppedItem.itemId},
         {"quantity", droppedItem.quantity},
         {"canBePickedUp", droppedItem.canBePickedUp},
         {"droppedByMobUID", droppedItem.droppedByMobUID},
+        {"droppedByCharacterId", droppedItem.droppedByCharacterId},
+        {"reservedForCharacterId", droppedItem.reservedForCharacterId},
+        {"reservationSecondsLeft", reservationSecondsLeft},
         {"position", {{"x", droppedItem.position.positionX}, {"y", droppedItem.position.positionY}, {"z", droppedItem.position.positionZ}, {"rotationZ", droppedItem.position.rotationZ}}},
         {"item", itemToJson(itemInfo)}};
 
@@ -286,9 +330,7 @@ ItemEventHandler::itemToJson(const ItemDataStruct &itemData)
 {
     nlohmann::json itemJson = {
         {"id", itemData.id},
-        {"name", itemData.name},
         {"slug", itemData.slug},
-        {"description", itemData.description},
         {"isQuestItem", itemData.isQuestItem},
         {"itemType", itemData.itemType},
         {"itemTypeName", itemData.itemTypeName},
@@ -309,7 +351,9 @@ ItemEventHandler::itemToJson(const ItemDataStruct &itemData)
         {"equipSlotName", itemData.equipSlotName},
         {"equipSlotSlug", itemData.equipSlotSlug},
         {"levelRequirement", itemData.levelRequirement},
-        {"attributes", nlohmann::json::array()}};
+        {"attributes", nlohmann::json::array()},
+        {"isUsable", itemData.isUsable},
+        {"useEffects", nlohmann::json::array()}};
 
     // Add attributes
     for (const auto &attribute : itemData.attributes)
@@ -321,6 +365,18 @@ ItemEventHandler::itemToJson(const ItemDataStruct &itemData)
             {"slug", attribute.slug},
             {"value", attribute.value}};
         itemJson["attributes"].push_back(attributeJson);
+    }
+
+    // Add use effects
+    for (const auto &ue : itemData.useEffects)
+    {
+        itemJson["useEffects"].push_back({{"effectSlug", ue.effectSlug},
+            {"attributeSlug", ue.attributeSlug},
+            {"value", ue.value},
+            {"isInstant", ue.isInstant},
+            {"durationSeconds", ue.durationSeconds},
+            {"tickMs", ue.tickMs},
+            {"cooldownSeconds", ue.cooldownSeconds}});
     }
 
     return itemJson;
@@ -357,7 +413,8 @@ ItemEventHandler::handleMobLootGenerationEvent(const Event &event)
                                           std::to_string(posY) + ")");
 
             // Generate loot using LootManager
-            gameServices_.getLootManager().generateLootOnMobDeath(mobId, mobUID, position);
+            int killerId = mobLootData.value("killerId", 0);
+            gameServices_.getLootManager().generateLootOnMobDeath(mobId, mobUID, position, killerId);
 
             // Register corpse for harvesting
             gameServices_.getHarvestManager().registerCorpse(mobUID, mobId, position);
@@ -418,6 +475,8 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
                 gameServices_.getLogger().log("[INVENTORY] Built inventory response with " + std::to_string(itemsArray.size()) + " items");
 
                 // Create response using ResponseBuilder
+                int goldAmount = gameServices_.getInventoryManager().getGoldAmount(characterId);
+
                 nlohmann::json response = ResponseBuilder()
                                               .setHeader("message", "Inventory retrieved successfully!")
                                               .setHeader("hash", clientData.hash)
@@ -425,6 +484,7 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
                                               .setHeader("eventType", "getPlayerInventory")
                                               .setBody("characterId", characterId)
                                               .setBody("items", itemsArray)
+                                              .setBody("gold", goldAmount)
                                               .build();
 
                 std::string responseData = networkManager_.generateResponseMessage("success", response);
@@ -433,6 +493,24 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
                 gameServices_.getLogger().log("[INVENTORY] Sent inventory to client for character " +
                                               std::to_string(characterId) + " (" +
                                               std::to_string(inventory.size()) + " items)");
+
+                // Send carry weight so the client can display currentWeight/weightLimit
+                // in the inventory UI immediately when the inventory panel is opened.
+                {
+                    float curW = gameServices_.getInventoryManager().getTotalWeight(characterId);
+                    float limW = gameServices_.getEquipmentManager().getCarryWeightLimit(characterId);
+                    nlohmann::json weightResponse = ResponseBuilder()
+                                                        .setHeader("message", "success")
+                                                        .setHeader("eventType", "WEIGHT_STATUS")
+                                                        .setHeader("clientId", clientID)
+                                                        .setBody("characterId", characterId)
+                                                        .setBody("currentWeight", curW)
+                                                        .setBody("weightLimit", limW)
+                                                        .setBody("isOverweight", curW > limW)
+                                                        .build();
+                    networkManager_.sendResponse(clientSocket,
+                        networkManager_.generateResponseMessage("success", weightResponse));
+                }
             }
             else
             {
@@ -473,5 +551,455 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
     catch (const std::exception &ex)
     {
         gameServices_.getLogger().logError("Error processing get player inventory event: " + std::string(ex.what()));
+    }
+}
+
+void
+ItemEventHandler::handleInventoryUpdateEvent(const Event &event)
+{
+    const auto &data = event.getData();
+    int characterId = event.getClientID(); // InventoryManager stores characterId in the clientID field
+
+    if (!std::holds_alternative<nlohmann::json>(data))
+    {
+        log_->error("[INVENTORY] handleInventoryUpdateEvent: unexpected data type for character " +
+                    std::to_string(characterId));
+        return;
+    }
+
+    const nlohmann::json &inventoryData = std::get<nlohmann::json>(data);
+
+    // Resolve the client socket for this character
+    auto charData = gameServices_.getCharacterManager().getCharacterData(characterId);
+    int clientId = charData.clientId;
+    if (clientId <= 0)
+        return;
+
+    auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+    if (!clientSocket)
+        return;
+
+    auto clientData = gameServices_.getClientManager().getClientData(clientId);
+
+    // Use the same eventType the client already handles for inventory display.
+    // The client only processes "getPlayerInventory" responses to refresh its
+    // inventory panel — "inventoryUpdate" is silently ignored on the client side.
+    nlohmann::json response = ResponseBuilder()
+                                  .setHeader("message", "Inventory retrieved successfully!")
+                                  .setHeader("hash", clientData.hash)
+                                  .setHeader("clientId", clientId)
+                                  .setHeader("eventType", "getPlayerInventory")
+                                  .build();
+    response["body"] = inventoryData;
+    response["body"]["gold"] = gameServices_.getInventoryManager().getGoldAmount(characterId);
+
+    networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", response));
+
+    log_->info("[INVENTORY] Sent inventoryUpdate to client " + std::to_string(clientId) +
+               " for character " + std::to_string(characterId));
+
+    // Keep carry weight in sync after any inventory change (harvest, quest reward, loot, etc.).
+    {
+        float curW = gameServices_.getInventoryManager().getTotalWeight(characterId);
+        float limW = gameServices_.getEquipmentManager().getCarryWeightLimit(characterId);
+        nlohmann::json weightResponse = ResponseBuilder()
+                                            .setHeader("message", "success")
+                                            .setHeader("eventType", "WEIGHT_STATUS")
+                                            .setHeader("clientId", clientId)
+                                            .setBody("characterId", characterId)
+                                            .setBody("currentWeight", curW)
+                                            .setBody("weightLimit", limW)
+                                            .setBody("isOverweight", curW > limW)
+                                            .build();
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", weightResponse));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// sendGroundItemsToClient — snapshot of all dropped items to one socket
+// ---------------------------------------------------------------------------
+void
+ItemEventHandler::sendGroundItemsToClient(int clientId,
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket)
+{
+    auto allDropped = gameServices_.getLootManager().getAllDroppedItems();
+
+    nlohmann::json itemsArray = nlohmann::json::array();
+    for (const auto &[uid, drop] : allDropped)
+        itemsArray.push_back(droppedItemToJson(drop));
+
+    ClientDataStruct clientData = gameServices_.getClientManager().getClientData(clientId);
+
+    nlohmann::json response = ResponseBuilder()
+                                  .setHeader("message", "success")
+                                  .setHeader("eventType", "itemDrop")
+                                  .setHeader("hash", clientData.hash)
+                                  .setHeader("clientId", clientId)
+                                  .setBody("items", itemsArray)
+                                  .build();
+
+    networkManager_.sendResponse(clientSocket,
+        networkManager_.generateResponseMessage("success", response));
+
+    log_->info("[LOOT] Sent " + std::to_string(itemsArray.size()) +
+               " ground items snapshot to client " + std::to_string(clientId));
+}
+
+// ---------------------------------------------------------------------------
+// handleItemDropByPlayerEvent — player drops item from inventory onto the ground
+// ---------------------------------------------------------------------------
+void
+ItemEventHandler::handleItemDropByPlayerEvent(const Event &event)
+{
+    const auto &data = event.getData();
+    int clientId = event.getClientID();
+
+    try
+    {
+        if (!std::holds_alternative<ItemDropByPlayerRequestStruct>(data))
+        {
+            log_->error("[DROP] handleItemDropByPlayerEvent: unexpected data type for client " +
+                        std::to_string(clientId));
+            return;
+        }
+
+        const auto &req = std::get<ItemDropByPlayerRequestStruct>(data);
+        int characterId = req.characterId;
+        int itemId = req.itemId;
+        int quantity = req.quantity;
+
+        if (quantity <= 0)
+        {
+            log_->warn("[DROP] Character " + std::to_string(characterId) +
+                       " requested invalid quantity " + std::to_string(quantity));
+            return;
+        }
+
+        // Validate item exists and is tradable / not quest-only
+        ItemDataStruct itemInfo = gameServices_.getItemManager().getItemById(itemId);
+        if (itemInfo.id == 0)
+        {
+            log_->warn("[DROP] Unknown itemId=" + std::to_string(itemId) +
+                       " from character " + std::to_string(characterId));
+            return;
+        }
+        if (itemInfo.isQuestItem || !itemInfo.isTradable)
+        {
+            log_->warn("[DROP] Character " + std::to_string(characterId) +
+                       " tried to drop non-droppable item " + itemInfo.slug);
+            return;
+        }
+
+        // Check the inventory contains enough quantity
+        int inInventory = gameServices_.getInventoryManager().getItemQuantity(characterId, itemId);
+        if (inInventory < quantity)
+        {
+            log_->warn("[DROP] Character " + std::to_string(characterId) +
+                       " has only " + std::to_string(inInventory) + " of item " +
+                       std::to_string(itemId) + ", cannot drop " + std::to_string(quantity));
+            return;
+        }
+
+        // ── Auto-unequip if the item being dropped is currently equipped ────
+        auto equippedSlot = gameServices_.getEquipmentManager().findSlotForItemId(characterId, itemId);
+        if (equippedSlot.has_value())
+        {
+            const auto &[slotSlug, inventoryItemId] = equippedSlot.value();
+
+            // Unequip from in-memory state
+            gameServices_.getEquipmentManager().unequipItem(characterId, slotSlug);
+
+            // Persist unequip to game server DB
+            nlohmann::json unequipPkt;
+            unequipPkt["header"]["eventType"] = "saveEquipmentChange";
+            unequipPkt["header"]["clientId"] = 0;
+            unequipPkt["header"]["hash"] = "";
+            unequipPkt["body"]["characterId"] = characterId;
+            unequipPkt["body"]["action"] = "unequip";
+            unequipPkt["body"]["inventoryItemId"] = inventoryItemId;
+            unequipPkt["body"]["equipSlotSlug"] = slotSlug;
+            gameServerWorker_.sendDataToGameServer(unequipPkt.dump() + "\n");
+
+            // Notify client of updated equipment state
+            auto socket = gameServices_.getClientManager().getClientSocket(clientId);
+            if (socket && socket->is_open())
+            {
+                nlohmann::json slotsJson = gameServices_.getEquipmentManager().buildEquipmentStateJson(characterId);
+                nlohmann::json eqResponse = ResponseBuilder()
+                                                .setHeader("message", "success")
+                                                .setHeader("eventType", "EQUIPMENT_STATE")
+                                                .setHeader("clientId", clientId)
+                                                .setBody("characterId", characterId)
+                                                .setBody("slots", slotsJson)
+                                                .build();
+                networkManager_.sendResponse(socket, networkManager_.generateResponseMessage("success", eqResponse));
+            }
+
+            // Recalculate stats — gear bonus no longer applies
+            gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+
+            log_->info("[DROP] Auto-unequipped slot=" + slotSlug +
+                       " invItemId=" + std::to_string(inventoryItemId) +
+                       " for char=" + std::to_string(characterId) + " before drop");
+        }
+
+        // Grab the inventory item ID before removing (needed to preserve instance in DB).
+        int droppingInvItemId = 0;
+        {
+            auto inv = gameServices_.getInventoryManager().getPlayerInventory(characterId);
+            for (const auto &s : inv)
+            {
+                if (s.itemId == itemId)
+                {
+                    droppingInvItemId = s.id;
+                    break;
+                }
+            }
+        }
+
+        if (droppingInvItemId > 0)
+        {
+            // Instanced item: remove from in-memory only (no DB delete).
+            // The DB row will be nullified (character_id = NULL) by LootManager.
+            gameServices_.getInventoryManager().evictFromMemory(characterId, droppingInvItemId);
+        }
+        else
+        {
+            // Non-instanced / id=0 item: normal remove path (DB delete triggers).
+            bool removed = gameServices_.getInventoryManager().removeItemFromInventory(characterId, itemId, quantity);
+            if (!removed)
+            {
+                log_->error("[DROP] Failed to remove item " + std::to_string(itemId) +
+                            " from character " + std::to_string(characterId));
+                return;
+            }
+        }
+
+        // Use server-tracked position (client does not send coords in dropItem)
+        PositionStruct dropPosition = gameServices_.getCharacterManager().getCharacterPosition(characterId);
+
+        // Spawn on the ground (LootManager fires nullifyItemOwner if inventoryItemId > 0)
+        gameServices_.getLootManager().dropItemByPlayer(characterId, droppingInvItemId, itemId, quantity, dropPosition);
+
+        log_->info("[DROP] Character " + std::to_string(characterId) + " dropped " +
+                   std::to_string(quantity) + "x item " + std::to_string(itemId));
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[DROP] Exception: " + std::string(ex.what()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// handleItemRemoveEvent — broadcast despawn of one or more ground items
+// ---------------------------------------------------------------------------
+void
+ItemEventHandler::handleItemRemoveEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        if (!std::holds_alternative<std::vector<int>>(data))
+        {
+            log_->error("[ITEM_REMOVE] Unexpected data type");
+            return;
+        }
+
+        const auto &uids = std::get<std::vector<int>>(data);
+        if (uids.empty())
+            return;
+
+        nlohmann::json uidsJson = nlohmann::json::array();
+        for (int uid : uids)
+            uidsJson.push_back(uid);
+
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("message", "success")
+                                      .setHeader("eventType", "itemRemove")
+                                      .setBody("uids", uidsJson)
+                                      .build();
+
+        std::string msg = networkManager_.generateResponseMessage("success", response);
+        broadcastToAllClients(msg);
+
+        log_->info("[ITEM_REMOVE] Broadcast removal of " + std::to_string(uids.size()) + " ground items");
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[ITEM_REMOVE] Exception: " + std::string(ex.what()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// handleUseItemEvent — potion / scroll / food use
+// ---------------------------------------------------------------------------
+
+bool
+ItemEventHandler::trySetItemCooldown(int characterId, int itemId, int cooldownSeconds)
+{
+    if (cooldownSeconds <= 0)
+        return true; // no cooldown defined — always allow
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(itemCooldownMutex_);
+    auto &entry = itemCooldowns_[characterId][itemId];
+    if (now < entry)
+        return false; // still on cooldown
+    entry = now + std::chrono::seconds(cooldownSeconds);
+    return true;
+}
+
+void
+ItemEventHandler::handleUseItemEvent(const Event &event)
+{
+    const auto &data = event.getData();
+    int clientId = event.getClientID();
+
+    try
+    {
+        if (!std::holds_alternative<ItemUseRequestStruct>(data))
+        {
+            log_->error("[USE_ITEM] Unexpected data type for client " + std::to_string(clientId));
+            return;
+        }
+
+        const auto &req = std::get<ItemUseRequestStruct>(data);
+        int characterId = req.characterId;
+        int itemId = req.itemId;
+
+        // Character must be alive
+        {
+            const auto ch = gameServices_.getCharacterManager().getCharacterData(characterId);
+            if (ch.characterCurrentHealth <= 0)
+            {
+                log_->warn("[USE_ITEM] Character " + std::to_string(characterId) + " is dead, ignoring use request");
+                return;
+            }
+        }
+
+        // Must have the item
+        int qty = gameServices_.getInventoryManager().getItemQuantity(characterId, itemId);
+        if (qty <= 0)
+        {
+            log_->warn("[USE_ITEM] Character " + std::to_string(characterId) +
+                       " has no item " + std::to_string(itemId));
+            return;
+        }
+
+        // Fetch item definition
+        ItemDataStruct itemInfo = gameServices_.getItemManager().getItemById(itemId);
+        if (!itemInfo.isUsable || itemInfo.useEffects.empty())
+        {
+            log_->warn("[USE_ITEM] Item " + itemInfo.slug + " is not usable");
+            return;
+        }
+
+        // Determine the cooldown from the first use-effect definition
+        // (items typically share a single cooldown across all their effects)
+        const int cooldownSec = itemInfo.useEffects.empty() ? 0 : itemInfo.useEffects[0].cooldownSeconds;
+        if (!trySetItemCooldown(characterId, itemId, cooldownSec))
+        {
+            log_->warn("[USE_ITEM] Character " + std::to_string(characterId) +
+                       " tried to use '" + itemInfo.slug + "' while still on cooldown");
+            return;
+        }
+
+        // Consume one from inventory
+        gameServices_.getInventoryManager().removeItemFromInventory(characterId, itemId, 1);
+
+        // Unix timestamp (seconds) — used for expiresAt in ActiveEffectStruct
+        const int64_t nowSec = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                                   .count();
+
+        int totalHeal = 0;
+        int finalHp = 0;
+
+        // Apply each use-effect
+        for (const auto &ue : itemInfo.useEffects)
+        {
+            if (ue.isInstant)
+            {
+                if (ue.attributeSlug == "hp")
+                {
+                    finalHp = gameServices_.getCharacterManager().applyHealToCharacter(
+                                                                     characterId, static_cast<int>(ue.value))
+                                  .newHealth;
+                    totalHeal += static_cast<int>(ue.value);
+                }
+                else if (ue.attributeSlug == "mp")
+                {
+                    gameServices_.getCharacterManager().restoreManaToCharacter(
+                        characterId, static_cast<int>(ue.value));
+                }
+                // Other instant slugs: value is applied directly via stat modifier
+                // and reflected in the stats_update packet sent below.
+            }
+            else
+            {
+                // Timed buff / HoT / debuff — routed through the existing
+                // ActiveEffect pipeline (CombatSystem::tickEffects ticks hot/dot,
+                // CharacterStatsNotificationService includes all effects in
+                // the stats_update packet for the buff bar).
+                ActiveEffectStruct effect;
+                effect.effectSlug = ue.effectSlug;
+                effect.attributeSlug = ue.attributeSlug;
+                effect.value = ue.value;
+                effect.tickMs = ue.tickMs > 0 ? ue.tickMs : 1000;
+                effect.expiresAt = nowSec + ue.durationSeconds; // Unix seconds
+
+                // Derive effectTypeSlug so CombatSystem handles ticking correctly
+                if (ue.attributeSlug == "hp" && ue.value > 0)
+                    effect.effectTypeSlug = "hot";
+                else if (ue.attributeSlug == "hp" && ue.value < 0)
+                    effect.effectTypeSlug = "dot";
+                else
+                    effect.effectTypeSlug = "buff"; // stat modifier (mp regen, str, …)
+
+                // Prime the first tick
+                effect.nextTickAt = std::chrono::steady_clock::now() +
+                                    std::chrono::milliseconds(effect.tickMs);
+
+                gameServices_.getCharacterManager().addActiveEffect(characterId, effect);
+            }
+        }
+
+        // Broadcast heal number to all clients (floating combat text).
+        // Uses the same "healingResult" eventType as heal skills — client
+        // needs no special handling for potion heals.
+        if (totalHeal > 0)
+        {
+            nlohmann::json skillResult;
+            skillResult["casterId"] = characterId;
+            skillResult["targetId"] = characterId;
+            skillResult["skillName"] = itemInfo.slug;
+            skillResult["skillSlug"] = itemInfo.slug;
+            skillResult["skillEffectType"] = "heal";
+            skillResult["healing"] = totalHeal;
+            skillResult["finalTargetHealth"] = finalHp;
+            skillResult["success"] = true;
+
+            nlohmann::json healResponse = ResponseBuilder()
+                                              .setHeader("message", "success")
+                                              .setHeader("eventType", "healingResult")
+                                              .setBody("skillResult", skillResult)
+                                              .build();
+            broadcastToAllClients(
+                networkManager_.generateResponseMessage("success", healResponse));
+        }
+
+        // One full stats_update to the owner — contains updated hp/mp, effective
+        // attributes (stat buffs already factored in), and the activeEffects list
+        // (buff bar display). This is the same packet used for equipment, respawn,
+        // level-up etc., so the client needs no special handling.
+        gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+
+        log_->info("[USE_ITEM] Character " + std::to_string(characterId) +
+                   " used item " + itemInfo.slug);
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[USE_ITEM] Exception: " + std::string(ex.what()));
     }
 }
