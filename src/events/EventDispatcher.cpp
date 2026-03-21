@@ -179,6 +179,14 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleGetBestiaryEntry(context, socket);
     }
+    else if (context.eventType == "getBestiaryOverview")
+    {
+        handleGetBestiaryOverview(context, socket);
+    }
+    else if (context.eventType == "chatMessage")
+    {
+        handleChatMessage(context, socket);
+    }
     else
     {
         log_->error("Unknown event type: " + context.eventType);
@@ -1671,6 +1679,25 @@ EventDispatcher::handleUseItem(const EventContext &context,
 }
 
 // ---------------------------------------------------------------------------
+// handleGetBestiaryOverview — client requests list of all discovered mobs with kill counts
+// ---------------------------------------------------------------------------
+void
+EventDispatcher::handleGetBestiaryOverview(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> /*socket*/)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+
+    nlohmann::json payload;
+    payload["characterId"] = context.characterData.characterId;
+    payload["clientId"] = context.clientData.clientId;
+
+    eventsBatch_.push_back(Event(Event::GET_BESTIARY_OVERVIEW, context.clientData.clientId, payload, context.timestamps));
+
+    log_->info("[EventDispatcher] getBestiaryOverview queued: character=" +
+               std::to_string(context.characterData.characterId));
+}
+
 // handleGetBestiaryEntry — client requests bestiary data for a mob template
 // ---------------------------------------------------------------------------
 void
@@ -1683,27 +1710,83 @@ EventDispatcher::handleGetBestiaryEntry(const EventContext &context,
     try
     {
         nlohmann::json j = nlohmann::json::parse(context.fullMessage);
-        int mobTemplateId = j["body"].value("mobTemplateId", 0);
+        std::string mobSlug = j["body"].value("mobSlug", std::string{});
 
-        if (mobTemplateId <= 0)
+        if (mobSlug.empty())
         {
-            log_->error("[EventDispatcher] getBestiaryEntry: missing mobTemplateId");
+            log_->error("[EventDispatcher] getBestiaryEntry: missing mobSlug");
             return;
         }
 
         nlohmann::json payload;
         payload["characterId"] = context.characterData.characterId;
         payload["clientId"] = context.clientData.clientId;
-        payload["mobTemplateId"] = mobTemplateId;
+        payload["mobSlug"] = mobSlug;
 
         eventsBatch_.push_back(Event(Event::GET_BESTIARY_ENTRY, context.clientData.clientId, payload, context.timestamps));
 
         log_->info("[EventDispatcher] getBestiaryEntry queued: character=" +
                    std::to_string(context.characterData.characterId) +
-                   " mob=" + std::to_string(mobTemplateId));
+                   " mob=" + mobSlug);
     }
     catch (const std::exception &e)
     {
         log_->error("[EventDispatcher] handleGetBestiaryEntry: " + std::string(e.what()));
+    }
+}
+
+// ── Chat message ─────────────────────────────────────────────────────────────
+void
+EventDispatcher::handleChatMessage(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.clientData.clientId <= 0 || context.characterData.characterId <= 0)
+        return;
+
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(context.fullMessage);
+
+        std::string channelStr = j["body"].value("channel", std::string{"zone"});
+        std::string text = j["body"].value("text", std::string{});
+        std::string targetName = j["body"].value("targetName", std::string{});
+
+        // Basic server-side validation
+        if (text.empty() || text.size() > 255)
+        {
+            log_->warn("[EventDispatcher] chatMessage: invalid text length from client " + std::to_string(context.clientData.clientId));
+            return;
+        }
+
+        ChatChannel channel = ChatChannel::ZONE;
+        if (channelStr == "local")
+            channel = ChatChannel::LOCAL;
+        else if (channelStr == "whisper")
+            channel = ChatChannel::WHISPER;
+
+        if (channel == ChatChannel::WHISPER && targetName.empty())
+        {
+            log_->warn("[EventDispatcher] chatMessage: whisper without targetName from client " + std::to_string(context.clientData.clientId));
+            return;
+        }
+
+        ChatMessageStruct msg;
+        msg.senderClientId = context.clientData.clientId;
+        msg.senderCharId = context.characterData.characterId;
+        msg.channel = channel;
+        msg.text = std::move(text);
+        msg.targetName = std::move(targetName);
+        msg.timestamps = context.timestamps;
+
+        eventsBatch_.push_back(Event(Event::CHAT_MESSAGE,
+            context.clientData.clientId,
+            msg,
+            context.timestamps));
+
+        log_->debug("[EventDispatcher] chatMessage queued: client=" + std::to_string(context.clientData.clientId) + " channel=" + channelStr);
+    }
+    catch (const std::exception &e)
+    {
+        log_->error("[EventDispatcher] handleChatMessage: " + std::string(e.what()));
     }
 }

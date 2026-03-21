@@ -28,7 +28,17 @@ MobAIController::checkAndTriggerFlee(MobDataStruct &mob, MobMovementData &moveme
         movementData.combatState == MobCombatState::EVADING)
         return false;
 
-    float hpRatio = static_cast<float>(mob.currentHealth) / static_cast<float>(mob.maxHealth);
+    // Refresh HP from the authoritative store — the mob struct passed from
+    // runMobTick is a point-in-time copy that may be up to 50 ms stale after
+    // a player lands a killing/threshold hit on a different thread.
+    int currentHealth = mob.currentHealth;
+    if (mobInstanceManager_)
+    {
+        auto freshData = mobInstanceManager_->getMobInstance(mob.uid);
+        if (freshData.uid > 0)
+            currentHealth = freshData.currentHealth;
+    }
+    float hpRatio = static_cast<float>(currentHealth) / static_cast<float>(mob.maxHealth);
     if (hpRatio >= mob.fleeHpThreshold)
         return false;
 
@@ -207,6 +217,45 @@ MobAIController::isTargetAlive(int targetPlayerId)
     return player.characterCurrentHealth > 0;
 }
 
+// ---------------------------------------------------------------------------
+// countMobsEngagingTarget — count active melee-slot occupants on a target
+// ---------------------------------------------------------------------------
+
+int
+MobAIController::countMobsEngagingTarget(int targetPlayerId, int excludeUID, float range) const
+{
+    if (!characterManager_ || !mobInstanceManager_ || !mobMovementManager_)
+        return 0;
+
+    auto target = characterManager_->getCharacterById(targetPlayerId);
+    if (target.characterId == 0)
+        return 0;
+
+    auto nearbyMobs = mobInstanceManager_->getMobsInRange(
+        target.characterPosition.positionX,
+        target.characterPosition.positionY,
+        range);
+
+    int count = 0;
+    for (const auto &nearMob : nearbyMobs)
+    {
+        if (nearMob.uid == excludeUID || nearMob.isDead)
+            continue;
+
+        auto md = mobMovementManager_->getMobMovementData(nearMob.uid);
+        if (md.targetPlayerId != targetPlayerId)
+            continue;
+
+        if (md.combatState == MobCombatState::PREPARING_ATTACK ||
+            md.combatState == MobCombatState::ATTACKING ||
+            md.combatState == MobCombatState::ATTACK_COOLDOWN)
+        {
+            ++count;
+        }
+    }
+    return count;
+}
+
 bool
 MobAIController::canAttackPlayer(const MobDataStruct &mob, int targetPlayerId, const MobMovementData &movementData)
 {
@@ -230,7 +279,7 @@ MobAIController::canAttackPlayer(const MobDataStruct &mob, int targetPlayerId, c
 }
 
 void
-MobAIController::executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData, float hitDelay)
+MobAIController::executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData)
 {
     movementData.lastAttackTime = getCurrentGameTime();
 
@@ -247,7 +296,7 @@ MobAIController::executeMobAttack(const MobDataStruct &mob, int targetPlayerId, 
 
     if (combatSystem_)
     {
-        combatSystem_->processAIAttack(mob.uid, targetPlayerId, usedSkillSlug, hitDelay);
+        combatSystem_->processAIAttack(mob.uid, targetPlayerId, usedSkillSlug);
         logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " attacking player " +
                     std::to_string(targetPlayerId) +
                     (usedSkillSlug.empty() ? "" : " with skill [" + usedSkillSlug + "]"));
@@ -454,7 +503,7 @@ MobAIController::handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct &zo
     }
 
     // 3) Caster archetype backpedal: if a caster mob is too close to its target, move away
-    if (mob.aiArchetype == "caster" && movementData.targetPlayerId > 0 && characterManager_)
+    if (mob.archetypeType == MobArchetype::CASTER && movementData.targetPlayerId > 0 && characterManager_)
     {
         auto target = characterManager_->getCharacterById(movementData.targetPlayerId);
         if (target.characterId > 0 && isTargetAlive(movementData.targetPlayerId))
@@ -588,6 +637,29 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                 }
                 // -----------------------------------------------------------------
 
+                // --- Melee-slot re-check for waiting mobs (crowding prevention) ---
+                // When a slot-blocked mob ticks through CHASING, see if a slot has
+                // freed up. Clearing the flag lets calculateChaseMovement advance
+                // the mob into attack range on the next movement tick.
+                if (movementData.waitingForMeleeSlot)
+                {
+                    const float kMobDiameter = (mob.radius > 0)
+                                                   ? static_cast<float>(mob.radius * 2)
+                                                   : 140.0f;
+                    const int maxMeleeSlots = std::max(
+                        1, static_cast<int>(2.0f * static_cast<float>(M_PI) * mob.attackRange / kMobDiameter));
+                    if (countMobsEngagingTarget(
+                            movementData.targetPlayerId, mob.uid, mob.attackRange) <
+                        maxMeleeSlots)
+                    {
+                        movementData.waitingForMeleeSlot = false;
+                        mobMovementManager_->updateMobMovementData(mob.uid, movementData);
+                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
+                                    " melee slot available, resuming approach");
+                    }
+                }
+                // -----------------------------------------------------------------
+
                 float timeSinceChasing = currentTime - movementData.stateChangeTime;
                 const float maxChaseTime = mob.chaseDuration; // per-mob value (plan §4.2)
                 if (timeSinceChasing > maxChaseTime)
@@ -609,6 +681,44 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                     float distance = calculateDistance(mob.position, targetPlayer.characterPosition);
                     if (distance <= mob.attackRange)
                     {
+                        // --- Melee-slot capacity check (crowding prevention) -------
+                        // Count mobs already in PREPARING_ATTACK / ATTACKING /
+                        // ATTACK_COOLDOWN targeting the same player within attackRange.
+                        // Physical ring capacity: 2π*attackRange / mob-diameter.
+                        // Excess mobs set waitingForMeleeSlot and stay parked in
+                        // CHASING — no jitter, no slow rotation toward the player.
+                        {
+                            const float kMobDiameter = (mob.radius > 0)
+                                                           ? static_cast<float>(mob.radius * 2)
+                                                           : 140.0f;
+                            const int maxMeleeSlots = std::max(
+                                1, static_cast<int>(2.0f * static_cast<float>(M_PI) * mob.attackRange / kMobDiameter));
+                            const int occupiedSlots = countMobsEngagingTarget(
+                                movementData.targetPlayerId, mob.uid, mob.attackRange);
+                            if (occupiedSlots >= maxMeleeSlots)
+                            {
+                                if (!movementData.waitingForMeleeSlot)
+                                {
+                                    movementData.waitingForMeleeSlot = true;
+                                    mobMovementManager_->updateMobMovementData(mob.uid, movementData);
+                                    logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
+                                                " waiting for melee slot (" +
+                                                std::to_string(occupiedSlots) + "/" +
+                                                std::to_string(maxMeleeSlots) +
+                                                ") — target player " +
+                                                std::to_string(movementData.targetPlayerId));
+                                }
+                                break; // stay in CHASING, don't transition
+                            }
+                            // Slot available — clear wait flag if still set
+                            if (movementData.waitingForMeleeSlot)
+                            {
+                                movementData.waitingForMeleeSlot = false;
+                                mobMovementManager_->updateMobMovementData(mob.uid, movementData);
+                            }
+                        }
+                        // ----------------------------------------------------------
+
                         // Select skill BEFORE entering PREPARING_ATTACK so that
                         // cast time is derived from the chosen skill (plan §2.1).
                         auto chosenOpt = selectAttackSkill(mob, movementData, distance);
@@ -633,12 +743,10 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                                         std::to_string(movementData.attackPrepareTime) + "s cd=" +
                                         std::to_string(movementData.postAttackCooldown) + "s");
 
-                            // Send combatInitiation now so the client can play the cast/attack
-                            // animation. combatResult is sent immediately after (below) with
-                            // hitDelay = castTime + swingTime so the client schedules its own
-                            // hit visuals without waiting for any server tick.
-                            if (combatSystem_)
-                                combatSystem_->broadcastMobSkillInitiation(mob.uid, movementData.targetPlayerId, chosen);
+                        // Send combatInitiation so the client starts the cast/channel animation.
+                        // combatResult (damage) is sent at the END of the cast (PREPARING_ATTACK→ATTACKING).
+                        if (combatSystem_)
+                            combatSystem_->broadcastMobSkillInitiation(mob.uid, movementData.targetPlayerId, chosen);
                         }
                         else
                         {
@@ -649,17 +757,35 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                             movementData.attackPrepareTime = 0.0f;
                             movementData.attackDuration = 0.3f;
                             movementData.postAttackCooldown = std::max(mob.attackCooldown, 0.5f);
+                            // Broadcast a fallback combatInitiation so the client knows an
+                            // attack is coming even when no DB skill is available (e.g. all
+                            // skills are on cooldown).
+                            if (combatSystem_ && movementData.targetPlayerId > 0)
+                            {
+                                SkillStruct fallback;
+                                fallback.skillSlug       = "mob_basic_attack";
+                                fallback.skillName       = "Basic Attack";
+                                fallback.skillEffectType = "damage";
+                                fallback.school          = "physical";
+                                fallback.castMs          = 0;
+                                fallback.swingMs         = static_cast<int>(movementData.attackDuration * 1000.0f);
+                                fallback.cooldownMs      = static_cast<int>(movementData.postAttackCooldown * 1000.0f);
+                                combatSystem_->broadcastMobSkillInitiation(
+                                    mob.uid, movementData.targetPlayerId, fallback);
+                            }
                         }
 
-                        // Send combatResult immediately after combatInitiation.
-                        // hitDelay = castTime + swingTime — client shows the hit effect
-                        // at the right moment using its own local timer, no server tick jitter.
-                        executeMobAttack(mob, movementData.targetPlayerId, movementData, movementData.attackPrepareTime + movementData.attackDuration);
-
+                        // combatResult (executeMobAttack) is sent when the cast ends (PREPARING_ATTACK→ATTACKING).
                         logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
                                     " in attack range, preparing attack");
                         movementData.combatState = MobCombatState::PREPARING_ATTACK;
                         movementData.stateChangeTime = currentTime;
+                        // Zero velocity — the client uses this field for extrapolation;
+                        // non-zero speed from the last chase step would make the mob
+                        // slide forward on the client during the cast animation.
+                        movementData.currentSpeedUnitsPerSec = 0.0f;
+                        movementData.movementDirectionX = 0.0f;
+                        movementData.movementDirectionY = 0.0f;
                         mobMovementManager_->updateMobMovementData(mob.uid, movementData);
                         mobMovementManager_->forceMobStateUpdate(mob.uid);
                         logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
@@ -692,7 +818,15 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
         {
             movementData.combatState = MobCombatState::RETURNING;
             movementData.stateChangeTime = currentTime;
+            // Zero velocity so the RETURNING packet doesn't carry stale chase speed.
+            movementData.currentSpeedUnitsPerSec = 0.0f;
+            movementData.movementDirectionX = 0.0f;
+            movementData.movementDirectionY = 0.0f;
             mobMovementManager_->updateMobMovementData(mob.uid, movementData);
+            // mobTargetLost was already broadcast by handlePlayerAggro — this
+            // force-update ensures clients receive the RETURNING state packet promptly
+            // so they can cancel the cast bar and transition animation.
+            mobMovementManager_->forceMobStateUpdate(mob.uid);
             break;
         }
 
@@ -716,8 +850,9 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
             }
             else if (movementData.targetPlayerId > 0)
             {
-                // combatResult was already sent at CHASING→PREPARING_ATTACK.
-                // Just advance to ATTACKING so the swing timer can gate ATTACK_COOLDOWN.
+                // Cast finished — apply damage now (at cast end, not cast start).
+                executeMobAttack(mob, movementData.targetPlayerId, movementData);
+
                 logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " starting attack sequence");
                 movementData.combatState = MobCombatState::ATTACKING;
                 // Use the exact moment the cast ended (stateChangeTime + attackPrepareTime) rather
@@ -782,6 +917,7 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                     movementData.combatState = MobCombatState::CHASING;
                     movementData.stateChangeTime = currentTime;
                     mobMovementManager_->updateMobMovementData(mob.uid, movementData);
+                    mobMovementManager_->forceMobStateUpdate(mob.uid);
                     logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
                                 " cooldown finished, resuming chase");
                 }

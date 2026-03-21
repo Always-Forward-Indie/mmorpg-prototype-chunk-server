@@ -144,168 +144,10 @@ MobMovementManager::moveMobsInZone(int zoneId)
     {
         // Skip dead mobs
         if (mob.isDead || mob.currentHealth <= 0)
-        {
             continue;
-        }
 
-        // Get movement data for this mob
-        auto movementData = getMobMovementDataInternal(mob.uid);
-
-        // Initialize spawn position if not set
-        if (movementData.spawnPosition.positionX == 0.0f && movementData.spawnPosition.positionY == 0.0f)
-        {
-            movementData.spawnPosition = mob.position;
-            updateMobMovementData(mob.uid, movementData);
-            logger_.log("[INFO] Initialized spawn position for mob UID: " + std::to_string(mob.uid) +
-                        " at (" + std::to_string(mob.position.positionX) + ", " +
-                        std::to_string(mob.position.positionY) + ")");
-        }
-
-        // Handle player aggro and AI behavior
-        // Only call aggro handling if mob is aggressive, has a target, or is already in combat state
-        if ((mob.isAggressive || movementData.targetPlayerId > 0) && characterManager_)
-        {
-            mobAIController_.handlePlayerAggro(mob, zone, movementData);
-            // Refresh movement data after aggro handling, as it may have changed
-            movementData = getMobMovementDataInternal(mob.uid);
-        }
-        else if (!mob.isAggressive && !movementData.isReturningToSpawn && movementData.targetPlayerId == 0)
-        {
-            // For non-aggressive mobs that are just patrolling, ensure they're not stuck
-            if (movementData.nextMoveTime == 0.0f)
-            {
-                std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
-                movementData.nextMoveTime = currentTime + moveTime(rng_);
-                updateMobMovementData(mob.uid, movementData);
-                log_->info("[DEBUG] Fixed non-aggressive mob UID: " + std::to_string(mob.uid) + " movement timing");
-            }
-        }
-
-        // Update combat state for this mob
-        mobAIController_.updateMobCombatState(mob, movementData, currentTime);
-
-        // Get fresh movement data after combat state update to ensure we have the latest state
-        movementData = getMobMovementDataInternal(mob.uid);
-
-        // Initialize movement timing if needed
-        if (movementData.nextMoveTime == 0.0f)
-        {
-            std::uniform_real_distribution<float> initialDelay(0.0f, params.initialDelayMax);
-            std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
-            movementData.nextMoveTime = currentTime + initialDelay(rng_) + moveTime(rng_);
-            updateMobMovementData(mob.uid, movementData);
-        }
-
-        // Check if mob can perform actions (movement) based on combat state
-        if (!canPerformAction(movementData, currentTime))
-        {
-            // Mob is in a state where it shouldn't move (preparing attack, attacking, cooldown)
-            continue;
-        }
-
-        // Check if it's time to move - respect timing even for mobs with targets
-        bool hasTarget = (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn ||
-                          movementData.isFleeing || movementData.isBackpedaling);
-        bool timeToMove = (currentTime >= movementData.nextMoveTime);
-
-        // For mobs with targets or returning to spawn, allow faster movement
-        // This applies to both aggressive and non-aggressive mobs
-        if (hasTarget)
-        {
-            float minInterval = movementData.isReturningToSpawn ? aiConfig_.returnMovementInterval : aiConfig_.chaseMovementInterval;
-            timeToMove = (movementData.nextMoveTime == 0.0f ||
-                          (currentTime - movementData.lastMoveTime) >= minInterval);
-        }
-
-        // Only move if it's time to move
-        if (!timeToMove)
-        {
-            continue;
-        }
-
-        // Calculate new position based on mob behavior
-        std::optional<MobMovementResult> movementResult;
-
-        if (movementData.isFleeing || movementData.isBackpedaling)
-        {
-            // Flee or caster backpedal: move toward precomputed fleeTargetPosition
-            movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, movementData.fleeTargetPosition, params);
-            if (!movementResult.has_value())
-            {
-                // Reached flee destination — clear flags
-                movementData.isFleeing = false;
-                movementData.isBackpedaling = false;
-                updateMobMovementData(mob.uid, movementData);
-            }
-        }
-        else if (movementData.isReturningToSpawn)
-        {
-            // Return to spawn zone
-            movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, movementData.spawnPosition, params);
-        }
-        else if (movementData.targetPlayerId > 0 && characterManager_)
-        {
-            // Chase target player
-            movementResult = calculateChaseMovement(mob, zone, mobPositions, movementData.targetPlayerId, params);
-        }
-        else
-        {
-            // Normal random movement
-            movementResult = calculateNewPosition(mob, zone, mobPositions, params);
-        }
-        if (movementResult && movementResult->validMovement)
-        {
-            // Update movement data
-            movementData.movementDirectionX = movementResult->newDirectionX;
-            movementData.movementDirectionY = movementResult->newDirectionY;
-            movementData.lastMoveTime = currentTime;
-
-            // Update next move time - faster movement when chasing or returning
-            if (movementData.targetPlayerId > 0)
-            {
-                // Use AI config for chase movement timing
-                movementData.nextMoveTime = currentTime + aiConfig_.chaseMovementInterval;
-            }
-            else if (movementData.isReturningToSpawn)
-            {
-                // Use AI config for return movement timing
-                movementData.nextMoveTime = currentTime + aiConfig_.returnMovementInterval;
-            }
-            else
-            {
-                // Normal movement timing — use per-mob patrol speed (plan §5.3)
-                movementData.nextMoveTime = calculateNextMoveTime(currentTime, mob, movementData, params);
-            }
-
-            // Targeted write: update only direction/timing fields.
-            // This prevents overwriting targetPlayerId / combatState that may
-            // have been set by handleMobAttacked on another thread between our
-            // last re-read and now (RMW race fix).
-            updateMobMovementPositionFields(
-                mob.uid,
-                movementData.movementDirectionX,
-                movementData.movementDirectionY,
-                movementData.lastMoveTime,
-                movementData.nextMoveTime,
-                movementResult->speed);
-
-            // Update position in MobInstanceManager
-            mobInstanceManager_->updateMobPosition(mob.uid, movementResult->newPosition);
-
+        if (runMobTick(mob, zone, params, mobPositions, currentTime))
             anyMobMoved = true;
-        }
-        else
-        {
-            // Same race-condition guard as in moveSingleMob: re-run the state machine
-            // when chase movement was stopped so CHASING → PREPARING_ATTACK fires even
-            // when the player moved between the pre-movement state-machine read and the
-            // movement distance check.
-            auto freshData = getMobMovementDataInternal(mob.uid);
-            if (freshData.combatState == MobCombatState::CHASING && freshData.targetPlayerId > 0)
-            {
-                mobAIController_.updateMobCombatState(mob, freshData, currentTime);
-            }
-        }
     }
 
     return anyMobMoved;
@@ -344,73 +186,113 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
             params = paramIt->second;
     }
 
+    // Delegate to the shared per-mob AI+movement tick.
+    return runMobTick(mob, zone, params, mobPositions, getCurrentGameTime());
+}
+
+bool
+MobMovementManager::runMobTick(
+    MobDataStruct &mob,
+    const SpawnZoneStruct &zone,
+    const MobMovementParams &params,
+    const std::vector<std::pair<int, PositionStruct>> &mobPositions,
+    float currentTime)
+{
     // Get movement data for this mob
-    auto movementData = getMobMovementDataInternal(mobUID);
+    auto movementData = getMobMovementDataInternal(mob.uid);
 
     // Initialize spawn position if not set
     if (movementData.spawnPosition.positionX == 0.0f && movementData.spawnPosition.positionY == 0.0f)
     {
         movementData.spawnPosition = mob.position;
-        updateMobMovementData(mobUID, movementData);
-        logger_.log("[INFO] Initialized spawn position for mob UID: " + std::to_string(mobUID) +
+        updateMobMovementData(mob.uid, movementData);
+        logger_.log("[INFO] Initialized spawn position for mob UID: " + std::to_string(mob.uid) +
                     " at (" + std::to_string(mob.position.positionX) + ", " +
                     std::to_string(mob.position.positionY) + ")");
     }
 
     // Handle player aggro and AI behavior
-    // Both aggressive mobs and non-aggressive mobs that have been attacked can have targets
     if ((mob.isAggressive || movementData.targetPlayerId > 0) && characterManager_)
     {
         mobAIController_.handlePlayerAggro(mob, zone, movementData);
-        // Refresh movement data after potential aggro changes to get latest state
-        movementData = getMobMovementDataInternal(mobUID);
+        movementData = getMobMovementDataInternal(mob.uid);
+    }
+    else if (!mob.isAggressive && !movementData.isReturningToSpawn && movementData.targetPlayerId == 0)
+    {
+        // For non-aggressive patrol mobs, fix up uninitialised move timing so they don't get stuck.
+        if (movementData.nextMoveTime == 0.0f)
+        {
+            std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
+            movementData.nextMoveTime = currentTime + moveTime(rng_);
+            updateMobMovementData(mob.uid, movementData);
+            log_->info("[DEBUG] Fixed non-aggressive mob UID: " + std::to_string(mob.uid) + " movement timing");
+        }
     }
 
-    // Update combat state for this mob
-    float currentTime = getCurrentGameTime();
+    // Update combat state machine
     mobAIController_.updateMobCombatState(mob, movementData, currentTime);
 
-    // Get fresh movement data after combat state update
-    movementData = getMobMovementDataInternal(mobUID);
+    // Refresh after state machine may have written new state
+    movementData = getMobMovementDataInternal(mob.uid);
 
-    // Check if mob can perform actions (movement) based on combat state
-    if (!canPerformAction(movementData, currentTime))
+    // Initialize movement timing if needed
+    if (movementData.nextMoveTime == 0.0f)
     {
-        // Mob is in a state where it shouldn't move (preparing attack, attacking, cooldown)
-        return false;
+        std::uniform_real_distribution<float> initialDelay(0.0f, params.initialDelayMax);
+        std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
+        movementData.nextMoveTime = currentTime + initialDelay(rng_) + moveTime(rng_);
+        updateMobMovementData(mob.uid, movementData);
     }
 
-    // Check if it's time to move this mob (respect timing constraints)
-    bool hasTarget = (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn ||
-                      movementData.isFleeing || movementData.isBackpedaling);
-    bool timeToMove = (currentTime >= movementData.nextMoveTime);
+    // Mob in a non-moving state (attacking, evading, …) — nothing to do this tick.
+    if (!canPerformAction(movementData, currentTime))
+        return false;
 
-    // For mobs with targets or returning to spawn, allow more frequent movement
-    // This applies to both aggressive and non-aggressive mobs
+    // Movement-interval gate
+    const bool hasTarget = (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn ||
+                            movementData.isFleeing || movementData.isBackpedaling);
+    bool timeToMove = (currentTime >= movementData.nextMoveTime);
     if (hasTarget)
     {
-        // Allow movement if enough time has passed (use config values)
-        float minInterval = movementData.isReturningToSpawn ? aiConfig_.returnMovementInterval : aiConfig_.chaseMovementInterval;
+        const float minInterval = movementData.isReturningToSpawn
+                                      ? aiConfig_.returnMovementInterval
+                                      : aiConfig_.chaseMovementInterval;
         timeToMove = (movementData.nextMoveTime == 0.0f ||
                       (currentTime - movementData.lastMoveTime) >= minInterval);
-    } // Don't move if it's not time yet
-    if (!timeToMove)
-    {
-        return false;
     }
+    if (!timeToMove)
+        return false;
 
-    // Calculate new position based on mob behavior
+    // Select movement calculation based on current behaviour
     std::optional<MobMovementResult> movementResult;
 
     if (movementData.isFleeing || movementData.isBackpedaling)
     {
-        // Flee or caster backpedal: move toward precomputed fleeTargetPosition
         movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, movementData.fleeTargetPosition, params);
         if (!movementResult.has_value())
         {
-            movementData.isFleeing = false;
             movementData.isBackpedaling = false;
-            updateMobMovementData(mobUID, movementData);
+            if (movementData.isFleeing)
+            {
+                // Flee destination reached — leash back immediately instead of letting
+                // the FLEEING state timer run out and causing a U-turn toward the player.
+                movementData.isFleeing = false;
+                int lostTargetId = movementData.targetPlayerId;
+                movementData.targetPlayerId = 0;
+                movementData.combatState = MobCombatState::RETURNING;
+                movementData.stateChangeTime = currentTime;
+                movementData.isReturningToSpawn = true;
+                movementData.threatTable.clear();
+                movementData.attackerTimestamps.clear();
+                updateMobMovementData(mob.uid, movementData);
+                forceMobStateUpdate(mob.uid);
+                if (lostTargetId > 0)
+                    sendMobTargetLost(mob, lostTargetId);
+            }
+            else
+            {
+                updateMobMovementData(mob.uid, movementData);
+            }
         }
     }
     else if (movementData.isReturningToSpawn)
@@ -423,65 +305,44 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
     }
     else
     {
-        // Normal random movement
         movementResult = calculateNewPosition(mob, zone, mobPositions, params);
     }
 
     if (movementResult && movementResult->validMovement)
     {
-        // Update movement data
         movementData.movementDirectionX = movementResult->newDirectionX;
         movementData.movementDirectionY = movementResult->newDirectionY;
-
-        // Update movement timing
         movementData.lastMoveTime = currentTime;
 
-        // Update next move time based on mob behavior (params already fetched above)
         if (movementData.targetPlayerId > 0)
-        {
-            // Use AI config for chase movement timing
             movementData.nextMoveTime = currentTime + aiConfig_.chaseMovementInterval;
-        }
         else if (movementData.isReturningToSpawn)
-        {
-            // Use AI config for return movement timing
             movementData.nextMoveTime = currentTime + aiConfig_.returnMovementInterval;
-        }
         else
-        {
-            // Normal movement timing — use per-mob patrol speed (plan §5.3)
             movementData.nextMoveTime = calculateNextMoveTime(currentTime, mob, movementData, params);
-        }
 
+        // Targeted write — avoids RMW race with handleMobAttacked on another thread.
         updateMobMovementPositionFields(
-            mobUID,
+            mob.uid,
             movementData.movementDirectionX,
             movementData.movementDirectionY,
             movementData.lastMoveTime,
             movementData.nextMoveTime,
             movementResult->speed);
 
-        // Update position in MobInstanceManager
-        mobInstanceManager_->updateMobPosition(mobUID, movementResult->newPosition);
-
+        mobInstanceManager_->updateMobPosition(mob.uid, movementResult->newPosition);
         return true;
     }
 
-    // Movement was stopped (mob reached attack range, collision, or other reason).
-    // Re-run the combat state machine so CHASING → PREPARING_ATTACK fires immediately
-    // when the mob stopped because it is within attack range.  This is necessary
-    // because the earlier updateMobCombatState call and calculateChaseMovement each
-    // call getCharacterById independently; a concurrent network-thread position update
-    // between those two reads can leave the mob frozen in CHASING even though it is
-    // already within attack range.
+    // Movement blocked (in attack range, collision, …).
+    // Re-run state machine so CHASING → PREPARING_ATTACK fires even when the mob
+    // stopped because the player moved between the pre-movement state-machine read
+    // and the calculateChaseMovement distance check (concurrent network thread race).
     {
-        auto freshData = getMobMovementDataInternal(mobUID);
+        auto freshData = getMobMovementDataInternal(mob.uid);
         if (freshData.combatState == MobCombatState::CHASING && freshData.targetPlayerId > 0)
-        {
             mobAIController_.updateMobCombatState(mob, freshData, currentTime);
-        }
     }
-
     return false;
 }
 
@@ -651,8 +512,12 @@ MobMovementManager::calculateNewPosition(
     result.newDirectionX = newDirectionX;
     result.newDirectionY = newDirectionY;
     result.validMovement = true;
-    // Patrol: server tick is 1 s, so stepSize units per tick ≈ units/second
-    result.speed = stepSize;
+    // Patrol: speed is set so the client can lerp from old position to new position
+    // over exactly 1.0 second, then stop (NOT extrapolate indefinitely).
+    // Client rule for combatState=0: animate toward packet.position over (stepSize/speed) seconds,
+    // then set velocity=0. This gives smooth visual movement without drift.
+    static constexpr float kPatrolTransitionSec = 1.0f;
+    result.speed = stepSize / kPatrolTransitionSec;
 
     return result;
 }
@@ -815,6 +680,17 @@ MobMovementManager::forceMobStateUpdate(int mobUID)
     }
 }
 
+void
+MobMovementManager::updateLastBroadcastMs(int mobUID, int64_t nowMs)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = mobMovementData_.find(mobUID);
+    if (it != mobMovementData_.end())
+    {
+        it->second.lastBroadcastMs = nowMs;
+    }
+}
+
 MobMovementData
 MobMovementManager::getMobMovementDataInternal(int mobUID)
 {
@@ -853,6 +729,10 @@ void
 MobMovementManager::updateMobMovementPositionFields(
     int mobUID, float dirX, float dirY, float lastMoveTime, float nextMoveTime, float currentSpeed)
 {
+    const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto it = mobMovementData_.find(mobUID);
     if (it != mobMovementData_.end())
@@ -862,6 +742,7 @@ MobMovementManager::updateMobMovementPositionFields(
         it->second.lastMoveTime = lastMoveTime;
         it->second.nextMoveTime = nextMoveTime;
         it->second.currentSpeedUnitsPerSec = currentSpeed;
+        it->second.lastStepTimestampMs = nowMs;
     }
 }
 
@@ -904,6 +785,8 @@ MobMovementManager::calculateChaseMovement(
         int lostTargetId = updated.targetPlayerId; // Save target ID before clearing
         updated.targetPlayerId = 0;
         updated.isReturningToSpawn = true;
+        updated.threatTable.clear();
+        updated.attackerTimestamps.clear();
         updateMobMovementData(mob.uid, updated);
 
         // Send target lost event to clients
@@ -922,6 +805,8 @@ MobMovementManager::calculateChaseMovement(
         int lostTargetId = updated.targetPlayerId; // Save target ID before clearing
         updated.targetPlayerId = 0;
         updated.isReturningToSpawn = true;
+        updated.threatTable.clear();
+        updated.attackerTimestamps.clear();
         updateMobMovementData(mob.uid, updated);
 
         // Send target lost event to clients
@@ -956,6 +841,18 @@ MobMovementManager::calculateChaseMovement(
         }
     }
 
+    // 4b) Melee-slot waiting: park this mob just outside the melee ring so it
+    // doesn't jitter while waiting for a free spot. The AI controller sets
+    // waitingForMeleeSlot when all physical slots around the target are taken.
+    // We stop movement at (attackRange + kWaitBuffer) — the mob stands still
+    // facing its target without twitching or slow-rotating in place.
+    {
+        constexpr float kWaitBuffer = 20.0f;
+        auto md = getMobMovementDataInternal(mob.uid);
+        if (md.waitingForMeleeSlot && distance <= mob.attackRange + kWaitBuffer)
+            return std::nullopt;
+    }
+
     // 5) Avoid jitter if extremely close
     if (distance < 1.0f)
     {
@@ -966,27 +863,34 @@ MobMovementManager::calculateChaseMovement(
     dx /= distance;
     dy /= distance;
 
-    // 7) Compute step size limited by attackRange (params passed from caller).
-    // Overshoot the attack-range boundary by a small buffer so floating-point
-    // rounding cannot land the mob at attackRange+epsilon (just outside), which
-    // would prevent updateMobCombatState from triggering the attack.
-    // The mob targets (attackRange - kAttackEntryBuffer) as its stop point, ensuring
-    // it lands clearly inside attack range. Step-4 above still returns nullopt any
-    // time the mob is already within attackRange, so the buffer has no effect once
-    // the mob is already close.
+    // 7) Compute step size from the mob's move_speed attribute (same stat system as
+    // players: stat_value * MOVE_SPEED_SCALE = units/sec).  Falls back to the global
+    // aiConfig_.chaseSpeedUnitsPerSec when the mob has no move_speed stat defined.
+    // This speed is also sent verbatim in the packet so the client Dead Reckoning
+    // uses exactly the same value:  TargetPos = ServerPos + velocity * dt.
+    static constexpr float MOVE_SPEED_SCALE = 40.0f;
+    float mobChaseSpeed = aiConfig_.chaseSpeedUnitsPerSec; // default
+    for (const auto &attr : mob.attributes)
+    {
+        if (attr.slug == "move_speed" && attr.value > 0)
+        {
+            mobChaseSpeed = static_cast<float>(attr.value) * MOVE_SPEED_SCALE;
+            break;
+        }
+    }
+
     const float kAttackEntryBuffer = 2.0f;
-    float maxStep = std::min(params.baseSpeedMax * 1.5f, params.maxStepSizeAbsolute);
+    float stepSize = mobChaseSpeed * aiConfig_.chaseMovementInterval;
+    stepSize = std::min(stepSize, params.maxStepSizeAbsolute);
     float overshoot = distance - std::max(0.0f, mob.attackRange - kAttackEntryBuffer);
-    float stepSize = std::min(maxStep, overshoot);
+    stepSize = std::min(stepSize, overshoot);
     if (stepSize <= 0.0f)
     {
         return std::nullopt;
     }
 
-    // 9) New position; record speed for client interpolation before computing final pos
-    const float chaseSpeed = (aiConfig_.chaseMovementInterval > 0.0f)
-                                 ? stepSize / aiConfig_.chaseMovementInterval
-                                 : stepSize;
+    // 9) Report the per-mob speed so client Dead Reckoning velocity is consistent.
+    const float chaseSpeed = mobChaseSpeed;
     float newX = mob.position.positionX + dx * stepSize;
     float newY = mob.position.positionY + dy * stepSize;
 
@@ -1196,6 +1100,7 @@ MobMovementManager::canPerformAction(const MobMovementData &movementData, float 
     case MobCombatState::PATROLLING:
     case MobCombatState::CHASING:
     case MobCombatState::RETURNING:
+    case MobCombatState::FLEEING: // Flee movement is handled via isFleeing flag path
         return true;
 
     case MobCombatState::PREPARING_ATTACK:

@@ -1015,3 +1015,96 @@ weightLimit = carry_weight.base + strength * carry_weight.per_strength
 ```
 
 Клиент заполняет `clientSendTime` (Unix ms), `serverReceiveTime` оставляет `0`.
+
+---
+
+## Чат
+
+### Каналы
+
+| Канал | Кому доставляется |
+|-------|------------------|
+| `zone` | Все игроки на текущем чанк-сервере |
+| `local` | Игроки в радиусе 50 юнитов от отправителя |
+| `whisper` | Конкретный игрок по имени персонажа |
+
+---
+
+### Клиент → Сервер: `chatMessage`
+
+```json
+{
+  "header": {
+    "eventType": "chatMessage",
+    "clientId": 42,
+    "hash": "abc123"
+  },
+  "body": {
+    "channel": "zone",
+    "text": "Кто хочет в пати?",
+    "targetName": ""
+  }
+}
+```
+
+| Поле | Тип | Обязательное | Описание |
+|------|-----|:---:|---------|
+| `channel` | `"zone"` \| `"local"` \| `"whisper"` | ✓ | Канал доставки |
+| `text` | string | ✓ | Текст (1–255 символов, валидируется сервером) |
+| `targetName` | string | только для `whisper` | Имя персонажа-получателя |
+
+**WSP (whisper):** если `channel = "whisper"`, поле `targetName` обязательно.
+
+---
+
+### Сервер → Клиент: `chatMessage` (broadcast)
+
+```json
+{
+  "header": {
+    "eventType": "chatMessage",
+    "clientId": 0,
+    "message": "success"
+  },
+  "body": {
+    "channel": "zone",
+    "senderName": "Aragorn",
+    "senderId": 17,
+    "text": "Кто хочет в пати?",
+    "timestamp": 1741689600456
+  }
+}
+```
+
+| Поле | Тип | Описание |
+|------|-----|---------|
+| `channel` | string | Канал, по которому пришло сообщение |
+| `senderName` | string | Имя персонажа-отправителя (заполняется сервером) |
+| `senderId` | int | `characterId` отправителя |
+| `text` | string | Текст сообщения |
+| `timestamp` | int64 | Server-side receive timestamp (Unix ms) |
+
+---
+
+### Сервер → Клиент: ошибка `whisper`
+
+Если `targetName` не найден среди подключённых игроков:
+
+```json
+{
+  "header": {
+    "eventType": "chatMessage",
+    "clientId": 42,
+    "message": "Player 'NoOne' not found"
+  },
+  "body": null
+}
+```
+
+---
+
+### Ограничения
+
+- Максимальная длина `text`: **255 символов**
+- Rate limit: **3 сообщения / 2 секунды** на клиента (превышение игнорируется без уведомления)
+- Имя отправителя заполняется исключительно сервером — клиент не может его подменить

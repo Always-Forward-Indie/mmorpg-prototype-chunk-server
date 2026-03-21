@@ -136,6 +136,7 @@ class Event
         SET_PLAYER_PITY,             // Load pity kill counters for a character (on join)
         SET_PLAYER_BESTIARY,         // Load bestiary kill counts for a character (on join)
         GET_BESTIARY_ENTRY,          // Client requests a single bestiary entry for a mob template
+        GET_BESTIARY_OVERVIEW,       // Client requests list of all discovered mob IDs with kill counts
         // Stage 3: Champion system
         SET_TIMED_CHAMPION_TEMPLATES, // Game-server sends timed champion template list to chunk-server
         TIMED_CHAMPION_KILLED,        // Chunk-server notifies game-server that a timed champion was killed
@@ -149,8 +150,11 @@ class Event
         SAVE_MASTERY,         // Persist a mastery value change to game-server
 
         // Stage 4: Zone Events
-        SET_ZONE_EVENT_TEMPLATES,      // Game-server sends zone event template list to chunk-server
-        SET_MOB_WEAKNESSES_RESISTANCES // Game-server sends mob weaknesses/resistances tables
+        SET_ZONE_EVENT_TEMPLATES,       // Game-server sends zone event template list to chunk-server
+        SET_MOB_WEAKNESSES_RESISTANCES, // Game-server sends mob weaknesses/resistances tables
+
+        // Chat events (client → chunk-server)
+        CHAT_MESSAGE ///< Player sends a chat message (local / zone / whisper)
     }; // Define more event types as needed
 
     Event() = default; // Default constructor

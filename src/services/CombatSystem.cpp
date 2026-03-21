@@ -113,6 +113,17 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
             return result;
         }
 
+        // Проверяем GCD до создания ongoingAction — предотвращает паттерн
+        // «инициация успешна, результат проваливается» — клиент не должен
+        // запускать анимацию если GCD ещё активен.
+        if (skill.gcdMs > 0 && skillSystem_->isGCDActive(casterId))
+        {
+            log_->warn("[initiateSkillUsage] GCD active for caster " + std::to_string(casterId) +
+                       " skill='" + skillSlug + "'");
+            result.errorMessage = "Global cooldown active";
+            return result;
+        }
+
         // Проверяем, что у кастера нет активного каста (защита от спама во время cast time).
         // Только для скилов с castMs > 0 — мгновенные можно спамить свободно.
         if (skill.castMs > 0)
@@ -145,6 +156,74 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
                 if (mobData.uid != 0 && mobData.currentMana < skill.costMp)
                 {
                     result.errorMessage = "Not enough mana";
+                    return result;
+                }
+            }
+        }
+
+        // Range check: reject before creating the ongoing action so that
+        // combatInitiation is never sent as "success" when the target is out
+        // of reach.  Mirrors the identical logic in SkillSystem::isInRange.
+        if (targetType != CombatTargetType::AREA && targetType != CombatTargetType::NONE)
+        {
+            PositionStruct casterPos{}, targetPos{};
+            bool posValid = true;
+
+            // Caster position
+            {
+                auto characterData = gameServices_->getCharacterManager().getCharacterData(casterId);
+                if (characterData.characterId != 0)
+                    casterPos = characterData.characterPosition;
+                else
+                {
+                    auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
+                    if (mobData.uid != 0)
+                        casterPos = mobData.position;
+                    else
+                        posValid = false;
+                }
+            }
+
+            // Target position
+            if (posValid)
+            {
+                if (targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF)
+                {
+                    auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
+                    if (targetData.characterId != 0)
+                        targetPos = targetData.characterPosition;
+                    else
+                        posValid = false;
+                }
+                else if (targetType == CombatTargetType::MOB)
+                {
+                    auto mobMoveData = gameServices_->getMobMovementManager().getMobMovementData(targetId);
+                    const PositionStruct &lastSent = mobMoveData.lastSentPosition;
+                    if (lastSent.positionX != 0.0f || lastSent.positionY != 0.0f)
+                        targetPos = lastSent;
+                    else
+                    {
+                        auto mobData = gameServices_->getMobInstanceManager().getMobInstance(targetId);
+                        if (mobData.uid != 0)
+                            targetPos = mobData.position;
+                        else
+                            posValid = false;
+                    }
+                }
+            }
+
+            if (posValid)
+            {
+                float dx = casterPos.positionX - targetPos.positionX;
+                float dy = casterPos.positionY - targetPos.positionY;
+                float distance = std::sqrt(dx * dx + dy * dy);
+                if (distance > skill.maxRange * 100.0f)
+                {
+                    log_->warn("[initiateSkillUsage] Target " + std::to_string(targetId) +
+                               " out of range for caster " + std::to_string(casterId) +
+                               " distance=" + std::to_string(distance) +
+                               " maxRange=" + std::to_string(skill.maxRange * 100.0f));
+                    result.errorMessage = "Target is out of range";
                     return result;
                 }
             }
@@ -201,6 +280,11 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         result.castTime = action->castTime;
         result.animationName = action->animationName;
         result.animationDuration = action->animationDuration;
+        auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+        result.serverTimestamp = nowMs;
+        result.castStartedAt = nowMs;
     }
     catch (const std::exception &e)
     {
@@ -218,7 +302,11 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
     result.casterId = casterId;
     result.targetId = targetId;
     result.targetType = targetType;
-    result.skillSlug = skillSlug; // Сохраняем оригинальный slug
+    result.skillSlug = skillSlug;
+    // Set serverTimestamp immediately so it is present even on early-return failure paths
+    result.serverTimestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+                                 .count();
 
     try
     {
@@ -475,6 +563,7 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         // ongoingActions_.erase(casterId);
 
         result.success = true;
+        // serverTimestamp already set at the top of this function.
 
         // Отправляем обновление статов для кастера (потратил ману)
         try
@@ -521,6 +610,13 @@ CombatSystem::interruptSkillUsage(int casterId, InterruptionReason reason)
         gameServices_->getLogger().log("Skill usage interrupted for caster " + std::to_string(casterId) +
                                        ", reason: " + std::to_string(static_cast<int>(reason)));
     }
+}
+
+void
+CombatSystem::clearOngoingAction(int casterId)
+{
+    std::lock_guard<std::mutex> lock(actionsMutex_);
+    ongoingActions_.erase(casterId);
 }
 
 void
@@ -1032,7 +1128,7 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
                         {
                             expMgr.grantExperience(killerId, bonus, "fellowship_bonus", mobId);
                             gameServices_->getStatsNotificationService().sendWorldNotification(
-                                killerId, "fellowship_bonus", "+" + std::to_string(bonus) + " Fellowship XP");
+                                killerId, "fellowship_bonus", nlohmann::json{{"xpBonus", bonus}}, "low", "float_text");
                         }
                     }
                 }
@@ -1049,7 +1145,7 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
                     {
                         expMgr.grantExperience(fellowId, bonus, "fellowship_bonus", mobId);
                         gameServices_->getStatsNotificationService().sendWorldNotification(
-                            fellowId, "fellowship_bonus", "+" + std::to_string(bonus) + " Fellowship XP");
+                            fellowId, "fellowship_bonus", nlohmann::json{{"xpBonus", bonus}}, "low", "float_text");
                         log_->info("[Fellowship] +" + std::to_string(bonus) + " XP \u2192 char " + std::to_string(fellowId));
                     }
                 }
@@ -1217,12 +1313,17 @@ CombatSystem::broadcastMobSkillInitiation(int mobId, int targetPlayerId, const S
         if (r.animationDuration < kSwing)
             r.animationDuration = kSwing;
     }
+    auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+                     .count();
+    r.serverTimestamp = nowMs;
+    r.castStartedAt = nowMs;
     broadcastCallback_(responseBuilder_->buildSkillInitiationBroadcast(r));
     log_->info("[AI] combatInitiation sent for mob " + std::to_string(mobId) + " skill: " + skill.skillName);
 }
 
 void
-CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug, float hitDelay)
+CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug)
 {
     try
     {
@@ -1314,7 +1415,9 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
         result.skillSchool = bestSkill.school;
         result.skillResult = skillResult;
         result.errorMessage = skillResult.errorMessage;
-        result.hitDelay = hitDelay;
+        result.serverTimestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                                     .count();
 
         if (result.success)
         {

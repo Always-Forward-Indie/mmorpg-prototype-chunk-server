@@ -1,3 +1,43 @@
+v0.1.1
+21.03.2026
+================
+New:
+ChatEventHandler — new chat message handler (zone/whisper channels); ChatEventHandler.cpp and ChatEventHandler.hpp registered in CMakeLists.txt.
+ChatChannel enum and ChatMessageStruct added to DataStructs.hpp.
+MobArchetype enum (MELEE, CASTER, RANGED, SUPPORT) — stores AI archetype as an enum for cheap hot-path comparison instead of a string aiArchetype field.
+EventDispatcher — handleGetBestiaryOverview(): handles client request for a list of all known mobs.
+EventHandler — handleGetBestiaryOverviewEvent(): sends the client the current bestiary overview (mob slug + kill count list).
+
+Improvements:
+MobMovementManager — unified tick `runMobTick()`: single method covering all states (patrol, chase, flee, return). Replaces two separate timers (moveMobInZoneTask@1000ms + aggroMobMovementTask@50ms) with one task using internal timing guards.
+MobMovementManager — `updateLastBroadcastMs()`: per-mob last-broadcast timestamp; patrol updates capped at 200 ms, combat updates capped at 100 ms. Removes the global lock that serialized all zones.
+MobMovementData — new fields for client Dead Reckoning: dirX, dirY, speed (units/sec), combatState, lastStepTimestampMs; waitingForMeleeSlot for queuing mobs when melee slots are occupied; lastBroadcastMs for rate-limiting.
+Mob patrol timing — significantly reduced: inter-step pause 2-6 s (was 10-40 s), inter-patrol pause 2-5 s (was 12-28 s), initial spawn delay ≤1 s (was ≤5 s), random cooldown 1-3 s (was 5-15 s). Mobs are visibly active immediately after server start.
+MobAIController — `countMobsEngagingTarget()`: counts mobs attacking the same player within a given radius; used for melee slot management and crowd jitter prevention.
+MobAIController — `executeMobAttack()`: extracted as a dedicated method for mob attack execution (internal refactoring).
+CombatSystem — `clearOngoingAction()`: removes the ongoing action entry after a skill is executed immediately, preventing a second execution by updateOngoingActions().
+CombatSystem — `processAIAttack()` accepts an optional `forcedSkillSlug` parameter to force a specific skill for AI attacks.
+CombatResult and CombatInitiationResult — new `serverTimestamp` field (unix ms) for client-side network latency compensation during animations.
+SkillSystem — `isGCDActive()`: read-only Global Cooldown check without consuming it (used for pre-cast validation).
+BestiaryManager — `getKnownMobs()`: returns a list of (mobTemplateId, killCount) pairs for all mobs killed by a character.
+BestiaryManager — `setNotifyCallback()`: callback with 6-tier information unlock system (thresholds 1/10/25/50/100/300 kills: T1 — basic info, T2 — lore, T3 — combat info, T4 — loot table, T5 — drop rates, T6 — hunter mastery).
+BestiaryManager — `setKillUpdateCallback()`: callback fired on every kill; pushes updated kill count to the client without a full re-request.
+BestiaryManager kill update wired in ChunkServer: updated kill count is automatically sent to the client on every mob kill.
+CharacterStatsNotificationService — `setDirectSendCallback()`: directed notification delivery to a specific character instead of broadcasting to the whole zone.
+CharacterStatsNotificationService — new notification methods with `priority` (critical|high|medium|low|ambient) and `channel` (screen_center|toast|float_text|atmosphere|chat_log) parameters; auto-incrementing `notifSeq_` for unique notificationId.
+CharacterStatsNotificationService — `sendWorldNotification()`, `sendGameZoneNotification()`: send notifications to all players in a zone.
+CombatEventHandler — calls `clearOngoingAction()` after immediate skill execution.
+docs/ updated: client-combat-protocol.md, client-progression-protocol.md, client-server-protocol.md, client-world-systems-protocol.md — brought in line with current implementation.
+
+Removed:
+docs/death-respawn-plan.md — removed (superseded by the implemented protocol in client-death-respawn-protocol.md).
+
+Bug Fixes:
+Fixed double skill execution: updateOngoingActions() could re-execute a skill that was already executed immediately in the combat handler — fixed via clearOngoingAction().
+Fixed visual jitter when multiple mobs attack the same player: melee slot queuing (waitingForMeleeSlot) parks excess mobs just outside the ring until a slot is free.
+
+---
+
 v0.1.0
 15.03.2026
 ================

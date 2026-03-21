@@ -167,8 +167,9 @@ class ChampionManager
     /// Send a worldNotification to all players in a game zone.
     void broadcastToGameZone(int gameZoneId,
         const std::string &type,
-        const std::string &text,
-        const nlohmann::json &data = nlohmann::json::object());
+        const nlohmann::json &data = nlohmann::json::object(),
+        const std::string &priority = "high",
+        const std::string &channel = "screen_center");
 
     /// Tell the game-server that a timed champion was killed.
     void sendTimedChampionKilledToGameServer(const std::string &slug, int killerCharId);

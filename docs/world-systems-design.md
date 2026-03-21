@@ -193,7 +193,7 @@ pity-намёк и любые другие сообщения мира. Клие
   "body": {
     "notificationType": "zone_explored",
     "scope": "personal",
-    "text": "Ты исследовал: Мёртвый Лес",
+    "text": "",
     "data": {}
   }
 }
@@ -203,6 +203,7 @@ pity-намёк и любые другие сообщения мира. Клие
 
 | notificationType | scope | Когда отправляется |
 |-----------------|-------|-------------------|
+| `zone_entered` | `personal` | Игрок вошёл в новую зону (вкл. первый логин) |
 | `zone_explored` | `personal` | Игрок впервые входит в зону |
 | `rare_mob_spawned` | `zone` | Спавн редкого моба в зоне |
 | `champion_spawned` | `zone` | Спавн чемпиона (Threshold / Timed) |

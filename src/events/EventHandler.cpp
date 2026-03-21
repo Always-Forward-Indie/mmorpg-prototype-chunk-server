@@ -25,6 +25,7 @@ EventHandler::EventHandler(
     dialogueEventHandler_ = std::make_unique<DialogueEventHandler>(networkManager, gameServerWorker, gameServices);
     vendorEventHandler_ = std::make_unique<VendorEventHandler>(networkManager, gameServerWorker, gameServices);
     equipmentEventHandler_ = std::make_unique<EquipmentEventHandler>(networkManager, gameServerWorker, gameServices);
+    chatEventHandler_ = std::make_unique<ChatEventHandler>(networkManager, gameServerWorker, gameServices);
 
     // Set skill event handler reference in character event handler
     characterEventHandler_->setSkillEventHandler(skillEventHandler_.get());
@@ -318,6 +319,9 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::GET_BESTIARY_ENTRY:
             handleGetBestiaryEntryEvent(event);
             break;
+        case Event::GET_BESTIARY_OVERVIEW:
+            handleGetBestiaryOverviewEvent(event);
+            break;
 
         // ── Stage-4 social systems ─────────────────────────────────────────────
         case Event::SET_PLAYER_REPUTATIONS:
@@ -418,6 +422,11 @@ EventHandler::dispatchEvent(const Event &event)
             equipmentEventHandler_->handleGetEquipmentEvent(event);
             break;
 
+        // ── Chat events ────────────────────────────────────────────────────────────
+        case Event::CHAT_MESSAGE:
+            chatEventHandler_->handleChatMessageEvent(event);
+            break;
+
         default:
             gameServices_.getLogger().logError("Unknown event type: " + std::to_string(static_cast<int>(event.getType())));
             break;
@@ -463,6 +472,12 @@ EquipmentEventHandler &
 EventHandler::getEquipmentEventHandler()
 {
     return *equipmentEventHandler_;
+}
+
+ChatEventHandler &
+EventHandler::getChatEventHandler()
+{
+    return *chatEventHandler_;
 }
 
 void
@@ -910,10 +925,108 @@ EventHandler::handleSetPlayerBestiaryEvent(const Event &event)
         gameServices_.getBestiaryManager().loadBestiaryData(characterId, kills);
         log_->info("[EH] SET_PLAYER_BESTIARY: loaded " + std::to_string(kills.size()) +
                    " bestiary entries for character " + std::to_string(characterId));
+
+        // Auto-push overview to the client so it knows which mobs are discovered
+        int clientId = event.getClientID();
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (clientSocket && clientSocket->is_open())
+        {
+            auto knownMobs = gameServices_.getBestiaryManager().getKnownMobs(characterId);
+            nlohmann::json entries = nlohmann::json::array();
+            for (const auto &[mobTemplateId, killCount] : knownMobs)
+            {
+                const std::string slug = gameServices_.getMobManager().getMobById(mobTemplateId).slug;
+                if (slug.empty())
+                    continue;
+                nlohmann::json e;
+                e["mobSlug"] = slug;
+                e["killCount"] = killCount;
+                entries.push_back(std::move(e));
+            }
+
+            nlohmann::json response = ResponseBuilder()
+                                          .setHeader("message", "Bestiary overview")
+                                          .setHeader("hash", "")
+                                          .setHeader("clientId", clientId)
+                                          .setHeader("eventType", "getBestiaryOverview")
+                                          .setBody("characterId", characterId)
+                                          .setBody("entries", entries)
+                                          .build();
+
+            networkManager_.sendResponse(clientSocket,
+                networkManager_.generateResponseMessage("success", response));
+
+            log_->info("[EH] SET_PLAYER_BESTIARY: pushed overview (" +
+                       std::to_string(entries.size()) + " mobs) to clientId=" + std::to_string(clientId));
+        }
     }
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("Error processing SET_PLAYER_BESTIARY: " + std::string(e.what()));
+    }
+}
+
+// ── GET_BESTIARY_OVERVIEW ──────────────────────────────────────────────────
+void
+EventHandler::handleGetBestiaryOverviewEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("GET_BESTIARY_OVERVIEW: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+        int clientId = body.value("clientId", event.getClientID());
+
+        if (characterId <= 0)
+        {
+            log_->error("GET_BESTIARY_OVERVIEW: invalid characterId");
+            return;
+        }
+
+        auto knownMobs = gameServices_.getBestiaryManager().getKnownMobs(characterId);
+
+        nlohmann::json entries = nlohmann::json::array();
+        for (const auto &[mobTemplateId, killCount] : knownMobs)
+        {
+            const std::string slug = gameServices_.getMobManager().getMobById(mobTemplateId).slug;
+            if (slug.empty())
+                continue;
+            nlohmann::json e;
+            e["mobSlug"] = slug;
+            e["killCount"] = killCount;
+            entries.push_back(std::move(e));
+        }
+
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (!clientSocket || !clientSocket->is_open())
+        {
+            log_->error("GET_BESTIARY_OVERVIEW: no socket for clientId=" + std::to_string(clientId));
+            return;
+        }
+
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("message", "Bestiary overview")
+                                      .setHeader("hash", "")
+                                      .setHeader("clientId", clientId)
+                                      .setHeader("eventType", "getBestiaryOverview")
+                                      .setBody("characterId", characterId)
+                                      .setBody("entries", entries)
+                                      .build();
+
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", response));
+
+        log_->info("[EH] GET_BESTIARY_OVERVIEW: sent " + std::to_string(entries.size()) +
+                   " entries to clientId=" + std::to_string(clientId));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing GET_BESTIARY_OVERVIEW: " + std::string(e.what()));
     }
 }
 
@@ -932,21 +1045,35 @@ EventHandler::handleGetBestiaryEntryEvent(const Event &event)
         const auto &body = std::get<nlohmann::json>(data);
         int characterId = body.value("characterId", 0);
         int clientId = body.value("clientId", event.getClientID());
-        int mobTemplateId = body.value("mobTemplateId", 0);
+        std::string mobSlug = body.value("mobSlug", std::string{});
 
-        if (characterId <= 0 || mobTemplateId <= 0)
+        if (characterId <= 0 || mobSlug.empty())
         {
-            log_->error("GET_BESTIARY_ENTRY: invalid characterId or mobTemplateId");
+            log_->error("GET_BESTIARY_ENTRY: invalid characterId or missing mobSlug");
             return;
         }
 
-        // Resolve mob static data
-        MobDataStruct mobStatic = gameServices_.getMobManager().getMobById(mobTemplateId);
-        const std::string &mobSlug = mobStatic.slug;
+        // Resolve mob static data by slug
+        MobDataStruct mobStatic = gameServices_.getMobManager().getMobBySlug(mobSlug);
+        int mobTemplateId = mobStatic.id;
+
+        if (mobTemplateId <= 0)
+        {
+            log_->error("GET_BESTIARY_ENTRY: unknown mobSlug=" + mobSlug);
+            return;
+        }
 
         // Resolve weaknesses and resistances
         std::vector<std::string> weaknesses = gameServices_.getMobManager().getWeaknessesForMob(mobTemplateId);
         std::vector<std::string> resistances = gameServices_.getMobManager().getResistancesForMob(mobTemplateId);
+
+        // Resolve ability slugs (skills the mob can actively use)
+        std::vector<std::string> abilities;
+        for (const auto &sk : mobStatic.skills)
+        {
+            if (!sk.isPassive && !sk.skillSlug.empty())
+                abilities.push_back(sk.skillSlug);
+        }
 
         // Resolve loot rows for this mob template
         std::vector<MobLootInfoStruct> lootRows = gameServices_.getItemManager().getLootForMob(mobTemplateId);
@@ -965,7 +1092,7 @@ EventHandler::handleGetBestiaryEntryEvent(const Event &event)
         };
 
         nlohmann::json entry = gameServices_.getBestiaryManager().buildEntryJson(
-            characterId, mobTemplateId, mobSlug, mobStatic, weaknesses, resistances, lootRows, itemSlugFn);
+            characterId, mobTemplateId, mobSlug, mobStatic, weaknesses, resistances, abilities, lootRows, itemSlugFn);
 
         auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
         if (!clientSocket || !clientSocket->is_open())

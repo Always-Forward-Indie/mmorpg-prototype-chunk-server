@@ -19,6 +19,7 @@ class MobManager
     std::map<int, MobDataStruct> getMobs() const;
     std::vector<MobDataStruct> getMobsAsVector() const;
     MobDataStruct getMobById(int mobId) const;
+    MobDataStruct getMobBySlug(const std::string &slug) const;
     MobDataStruct getMobByUid(int mobUid) const;
 
     // Update mob mana

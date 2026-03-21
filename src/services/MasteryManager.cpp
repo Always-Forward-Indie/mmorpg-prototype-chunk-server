@@ -8,7 +8,7 @@
 
 MasteryManager::MasteryManager(GameServices *gs)
     : gs_(gs),
-      log_(spdlog::get("chunk_server"))
+      log_(spdlog::get("chunk-server"))
 {
 }
 
@@ -164,7 +164,7 @@ MasteryManager::checkAndApplyMilestone(int characterId,
             gs_->getCharacterManager().addActiveEffect(characterId, eff);
             gs_->getStatsNotificationService().sendStatsUpdate(characterId);
             gs_->getStatsNotificationService().sendWorldNotification(
-                characterId, "mastery_tier_up", "Мастерство " + masterySlug + " достигло нового уровня!", {{"masterySlug", masterySlug}, {"tier", effectSlug}});
+                characterId, "mastery_tier_up", nlohmann::json{{"masterySlug", masterySlug}, {"tier", effectSlug}});
         }
         catch (...)
         {

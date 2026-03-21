@@ -64,6 +64,11 @@ class SkillSystem
     bool isOnCooldown(int casterId, const std::string &skillSlug);
 
     /**
+     * @brief Проверить, активен ли Global Cooldown для кастера (реад-онли, без потребления).
+     */
+    bool isGCDActive(int casterId);
+
+    /**
      * @brief HIGH-1 fix: Atomically check that the skill is NOT on cooldown and
      *        immediately set it if so.  Returns true (cooldown set, proceed with
      *        skill execution) or false (already on cooldown, reject).  Both

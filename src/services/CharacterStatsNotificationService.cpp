@@ -37,10 +37,11 @@ CharacterStatsNotificationService::sendStatsUpdate(int characterId)
 void
 CharacterStatsNotificationService::sendWorldNotification(int characterId,
     const std::string &notificationType,
-    const std::string &text,
-    const nlohmann::json &data)
+    const nlohmann::json &data,
+    const std::string &priority,
+    const std::string &channel)
 {
-    if (!statsUpdateCallback_)
+    if (!directSendCallback_ && !statsUpdateCallback_)
         return;
     try
     {
@@ -48,10 +49,16 @@ CharacterStatsNotificationService::sendWorldNotification(int characterId,
         packet["header"]["eventType"] = "world_notification";
         packet["header"]["status"] = "success";
         packet["body"]["characterId"] = characterId;
+        packet["body"]["notificationId"] = std::to_string(++notifSeq_);
         packet["body"]["notificationType"] = notificationType;
-        packet["body"]["text"] = text;
+        packet["body"]["priority"] = priority;
+        packet["body"]["channel"] = channel;
+        packet["body"]["text"] = "";
         packet["body"]["data"] = data;
-        statsUpdateCallback_(packet);
+        if (directSendCallback_)
+            directSendCallback_(characterId, packet);
+        else
+            statsUpdateCallback_(packet);
     }
     catch (const std::exception &e)
     {
@@ -66,10 +73,18 @@ CharacterStatsNotificationService::setStatsUpdateCallback(std::function<void(con
 }
 
 void
+CharacterStatsNotificationService::setDirectSendCallback(
+    std::function<void(int, const nlohmann::json &)> callback)
+{
+    directSendCallback_ = std::move(callback);
+}
+
+void
 CharacterStatsNotificationService::sendWorldNotificationToGameZone(int gameZoneId,
     const std::string &notificationType,
-    const std::string &text,
-    const nlohmann::json &data)
+    const nlohmann::json &data,
+    const std::string &priority,
+    const std::string &channel)
 {
     if (!statsUpdateCallback_)
         return;
@@ -86,7 +101,7 @@ CharacterStatsNotificationService::sendWorldNotificationToGameZone(int gameZoneI
             if (!zone.has_value() || zone->id != gameZoneId)
                 continue;
 
-            sendWorldNotification(charData.characterId, notificationType, text, data);
+            sendWorldNotification(charData.characterId, notificationType, data, priority, channel);
         }
     }
     catch (const std::exception &e)

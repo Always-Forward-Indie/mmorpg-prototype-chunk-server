@@ -83,7 +83,7 @@ class MobAIController
      * @brief Fire the actual attack via CombatSystem, update lastAttackTime.
      *        Uses movementData.pendingSkillSlug if set; clears it after use.
      */
-    void executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData, float hitDelay = 0.0f);
+    void executeMobAttack(const MobDataStruct &mob, int targetPlayerId, MobMovementData &movementData);
 
     /**
      * @brief Select the best skill for the mob to use against the target.
@@ -106,4 +106,13 @@ class MobAIController
      *        and persists changes.  Returns true if FLEEING was triggered.
      */
     bool checkAndTriggerFlee(MobDataStruct &mob, MobMovementData &movementData, float currentTime, int attackerPlayerId);
+
+    /**
+     * @brief Count mobs (excluding excludeUID) that are currently occupying a
+     *        melee slot: targeting targetPlayerId and in state PREPARING_ATTACK,
+     *        ATTACKING, or ATTACK_COOLDOWN within the given range.
+     *        Used to gate crowding — excess mobs wait outside the melee ring
+     *        instead of jittering and slow-rotating toward the player.
+     */
+    int countMobsEngagingTarget(int targetPlayerId, int excludeUID, float range) const;
 };

@@ -421,26 +421,29 @@ CombatEventHandler::dispatchSkillAction(int characterId,
         return;
     }
 
-    // No cast time — execute immediately; otherwise updateOngoingActions() will fire later
-    if (initiationResult.castTime <= 0.0f)
+    // Always execute immediately (optimistic broadcast, same as mob AI).
+    // The client uses the animation hit trigger to time the visual hit effect.
+    log_->info("[dispatchSkillAction] Executing skill '" + skillSlug +
+               "' for char " + std::to_string(characterId) +
+               " -> target " + std::to_string(targetId) + "'");
+
+    auto executionResult = combatSystem_->executeSkillUsage(characterId, skillSlug, targetId, targetType);
+
+    // Clear the ongoingActions_ entry so updateOngoingActions() doesn't fire it again.
+    combatSystem_->clearOngoingAction(characterId);
+
+    if (!executionResult.success)
     {
-        log_->info("[dispatchSkillAction] Executing instant skill '" + skillSlug +
-                   "' for char " + std::to_string(characterId) +
-                   " -> target " + std::to_string(targetId));
-        auto executionResult = combatSystem_->executeSkillUsage(characterId, skillSlug, targetId, targetType);
-        if (!executionResult.success)
-        {
-            log_->warn("[dispatchSkillAction] Skill execution failed for char " + std::to_string(characterId) +
-                       " skill='" + skillSlug + "': " + executionResult.errorMessage);
-        }
-        else
-        {
-            log_->info("[dispatchSkillAction] Skill '" + skillSlug + "' executed OK for char " +
-                       std::to_string(characterId) + " -> target " + std::to_string(targetId) +
-                       " damage=" + std::to_string(executionResult.skillResult.damageResult.totalDamage));
-        }
-        broadcastSkillExecution(executionResult);
+        log_->warn("[dispatchSkillAction] Skill execution failed for char " + std::to_string(characterId) +
+                   " skill='" + skillSlug + "': " + executionResult.errorMessage);
     }
+    else
+    {
+        log_->info("[dispatchSkillAction] Skill '" + skillSlug + "' executed OK for char " +
+                   std::to_string(characterId) + " -> target " + std::to_string(targetId) +
+                   " damage=" + std::to_string(executionResult.skillResult.damageResult.totalDamage));
+    }
+    broadcastSkillExecution(executionResult);
 }
 
 void

@@ -73,7 +73,4 @@ class ChunkServer
 
     // Helper method for sending spawn events to all clients
     void sendSpawnEventsToClients(const SpawnZoneStruct &zone);
-
-    // Timestamp of last aggro-mob-movement broadcast (replaces static variable in lambda)
-    std::chrono::steady_clock::time_point aggroLastBroadcastTime_;
 };

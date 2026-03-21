@@ -191,7 +191,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                         {"isPvp", zoneOpt->isPvp},
                         {"isSafeZone", zoneOpt->isSafeZone}};
                     gameServices_.getStatsNotificationService().sendWorldNotification(
-                        characterData.characterId, "zone_entered", "", zoneData);
+                        characterData.characterId, "zone_entered", zoneData, "high", "zone_banner");
                 }
             }
             catch (const std::exception &ex)
@@ -391,7 +391,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                             {"isPvp", zoneOpt->isPvp},
                             {"isSafeZone", zoneOpt->isSafeZone}};
                         gameServices_.getStatsNotificationService().sendWorldNotification(
-                            movementData.characterId, "zone_entered", "", zoneData);
+                            movementData.characterId, "zone_entered", zoneData, "high", "zone_banner");
                     }
 
                     // One-time exploration XP reward
@@ -413,8 +413,9 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                         gameServices_.getStatsNotificationService().sendWorldNotification(
                             movementData.characterId,
                             "zone_explored",
-                            "",
-                            notifData);
+                            notifData,
+                            "medium",
+                            "toast");
                     }
                 }
             }
@@ -684,7 +685,7 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
                     {"isPvp", zoneOpt->isPvp},
                     {"isSafeZone", zoneOpt->isSafeZone}};
                 gameServices_.getStatsNotificationService().sendWorldNotification(
-                    characterData.characterId, "zone_entered", "", zoneData);
+                    characterData.characterId, "zone_entered", zoneData, "high", "zone_banner");
             }
         }
         catch (const std::exception &ex)

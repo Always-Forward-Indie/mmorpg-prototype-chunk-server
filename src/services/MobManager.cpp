@@ -197,6 +197,18 @@ MobManager::getMobById(int mobId) const
 }
 
 MobDataStruct
+MobManager::getMobBySlug(const std::string &slug) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    for (const auto &[id, mob] : mobs_)
+    {
+        if (mob.slug == slug)
+            return mob;
+    }
+    return MobDataStruct();
+}
+
+MobDataStruct
 MobManager::getMobByUid(int mobUid) const
 {
     std::shared_lock<std::shared_mutex> lock(mutex_);

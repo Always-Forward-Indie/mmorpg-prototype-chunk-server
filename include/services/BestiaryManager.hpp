@@ -47,6 +47,12 @@ class BestiaryManager
     int getKillCount(int characterId, int mobTemplateId) const;
 
     /**
+     * @brief Return all mob template IDs with at least 1 kill for a character.
+     *        Used to send the bestiary overview list to the client on request.
+     */
+    std::vector<std::pair<int, int>> getKnownMobs(int characterId) const;
+
+    /**
      * @brief Compute which tiers are revealed given the current kill count.
      */
     std::vector<int> getRevealedTiers(int characterId, int mobTemplateId, const std::vector<int> &thresholds) const;
@@ -57,12 +63,21 @@ class BestiaryManager
      * Returns all tiers — unlocked ones with full 'data', locked ones with
      * metadata only (no data leakage).
      *
+     * Tier layout (thresholds from config, defaults 1/10/25/50/100/300):
+     *   T1 basic_info    — level, rank, HP range, type, biome
+     *   T2 lore          — loreKey (client resolves from locale)
+     *   T3 combat_info   — weaknesses, resistances, abilities (skill slugs)
+     *   T4 loot_table    — all item slugs (no chances — what to hunt for)
+     *   T5 drop_rates    — all items with exact drop chances
+     *   T6 hunter_mastery— titleSlug, achievementSlug milestone
+     *
      * @param characterId      Target player.
      * @param mobTemplateId    Mob template ID.
      * @param mobSlug          Mob slug (localisation key on the client).
      * @param mobStatic        Static mob data for basic_info tier.
      * @param weaknesses       Element slugs the mob is weak against.
      * @param resistances      Element slugs the mob resists.
+     * @param abilities        Skill slugs the mob can use (for combat_info tier).
      * @param allLootForMob    All loot rows for this mob template.
      * @param itemSlugFn       Resolver: itemId → itemSlug.
      */
@@ -73,6 +88,7 @@ class BestiaryManager
         const MobDataStruct &mobStatic,
         const std::vector<std::string> &weaknesses,
         const std::vector<std::string> &resistances,
+        const std::vector<std::string> &abilities,
         const std::vector<MobLootInfoStruct> &allLootForMob,
         const std::function<std::string(int)> &itemSlugFn) const;
 
@@ -89,6 +105,7 @@ class BestiaryManager
     /**
      * @brief Set tier kill thresholds from game config.
      *        Expected order: [tier1, tier2, tier3, tier4, tier5, tier6].
+     *        Protocol defaults: [1, 10, 25, 50, 100, 300].
      */
     void setThresholds(std::vector<int> thresholds);
 
@@ -101,9 +118,17 @@ class BestiaryManager
 
     /**
      * @brief Set the callback invoked when a new bestiary tier is unlocked.
-     *        Signature: (characterId, mobTemplateId, tierNum 1-based, categorySlug)
+     *        Signature: (characterId, mobTemplateId, tierNum 1-based, newKillCount, categorySlug)
      */
-    void setNotifyCallback(std::function<void(int, int, int, const std::string &)> callback);
+    void setNotifyCallback(std::function<void(int, int, int, int, const std::string &)> callback);
+
+    /**
+     * @brief Set the callback invoked on every kill (including non-tier-crossing ones).
+     *        Used to push the updated kill count to the client so the overview list
+     *        stays in sync without requiring a full re-request.
+     *        Signature: (characterId, mobTemplateId, newKillCount)
+     */
+    void setKillUpdateCallback(std::function<void(int, int, int)> callback);
 
   private:
     void persist(int characterId, int mobTemplateId, int killCount);
@@ -118,7 +143,8 @@ class BestiaryManager
     std::vector<int> thresholds_;
 
     std::function<void(const std::string &)> saveCallback_;
-    std::function<void(int, int, int, const std::string &)> notifyCallback_;
+    std::function<void(int, int, int, int, const std::string &)> notifyCallback_;
+    std::function<void(int, int, int)> killUpdateCallback_;
 
     /// Category slug for each tier index (0-based), matching thresholds_ positions.
     static const std::vector<std::string> kCategorySlugs_;

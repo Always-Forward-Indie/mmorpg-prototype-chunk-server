@@ -83,6 +83,7 @@ set(SOURCE_FILES
     src/events/handlers/DialogueEventHandler.cpp
     src/events/handlers/VendorEventHandler.cpp
     src/events/handlers/EquipmentEventHandler.cpp
+    src/events/handlers/ChatEventHandler.cpp
     src/events/ExperienceEventHandler.cpp
     src/data/AttackSystem.cpp
     src/utils/Scheduler.cpp
@@ -151,6 +152,7 @@ set(HEADER_FILES
     include/events/handlers/HarvestEventHandler.hpp
     include/events/handlers/DialogueEventHandler.hpp
     include/events/handlers/VendorEventHandler.hpp
+    include/events/handlers/ChatEventHandler.hpp
     include/events/ExperienceEventHandler.hpp
     include/data/DataStructs.hpp
     include/data/SkillStructs.hpp

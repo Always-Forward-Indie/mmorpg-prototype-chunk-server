@@ -744,8 +744,13 @@ ItemEventHandler::handleItemDropByPlayerEvent(const Event &event)
                        " for char=" + std::to_string(characterId) + " before drop");
         }
 
-        // Grab the inventory item ID before removing (needed to preserve instance in DB).
+        // Grab the inventory item's DB id and current durability before removing.
+        // Use the instanced path (evict + nullify owner) ONLY for non-stackable items
+        // (stackMax == 1, e.g. equipment) — for those we want to preserve the exact DB row.
+        // Stackable items always use the quantity-reduction path with inventoryItemId = 0,
+        // otherwise evictFromMemory removes the entire stack regardless of how many we drop.
         int droppingInvItemId = 0;
+        int droppingDurability = 0;
         {
             auto inv = gameServices_.getInventoryManager().getPlayerInventory(characterId);
             for (const auto &s : inv)
@@ -753,20 +758,25 @@ ItemEventHandler::handleItemDropByPlayerEvent(const Event &event)
                 if (s.itemId == itemId)
                 {
                     droppingInvItemId = s.id;
+                    droppingDurability = s.durabilityCurrent;
                     break;
                 }
             }
         }
 
-        if (droppingInvItemId > 0)
+        // Instanced path applies only to non-stackable unique items (e.g. equipment).
+        bool isInstanced = (itemInfo.stackMax == 1) && (droppingInvItemId > 0);
+
+        if (isInstanced)
         {
-            // Instanced item: remove from in-memory only (no DB delete).
+            // Non-stackable item: remove from in-memory only (no DB delete).
             // The DB row will be nullified (character_id = NULL) by LootManager.
             gameServices_.getInventoryManager().evictFromMemory(characterId, droppingInvItemId);
         }
         else
         {
-            // Non-instanced / id=0 item: normal remove path (DB delete triggers).
+            // Stackable item: reduce quantity by the dropped amount.
+            // Do NOT link the drop to the original DB row — create a new ground pile.
             bool removed = gameServices_.getInventoryManager().removeItemFromInventory(characterId, itemId, quantity);
             if (!removed)
             {
@@ -774,13 +784,14 @@ ItemEventHandler::handleItemDropByPlayerEvent(const Event &event)
                             " from character " + std::to_string(characterId));
                 return;
             }
+            droppingInvItemId = 0; // ground item is a new pile, not tied to any DB row
         }
 
         // Use server-tracked position (client does not send coords in dropItem)
         PositionStruct dropPosition = gameServices_.getCharacterManager().getCharacterPosition(characterId);
 
         // Spawn on the ground (LootManager fires nullifyItemOwner if inventoryItemId > 0)
-        gameServices_.getLootManager().dropItemByPlayer(characterId, droppingInvItemId, itemId, quantity, dropPosition);
+        gameServices_.getLootManager().dropItemByPlayer(characterId, droppingInvItemId, itemId, quantity, dropPosition, droppingDurability);
 
         log_->info("[DROP] Character " + std::to_string(characterId) + " dropped " +
                    std::to_string(quantity) + "x item " + std::to_string(itemId));

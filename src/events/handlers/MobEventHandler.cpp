@@ -533,11 +533,19 @@ MobEventHandler::handleMobMoveUpdateEvent(const Event &event)
         nlohmann::json mobsArray = nlohmann::json::array();
         for (const auto &mob : movedMobs)
         {
-            mobsArray.push_back({{"uid", mob.uid},
+            nlohmann::json entry = {{"uid", mob.uid},
                 {"zoneId", mob.zoneId},
                 {"position", {{"x", mob.position.positionX}, {"y", mob.position.positionY}, {"z", mob.position.positionZ}, {"rotationZ", mob.position.rotationZ}}},
                 {"velocity", {{"dirX", mob.dirX}, {"dirY", mob.dirY}, {"speed", mob.speed}}},
-                {"combatState", mob.combatState}});
+                {"combatState", mob.combatState},
+                {"stepTimestampMs", mob.stepTimestampMs}};
+
+            if (mob.hasWaypoint)
+            {
+                entry["waypoint"] = {{"x", mob.waypointX}, {"y", mob.waypointY}};
+            }
+
+            mobsArray.push_back(std::move(entry));
         }
 
         if (clientID == 0 || !clientSocket || !clientSocket->is_open())

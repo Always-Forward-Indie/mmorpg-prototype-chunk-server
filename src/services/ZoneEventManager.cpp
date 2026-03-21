@@ -9,7 +9,7 @@ using SteadyClock = std::chrono::steady_clock;
 
 ZoneEventManager::ZoneEventManager(GameServices *gs)
     : gs_(gs),
-      log_(spdlog::get("chunk_server"))
+      log_(spdlog::get("chunk-server"))
 {
     // Initialise with an empty snapshot
     std::atomic_store(&snapshot_, std::make_shared<const EventSnapshot>());
@@ -66,7 +66,7 @@ ZoneEventManager::startEvent(const std::string &slug, int overrideGameZoneId)
         data["durationSec"] = tmpl.durationSec;
         data["gameZoneId"] = zoneId;
         gs_->getStatsNotificationService().sendWorldNotificationToGameZone(
-            zoneId, "zone_event_start", tmpl.announceKey.empty() ? "Началось мировое событие: " + slug : tmpl.announceKey, data);
+            zoneId, "zone_event_start", data, "high", "screen_center");
     }
 
     log_->info("[ZoneEvent] Event '{}' started in gameZone={}, duration={}s",
@@ -99,7 +99,7 @@ ZoneEventManager::endEventInternal(const std::string &slug)
     if (gs_ && zoneId >= 0)
     {
         gs_->getStatsNotificationService().sendWorldNotificationToGameZone(
-            zoneId, "zone_event_end", "Событие завершилось.", {{"eventSlug", slug}});
+            zoneId, "zone_event_end", nlohmann::json{{"eventSlug", slug}}, "medium", "toast");
     }
 
     log_->info("[ZoneEvent] Event '{}' ended", slug);

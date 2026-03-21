@@ -228,8 +228,9 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
                                 gameServices_->getStatsNotificationService()
                                     .sendWorldNotification(
                                         cid, "pity_hint",
-                                        "Ты давно охотишься здесь... Удача должна улыбнуться",
-                                        nlohmann::json::object());
+                                        nlohmann::json::object(),
+                                        "ambient",
+                                        "atmosphere");
                             } });
                 }
             }
@@ -364,6 +365,7 @@ LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruc
             inst.characterId = characterId;
             inst.itemId = droppedItem.itemId;
             inst.quantity = droppedItem.quantity;
+            inst.durabilityCurrent = droppedItem.durabilityCurrent; // restore preserved durability
             inventoryManager_->addInstancedItemToInventory(characterId, inst);
 
             if (transferInventoryItemCallback_)
@@ -497,13 +499,14 @@ LootManager::cleanupOldDroppedItems(int maxAgeSeconds)
 }
 
 DroppedItemStruct
-LootManager::dropItemByPlayer(int characterId, int inventoryItemId, int itemId, int quantity, const PositionStruct &position)
+LootManager::dropItemByPlayer(int characterId, int inventoryItemId, int itemId, int quantity, const PositionStruct &position, int durabilityCurrent)
 {
     DroppedItemStruct drop;
     drop.uid = generateDroppedItemUID();
     drop.itemId = itemId;
     drop.quantity = quantity;
     drop.inventoryItemId = inventoryItemId;
+    drop.durabilityCurrent = durabilityCurrent;
     drop.position = position;
     drop.dropTime = std::chrono::steady_clock::now();
     drop.droppedByCharacterId = characterId;

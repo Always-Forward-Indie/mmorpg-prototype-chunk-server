@@ -323,6 +323,20 @@ SkillSystem::isOnCooldown(int casterId, const std::string &skillSlug)
     return std::chrono::steady_clock::now() < skillIt->second;
 }
 
+bool
+SkillSystem::isGCDActive(int casterId)
+{
+    static const std::string GCD_KEY = "__gcd__";
+    std::shared_lock<std::shared_mutex> lock(cooldownsMutex_);
+    auto it = cooldowns_.find(casterId);
+    if (it == cooldowns_.end())
+        return false;
+    auto gcdIt = it->second.find(GCD_KEY);
+    if (gcdIt == it->second.end())
+        return false;
+    return std::chrono::steady_clock::now() < gcdIt->second;
+}
+
 std::optional<std::reference_wrapper<const SkillStruct>>
 SkillSystem::getBestSkillForMob(const MobDataStruct &mobData,
     const CharacterDataStruct &targetData,

@@ -111,8 +111,7 @@ ChampionManager::tickTimedChampions()
             {
                 broadcastToGameZone(state.tmpl.gameZoneId,
                     "champion_spawned_soon",
-                    "Через несколько минут появится " + state.tmpl.slug + "!",
-                    {{"slug", state.tmpl.slug}});
+                    nlohmann::json{{"slug", state.tmpl.slug}});
                 state.preAnnounceSent = true;
             }
 
@@ -191,7 +190,7 @@ ChampionManager::onChampionKilled(int champUid, int killerCharId, const std::str
     auto killerData = gs_->getCharacterManager().getCharacterData(killerCharId);
     std::string killerName = (killerData.characterId != 0) ? killerData.characterName : "кто-то";
 
-    broadcastToGameZone(gameZoneId, "champion_killed", killerName + " убил Чемпиона!", {{"killerCharId", killerCharId}});
+    broadcastToGameZone(gameZoneId, "champion_killed", nlohmann::json{{"killerCharId", killerCharId}, {"killerName", killerName}});
 
     // Notify game-server for Timed Champions so next_spawn_at can be updated
     if (!slug.empty())
@@ -283,7 +282,7 @@ ChampionManager::spawnChampion(int mobTemplateId,
         active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, now + std::chrono::minutes(despawnMin)});
     }
 
-    broadcastToGameZone(gameZoneId, "champion_spawned", "[!] " + base.name + " появился в зоне!", {{"mobSlug", base.slug}, {"uid", base.uid}});
+    broadcastToGameZone(gameZoneId, "champion_spawned", nlohmann::json{{"mobSlug", base.slug}, {"uid", base.uid}});
 
     log_->info("[Champion] Spawned uid={} '{}' in gameZone={}", base.uid, base.name, gameZoneId);
     return base.uid;
@@ -302,7 +301,7 @@ ChampionManager::checkDespawnedChampions()
         if (now >= it->despawnAt)
         {
             gs_->getMobInstanceManager().unregisterMobInstance(it->uid);
-            broadcastToGameZone(it->gameZoneId, "champion_despawned", "Чемпион исчез, не дождавшись вызова.");
+            broadcastToGameZone(it->gameZoneId, "champion_despawned", nlohmann::json::object());
 
             // Halve the kill counter (Threshold champions)
             if (it->slug.empty())
@@ -372,7 +371,7 @@ ChampionManager::evolveSurvivalMob(int mobUid)
         active_.push_back({mobUid, gzId, mob.id, "", std::chrono::steady_clock::now(), std::chrono::steady_clock::time_point::max()});
     }
 
-    broadcastToGameZone(gzId, "survival_evolved", mob.name + " прожил слишком долго. Он стал сильнее.", {{"uid", mobUid}, {"mobSlug", mob.slug}});
+    broadcastToGameZone(gzId, "survival_evolved", nlohmann::json{{"uid", mobUid}, {"mobSlug", mob.slug}});
 
     log_->info("[Survival] Mob uid={} '{}' evolved after {}h alive",
         mobUid,
@@ -434,10 +433,11 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
 void
 ChampionManager::broadcastToGameZone(int gameZoneId,
     const std::string &type,
-    const std::string &text,
-    const nlohmann::json &data)
+    const nlohmann::json &data,
+    const std::string &priority,
+    const std::string &channel)
 {
-    gs_->getStatsNotificationService().sendWorldNotificationToGameZone(gameZoneId, type, text, data);
+    gs_->getStatsNotificationService().sendWorldNotificationToGameZone(gameZoneId, type, data, priority, channel);
 }
 
 void

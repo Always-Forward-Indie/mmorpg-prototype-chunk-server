@@ -266,6 +266,7 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 try
                 {
                     gameServices_.getQuestManager().flushAllProgress(passedClientData.characterId);
+                    gameServices_.getQuestManager().flushPendingFlags();
                     gameServices_.getQuestManager().unloadPlayerQuests(passedClientData.characterId);
                     gameServices_.getDialogueSessionManager().cleanupExpiredSessions();
                 }

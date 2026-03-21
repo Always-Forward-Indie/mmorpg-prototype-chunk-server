@@ -244,7 +244,8 @@ struct DroppedItemStruct
     int uid = 0; // Unique instance ID for the dropped item
     int itemId = 0;
     int quantity = 1;
-    int inventoryItemId = 0; // player_inventory.id of the source row (0 = new item, e.g. mob loot)
+    int inventoryItemId = 0;   // player_inventory.id of the source row (0 = new item, e.g. mob loot)
+    int durabilityCurrent = 0; // preserved from the dropped inventory item (0 = not applicable)
     PositionStruct position;
     std::chrono::steady_clock::time_point dropTime;
     int droppedByMobUID = 0;                                 // UID of the mob that dropped it (0 = player drop)
@@ -402,6 +403,18 @@ struct ClientDataStruct
     TimestampStruct timestamps; // Lag compensation timestamps
 };
 
+/**
+ * @brief AI archetype for mob behavior.
+ * Stored as an enum after parsing so comparisons in the hot path are cheap.
+ */
+enum class MobArchetype : uint8_t
+{
+    MELEE = 0,
+    CASTER = 1,
+    RANGED = 2,
+    SUPPORT = 3,
+};
+
 struct MobDataStruct
 {
     int id = 0;
@@ -446,8 +459,9 @@ struct MobDataStruct
     float rankMult = 1.0f;
 
     // AI depth (migration 016)
-    float fleeHpThreshold = 0.0f;      // 0.0 = never flees; 0.25 = flee at 25% HP
-    std::string aiArchetype = "melee"; // melee | caster | ranged | support
+    float fleeHpThreshold = 0.0f;                     // 0.0 = never flees; 0.25 = flee at 25% HP
+    std::string aiArchetype = "melee";                // melee | caster | ranged | support
+    MobArchetype archetypeType = MobArchetype::MELEE; // Parsed enum of aiArchetype (avoids hot-path string comparison)
 
     // Champion / rare mob flags (Stage 3, migration 038)
     bool isChampion = false;     ///< True after spawnChampion(); triggers onChampionKilled
@@ -526,17 +540,26 @@ struct MobMovementParams
     float minSeparationDistance = 140.0f;
     float baseSpeedMin = 80.0f;
     float baseSpeedMax = 140.0f;
-    float moveTimeMin = 10.0f;
-    float moveTimeMax = 40.0f;
-    float speedTimeMin = 12.0f;
-    float speedTimeMax = 28.0f;
-    float cooldownMin = 5.0f;
-    float cooldownMax = 15.0f;
+    // Initial wait before a freshly-spawned mob makes its first patrol step.
+    // Was 10-40s — caused mobs to appear completely frozen for up to 40s after spawn.
+    float moveTimeMin = 2.0f;
+    float moveTimeMax = 6.0f;
+    // Inter-step pause (used by calculateNextMoveTime via speedTimeMin/Max).
+    // Was 12-28s — mobs moved once every ~20s on average, visually appeared static.
+    // Reduced to 2-5s for visibly active patrol behaviour.
+    float speedTimeMin = 2.0f;
+    float speedTimeMax = 5.0f;
+    // Extra random cooldown appended with 15% probability. Was 5-15s → up to 7.5s added.
+    // Reduced to keep occasional pauses short.
+    float cooldownMin = 1.0f;
+    float cooldownMax = 3.0f;
     float borderAngleMin = 30.0f;
     float borderAngleMax = 100.0f;
     float stepMultiplierMin = 1.2f;
     float stepMultiplierMax = 3.0f;
-    float initialDelayMax = 5.0f;
+    // Max initial spawn delay before first move. Was 5s; reduced to 1s so mobs
+    // start wandering almost immediately after the server boots.
+    float initialDelayMax = 1.0f;
     float rotationJitterMin = -5.0f;
     float rotationJitterMax = 5.0f;
     float directionAdjustMin = 0.2f;
@@ -569,11 +592,19 @@ struct MobAIConfig
     float chaseDistanceMultiplier = 2.0f; // Множитель дистанции преследования от aggroRange
 
     // Movement timing
-    float chaseMovementInterval = 0.3f;   // Интервал движения при преследовании (секунды)
+    float chaseMovementInterval = 0.1f;   // Интервал движения при преследовании (секунды)
     float returnMovementInterval = 0.15f; // Интервал движения при возврате (секунды)
 
+    // Chase speed — задаётся напрямую в units/sec, шаг = скорость * interval.
+    // На клиенте совпадает с velocity.speed в пакете mobMoveUpdate, используется
+    // для Dead Reckoning: TargetPos = ServerPos + velocity * dt.
+    // Должен быть выше скорости игрока, иначе моб не догонит (player ~400-600 u/s).
+    float chaseSpeedUnitsPerSec = 450.0f;
+
     // Network optimization
-    float minimumMoveDistance = 50.0f; // Минимальное расстояние для отправки обновления
+    // Снижено до 10 потому что при реалистичной chase-скорости один шаг ~45 юнитов,
+    // а порог 50 срезал бы большинство обновлений.
+    float minimumMoveDistance = 10.0f; // Минимальное расстояние для отправки обновления
 };
 
 /**
@@ -620,6 +651,7 @@ struct MobMovementData
     // Network optimization
     PositionStruct lastSentPosition;      // Последняя отправленная позиция
     float currentSpeedUnitsPerSec = 0.0f; // Last computed movement speed (units/second) for client interpolation
+    int64_t lastStepTimestampMs = 0;      // Unix ms when the last position step was computed (for client RTT compensation)
     bool forceNextUpdate = false;         // When true, skip distance threshold check once (set by forceMobStateUpdate)
 
     // Leash regen tick tracker: time of last HP restoration while RETURNING.
@@ -668,6 +700,18 @@ struct MobMovementData
     // until it arrives, then picks a new random point inside the zone.
     PositionStruct patrolTargetPoint;
     bool hasPatrolTarget = false;
+
+    // Melee slot queuing: prevents crowding jitter when too many mobs chase the
+    // same player. Set by MobAIController in CHASING state when calculateDistance
+    // is <= attackRange but all physical melee slots around the target are already
+    // occupied by mobs in PREPARING_ATTACK / ATTACKING / ATTACK_COOLDOWN.
+    // The movement manager parks the mob just outside the ring until a slot opens.
+    bool waitingForMeleeSlot = false;
+
+    // Per-mob broadcast timestamp (ms). Used by unified mob tick to enforce
+    // state-aware rate limiting: patrol=200ms min, combat=100ms min.
+    // Replaces the global aggroLastBroadcastTime_ that serialised all zones.
+    int64_t lastBroadcastMs = 0;
 };
 
 /**
@@ -692,10 +736,18 @@ struct MobMoveUpdateStruct
     int uid = 0;
     int zoneId = 0;
     PositionStruct position;
-    float dirX = 0.0f;   // Normalized direction vector X
-    float dirY = 0.0f;   // Normalized direction vector Y
-    float speed = 0.0f;  // World-units per second (for dead reckoning on client)
-    int combatState = 0; // MobCombatState cast to int
+    float dirX = 0.0f;           // Normalized direction vector X
+    float dirY = 0.0f;           // Normalized direction vector Y
+    float speed = 0.0f;          // World-units per second (for dead reckoning on client)
+    int combatState = 0;         // MobCombatState cast to int
+    int64_t stepTimestampMs = 0; // Unix ms when this step was computed (allows client RTT compensation)
+
+    // Patrol waypoint: when hasWaypoint=true the client moves toward (waypointX, waypointY)
+    // at `speed` units/sec without waiting for the next packet. This allows the patrol
+    // broadcast interval to be increased to ~200ms while keeping client motion smooth.
+    float waypointX = 0.0f;
+    float waypointY = 0.0f;
+    bool hasWaypoint = false;
 };
 
 /**
@@ -1476,4 +1528,26 @@ struct TimedChampionKilledStruct
     std::string slug; ///< timed_champion_templates.slug
     int killerCharId = 0;
     int64_t killedAt = 0; ///< Unix timestamp
+};
+
+// ── Chat system ─────────────────────────────────────────────────────────────
+
+enum class ChatChannel
+{
+    LOCAL,   ///< Visible to players within localRadius units of sender
+    ZONE,    ///< Visible to all players on this chunk server
+    WHISPER, ///< Private message to a single player by character name
+};
+
+/// Client → chunk-server: player sends a chat message
+struct ChatMessageStruct
+{
+    int senderClientId = 0;
+    int senderCharId = 0;
+    std::string senderName; ///< populated server-side, not trusted from client
+    ChatChannel channel = ChatChannel::ZONE;
+    std::string text;          ///< max 255 chars, validated server-side
+    std::string targetName;    ///< only used for WHISPER channel
+    float localRadius = 50.0f; ///< only used for LOCAL channel
+    TimestampStruct timestamps;
 };

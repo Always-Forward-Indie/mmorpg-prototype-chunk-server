@@ -638,7 +638,17 @@ JSONParser::parseMobsList(const char *data, size_t length)
             if (mob.contains("fleeHpThreshold") && mob["fleeHpThreshold"].is_number())
                 mobData.fleeHpThreshold = mob["fleeHpThreshold"].get<float>();
             if (mob.contains("aiArchetype") && mob["aiArchetype"].is_string())
+            {
                 mobData.aiArchetype = mob["aiArchetype"].get<std::string>();
+                if (mobData.aiArchetype == "caster")
+                    mobData.archetypeType = MobArchetype::CASTER;
+                else if (mobData.aiArchetype == "ranged")
+                    mobData.archetypeType = MobArchetype::RANGED;
+                else if (mobData.aiArchetype == "support")
+                    mobData.archetypeType = MobArchetype::SUPPORT;
+                else
+                    mobData.archetypeType = MobArchetype::MELEE;
+            }
 
             // Survival / Rare mob groundwork (Stage 3, migration 038)
             if (mob.contains("canEvolve") && mob["canEvolve"].is_boolean())

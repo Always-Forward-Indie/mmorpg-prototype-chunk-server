@@ -22,6 +22,8 @@ struct SkillInitiationResult
     float castTime = 0.0f;
     std::string animationName;
     float animationDuration = 0.0f;
+    int64_t serverTimestamp = 0; ///< unix ms when packet was generated (= castStartedAt)
+    int64_t castStartedAt = 0;   ///< unix ms when cast started (same as serverTimestamp for initiation)
     int casterId = 0;
     int targetId = 0;
     CombatTargetType targetType = CombatTargetType::NONE;
@@ -50,7 +52,7 @@ struct SkillExecutionResult
     std::string skillSlug;
     std::string skillEffectType; // damage, heal, buff, debuff, etc.
     std::string skillSchool;     // physical, fire, ice, etc.
-    float hitDelay = 0.0f;       ///< seconds after receiving this packet before showing the hit effect
+    int64_t serverTimestamp = 0; ///< unix ms when packet was generated
 };
 
 /**

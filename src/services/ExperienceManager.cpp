@@ -28,11 +28,12 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         // Сохраняем старые значения
         int oldExperience = characterData.characterExperiencePoints;
         int oldLevel = characterData.characterLevel;
+        int oldDebt = characterData.experienceDebt;
 
-        // ── Experience Debt: redirect up to 50% of each XP gain to pay debt ─
+        // ── Experience Debt: redirect XP to pay debt first, remainder goes to character ─
         if (experienceAmount > 0 && characterData.experienceDebt > 0)
         {
-            int toDebt = std::min(experienceAmount / 2, characterData.experienceDebt);
+            int toDebt = std::min(experienceAmount, characterData.experienceDebt);
             characterData.experienceDebt -= toDebt;
             experienceAmount -= toDebt;
             log_->info("[ExperienceDebt] character {} paid {} debt, remaining: {}",
@@ -132,6 +133,18 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
 
         // Немедленно сохраняем exp/level на гейм-сервере
         sendSaveProgressToGameServer(characterId, newExperience, newLevel);
+
+        // Сохраняем долг, если он изменился
+        if (characterData.experienceDebt != oldDebt && saveProgressCallback_)
+        {
+            nlohmann::json debtPacket;
+            debtPacket["header"]["eventType"] = "saveExperienceDebt";
+            debtPacket["header"]["clientId"] = 0;
+            debtPacket["header"]["hash"] = "";
+            debtPacket["body"]["characterId"] = characterId;
+            debtPacket["body"]["experienceDebt"] = characterData.experienceDebt;
+            saveProgressCallback_(debtPacket.dump() + "\n");
+        }
 
         // Отправляем пакет об изменении опыта
         sendExperiencePacket(result.experienceEvent);

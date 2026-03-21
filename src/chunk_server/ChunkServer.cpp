@@ -25,8 +25,7 @@ ChunkServer::ChunkServer(GameServices &gameServices,
       scheduler_(scheduler),
       gameServices_(gameServices),
       networkManager_(networkManager),
-      gameServerWorker_(gameServerWorker),
-      aggroLastBroadcastTime_(std::chrono::steady_clock::now())
+      gameServerWorker_(gameServerWorker)
 {
     log_ = gameServices_.getLogger().getSystem("gameloop");
     // Set EventQueue for MobMovementManager to send combat events
@@ -117,6 +116,29 @@ ChunkServer::ChunkServer(GameServices &gameServices,
             });
     }
 
+    // Wire up CharacterStatsNotificationService direct-send: world_notification packets go only
+    // to the specific character's socket instead of being broadcast to every client in zone.
+    gameServices_.getStatsNotificationService().setDirectSendCallback(
+        [this](int characterId, const nlohmann::json &packet)
+        {
+            try
+            {
+                auto clientData = gameServices_.getClientManager().getClientDataByCharacterId(characterId);
+                if (clientData.clientId <= 0)
+                    return;
+                auto sock = gameServices_.getClientManager().getClientSocket(clientData.clientId);
+                if (!sock || !sock->is_open())
+                    return;
+                networkManager_.sendResponse(sock,
+                    networkManager_.generateResponseMessage("success", packet));
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError(
+                    "[WorldNotif] directSend error: " + std::string(ex.what()));
+            }
+        });
+
     // Wire up PityManager persistence callbacks
     gameServices_.getPityManager().setSaveCallback(
         [this](const std::string &data)
@@ -129,21 +151,46 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 
     // Wire up BestiaryManager tier-unlock notification
     gameServices_.getBestiaryManager().setNotifyCallback(
-        [this](int charId, int mobTemplateId, int tierNum, const std::string &catSlug)
+        [this](int charId, int mobTemplateId, int tierNum, int newKillCount, const std::string &catSlug)
         {
             try
             {
+                const std::string mobSlug = gameServices_.getMobManager().getMobById(mobTemplateId).slug;
                 nlohmann::json notifData;
-                notifData["mobTemplateId"] = mobTemplateId;
+                notifData["mobSlug"] = mobSlug;
                 notifData["unlockedTier"] = tierNum;
                 notifData["categorySlug"] = catSlug;
+                notifData["killCount"] = newKillCount;
                 gameServices_.getStatsNotificationService()
-                    .sendWorldNotification(charId, "bestiary_tier_unlocked", "", notifData);
+                    .sendWorldNotification(charId, "bestiary_tier_unlocked", notifData, "medium", "toast");
             }
             catch (const std::exception &ex)
             {
                 gameServices_.getLogger().logError(
                     "[Bestiary] notifyCallback error: " + std::string(ex.what()));
+            }
+        });
+
+    // Wire up BestiaryManager kill-count update — pushes updated count to client on every kill
+    // so the bestiary overview list stays in sync without a full re-request
+    gameServices_.getBestiaryManager().setKillUpdateCallback(
+        [this](int charId, int mobTemplateId, int newKillCount)
+        {
+            try
+            {
+                const std::string mobSlug = gameServices_.getMobManager().getMobById(mobTemplateId).slug;
+                if (mobSlug.empty())
+                    return;
+                nlohmann::json updateData;
+                updateData["mobSlug"] = mobSlug;
+                updateData["killCount"] = newKillCount;
+                gameServices_.getStatsNotificationService()
+                    .sendWorldNotification(charId, "bestiary_kill_update", updateData, "low", "silent");
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError(
+                    "[Bestiary] killUpdateCallback error: " + std::string(ex.what()));
             }
         });
 
@@ -343,204 +390,107 @@ ChunkServer::mainEventLoopCH()
 
     scheduler_.scheduleTask(respawnMobTask);
 
-    // Task for moving mobs in the zone
-    Task moveMobInZoneTask(
+    // -------------------------------------------------------------------------
+    // Unified mob movement + broadcast tick (replaces the old split-brain pair
+    // of moveMobInZoneTask@1000ms and aggroMobMovementTask@50ms).
+    //
+    // Running at 50ms gives a fine-grained scheduling resolution, but the
+    // actual movement of each mob is gated internally:
+    //   • PATROLLING mobs  — governed by nextMoveTime    (~200-400ms cadence)
+    //   • CHASING mobs     — governed by chaseMovementInterval (100ms)
+    //   • RETURNING mobs   — governed by returnMovementInterval (150ms)
+    //
+    // Broadcast frequency is further limited per-mob via lastBroadcastMs:
+    //   • PATROLLING     → min 200ms between packets  (client uses waypoint DR)
+    //   • combat states  → min 100ms between packets  (Hermite interpolation)
+    //
+    // forceNextUpdate (triggered by combat state transitions) bypasses the
+    // per-mob rate limit so state-change packets are never delayed.
+    // -------------------------------------------------------------------------
+    Task unifiedMobTickTask(
         [&]
         {
-            // get all spawn zones
             auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
             if (spawnZones.empty())
-            {
-                log_->error("No spawn zones found, cannot move mobs!");
                 return;
-            }
 
-            // move mobs in all zones
+            const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                                      .count();
 
             for (const auto &zone : spawnZones)
             {
-                if (zone.second.spawnEnabled && zone.second.spawnedMobsCount > 0)
+                if (!zone.second.spawnEnabled || zone.second.spawnedMobsCount == 0)
+                    continue;
+
+                // Single movement tick for ALL mobs in zone.
+                // runMobTick (called internally) handles every state: patrol,
+                // chase, return, flee. Internal timing guards gate actual movement.
+                gameServices_.getMobMovementManager().moveMobsInZone(zone.second.zoneId);
+
+                // Collect mobs that need a broadcast this tick.
+                auto mobsInZone = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
+                std::vector<MobMoveUpdateStruct> updates;
+
+                for (const auto &mob : mobsInZone)
                 {
-                    // Move mobs in this zone
-                    bool anyMobMoved = gameServices_.getMobMovementManager().moveMobsInZone(zone.second.zoneId);
+                    if (mob.isDead || mob.currentHealth <= 0)
+                        continue;
 
-                    if (anyMobMoved)
-                    {
-                        // Get mobs that should send updates (moved significantly)
-                        auto movedMobs = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
-                        std::vector<MobMoveUpdateStruct> mobsToSend;
+                    auto mvData = gameServices_.getMobMovementManager().getMobMovementData(mob.uid);
 
-                        for (const auto &mob : movedMobs)
-                        {
-                            if (gameServices_.getMobMovementManager().shouldSendMobUpdate(mob.uid, mob.position))
-                            {
-                                auto mvData = gameServices_.getMobMovementManager().getMobMovementData(mob.uid);
-                                MobMoveUpdateStruct upd;
-                                upd.uid = mob.uid;
-                                upd.zoneId = mob.zoneId;
-                                upd.position = mob.position;
-                                upd.dirX = mvData.movementDirectionX;
-                                upd.dirY = mvData.movementDirectionY;
-                                upd.speed = mvData.currentSpeedUnitsPerSec;
-                                upd.combatState = static_cast<int>(mvData.combatState);
-                                mobsToSend.push_back(upd);
-                            }
-                        }
+                    // Per-mob rate limit: patrol gets 200ms budget, combat 100ms.
+                    // forceNextUpdate bypasses the limit for instant state-change delivery.
+                    const bool isActiveCombat = (mvData.combatState != MobCombatState::PATROLLING);
+                    const int64_t minIntervalMs = isActiveCombat ? 100 : 200;
 
-                        // Only send updates if there are mobs that moved significantly
-                        if (!mobsToSend.empty())
-                        {
-                            // send move mobs updates to all connected clients
-                            auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
-                            for (const auto &client : connectedClients)
-                            {
-                                if (client.clientId <= 0) // Strict validation
-                                    continue;
-                                Event moveMobsEvent(Event::MOB_MOVE_UPDATE, client.clientId, mobsToSend);
-                                eventQueueGameServer_.push(std::move(moveMobsEvent));
-                            }
-                        }
-                    }
+                    if (!mvData.forceNextUpdate && (nowMs - mvData.lastBroadcastMs) < minIntervalMs)
+                        continue;
+
+                    // Distance + forceNextUpdate filter (clears forceNextUpdate on true).
+                    if (!gameServices_.getMobMovementManager().shouldSendMobUpdate(mob.uid, mob.position))
+                        continue;
+
+                    MobMoveUpdateStruct upd;
+                    upd.uid = mob.uid;
+                    upd.zoneId = mob.zoneId;
+                    upd.position = mob.position;
+                    upd.dirX = mvData.movementDirectionX;
+                    upd.dirY = mvData.movementDirectionY;
+                    upd.speed = mvData.currentSpeedUnitsPerSec;
+                    upd.combatState = static_cast<int>(mvData.combatState);
+                    upd.stepTimestampMs = mvData.lastStepTimestampMs;
+
+                    // Patrol waypoint: lets the client dead-reckon toward the mob's
+                    // active waypoint at server speed, so 200ms packets look smooth.
+                    upd.hasWaypoint = mvData.hasPatrolTarget &&
+                                      (mvData.combatState == MobCombatState::PATROLLING);
+                    upd.waypointX = mvData.patrolTargetPoint.positionX;
+                    upd.waypointY = mvData.patrolTargetPoint.positionY;
+
+                    updates.push_back(upd);
+                    gameServices_.getMobMovementManager().updateLastBroadcastMs(mob.uid, nowMs);
                 }
-            }
-        },
-        1000, // Increased frequency - every 1 second instead of 3
-        std::chrono::steady_clock::now(),
-        2 // unique task ID
-    );
 
-    scheduler_.scheduleTask(moveMobInZoneTask);
-
-    // Task for aggressive mob movement (faster update for mobs with targets)
-    Task aggroMobMovementTask(
-        [&]
-        {
-            // Get all spawn zones
-            auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
-            if (spawnZones.empty())
-            {
-                return;
-            }
-
-            // Track individual mobs that need position updates
-            std::unordered_map<int, int> mobsToUpdate; // mobUID -> zoneId
-            // Use member variable instead of static to avoid shared-state issues
-            // across lambda re-invocations and to allow proper reset on reconnect.
-
-            // Check for mobs with active targets and move them more frequently
-            for (const auto &zone : spawnZones)
-            {
-                if (zone.second.spawnEnabled && zone.second.spawnedMobsCount > 0)
+                if (!updates.empty())
                 {
-                    auto mobsInZone = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
-                    int aggroMobsMovedCount = 0;
-
-                    for (const auto &mob : mobsInZone)
+                    auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
+                    for (const auto &client : connectedClients)
                     {
-                        if (mob.isDead || mob.currentHealth <= 0)
+                        if (client.clientId <= 0)
                             continue;
-
-                        auto movementData = gameServices_.getMobMovementManager().getMobMovementData(mob.uid);
-
-                        // If mob has a target or is returning to spawn, try to move it (respecting timing)
-                        if (movementData.targetPlayerId > 0 || movementData.isReturningToSpawn)
-                        {
-                            // Move single mob (will respect timing constraints internally)
-                            bool moved = gameServices_.getMobMovementManager().moveSingleMob(mob.uid, zone.second.zoneId);
-
-                            if (moved)
-                            {
-                                aggroMobsMovedCount++;
-                            }
-
-                            // Always check shouldSendMobUpdate, not just when the mob moved.
-                            // forceMobStateUpdate() sets forceNextUpdate=true on combat-state
-                            // transitions (CHASING→PREPARING_ATTACK, etc.) but moveSingleMob
-                            // returns false in those states because the mob can't move.
-                            // Without this check the client never receives the state-change
-                            // position packet and the mob appears frozen / not attacking.
-                            {
-                                auto updatedMob = gameServices_.getMobInstanceManager().getMobInstance(mob.uid);
-                                if (updatedMob.uid > 0)
-                                {
-                                    PositionStruct currentPos = updatedMob.position;
-                                    if (gameServices_.getMobMovementManager().shouldSendMobUpdate(mob.uid, currentPos))
-                                    {
-                                        mobsToUpdate[mob.uid] = zone.second.zoneId;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (aggroMobsMovedCount > 0)
-                    {
-                        // Removed excessive logging
+                        Event mobUpdateEvent(Event::MOB_MOVE_UPDATE, client.clientId, updates);
+                        eventQueueGameServer_.push(std::move(mobUpdateEvent));
                     }
                 }
-            }
-
-            // Send position updates only for mobs that moved significantly
-            // And limit update frequency to avoid client spam
-            auto currentTime = std::chrono::steady_clock::now();
-            auto timeSinceLastBroadcast = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - aggroLastBroadcastTime_);
-
-            // Only send updates every 50ms minimum to avoid overwhelming clients
-            if (!mobsToUpdate.empty() && timeSinceLastBroadcast.count() >= 50)
-            {
-                // Group mobs by zone for efficient broadcasting
-                std::unordered_map<int, std::vector<int>> mobsByZone;
-                for (const auto &[mobUID, zoneId] : mobsToUpdate)
-                {
-                    mobsByZone[zoneId].push_back(mobUID);
-                }
-
-                for (const auto &[zoneId, mobUIDs] : mobsByZone)
-                {
-                    // Build compact movement structs instead of full MobDataStruct
-                    std::vector<MobMoveUpdateStruct> movedMobs;
-                    for (int mobUID : mobUIDs)
-                    {
-                        auto mobData = gameServices_.getMobInstanceManager().getMobInstance(mobUID);
-                        if (mobData.uid > 0) // Valid mob
-                        {
-                            auto mvData = gameServices_.getMobMovementManager().getMobMovementData(mobUID);
-                            MobMoveUpdateStruct upd;
-                            upd.uid = mobData.uid;
-                            upd.zoneId = mobData.zoneId;
-                            upd.position = mobData.position;
-                            upd.dirX = mvData.movementDirectionX;
-                            upd.dirY = mvData.movementDirectionY;
-                            upd.speed = mvData.currentSpeedUnitsPerSec;
-                            upd.combatState = static_cast<int>(mvData.combatState);
-                            movedMobs.push_back(upd);
-                        }
-                    }
-
-                    if (!movedMobs.empty())
-                    {
-                        // Send zone update events to all connected clients with specific moved mobs
-                        auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
-                        for (const auto &client : connectedClients)
-                        {
-                            if (client.clientId <= 0)
-                                continue;
-
-                            Event mobUpdateEvent(Event::MOB_MOVE_UPDATE, client.clientId, movedMobs);
-                            eventQueueGameServer_.push(std::move(mobUpdateEvent));
-                        }
-                    }
-                }
-
-                aggroLastBroadcastTime_ = currentTime;
             }
         },
-        50, // Very fast frequency - every 50ms for very smooth chase movement
+        50, // 50ms scheduling resolution; actual mob movement is gated internally
         std::chrono::steady_clock::now(),
-        7 // unique task ID
+        2 // task ID (reuses slot 2, previously moveMobInZoneTask)
     );
 
-    scheduler_.scheduleTask(aggroMobMovementTask);
+    scheduler_.scheduleTask(unifiedMobTickTask);
 
     // Task for updating ongoing combat actions
     Task combatUpdateTask(

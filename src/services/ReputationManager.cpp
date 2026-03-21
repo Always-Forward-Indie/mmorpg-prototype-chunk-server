@@ -5,7 +5,7 @@
 
 ReputationManager::ReputationManager(Logger &logger)
     : logger_(logger),
-      log_(spdlog::get("chunk_server"))
+      log_(spdlog::get("chunk-server"))
 {
 }
 

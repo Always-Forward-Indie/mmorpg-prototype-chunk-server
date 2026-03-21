@@ -28,6 +28,8 @@ CombatResponseBuilder::buildSkillInitiationBroadcast(const SkillInitiationResult
     body["castTime"] = result.castTime;
     body["animationName"] = result.animationName;
     body["animationDuration"] = result.animationDuration;
+    body["serverTimestamp"] = result.serverTimestamp;
+    body["castStartedAt"] = result.castStartedAt;
 
     if (!result.success)
     {
@@ -64,7 +66,7 @@ CombatResponseBuilder::buildSkillExecutionBroadcast(const SkillExecutionResult &
     body["skillSlug"] = result.skillSlug;
     body["skillEffectType"] = result.skillEffectType;
     body["skillSchool"] = result.skillSchool;
-    body["hitDelay"] = result.hitDelay;
+    body["serverTimestamp"] = result.serverTimestamp;
 
     if (result.success)
     {

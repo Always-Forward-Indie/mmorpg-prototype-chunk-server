@@ -85,6 +85,7 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
             savePacket["body"]["characterId"] = characterId;
             savePacket["body"]["itemId"] = itemId;
             savePacket["body"]["quantity"] = savedIt->quantity;
+            savePacket["body"]["inventoryItemId"] = savedIt->id; // 0 = new row (INSERT), >0 = UPDATE
             saveInventoryCallback_(savePacket.dump() + "\n");
         }
     }
@@ -170,6 +171,7 @@ InventoryManager::removeItemFromInventoryById(int characterId, int inventoryItem
         savePacket["body"]["characterId"] = characterId;
         savePacket["body"]["itemId"] = itemId;
         savePacket["body"]["quantity"] = finalQty;
+        savePacket["body"]["inventoryItemId"] = inventoryItemId; // UPDATE by exact DB row id
         saveInventoryCallback_(savePacket.dump() + "\n");
     }
 
@@ -223,6 +225,7 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
     }
 
     ItemDataStruct itemInfo = itemManager_.getItemById(itemId);
+    const int invItemId = itemIt->id; // capture before potential erase
 
     itemIt->quantity -= quantity;
     const int finalQty = itemIt->quantity;
@@ -250,6 +253,7 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
         savePacket["body"]["characterId"] = characterId;
         savePacket["body"]["itemId"] = itemId;
         savePacket["body"]["quantity"] = finalQty;
+        savePacket["body"]["inventoryItemId"] = invItemId; // >0 = UPDATE by id; 0 = fallback DELETE by itemId
         saveInventoryCallback_(savePacket.dump() + "\n");
     }
 

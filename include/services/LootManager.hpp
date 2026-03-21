@@ -80,7 +80,7 @@ class LootManager
      * @param position Position of the player
      * @return The created DroppedItemStruct (uid == 0 on failure)
      */
-    DroppedItemStruct dropItemByPlayer(int characterId, int inventoryItemId, int itemId, int quantity, const PositionStruct &position);
+    DroppedItemStruct dropItemByPlayer(int characterId, int inventoryItemId, int itemId, int quantity, const PositionStruct &position, int durabilityCurrent = 0);
 
     /**
      * @brief Get all dropped items in the world

@@ -108,6 +108,11 @@ class MobMovementManager
     void forceMobStateUpdate(int mobUID);
 
     /**
+     * @brief Update per-mob broadcast timestamp (used by unified mob tick for rate limiting)
+     */
+    void updateLastBroadcastMs(int mobUID, int64_t nowMs);
+
+    /**
      * @brief Set AI configuration for mobs
      */
     void setAIConfig(const MobAIConfig &config);
@@ -218,6 +223,19 @@ class MobMovementManager
         float lastMoveTime,
         float nextMoveTime,
         float currentSpeed);
+
+    /**
+     * @brief Run one AI+movement tick for a single mob.
+     *
+     * Shared implementation used by both moveMobsInZone and moveSingleMob.
+     * Handles aggro, combat-state machine, timing checks, movement calculation, and
+     * position update. Returns true if the mob physically moved this tick.
+     */
+    bool runMobTick(MobDataStruct &mob,
+        const SpawnZoneStruct &zone,
+        const MobMovementParams &params,
+        const std::vector<std::pair<int, PositionStruct>> &mobPositions,
+        float currentTime);
 
     /**
      * @brief Get movement data for specific mob (internal use)

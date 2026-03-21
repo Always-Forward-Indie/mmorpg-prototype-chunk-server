@@ -42,6 +42,13 @@ class CombatSystem
     void interruptSkillUsage(int casterId, InterruptionReason reason);
 
     /**
+     * @brief Удалить запись об ongoing action для кастера (без side-effects).
+     *        Вызывается после немедленного выполнения скила игрока, чтобы
+     *        updateOngoingActions() не выполнил его повторно по таймеру.
+     */
+    void clearOngoingAction(int casterId);
+
+    /**
      * @brief Обновить ongoing actions
      */
     void updateOngoingActions();
@@ -61,7 +68,7 @@ class CombatSystem
      *                                (выбранный MobAIController при подготовке атаки).
      *                                Если пуст — CombatSystem выбирает лучший скил сам.
      */
-    void processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug = "", float hitDelay = 0.0f);
+    void processAIAttack(int mobId, int targetPlayerId, const std::string &forcedSkillSlug = "");
 
     /**
      * @brief Отправить combatInitiation broadcast при начале атаки/каста моба.

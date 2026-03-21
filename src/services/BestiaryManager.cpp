@@ -3,8 +3,15 @@
 #include <spdlog/logger.h>
 
 // Protocol-defined category slugs for tiers 1-6 (index = tierNum - 1)
+// Actual kill thresholds come from game_config (bestiary.tierN_kills); these labels are stable.
 const std::vector<std::string> BestiaryManager::kCategorySlugs_ = {
-    "basic_info", "weaknesses", "common_loot", "uncommon_loot", "rare_loot", "very_rare_loot"};
+    "basic_info",    // T1 — level, rank, HP range, type, biome
+    "lore",          // T2 — lore key (client resolves from locale)
+    "combat_info",   // T3 — weaknesses, resistances, ability slugs
+    "loot_table",    // T4 — full item list (slug only, no chances)
+    "drop_rates",    // T5 — full item list with drop chances
+    "hunter_mastery" // T6 — title/achievement milestone
+};
 
 BestiaryManager::BestiaryManager(Logger &logger)
     : logger_(logger)
@@ -23,6 +30,22 @@ BestiaryManager::loadBestiaryData(int characterId, const std::vector<std::pair<i
     }
     log_->info("[Bestiary] Loaded " + std::to_string(entries.size()) +
                " entries for char " + std::to_string(characterId));
+}
+
+std::vector<std::pair<int, int>>
+BestiaryManager::getKnownMobs(int characterId) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    std::vector<std::pair<int, int>> result;
+    auto charIt = data_.find(characterId);
+    if (charIt == data_.end())
+        return result;
+    for (const auto &[mobTemplateId, killCount] : charIt->second)
+    {
+        if (killCount > 0)
+            result.emplace_back(mobTemplateId, killCount);
+    }
+    return result;
 }
 
 int
@@ -57,6 +80,7 @@ BestiaryManager::buildEntryJson(
     const MobDataStruct &mobStatic,
     const std::vector<std::string> &weaknesses,
     const std::vector<std::string> &resistances,
+    const std::vector<std::string> &abilities,
     const std::vector<MobLootInfoStruct> &allLootForMob,
     const std::function<std::string(int)> &itemSlugFn) const
 {
@@ -66,12 +90,11 @@ BestiaryManager::buildEntryJson(
         threshCopy = thresholds_;
     }
     if (threshCopy.empty())
-        threshCopy = {1, 5, 15, 30, 75, 150}; // protocol defaults
+        threshCopy = {1, 10, 25, 50, 100, 300}; // protocol defaults
 
     int kills = getKillCount(characterId, mobTemplateId);
 
     nlohmann::json entry;
-    entry["mobTemplateId"] = mobTemplateId;
     entry["mobSlug"] = mobSlug;
     entry["killCount"] = kills;
 
@@ -101,6 +124,7 @@ BestiaryManager::buildEntryJson(
         if (unlocked)
         {
             nlohmann::json data;
+
             if (catSlug == "basic_info")
             {
                 data["level"] = mobStatic.level;
@@ -110,28 +134,43 @@ BestiaryManager::buildEntryJson(
                 data["type"] = mobStatic.mobTypeSlug;
                 data["biomeSlug"] = mobStatic.biomeSlug;
             }
-            else if (catSlug == "weaknesses")
+            else if (catSlug == "lore")
+            {
+                // Lore text lives in the client locale under mobs.{mobSlug}.lore
+                data["loreKey"] = mobSlug;
+            }
+            else if (catSlug == "combat_info")
             {
                 data["weaknesses"] = weaknesses;
                 data["resistances"] = resistances;
+                data["abilities"] = abilities;
             }
-            else
+            else if (catSlug == "loot_table")
             {
-                // Loot tiers: catSlug → lootTier value in MobLootInfoStruct
-                std::string lootTierVal;
-                if (catSlug == "common_loot")
-                    lootTierVal = "common";
-                else if (catSlug == "uncommon_loot")
-                    lootTierVal = "uncommon";
-                else if (catSlug == "rare_loot")
-                    lootTierVal = "rare";
-                else if (catSlug == "very_rare_loot")
-                    lootTierVal = "very_rare";
-
+                // All item slugs without drop chances — tells player what to look for
+                nlohmann::json items = nlohmann::json::array();
+                std::vector<std::string> seen;
+                for (const auto &li : allLootForMob)
+                {
+                    if (!li.isHarvestOnly)
+                    {
+                        std::string slug = itemSlugFn(li.itemId);
+                        if (!slug.empty() && std::find(seen.begin(), seen.end(), slug) == seen.end())
+                        {
+                            items.push_back(slug);
+                            seen.push_back(slug);
+                        }
+                    }
+                }
+                data["items"] = items;
+            }
+            else if (catSlug == "drop_rates")
+            {
+                // Full loot table with exact chances
                 nlohmann::json lootArr = nlohmann::json::array();
                 for (const auto &li : allLootForMob)
                 {
-                    if (li.lootTier == lootTierVal)
+                    if (!li.isHarvestOnly)
                     {
                         nlohmann::json lootEntry;
                         lootEntry["itemSlug"] = itemSlugFn(li.itemId);
@@ -141,6 +180,13 @@ BestiaryManager::buildEntryJson(
                 }
                 data["loot"] = lootArr;
             }
+            else if (catSlug == "hunter_mastery")
+            {
+                // Client localises these via locale keys
+                data["titleSlug"] = mobSlug + "_hunter";
+                data["achievementSlug"] = mobSlug + "_master";
+            }
+
             tierObj["data"] = data;
         }
 
@@ -163,6 +209,10 @@ BestiaryManager::recordKill(int characterId, int mobTemplateId)
     }
     persist(characterId, mobTemplateId, newCount);
 
+    // Always notify client of the updated kill count so the overview list stays in sync
+    if (killUpdateCallback_)
+        killUpdateCallback_(characterId, mobTemplateId, newCount);
+
     // Detect newly crossed tier thresholds and fire notifications
     if (notifyCallback_ && !threshCopy.empty())
     {
@@ -174,7 +224,7 @@ BestiaryManager::recordKill(int characterId, int mobTemplateId)
                 const std::string &catSlug = (i < static_cast<int>(kCategorySlugs_.size()))
                                                  ? kCategorySlugs_[i]
                                                  : ("tier_" + std::to_string(i + 1));
-                notifyCallback_(characterId, mobTemplateId, i + 1, catSlug);
+                notifyCallback_(characterId, mobTemplateId, i + 1, newCount, catSlug);
             }
         }
     }
@@ -194,9 +244,15 @@ BestiaryManager::setSaveCallback(std::function<void(const std::string &)> callba
 }
 
 void
-BestiaryManager::setNotifyCallback(std::function<void(int, int, int, const std::string &)> callback)
+BestiaryManager::setNotifyCallback(std::function<void(int, int, int, int, const std::string &)> callback)
 {
     notifyCallback_ = std::move(callback);
+}
+
+void
+BestiaryManager::setKillUpdateCallback(std::function<void(int, int, int)> callback)
+{
+    killUpdateCallback_ = std::move(callback);
 }
 
 void

@@ -167,7 +167,7 @@ using EventData = std::variant<
     // Timed champion payloads (Stage 3)
     TimedChampionTemplate,
     std::vector<TimedChampionTemplate>,
-    TimedChampionKilledStruct,
-    // Mob weaknesses and resistances: {mobTemplateId -> [elementSlugs], ...} x2
+    TimedChampionKilledStruct, // Chat system
+    ChatMessageStruct,         // Mob weaknesses and resistances: {mobTemplateId -> [elementSlugs], ...} x2
     std::pair<std::unordered_map<int, std::vector<std::string>>,
         std::unordered_map<int, std::vector<std::string>>>>;

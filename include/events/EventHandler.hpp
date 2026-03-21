@@ -4,6 +4,7 @@
 #include "events/ExperienceEventHandler.hpp"
 #include "events/handlers/BaseEventHandler.hpp"
 #include "events/handlers/CharacterEventHandler.hpp"
+#include "events/handlers/ChatEventHandler.hpp"
 #include "events/handlers/ChunkEventHandler.hpp"
 #include "events/handlers/ClientEventHandler.hpp"
 #include "events/handlers/CombatEventHandler.hpp"
@@ -85,6 +86,7 @@ class EventHandler
     DialogueEventHandler &getDialogueEventHandler();
     VendorEventHandler &getVendorEventHandler();
     EquipmentEventHandler &getEquipmentEventHandler();
+    ChatEventHandler &getChatEventHandler();
 
   private:
     /**
@@ -107,6 +109,7 @@ class EventHandler
     void handleSetPlayerPityEvent(const Event &event);
     void handleSetPlayerBestiaryEvent(const Event &event);
     void handleGetBestiaryEntryEvent(const Event &event);
+    void handleGetBestiaryOverviewEvent(const Event &event);
     void handleSetPlayerReputationsEvent(const Event &event);
     void handleSetPlayerMasteriesEvent(const Event &event);
     void handleSetZoneEventTemplatesEvent(const Event &event);
@@ -126,6 +129,7 @@ class EventHandler
     std::unique_ptr<DialogueEventHandler> dialogueEventHandler_;
     std::unique_ptr<VendorEventHandler> vendorEventHandler_;
     std::unique_ptr<EquipmentEventHandler> equipmentEventHandler_;
+    std::unique_ptr<ChatEventHandler> chatEventHandler_;
 
     // References for logging and error handling
     NetworkManager &networkManager_;
