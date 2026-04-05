@@ -1,7 +1,7 @@
 # Протокол AI мобов: движение и атака
 
-**Версия документа:** v1.4  
-**Дата:** 2026-03-20  
+**Версия документа:** v1.5  
+**Дата:** 2026-03-21  
 **Актуально для:** chunk-server v0.0.4+  
 **Исходный код:** `MobAIController.cpp`, `MobMovementManager.cpp`
 
@@ -35,7 +35,7 @@
 | Значение | Имя | Движение | Уязвим |
 |----------|-----|----------|--------|
 | `0` | `PATROLLING` | случайный waypoint | да |
-| `1` | `CHASING` | к цели, каждые 0.3 с | да |
+| `1` | `CHASING` | к цели, каждые 0.1 с | да |
 | `2` | `PREPARING_ATTACK` | **нет** | да |
 | `3` | `ATTACKING` | **нет** | да |
 | `4` | `ATTACK_COOLDOWN` | **нет** | да |
@@ -104,7 +104,7 @@
 
 ### CHASING (1)
 
-- Каждые `chaseMovementInterval` (0.3 с) сервер делает шаг к позиции цели.
+- Каждые `chaseMovementInterval` (0.1 с) сервер делает шаг к позиции цели.
 - При достижении `attackRange`: стоп — → PREPARING_ATTACK.
 - Причины перехода в RETURNING:
   - Расстояние до цели > `aggroRange × chaseMultiplier`
@@ -118,15 +118,15 @@
 - В момент перехода CHASING → PREPARING_ATTACK:
   1. Сервер выбирает скилл (`selectAttackSkill`).
   2. Отправляет `combatInitiation` (broadcast) — клиент запускает кастбар.
-- По истечении `castMs` (переход PREPARING_ATTACK → ATTACKING):
-  1. Сервер выполняет атаку (`processAIAttack`) → отправляет `combatResult` (broadcast).
+  3. **Немедленно** отправляет `combatResult` (broadcast) — урон применяется сразу.
+- По истечении `castMs` (переход PREPARING_ATTACK → ATTACKING): состояние меняется, урон уже не повторяется.
 - Клиент использует `castTime` из `combatInitiation.skillInitiation.castTime` для кастбара.
 - Если цель умерла во время касты → PATROLLING.
 
 ### ATTACKING (3)
 
 - Моб заморожен. Длительность = `swingMs` выбранного скилла / 1000.0 секунды.
-- `combatResult` приходит в начале состояния ATTACKING (сразу после окончания каста).
+- `combatResult` был отправлен сразу при входе в PREPARING_ATTACK (вместе с `combatInitiation`).
 - Клиент воспроизводит анимацию удара; хит-триггер внутри анимации применяет урон к HP-бару.
 
 ### ATTACK_COOLDOWN (4)
@@ -271,9 +271,10 @@
 
 | Параметр | Значение по умолчанию | Описание |
 |----------|-----------------------|----------|
-| `chaseMovementInterval` | `0.3 с` | Интервал шага при преследовании |
+| `chaseMovementInterval` | `0.1 с` | Интервал шага при преследовании |
 | `returnMovementInterval` | `0.15 с` | Интервал шага при возврате |
-| `minimumMoveDistance` | `50 units` | Минимальный сдвиг для отправки `mobMoveUpdate` |
+| `chaseSpeedUnitsPerSec` | `450 units/с` | Скорость преследования (units/sec); переопределяется атрибутом моба `move_speed × 40` |
+| `minimumMoveDistance` | `10 units` | Минимальный сдвиг для отправки `mobMoveUpdate` (снижено с 50, чтобы не терялись обновления при скорости ≈45 units/тик) |
 | `maxChaseFromZoneEdge` | `1500 units` | Макс. расстояние от границы зоны при преследовании |
 | `newTargetZoneDistance` | `150 units` | Макс. расстояние от зоны для поиска новой цели |
 
@@ -320,11 +321,13 @@
 
 | Параметр | Значение | Описание |
 |----------|----------|----------|
-| `baseSpeedMin` / `baseSpeedMax` | 80–140 units | Диапазон размера шага |
+| `baseSpeedMin` / `baseSpeedMax` | 80–140 units | Диапазон размера шага при патруле (и размер шага при RETURNING) |
 | `maxStepSizeAbsolute` | 450 units | Максимальный шаг за тик |
 | `minMoveDistance` | 120 units | Минимальный шаг (иначе пропуск) |
 | `minSeparationDistance` | 140 units | Минимальное расстояние между мобами |
-| `moveTimeMin` / `moveTimeMax` | 10–40 с | Интервал между шагами при патруле |
+| `moveTimeMin` / `moveTimeMax` | 2–6 с | Начальная задержка патруля: сколько ждать до первого шага |
+| `speedTimeMin` / `speedTimeMax` | 2–5 с | Интервал между шагами при патруле (пауза после каждого шага) |
+| `initialDelayMax` | 1.0 с | Максимальная случайная задержка сразу после спавна |
 
 ### Dead reckoning при патруле
 
@@ -341,18 +344,22 @@ position += velocity.dirY × velocity.speed × deltaTime
 
 ### Алгоритм chase
 
-1. Каждые 0.3 с вычислить вектор к позиции цели (`characterManager.getCharacterById(targetId)`).
+1. Каждые 0.1 с вычислить вектор к позиции цели (`characterManager.getCharacterById(targetId)`).
 2. Если `distance > aggroRange × chaseMultiplier` → leash, `mobTargetLost`.
 3. Если `distance > maxChaseFromZoneEdge` от границы зоны → leash, `mobTargetLost`.
 4. Если `distance ≤ attackRange` → остановиться, запустить процесс атаки.
-5. Шаг: `min(baseSpeedMax × 1.5, maxStepSizeAbsolute)`, ограниченный до `attackRange - 2` units от цели.
+5. Скорость: берётся из атрибута `move_speed × 40` (units/sec), при отсутствии атрибута — `chaseSpeedUnitsPerSec` (450 units/sec). Шаг за тик: `chaseSpeed × chaseMovementInterval`, не более `maxStepSizeAbsolute`, и не больше расстояния до `attackRange - 2` units от цели (предотвращает проскок сквозь игрока).
 6. При столкновении с другими мобами: deflection 30°/−30°/60°/−60°/90°/−90°.
 
 ### Скорость в `mobMoveUpdate` при преследовании
 
 ```
-velocity.speed = stepSize / chaseMovementInterval  (units/sec)
+velocity.speed = chaseSpeedUnitsPerSec  (units/sec)
+             = move_speed_attr × 40    (если атрибут задан)
+             = 450.0                   (по умолчанию)
 ```
+
+Скорость передаётся напрямую из вычисленного значения `mobChaseSpeed` и Used verbatim for Dead Reckoning на клиенте: `TargetPos = ServerPos + velocity × dt`.
 
 ---
 
@@ -484,7 +491,7 @@ maxMeleeSlots = max(1, floor(2π × attackRange / kMobDiameter))
 | `mobTargetLost` | Сервер → broadcast | Моб потерял цель (leash или смерть цели) |
 | `mobHealthUpdate` | Сервер → broadcast | Leash regen (только в состоянии RETURNING, 1 раз/сек) |
 | `combatInitiation` | Сервер → broadcast | Моб начинает атаку (CHASING → PREPARING_ATTACK) |
-| `combatResult` | Сервер → broadcast | Результат атаки (отправляется вместе с `combatInitiation`) |
+| `combatResult` | Сервер → broadcast | Результат атаки (отправляется **немедленно** вместе с `combatInitiation`, при входе в PREPARING_ATTACK) |
 | `stats_update` | Сервер → атакованному | Обновление HP/Mana игрока после получения урона |
 
 > Подробная документация пакетов `combatInitiation` и `combatResult`: [client-combat-protocol.md](client-combat-protocol.md) раздел 10.  
@@ -508,7 +515,7 @@ mob.posY += mob.velocity.dirY * mob.velocity.speed * deltaTime
 
 **При получении `mobMoveUpdate`**: обновить `velocity` и выполнить мягкую коррекцию позиции (lerp к `posX/posY` из пакета за 2–4 кадра), чтобы не было телепортов.
 
-> **Важно**: сервер отправляет `mobMoveUpdate` только если моб сдвинулся на ≥ **50 units** от последней отправленной позиции (`minimumMoveDistance`).  
+> **Важно**: сервер отправляет `mobMoveUpdate` только если моб сдвинулся на ≥ **10 units** от последней отправленной позиции (`minimumMoveDistance`).  
 > Исключение — смена боевого состояния: тогда пакет отправляется принудительно, даже без движения (`forceNextUpdate = true`).
 
 ---
@@ -518,8 +525,8 @@ mob.posY += mob.velocity.dirY * mob.velocity.speed * deltaTime
 | `combatState` | Клиентское поведение |
 |---|---|
 | `0` PATROLLING | ⚠️ **НЕ экстраполировать бесконечно.** Lerp к `position` из пакета за `stepSize/speed ≈ 1.0 сек`, затем **остановить velocity = 0**. Ждать следующего пакета. |
-| `1` CHASING | Экстраполировать по `velocity`. Пакет каждые **~0.3 сек** (при движении ≥50 units). |
-| `2` PREPARING_ATTACK | **Заморозить** (velocity.speed = 0). Показать анимацию каста. Кастбар = `castTime` из `combatInitiation`. |
+| `1` CHASING | Экстраполировать по `velocity`. Пакет каждые **~0.1 сек** (при движении ≥10 units). |
+| `2` PREPARING_ATTACK | **Заморозить** (velocity.speed = 0). Показать анимацию каста. Кастбар = `castTime` из `combatInitiation`. **Урон уже применён** (`combatResult` пришёл вместе с `combatInitiation`). |
 | `3` ATTACKING | **Заморозить**. Воспроизвести анимацию удара. |
 | `4` ATTACK_COOLDOWN | **Заморозить**. Моб стоит. |
 | `5` RETURNING | Экстраполировать по `velocity`. Пакет каждые **~0.15 сек**. |
@@ -528,7 +535,7 @@ mob.posY += mob.velocity.dirY * mob.velocity.speed * deltaTime
 
 При переходе в состояние 2/3/4 сервер гарантированно присылает `mobMoveUpdate` с `speed = 0` — используйте это как сигнал остановки.
 
-> **Почему патруль — особый случай**: сервер отправляет пакет патруля только когда моб реально делает шаг (раз в 10–40 сек). Нет отдельного пакета «моб остановился». Поэтому правило: анимировать к новой позиции за `stepSize/speed = 1.0 с`, затем держать. Не экстраполировать за это время.
+> **Почему патруль — особый случай**: сервер отправляет пакет патруля только когда моб реально делает шаг (раз в 2–6 сек). Нет отдельного пакета «моб остановился». Поэтому правило: анимировать к новой позиции за `stepSize/speed = 1.0 с`, затем держать. Не экстраполировать за это время.
 
 ---
 
@@ -536,10 +543,10 @@ mob.posY += mob.velocity.dirY * mob.velocity.speed * deltaTime
 
 | Режим | Частота (сервер) | Пакет придёт, если... | Клиент после пакета |
 |---|---|---|---|
-| Chase | раз в **0.3 сек** | моб двигался ≥ 50 units | экстраполировать ~0.3 сек |
-| Return | раз в **0.15 сек** | моб двигался ≥ 50 units | экстраполировать ~0.15 сек |
-| Patrol | раз в **10–40 сек** | моб двигался ≥ 50 units | lerp за 1.0 сек → стоп |
-| Fleeing | раз в **0.15 сек** | моб двигался ≥ 50 units | экстраполировать ~0.15 сек |
+| Chase | раз в **0.1 сек** | моб двигался ≥ 10 units | экстраполировать ~0.1 сек |
+| Return | раз в **0.15 сек** | моб двигался ≥ 10 units | экстраполировать ~0.15 сек |
+| Patrol | раз в **2–6 сек** | моб двигался ≥ 10 units | lerp за 1.0 сек → стоп |
+| Fleeing | раз в **0.1 сек** | моб двигался ≥ 10 units | экстраполировать ~0.1 сек |
 | Смена состояния | **немедленно** | всегда (force update) | заморозить / разморозить |
 
 При смене состояния пакет приходит даже если моб не двигался — `posX/posY` будут текущими координатами.
@@ -565,15 +572,15 @@ mob.posY += mob.velocity.dirY * mob.velocity.speed * deltaTime
         │                 │         │       │          │
         ├─────────────────┼─────────┼───────┼──────────┤
 Server: combatInit        combatRes state=3 state=4    state=1 (resume chase)
-        state=2           (cast end)(swing) (cd=0.5s)
+        state=2           (урон!)  (swing) (cd=0.5s)
         (castTime=0.5s)
         ├─────────────────┤
-Client: кастбар           урон      удар    cooldown   бег
-        (0.5 сек)         →HP бар   анимация
+Client: кастбар           HP бар↓  удар    cooldown   бег
+        (0.5 сек)         (сразу)  анимация
 ```
 
-- `combatInitiation.skillInitiation.castTime` — длина кастбара.
-- `combatResult` приходит **в конце каста** (одновременно с `combatState = 3`). Сохранить урон, применить к HP-бару в хит-фрейм анимации ATTACKING.
+- `combatInitiation` и `combatResult` приходят одновременно при входе в PREPARING_ATTACK.
+- `combatInitiation.skillInitiation.castTime` — длина кастбара; урон уже применён на сервере, клиент может применить к HP-бару немедленно либо в хит-фрейм анимации.
 - После `state = 4` (ATTACK_COOLDOWN) клиент ждёт следующего `combatState = 1` + `velocity ≠ 0` — это сигнал возобновления погони.
 
 ---
@@ -582,7 +589,7 @@ Client: кастбар           урон      удар    cooldown   бег
 
 | Ошибка | Последствие | Правильное решение |
 |---|---|---|
-| Применять урон из `combatResult` сразу при получении | HP бара прыгает до визуального удара | `combatResult` приходит в начале ATTACKING; сохранить урон, применить в хит-фрейме анимации удара |
+| Ожидать отдельный `combatResult` после каста | HP бар не обновляется | `combatResult` приходит **вместе с `combatInitiation`** (при входе в PREPARING_ATTACK) |
 | Двигать моба в состояниях 2/3/4 | Моб "едет" сквозь игрока во время удара | Заморозить при `combatState` ∈ {2, 3, 4, 6} |
 | Телепортировать моба при коррекции позиции | Дёрганое движение каждые 0.3 сек | Lerp к целевой позиции за 2–4 кадра |
 | Не экстраполировать между пакетами | Моб движется рывками | Extrapolation по `velocity × deltaTime` |
@@ -785,7 +792,7 @@ Client: кастбар           урон      удар    cooldown   бег
         "uid": 1001,
         "zoneId": 1,
         "position": { "x": 450.0, "y": 380.0, "z": 0.0, "rotationZ": 90.0 },
-        "velocity": { "dirX": 0.0, "dirY": 1.0, "speed": 700.0 },
+        "velocity": { "dirX": 0.0, "dirY": 1.0, "speed": 450.0 },
         "combatState": 1,
         "stepTimestampMs": 1742477722789
       }
@@ -796,7 +803,7 @@ Client: кастбар           урон      удар    cooldown   бег
 
 #### Моб начинает атаку — PREPARING_ATTACK (combatState = 2)
 
-Этот пакет приходит вместе с `combatInitiation`. `combatResult` (урон) придёт позже — в момент перехода в ATTACKING.
+Этот пакет приходит вместе с `combatInitiation` **и** `combatResult` — все три отправляются одновременно при входе в PREPARING_ATTACK.
 
 ```json
 {
@@ -864,7 +871,7 @@ Client: кастбар           урон      удар    cooldown   бег
         "uid": 1001,
         "zoneId": 1,
         "position": { "x": 440.0, "y": 370.0, "z": 0.0, "rotationZ": 270.0 },
-        "velocity": { "dirX": -0.707, "dirY": -0.707, "speed": 933.0 },
+        "velocity": { "dirX": -0.707, "dirY": -0.707, "speed": 200.0 },
         "combatState": 5,
         "stepTimestampMs": 1742477725000
       }
@@ -873,7 +880,7 @@ Client: кастбар           урон      удар    cooldown   бег
 }
 ```
 
-> `speed` при RETURNING: `baseSpeedMax(140) / returnMovementInterval(0.15) ≈ 933 units/sec`
+> `speed` при RETURNING: `returnSpeedUnitsPerSec = 200 units/sec` (настраивается в `MobAIConfig`)
 
 #### Evading — EVADING (combatState = 6)
 ```json
@@ -904,7 +911,7 @@ Client: кастбар           урон      удар    cooldown   бег
         "uid": 1001,
         "zoneId": 1,
         "position": { "x": 460.0, "y": 390.0, "z": 0.0, "rotationZ": 270.0 },
-        "velocity": { "dirX": -0.8, "dirY": -0.6, "speed": 933.0 },
+        "velocity": { "dirX": -0.8, "dirY": -0.6, "speed": 200.0 },
         "combatState": 7,
         "stepTimestampMs": 1742477724800
       }

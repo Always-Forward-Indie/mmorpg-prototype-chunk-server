@@ -28,6 +28,8 @@ CombatResponseBuilder::buildSkillInitiationBroadcast(const SkillInitiationResult
     body["castTime"] = result.castTime;
     body["animationName"] = result.animationName;
     body["animationDuration"] = result.animationDuration;
+    body["cooldownMs"] = result.cooldownMs;
+    body["gcdMs"] = result.gcdMs;
     body["serverTimestamp"] = result.serverTimestamp;
     body["castStartedAt"] = result.castStartedAt;
 
@@ -90,6 +92,7 @@ CombatResponseBuilder::buildSkillExecutionBroadcast(const SkillExecutionResult &
 
         body["finalTargetHealth"] = result.finalTargetHealth;
         body["finalTargetMana"] = result.finalTargetMana;
+        body["finalCasterMana"] = result.finalCasterMana;
     }
     else
     {
@@ -113,6 +116,46 @@ CombatResponseBuilder::buildSkillExecutionBroadcast(const SkillExecutionResult &
 }
 
 nlohmann::json
+CombatResponseBuilder::buildAoESkillExecutionBroadcast(const AoESkillExecutionResult &result)
+{
+    nlohmann::json body;
+    body["casterId"] = result.casterId;
+    body["skillSlug"] = result.skillSlug;
+    body["skillName"] = result.skillName;
+    body["skillEffectType"] = result.skillEffectType;
+    body["skillSchool"] = result.skillSchool;
+    body["serverTimestamp"] = result.serverTimestamp;
+    body["finalCasterMana"] = result.finalCasterMana;
+
+    int casterType = determineCharacterType(result.casterId);
+    body["casterType"] = casterType;
+    body["casterTypeString"] = getCharacterTypeString(casterType);
+
+    nlohmann::json targetsArr = nlohmann::json::array();
+    for (const auto &t : result.targets)
+    {
+        nlohmann::json entry;
+        entry["targetId"] = t.targetId;
+        entry["targetType"] = static_cast<int>(t.targetType);
+        entry["targetTypeString"] = getCombatTargetTypeString(t.targetType);
+        entry["damage"] = t.damage;
+        entry["isCritical"] = t.isCritical;
+        entry["isBlocked"] = t.isBlocked;
+        entry["isMissed"] = t.isMissed;
+        entry["targetDied"] = t.targetDied;
+        entry["finalTargetHealth"] = t.finalTargetHealth;
+        targetsArr.push_back(entry);
+    }
+    body["targets"] = targetsArr;
+
+    return ResponseBuilder()
+        .setHeader("eventType", "combatAoeResult")
+        .setHeader("message", "AoE skill executed")
+        .setBody("aoeResult", body)
+        .build();
+}
+
+nlohmann::json
 CombatResponseBuilder::buildErrorResponse(const std::string &errorMessage,
     const std::string &eventType,
     int clientId)
@@ -126,34 +169,6 @@ CombatResponseBuilder::buildErrorResponse(const std::string &errorMessage,
         .setHeader("clientId", clientId)
         .setHeader("eventType", eventType)
         .setBody("error", body)
-        .build();
-}
-
-nlohmann::json
-CombatResponseBuilder::buildAnimationPacket(int characterId, const std::string &animationName, float duration, const PositionStruct &position, const PositionStruct &targetPosition)
-{
-    nlohmann::json animationData;
-    animationData["characterId"] = characterId;
-    animationData["animationName"] = animationName;
-    animationData["duration"] = duration;
-    animationData["position"] = {
-        {"x", position.positionX},
-        {"y", position.positionY},
-        {"z", position.positionZ}};
-
-    // Добавляем позицию цели если она указана
-    if (targetPosition.positionX != 0.0f || targetPosition.positionY != 0.0f || targetPosition.positionZ != 0.0f)
-    {
-        animationData["targetPosition"] = {
-            {"x", targetPosition.positionX},
-            {"y", targetPosition.positionY},
-            {"z", targetPosition.positionZ}};
-    }
-
-    return ResponseBuilder()
-        .setHeader("message", "Combat animation")
-        .setHeader("eventType", "combatAnimation")
-        .setBody("animation", animationData)
         .build();
 }
 
@@ -175,33 +190,14 @@ CombatResponseBuilder::determineEventType(const std::string &skillEffectType)
 int
 CombatResponseBuilder::determineCharacterType(int characterId)
 {
-    // Проверяем, является ли это игроком
-    try
-    {
-        auto characterData = gameServices_->getCharacterManager().getCharacterData(characterId);
-        if (characterData.characterId != 0)
-        {
-            return 1; // PLAYER
-        }
-    }
-    catch (...)
-    {
-        // Не игрок
-    }
+    // HIGH-8: no exceptions — managers return default structs (id==0) when not found
+    auto characterData = gameServices_->getCharacterManager().getCharacterData(characterId);
+    if (characterData.characterId != 0)
+        return 1; // PLAYER
 
-    // Проверяем, является ли это мобом
-    try
-    {
-        auto mobData = gameServices_->getMobInstanceManager().getMobInstance(characterId);
-        if (mobData.uid != 0)
-        {
-            return 2; // MOB
-        }
-    }
-    catch (...)
-    {
-        // Не моб
-    }
+    auto mobData = gameServices_->getMobInstanceManager().getMobInstance(characterId);
+    if (mobData.uid != 0)
+        return 2; // MOB
 
     return 0; // UNKNOWN
 }

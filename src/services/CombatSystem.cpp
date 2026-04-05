@@ -280,6 +280,8 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         result.castTime = action->castTime;
         result.animationName = action->animationName;
         result.animationDuration = action->animationDuration;
+        result.cooldownMs = skill.cooldownMs;
+        result.gcdMs = skill.gcdMs;
         auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch())
                          .count();
@@ -350,9 +352,28 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         // Route AoE skills to dedicated handler (resource management handled inside)
         if (targetType == CombatTargetType::AREA)
         {
-            executeAoESkillUsage(casterId, skillSlug);
-            result.success = true;
+            result.success = executeAoESkillUsage(casterId, skillSlug);
             return result;
+        }
+
+        // Re-validate target is still alive before spending resources (HIGH-8 style)
+        if (targetType == CombatTargetType::MOB)
+        {
+            auto mobData = gameServices_->getMobInstanceManager().getMobInstance(targetId);
+            if (mobData.uid == 0 || mobData.isDead)
+            {
+                result.errorMessage = "Target is dead";
+                return result;
+            }
+        }
+        else if (targetType == CombatTargetType::PLAYER)
+        {
+            auto charData = gameServices_->getCharacterManager().getCharacterData(targetId);
+            if (charData.characterId == 0 || charData.characterCurrentHealth <= 0)
+            {
+                result.errorMessage = "Target is dead";
+                return result;
+            }
         }
 
         // Выполняем скил через SkillSystem
@@ -414,13 +435,15 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
                         result.targetDied = updateResult.mobDied;
                         result.healthPopulated = true;
 
-                        // Durability: player's weapon loses durability on hit
+                        // Durability + Mastery: single weapon fetch for both (HIGH-8 style)
                         try
                         {
                             auto weapon = gameServices_->getInventoryManager().getEquippedWeapon(casterId);
                             if (weapon.has_value())
                             {
                                 const auto &wItem = gameServices_->getItemManager().getItemById(weapon->itemId);
+
+                                // Durability: weapon wears on every hit
                                 if (wItem.isDurable && wItem.durabilityMax > 0)
                                 {
                                     int loss = static_cast<int>(gameServices_->getGameConfigService().getFloat("durability.weapon_loss_per_hit", 1.0f));
@@ -430,20 +453,8 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
                                     saveDurabilityChange(casterId, weapon->id, newDur);
                                     checkAndTriggerDurabilityWarning(casterId, cur, newDur, wItem.durabilityMax);
                                 }
-                            }
-                        }
-                        catch (const std::exception &e)
-                        {
-                            log_->warn("[COMBAT] Weapon durability update error: " + std::string(e.what()));
-                        }
 
-                        // --- Mastery: player attack on mob → mastery experience ---
-                        try
-                        {
-                            auto weapon = gameServices_->getInventoryManager().getEquippedWeapon(casterId);
-                            if (weapon.has_value())
-                            {
-                                const auto &wItem = gameServices_->getItemManager().getItemById(weapon->itemId);
+                                // Mastery: player gains weapon mastery XP on hit
                                 if (!wItem.masterySlug.empty())
                                 {
                                     const auto charData = gameServices_->getCharacterManager().getCharacterData(casterId);
@@ -455,7 +466,7 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
                         }
                         catch (const std::exception &e)
                         {
-                            log_->warn("[Mastery] Error on player attack: " + std::string(e.what()));
+                            log_->warn("[COMBAT] Weapon durability/mastery update error: " + std::string(e.what()));
                         }
 
                         if (updateResult.mobDied)
@@ -562,6 +573,26 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         // НЕ удаляем ongoing action здесь - это делается в updateOngoingActions()
         // ongoingActions_.erase(casterId);
 
+        // Mark caster as in-combat so their regen is suppressed while fighting
+        {
+            auto casterChar = gameServices_->getCharacterManager().getCharacterData(casterId);
+            if (casterChar.characterId != 0)
+                gameServices_->getCharacterManager().markCharacterInCombat(casterId);
+        }
+
+        // Capture caster's remaining mana after skill consumed it
+        {
+            auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
+            if (casterData.characterId != 0)
+                result.finalCasterMana = casterData.characterCurrentMana;
+            else
+            {
+                auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
+                if (mobData.uid != 0)
+                    result.finalCasterMana = mobData.currentMana;
+            }
+        }
+
         result.success = true;
         // serverTimestamp already set at the top of this function.
 
@@ -591,25 +622,6 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
     }
 
     return result;
-}
-
-void
-CombatSystem::interruptSkillUsage(int casterId, InterruptionReason reason)
-{
-    std::lock_guard<std::mutex> lock(actionsMutex_);
-    auto it = ongoingActions_.find(casterId);
-    if (it != ongoingActions_.end())
-    {
-        it->second->state = CombatActionState::INTERRUPTED;
-        it->second->interruptReason = reason;
-
-        // TODO: возврат ресурсов при прерывании
-
-        ongoingActions_.erase(it);
-
-        gameServices_->getLogger().log("Skill usage interrupted for caster " + std::to_string(casterId) +
-                                       ", reason: " + std::to_string(static_cast<int>(reason)));
-    }
 }
 
 void
@@ -711,7 +723,7 @@ CombatSystem::tickEffects()
     }
 }
 
-void
+bool
 CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
 {
     try
@@ -724,14 +736,15 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
             log_->error(
                 "[AoE] useSkill failed for caster=" + std::to_string(casterId) +
                 " skill=" + skillSlug + ": " + skillResult.errorMessage);
-            return;
+            return false;
         }
 
         auto skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
         if (!skillOpt.has_value())
-            return;
+            return false;
         const SkillStruct &skill = skillOpt.value();
 
+        // Fetch caster data AFTER mana was consumed by useSkill above
         auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
         const float cx = casterData.characterPosition.positionX;
         const float cy = casterData.characterPosition.positionY;
@@ -742,7 +755,23 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
 
         auto *calc = skillSystem_->getCombatCalculator();
         if (!calc)
-            return;
+            return false;
+
+        // Mark caster as in-combat (suppress regen)
+        if (casterData.characterId != 0)
+            gameServices_->getCharacterManager().markCharacterInCombat(casterId);
+
+        // Prepare batched result (one broadcast for all targets)
+        AoESkillExecutionResult batchResult;
+        batchResult.casterId = casterId;
+        batchResult.skillSlug = skillSlug;
+        batchResult.skillName = skill.skillName;
+        batchResult.skillEffectType = skill.skillEffectType;
+        batchResult.skillSchool = skill.school;
+        batchResult.serverTimestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                                          .count();
+        batchResult.finalCasterMana = (casterData.characterId != 0) ? casterData.characterCurrentMana : 0;
 
         // ---- Mob targets ----
         auto mobs = gameServices_->getMobInstanceManager().getMobsInRange(cx, cy, radius);
@@ -753,7 +782,8 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
 
             // Simplified player→mob path (mirror of SkillSystem::useSkill MOB branch)
             int dmg = calc->calculateBaseDamage(skill, casterData.attributes);
-            if (calc->rollCriticalHit(casterData.attributes))
+            bool isCrit = calc->rollCriticalHit(casterData.attributes);
+            if (isCrit)
                 dmg = static_cast<int>(dmg * 2.0f);
             dmg = std::max(0, dmg);
 
@@ -772,22 +802,16 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
 
             auto upResult = gameServices_->getMobInstanceManager().applyDamageToMob(mob.uid, dmg, casterId);
 
-            SkillExecutionResult execResult;
-            execResult.success = true;
-            execResult.casterId = casterId;
-            execResult.targetId = mob.uid;
-            execResult.targetType = CombatTargetType::MOB;
-            execResult.skillSlug = skillSlug;
-            execResult.skillName = skill.skillName;
-            execResult.skillEffectType = skill.skillEffectType;
-            execResult.skillSchool = skill.school;
-            execResult.skillResult.damageResult.totalDamage = dmg;
-            execResult.finalTargetHealth = upResult.newHealth;
-            execResult.finalTargetMana = upResult.currentMana;
-            execResult.targetDied = upResult.mobDied;
-
-            if (responseBuilder_ && broadcastCallback_)
-                broadcastCallback_(responseBuilder_->buildSkillExecutionBroadcast(execResult));
+            AoETargetResultEntry entry;
+            entry.targetId = mob.uid;
+            entry.targetType = CombatTargetType::MOB;
+            entry.damage = dmg;
+            entry.isCritical = isCrit;
+            entry.isBlocked = false;
+            entry.isMissed = false;
+            entry.targetDied = upResult.mobDied;
+            entry.finalTargetHealth = upResult.newHealth;
+            batchResult.targets.push_back(entry);
 
             if (upResult.mobDied)
                 handleMobDeath(mob.uid, casterId);
@@ -816,36 +840,47 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
             // Suppress regen for AoE targets
             gameServices_->getCharacterManager().markCharacterInCombat(target.characterId);
 
-            SkillExecutionResult execResult;
-            execResult.success = true;
-            execResult.casterId = casterId;
-            execResult.targetId = target.characterId;
-            execResult.targetType = CombatTargetType::PLAYER;
-            execResult.skillSlug = skillSlug;
-            execResult.skillName = skill.skillName;
-            execResult.skillEffectType = skill.skillEffectType;
-            execResult.skillSchool = skill.school;
-            execResult.skillResult.damageResult = dmgResult;
-            execResult.finalTargetHealth = hpAoE.newHealth;
-            execResult.finalTargetMana = hpAoE.currentMana;
-            execResult.targetDied = hpAoE.died;
+            AoETargetResultEntry entry;
+            entry.targetId = target.characterId;
+            entry.targetType = CombatTargetType::PLAYER;
+            entry.damage = dmgResult.totalDamage;
+            entry.isCritical = dmgResult.isCritical;
+            entry.isBlocked = dmgResult.isBlocked;
+            entry.isMissed = false; // already filtered above
+            entry.targetDied = hpAoE.died;
+            entry.finalTargetHealth = hpAoE.newHealth;
+            batchResult.targets.push_back(entry);
 
-            if (responseBuilder_ && broadcastCallback_)
-                broadcastCallback_(responseBuilder_->buildSkillExecutionBroadcast(execResult));
-
-            if (execResult.targetDied)
+            if (hpAoE.died)
+            {
                 handleTargetDeath(target.characterId, CombatTargetType::PLAYER);
+            }
+            else
+            {
+                // Apply DoT/debuff effects on surviving player targets
+                applySkillEffects(skillResult, casterId, skillSlug, target.characterId, CombatTargetType::PLAYER);
+            }
 
             ++hitCount;
         }
 
+        // Single batched broadcast for all AoE targets
+        if (responseBuilder_ && broadcastCallback_)
+            broadcastCallback_(responseBuilder_->buildAoESkillExecutionBroadcast(batchResult));
+
+        // Caster stats update (mana consumed)
+        gameServices_->getStatsNotificationService().sendStatsUpdate(casterId);
+
         gameServices_->getLogger().log(
             "[AoE] '" + skillSlug + "' by char " + std::to_string(casterId) +
             " hit " + std::to_string(hitCount) + " target(s) in r=" + std::to_string(radius));
+
+        return true;
     }
     catch (const std::exception &ex)
     {
         gameServices_->getLogger().logError("[CombatSystem::executeAoESkillUsage] " + std::string(ex.what()));
+        return false;
     }
 }
 

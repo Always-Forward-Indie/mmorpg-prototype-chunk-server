@@ -194,43 +194,100 @@ Chunk → Client: SELL_RESULT
 
 ```json
 {
-  "header": { "message": "success", "eventType": "VENDOR_SHOP", "clientId": 7 },
+  "header": { "message": "success", "eventType": "vendorShop", "clientId": 7 },
   "body": {
     "npcId": 55,
+    "npcSlug": "merchant_tom",
+    "goldBalance": 500,
     "items": [
       {
         "itemId": 3,
-        "name": "Iron Sword",
         "slug": "iron_sword",
+        "itemType": 1,
+        "itemTypeSlug": "weapon",
+        "rarityId": 1,
+        "raritySlug": "common",
+        "isDurable": true,
+        "durabilityMax": 100,
+        "isTradable": true,
+        "isEquippable": true,
+        "isUsable": false,
+        "isQuestItem": false,
+        "isContainer": false,
+        "isHarvest": false,
+        "isTwoHanded": false,
+        "weight": 3.5,
+        "equipSlot": 10,
+        "equipSlotSlug": "main_hand",
+        "levelRequirement": 1,
+        "setId": 0,
+        "setSlug": "",
+        "allowedClassIds": [],
+        "masterySlug": "sword_mastery",
         "priceBuy": 150,
         "priceSell": 60,
-        "stockCount": -1,
-        "restockAmount": 0
+        "stockCurrent": -1,
+        "stockMax": -1,
+        "attributes": [
+          { "id": 1, "slug": "attack", "value": 12 }
+        ],
+        "useEffects": []
       },
       {
         "itemId": 7,
-        "name": "Health Potion",
         "slug": "health_potion",
+        "itemType": 3,
+        "itemTypeSlug": "consumable",
+        "rarityId": 1,
+        "raritySlug": "common",
+        "isDurable": false,
+        "durabilityMax": 0,
+        "isTradable": true,
+        "isEquippable": false,
+        "isUsable": true,
+        "isQuestItem": false,
+        "isContainer": false,
+        "isHarvest": false,
+        "isTwoHanded": false,
+        "weight": 0.1,
+        "equipSlot": 0,
+        "equipSlotSlug": "",
+        "levelRequirement": 1,
+        "setId": 0,
+        "setSlug": "",
+        "allowedClassIds": [],
+        "masterySlug": "",
         "priceBuy": 20,
         "priceSell": 8,
-        "stockCount": 50,
-        "restockAmount": 0
-      },
-      {
-        "itemId": 22,
-        "name": "Rare Enchant Recipe",
-        "slug": "enchant_recipe_rare",
-        "priceBuy": 500,
-        "priceSell": 200,
-        "stockCount": 0,
-        "restockAmount": 3
+        "stockCurrent": 50,
+        "stockMax": 100,
+        "attributes": [],
+        "useEffects": [
+          {
+            "effectSlug": "hp_restore",
+            "attributeSlug": "hp",
+            "value": 150.0,
+            "isInstant": true,
+            "durationSeconds": 0,
+            "tickMs": 0,
+            "cooldownSeconds": 30
+          }
+        ]
       }
     ]
   }
 }
 ```
 
-`stockCount: -1` = бесконечный запас. `restockAmount > 0` = пополняется по расписанию. `stockCount: 0` с `restockAmount > 0` = временно нет в наличии, скоро будет. Клиент показывает такие позиции серым. `priceBuy` уже с учётом наценки (`markup_pct`).
+Каждый элемент в `items` содержит полный объект предмета (аналог §5 `client-item-features-protocol.md`) плюс торговые поля:
+
+| Поле | Описание |
+|------|----------|
+| `priceBuy` | Цена покупки у NPC (уже с учётом `markup_pct` и репутационной скидки) |
+| `priceSell` | Цена продажи NPC |
+| `stockCurrent` | `-1` = бесконечный запас; `0` = временно нет в наличии; `N > 0` = текущий сток |
+| `stockMax` | Максимальный сток при ресток. `-1` = без верхней планки |
+| `killCount` | **Всегда `0` в магазине** — у вендора нет инстанс-данных предмета |
 
 ---
 
@@ -475,28 +532,64 @@ Chunk → Client: SELL_RESULT
 
 **Направление:** Chunk Server → Client
 
+Каждый элемент в `myItems` / `theirItems` — полный объект предмета из инвентаря (тот же формат что `getPlayerInventory`, включая `attributes`, `useEffects`, `masterySlug`, `killCount`, `durabilityCurrent`). Поле `quantity` может быть меньше quantidade в слоте, если игрок предложил только часть стака.
+
 ```json
 {
-  "header": { "eventType": "TRADE_STATE", "clientId": 7 },
+  "header": { "eventType": "tradeState", "clientId": 7 },
   "body": {
-    "sessionId": "trade_101_205_1709834400000",
-    "myOffer": {
-      "items": [
-        { "inventorySlotId": 15, "itemId": 3, "name": "Iron Sword", "quantity": 1 }
+    "trade": {
+      "sessionId": "trade_101_205_1709834400000",
+      "myGold": 50,
+      "theirGold": 0,
+      "myGoldBalance": 350,
+      "myItems": [
+        {
+          "id": 15,
+          "itemId": 3,
+          "slug": "iron_sword",
+          "quantity": 1,
+          "durabilityCurrent": 87,
+          "durabilityMax": 100,
+          "isEquipped": false,
+          "killCount": 42,
+          "masterySlug": "sword_mastery",
+          "attributes": [
+            { "id": 1, "slug": "attack", "value": 12 }
+          ],
+          "useEffects": []
+        }
       ],
-      "gold": 50
-    },
-    "theirOffer": {
-      "items": [
-        { "inventorySlotId": 89, "itemId": 7, "name": "Health Potion", "quantity": 5 }
+      "theirItems": [
+        {
+          "id": 89,
+          "itemId": 7,
+          "slug": "health_potion",
+          "quantity": 5,
+          "killCount": 0,
+          "masterySlug": "",
+          "attributes": [],
+          "useEffects": [
+            {
+              "effectSlug": "hp_restore",
+              "attributeSlug": "hp",
+              "value": 150.0,
+              "isInstant": true,
+              "durationSeconds": 0,
+              "tickMs": 0,
+              "cooldownSeconds": 30
+            }
+          ]
+        }
       ],
-      "gold": 0
-    },
-    "myConfirmed": false,
-    "theirConfirmed": false
+      "myConfirmed": false,
+      "theirConfirmed": false
+    }
   }
 }
 ```
+
+> **Примечание по `eventType`:** реальный `eventType` в хедере — `tradeState` (camelCase), а не `TRADE_STATE`. Аналогично: `tradeCancelled` вместо `TRADE_CANCELLED`, `TRADE_OPENED` → `tradeOpened` будет выровнено при рефакторинге пакетов.
 
 ---
 
@@ -523,7 +616,7 @@ Chunk → Client: SELL_RESULT
   "body": {
     "sessionId": "trade_101_205_1709834400000",
     "receivedItems": [
-      { "itemId": 7, "name": "Health Potion", "quantity": 5 }
+      { "itemId": 7, "slug": "health_potion", "quantity": 5 }
     ],
     "receivedGold": 0,
     "newGoldBalance": 0
@@ -643,7 +736,7 @@ Chunk → Client: SELL_RESULT
 ```json
 {
   "header": { "eventType": "ITEM_BROKEN", "clientId": 7 },
-  "body": { "inventorySlotId": 15, "itemId": 3, "name": "Iron Sword" }
+  "body": { "inventorySlotId": 15, "itemId": 3, "slug": "iron_sword" }
 }
 ```
 
@@ -678,7 +771,7 @@ NPC с `npcType = "blacksmith"`. Ошибки: `NPC_NOT_FOUND`, `OUT_OF_RANGE`, 
       {
         "inventorySlotId": 15,
         "itemId": 3,
-        "name": "Iron Sword",
+        "slug": "iron_sword",
         "durabilityCurrent": 45,
         "durabilityMax": 100,
         "repairCost": 110
@@ -686,7 +779,7 @@ NPC с `npcType = "blacksmith"`. Ошибки: `NPC_NOT_FOUND`, `OUT_OF_RANGE`, 
       {
         "inventorySlotId": 18,
         "itemId": 9,
-        "name": "Leather Chest",
+        "slug": "leather_chest",
         "durabilityCurrent": 20,
         "durabilityMax": 80,
         "repairCost": 180

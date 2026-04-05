@@ -185,6 +185,16 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 return;
             }
 
+            // Idempotency guard: skip if client was already cleaned up by a previous disconnect event
+            {
+                ClientDataStruct existingClient = gameServices_.getClientManager().getClientData(passedClientData.clientId);
+                if (existingClient.clientId == 0)
+                {
+                    log_->info("Client " + std::to_string(passedClientData.clientId) + " already cleaned up, skipping duplicate disconnect event.");
+                    return;
+                }
+            }
+
             // Get the list of clients BEFORE removing the disconnecting client
             std::vector<ClientDataStruct> clientDataMap;
             try
@@ -200,69 +210,77 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
             // Remove the client data
             gameServices_.getClientManager().removeClientData(passedClientData.clientId);
 
-            // Save last known position to game server before removing character data
+            // Only save and clean up character data if the character is actually loaded in CharacterManager
             if (passedClientData.characterId > 0)
             {
-                try
+                CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(passedClientData.characterId);
+                if (charData.characterId == 0)
                 {
-                    PositionStruct lastPos = gameServices_.getCharacterManager().getCharacterPosition(passedClientData.characterId);
-                    nlohmann::json savePacket;
-                    savePacket["header"]["eventType"] = "savePositions";
-                    savePacket["header"]["clientId"] = 0;
-                    savePacket["header"]["hash"] = "";
-                    savePacket["body"]["characters"] = nlohmann::json::array();
-                    nlohmann::json entry;
-                    entry["characterId"] = passedClientData.characterId;
-                    entry["posX"] = lastPos.positionX;
-                    entry["posY"] = lastPos.positionY;
-                    entry["posZ"] = lastPos.positionZ;
-                    entry["rotZ"] = lastPos.rotationZ;
-                    savePacket["body"]["characters"].push_back(entry);
-                    gameServerWorker_.sendDataToGameServer(savePacket.dump() + "\n");
-                    log_->info(
-                        "[DISCONNECT] Saved position for characterId: " + std::to_string(passedClientData.characterId));
+                    log_->warn("[DISCONNECT] Character " + std::to_string(passedClientData.characterId) +
+                               " not loaded in CharacterManager (incomplete join?), skipping save.");
                 }
-                catch (const std::exception &ex)
+                else
                 {
-                    gameServices_.getLogger().logError(
-                        "[DISCONNECT] Failed to save position for characterId: " +
-                        std::to_string(passedClientData.characterId) + " - " + ex.what());
+                    // Save last known position to game server
+                    try
+                    {
+                        PositionStruct lastPos = charData.characterPosition;
+                        nlohmann::json savePacket;
+                        savePacket["header"]["eventType"] = "savePositions";
+                        savePacket["header"]["clientId"] = 0;
+                        savePacket["header"]["hash"] = "";
+                        savePacket["body"]["characters"] = nlohmann::json::array();
+                        nlohmann::json entry;
+                        entry["characterId"] = passedClientData.characterId;
+                        entry["posX"] = lastPos.positionX;
+                        entry["posY"] = lastPos.positionY;
+                        entry["posZ"] = lastPos.positionZ;
+                        entry["rotZ"] = lastPos.rotationZ;
+                        savePacket["body"]["characters"].push_back(entry);
+                        gameServerWorker_.sendDataToGameServer(savePacket.dump() + "\n");
+                        log_->info("[DISCONNECT] Saved position for characterId: " + std::to_string(passedClientData.characterId));
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError(
+                            "[DISCONNECT] Failed to save position for characterId: " +
+                            std::to_string(passedClientData.characterId) + " - " + ex.what());
+                    }
+
+                    // Save HP/Mana to game server
+                    try
+                    {
+                        nlohmann::json hpManaPacket;
+                        hpManaPacket["header"]["eventType"] = "saveHpMana";
+                        hpManaPacket["header"]["clientId"] = 0;
+                        hpManaPacket["header"]["hash"] = "";
+                        hpManaPacket["body"]["characters"] = nlohmann::json::array();
+                        nlohmann::json hpEntry;
+                        hpEntry["characterId"] = passedClientData.characterId;
+                        hpEntry["currentHp"] = charData.characterCurrentHealth;
+                        hpEntry["currentMana"] = charData.characterCurrentMana;
+                        hpManaPacket["body"]["characters"].push_back(hpEntry);
+                        gameServerWorker_.sendDataToGameServer(hpManaPacket.dump() + "\n");
+                        log_->info("[DISCONNECT] Saved HP/Mana for characterId: " + std::to_string(passedClientData.characterId));
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError(
+                            "[DISCONNECT] Failed to save HP/Mana for characterId: " +
+                            std::to_string(passedClientData.characterId) + " - " + ex.what());
+                    }
                 }
             }
 
-            // Save HP/Mana to game server on disconnect
+            // Remove character data and flush state (only if character was loaded)
             if (passedClientData.characterId > 0)
             {
-                try
+                CharacterDataStruct existingChar = gameServices_.getCharacterManager().getCharacterData(passedClientData.characterId);
+                if (existingChar.characterId > 0)
                 {
-                    CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(passedClientData.characterId);
-                    nlohmann::json hpManaPacket;
-                    hpManaPacket["header"]["eventType"] = "saveHpMana";
-                    hpManaPacket["header"]["clientId"] = 0;
-                    hpManaPacket["header"]["hash"] = "";
-                    hpManaPacket["body"]["characters"] = nlohmann::json::array();
-                    nlohmann::json hpEntry;
-                    hpEntry["characterId"] = passedClientData.characterId;
-                    hpEntry["currentHp"] = charData.characterCurrentHealth;
-                    hpEntry["currentMana"] = charData.characterCurrentMana;
-                    hpManaPacket["body"]["characters"].push_back(hpEntry);
-                    gameServerWorker_.sendDataToGameServer(hpManaPacket.dump() + "\n");
-                    log_->info("[DISCONNECT] Saved HP/Mana for characterId: " + std::to_string(passedClientData.characterId));
+                    gameServices_.getCharacterManager().removeCharacter(passedClientData.characterId);
                 }
-                catch (const std::exception &ex)
-                {
-                    gameServices_.getLogger().logError(
-                        "[DISCONNECT] Failed to save HP/Mana for characterId: " +
-                        std::to_string(passedClientData.characterId) + " - " + ex.what());
-                }
-            }
 
-            // Remove character data
-            gameServices_.getCharacterManager().removeCharacter(passedClientData.characterId);
-
-            // Flush and unload quest/dialogue state on disconnect
-            if (passedClientData.characterId > 0)
-            {
                 try
                 {
                     gameServices_.getQuestManager().flushAllProgress(passedClientData.characterId);
@@ -282,11 +300,39 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 {
                     gameServices_.getReputationManager().unloadCharacterReputations(passedClientData.characterId);
                     gameServices_.getMasteryManager().unloadCharacterMasteries(passedClientData.characterId);
+                    gameServices_.getQuestManager().clearFlagsLoaded(passedClientData.characterId);
                 }
                 catch (const std::exception &ex)
                 {
                     gameServices_.getLogger().logError(
                         "[DISCONNECT] Rep/Mastery unload error for characterId: " +
+                        std::to_string(passedClientData.characterId) + " - " + ex.what());
+                }
+
+                // Flush Item Soul kill_count for equipped weapon so unsaved kills are not lost
+                try
+                {
+                    auto weapon = gameServices_.getInventoryManager().getEquippedWeapon(passedClientData.characterId);
+                    if (weapon.has_value() && weapon->killCount > 0)
+                    {
+                        nlohmann::json pkt;
+                        pkt["header"]["eventType"] = "saveItemKillCount";
+                        pkt["header"]["clientId"] = 0;
+                        pkt["header"]["hash"] = "";
+                        pkt["body"]["characterId"] = passedClientData.characterId;
+                        pkt["body"]["inventoryItemId"] = weapon->id;
+                        pkt["body"]["killCount"] = weapon->killCount;
+                        gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+                        log_->info("[DISCONNECT] Flushed ItemSoul killCount=" +
+                                   std::to_string(weapon->killCount) +
+                                   " for invId=" + std::to_string(weapon->id) +
+                                   " charId=" + std::to_string(passedClientData.characterId));
+                    }
+                }
+                catch (const std::exception &ex)
+                {
+                    gameServices_.getLogger().logError(
+                        "[DISCONNECT] ItemSoul flush error for characterId: " +
                         std::to_string(passedClientData.characterId) + " - " + ex.what());
                 }
             }

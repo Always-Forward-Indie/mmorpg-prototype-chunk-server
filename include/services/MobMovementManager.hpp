@@ -222,7 +222,8 @@ class MobMovementManager
         float dirY,
         float lastMoveTime,
         float nextMoveTime,
-        float currentSpeed);
+        float currentSpeed,
+        float deflectionSign = 0.0f);
 
     /**
      * @brief Run one AI+movement tick for a single mob.

@@ -34,6 +34,8 @@ class DialogueActionExecutor
     {
         /// JSON notifications to forward to the client (DIALOGUE_ACTION_RESULT body)
         std::vector<nlohmann::json> clientNotifications;
+        /// JSON packet strings to send to the game server (e.g. saveLearnedSkill)
+        std::vector<std::string> pendingGameServerPackets;
     };
 
     /**
@@ -108,6 +110,15 @@ class DialogueActionExecutor
     // {"type":"change_reputation", "faction":"bandits", "delta":50}
     void executeChangeReputation(const nlohmann::json &action,
         int characterId,
+        PlayerContextStruct &ctx,
+        ActionResult &result);
+
+    // Skill system: learn a skill by spending SP, gold, and optionally a skill book
+    // {"type":"learn_skill","skill_slug":"shield_bash","sp_cost":1,"gold_cost":500,
+    //  "requires_book":true,"book_item_id":18}
+    void executeLearnSkill(const nlohmann::json &action,
+        int characterId,
+        int clientId,
         PlayerContextStruct &ctx,
         ActionResult &result);
 

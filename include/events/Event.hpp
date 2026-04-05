@@ -66,7 +66,6 @@ class Event
         INITIATE_COMBAT_ACTION,
         COMPLETE_COMBAT_ACTION,
         INTERRUPT_COMBAT_ACTION,
-        COMBAT_ANIMATION,
         COMBAT_RESULT,
         // New attack events
         PLAYER_ATTACK,
@@ -81,6 +80,7 @@ class Event
         LEVEL_UP,          // Level up event
         // Skill events
         INITIALIZE_PLAYER_SKILLS, // Initialize player skills on client connection
+        SET_LEARNED_SKILL,        // Game-server confirms a skill was saved and sends full skill data
         // Dialogue events (game-server → chunk-server, static data load)
         SET_ALL_DIALOGUES,                // Load all dialogue graphs from game-server
         SET_NPC_DIALOGUE_MAPPINGS,        // Load all npc_dialogue bindings
@@ -154,7 +154,8 @@ class Event
         SET_MOB_WEAKNESSES_RESISTANCES, // Game-server sends mob weaknesses/resistances tables
 
         // Chat events (client → chunk-server)
-        CHAT_MESSAGE ///< Player sends a chat message (local / zone / whisper)
+        CHAT_MESSAGE, ///< Player sends a chat message (local / zone / whisper)
+        PLAYER_READY  ///< Client notifies server that the game scene has finished loading
     }; // Define more event types as needed
 
     Event() = default; // Default constructor

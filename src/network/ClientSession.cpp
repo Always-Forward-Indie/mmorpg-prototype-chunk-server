@@ -321,11 +321,24 @@ ClientSession::handleClientDisconnect()
         log_->info("Socket is null during disconnect");
     }
 
-    // Get client ID before cleanup to prevent clientId=0 issues
+    // Get client ID and character ID before cleanup to prevent clientId/characterId=0 issues
     int clientId = 0;
+    int characterId = 0;
     if (socket_)
     {
         clientId = gameServices_.getClientManager().getClientIdBySocket(socket_);
+        if (clientId > 0)
+        {
+            // Read characterId while the client data is still present
+            try
+            {
+                characterId = gameServices_.getClientManager().getClientData(clientId).characterId;
+            }
+            catch (const std::exception &)
+            {
+                // Leave characterId = 0 if lookup fails
+            }
+        }
     }
 
     // Clean up the socket from ClientManager if it exists
@@ -339,7 +352,8 @@ ClientSession::handleClientDisconnect()
     {
         // Construct minimal disconnect event WITHOUT socket reference to avoid use-after-free
         ClientDataStruct clientData;
-        clientData.clientId = clientId; // Use real client ID, not 0
+        clientData.clientId = clientId;       // Use real client ID, not 0
+        clientData.characterId = characterId; // Carry character ID so handlers can clean up properly
         clientData.hash = "";
 
         std::vector<Event> eventsBatch;

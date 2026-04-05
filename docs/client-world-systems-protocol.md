@@ -1119,7 +1119,7 @@ Broadcast. Отправляется каждую секунду пока моб 
         "npcType": "vendor",
         "isInteractable": true,
         "dialogueId": 5,
-        "questId": 0,
+        "quests": [],
         "stats": {
           "health": { "current": 500, "max": 500 },
           "mana":   { "current": 0,   "max": 0   }
@@ -1133,10 +1133,10 @@ Broadcast. Отправляется каждую секунду пока моб 
         "slug": "blacksmith_bragor",
         "race": "Dwarf",
         "level": 1,
-        "npcType": "repair",
+        "npcType": "blacksmith",
         "isInteractable": true,
         "dialogueId": 8,
-        "questId": 0,
+        "quests": [],
         "stats": {
           "health": { "current": 800, "max": 800 },
           "mana":   { "current": 0,   "max": 0   }
@@ -1159,20 +1159,29 @@ Broadcast. Отправляется каждую секунду пока моб 
 | `level` | int | Уровень (влияет на отображение в UI) |
 | `npcType` | string | Тип NPC (см. таблицу ниже) |
 | `isInteractable` | bool | Можно ли взаимодействовать |
-| `dialogueId` | int | ID диалогового дерева (0 = нет диалога) |
-| `questId` | int | ID квеста NPC (0 = нет квеста) |
+| `dialogueId` | string | ID диалогового дерева ("" = нет диалога) |
+| `quests` | array | Квесты NPC с per-player статусом (см. ниже) |
 | `stats` | object | HP/Mana для отображения |
 | `position` | object | `{x, y, z, rotationZ}` |
 | `attributes` | array | Боевые атрибуты |
+
+**Структура элемента `quests[]`:**
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `slug` | string | Slug квеста |
+| `status` | string | Статус для **этого персонажа**: `available`, `in_progress`, `completable`, `turned_in`, `failed` |
+
+> `available` — квест можно взять; `completable` — все шаги выполнены, необходимо сдать.
 
 **Типы NPC (`npcType`):**
 
 | Значение | Описание |
 |----------|----------|
+| `general` | Обычный NPC, только диалог |
 | `vendor` | Торговец предметами |
-| `repair` | Ремонтник экипировки |
-| `quest` | Квестовый NPC |
-| `dialogue` | Только диалог (без квеста/магазина) |
+| `blacksmith` | Кузнец / ремонтник экипировки |
+| `quest_giver` | Квестовый NPC (выдаёт и принимает квесты) |
 | `guard` | Охранник |
 | `trainer` | Тренер скиллов |
 

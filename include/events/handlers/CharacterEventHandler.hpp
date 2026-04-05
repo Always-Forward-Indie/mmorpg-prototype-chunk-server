@@ -4,6 +4,7 @@
 #include "events/handlers/BaseEventHandler.hpp"
 #include "events/handlers/SkillEventHandler.hpp"
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 
 // Forward declaration to avoid circular include
@@ -87,6 +88,26 @@ class CharacterEventHandler : public BaseEventHandler
      */
     void handleGetConnectedCharactersEvent(const Event &event);
 
+  private:
+    /**
+     * @brief Push connected characters list + equipment to one client socket.
+     *
+     * Sends a single `getConnectedCharacters` response followed by one
+     * `PLAYER_EQUIPMENT_UPDATE` per character. Used by both
+     * handleGetConnectedCharactersEvent (client-requested) and
+     * handlePlayerReadyEvent (Phase 4 server push).
+     *
+     * @param clientID      Target client ID
+     * @param clientSocket  Target socket
+     * @param excludeCharacterId  Skip this character (pass own characterId in Phase 4,
+     *                            or -1 to include all)
+     */
+    void pushConnectedCharactersToClient(
+        int clientID,
+        std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+        int excludeCharacterId);
+
+  public:
     /**
      * @brief Handle set character data event
      *
@@ -113,6 +134,16 @@ class CharacterEventHandler : public BaseEventHandler
      * @param event Event containing character attributes
      */
     void handleSetCharacterAttributesEvent(const Event &event);
+
+    /**
+     * @brief Handle player ready event (Phase 4 world-state push)
+     *
+     * Called when the client sends "playerReady" — scene has finished loading.
+     * Pushes mobs, NPCs, ground items, and other players' equipment to the client.
+     *
+     * @param event Event containing CharacterDataStruct (characterId only)
+     */
+    void handlePlayerReadyEvent(const Event &event);
 
     /**
      * @brief Handle player respawn request
@@ -143,6 +174,24 @@ class CharacterEventHandler : public BaseEventHandler
     nlohmann::json characterToJson(const CharacterDataStruct &characterData);
 
     /**
+     * @brief Evict a stale session for a character that is already loaded.
+     *
+     * If `characterId` is already present in CharacterManager (left over from a
+     * previous connection that did not cleanly disconnect), this method:
+     *   1. Flushes position, HP/Mana, quests, flags, reputation, mastery and
+     *      ItemSoul kill-count to the game-server.
+     *   2. Removes the character and old client entry from their respective managers.
+     *   3. Broadcasts a `disconnectClient` notification to all currently connected
+     *      clients, excluding both the dead old socket and `newClientId` (the
+     *      reconnecting client that has not yet joined).
+     *
+     * @param characterId  The character being reclaimed.
+     * @param newClientId  The clientId of the incoming (re)connect — excluded from
+     *                     the disconnect broadcast so it does not confuse itself.
+     */
+    void evictStaleSession(int characterId, int newClientId);
+
+    /**
      * @brief Validate character authentication
      *
      * @param clientId Client ID
@@ -165,6 +214,7 @@ class CharacterEventHandler : public BaseEventHandler
 
     // Store pending join requests while waiting for character data from Game Server
     std::unordered_map<int, std::vector<PendingJoinRequest>> pendingJoinRequests_;
+    std::mutex pendingJoinRequestsMutex_;
 
     // Reference to skill event handler for skill initialization
     SkillEventHandler *skillEventHandler_;

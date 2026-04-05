@@ -59,7 +59,7 @@ MobEventHandler::spawnZoneToJson(const SpawnZoneStruct &spawnZoneData)
         {"maxSpawnCount", spawnZoneData.spawnCount},
         {"spawnedMobsCount", spawnZoneData.spawnedMobsList.size()},
         {"respawnTime", spawnZoneData.respawnTime.count()},
-        {"spawnEnabled", true}};
+        {"spawnEnabled", spawnZoneData.spawnEnabled}};
 }
 
 void

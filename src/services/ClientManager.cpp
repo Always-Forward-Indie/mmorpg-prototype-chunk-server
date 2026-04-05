@@ -201,6 +201,32 @@ ClientManager::setClientCharacterId(int clientID, int characterId)
     logger_.log("Created and set character ID " + std::to_string(characterId) + " for new client ID: " + std::to_string(clientID));
 }
 
+void
+ClientManager::setClientWorldReady(int clientID, bool ready)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    for (auto &client : clientsList_)
+    {
+        if (client.clientId == clientID)
+        {
+            client.isWorldReady = ready;
+            return;
+        }
+    }
+}
+
+bool
+ClientManager::isClientWorldReady(int clientID) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    for (const auto &client : clientsList_)
+    {
+        if (client.clientId == clientID)
+            return client.isWorldReady;
+    }
+    return false;
+}
+
 // remove client by ID
 void
 ClientManager::removeClientData(int clientID)

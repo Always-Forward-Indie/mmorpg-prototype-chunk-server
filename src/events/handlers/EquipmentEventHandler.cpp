@@ -61,6 +61,23 @@ EquipmentEventHandler::sendWeightStatus(int clientId, int characterId)
 }
 
 void
+EquipmentEventHandler::broadcastEquipmentUpdate(int characterId, int excludeClientId)
+{
+    nlohmann::json slotsJson = gameServices_.getEquipmentManager().buildEquipmentStateJson(characterId);
+
+    nlohmann::json response = ResponseBuilder()
+                                  .setHeader("message", "success")
+                                  .setHeader("eventType", "PLAYER_EQUIPMENT_UPDATE")
+                                  .setHeader("clientId", 0)
+                                  .setBody("characterId", characterId)
+                                  .setBody("slots", slotsJson)
+                                  .build();
+
+    std::string responseData = networkManager_.generateResponseMessage("success", response);
+    broadcastToAllClients(responseData, excludeClientId);
+}
+
+void
 EquipmentEventHandler::saveEquipmentChange(
     int characterId,
     const std::string &action,
@@ -183,6 +200,9 @@ EquipmentEventHandler::handleEquipItemEvent(const Event &event)
         // ── Send updated stats (effective attrs change with new gear) ─────────
         gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
 
+        // ── Broadcast gear change to all other clients (visual update) ─────────
+        broadcastEquipmentUpdate(characterId, clientId);
+
         log_->info("[EquipmentEH] Equipped invItemId=" + std::to_string(req.inventoryItemId) +
                    " slot=" + result.equipSlotSlug +
                    " char=" + std::to_string(characterId));
@@ -252,6 +272,9 @@ EquipmentEventHandler::handleUnequipItemEvent(const Event &event)
 
         // ── Send updated stats (effective attrs change without old gear) ──────
         gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+
+        // ── Broadcast gear change to all other clients (visual update) ─────────
+        broadcastEquipmentUpdate(characterId, clientId);
 
         log_->info("[EquipmentEH] Unequipped slot=" + req.equipSlotSlug +
                    " invItemId=" + std::to_string(result.inventoryItemId) +

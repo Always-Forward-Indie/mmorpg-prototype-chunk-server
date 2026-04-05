@@ -1,7 +1,13 @@
-# Client ↔ Server Protocol Reference
+# MMORPG Network Protocol Reference
 
-Документ описывает все пакеты данных, которыми обмениваются игровой клиент и чанк-сервер.
-Охватывает систему экипировки, износ, ремонт, торговлю с NPC, P2P-торговлю и систему веса.
+Документ описывает полный сетевой протокол проекта на основе текущего кода:
+- Login Server ↔ Client
+- Chunk Server ↔ Client
+- Chunk Server ↔ Game Server (внутренний межсерверный протокол)
+
+Охватывает авторизацию, инициализацию персонажа, боевую систему, инвентарь,
+экипировку, износ, ремонт, торговлю с NPC, P2P-торговлю, чат, progression-данные,
+а также правила транспорта пакетов и timestamp-поля.
 
 ---
 
@@ -36,49 +42,98 @@
 ### Полная последовательность входа в игру
 
 ```
-Клиент                          Chunk Server                   Game Server
-  │                                  │                               │
-  │──── TCP connect ─────────────────►│                               │
-  │                                  │  (присваивает clientId)        │
-  │──── joinGameClient ──────────────►│                               │
-  │                                  │  (проверка hash, loadClientData)
-  │◄─── joinGameClient (broadcast) ───│  ← все клиенты видят
-  │                                  │                               │
-  │──── joinGameCharacter ───────────►│                               │
-  │                                  │──── getPlayerQuests/Flags ────►│
-  │                                  │──── getPlayerInventory ────────►│
-  │                                  │──── getPlayerActiveEffects ─────►│
-  │                                  │──── getPlayerPityData ──────────►│
-  │                                  │──── getPlayerBestiaryData ──────►│
-  │                                  │──── getPlayerReputationsData ───►│
-  │                                  │──── getPlayerMasteriesData ─────►│
-  │◄─── joinGameCharacter (broadcast) │  ← все клиенты видят нового персонажа
-  │◄─── initializePlayerSkills ───────│  ← только вошедшему
-  │◄─── spawnNPCs ────────────────────│  ← только вошедшему
-  │◄─── itemDrop (snapshot) ──────────│  ← только вошедшему (наземные предметы)
-  │◄─── spawnMobsInZone (×N зон) ─────│  ← только вошедшему (мобы всех зон, server-push)
-  │◄─── world_notification zone_entered│  ← только вошедшему (текущая игровая зона)
-  │◄─── stats_update ─────────────────│  ← только вошедшему (полные статы + инвентарь завершён)
-  │◄─── getPlayerInventory ───────────│  ← только вошедшему
-  │◄─── equipmentState ───────────────│  ← только вошедшему
+Клиент                     Game Server                  Chunk Server
+  │                          │                               │
+  │  ── PRE-PHASE: Game Server ───────────────────────────────────────────
+  │──── joinGameClient ──────►│ header: {clientId, hash}  │
+  │     body: {characterId}  │                               │
+  │                          ├──── loadCharacter(DB) ────────►│ setCharacterData push
+  │◄─── joinGameClient ───────┤ body: {chunkServerData}    │  (server-to-server, async)
+  │                          │                               │
+  │  ──────────────────────────────────────────────────────────────────────
+  │──── TCP connect (Chunk) ────────────────────────────────►│
+  │──── joinGameClient ─────────────────────────────────────►│ header: {clientId, hash}
+  │     body: {}             │                               │ (clientId уже назначен)
+  │◄─── joinGameClient (broadcast) ─────────────────────────│ ← все клиенты видят
+  │                          │                               │
+  │──── joinGameCharacter ───────────────────────────────────►│
+  │                          │◄─── getPlayerQuests/Flags ────│
+  │                          │◄─── getPlayerInventory ────────│
+  │                          │◄─── getPlayerActiveEffects ────│
+  │                          │◄─── getPlayerPityData ─────────│
+  │                          │◄─── getPlayerBestiaryData ──────│
+  │                          │◄─── getPlayerReputationsData ───│
+  │                          │◄─── getPlayerMasteriesData ─────│
+  │◄─── joinGameCharacter (broadcast) ──────────────────────│ ← все клиенты видят нового персонажа
+  │◄─── initializePlayerSkills ─────────────────────────────│ ← только вошедшему
+  │◄─── асинхронные ассеты (inv / quests / flags / ...) ────│ ← только вошедшему
+  │                          │                               │
+  │──── playerReady ─────────────────────────────────────────►│ сцена загружена
+  │◄─── spawnNPCs + spawnMobsInZone + nearbyItems + equipments│ ← только вошедшему
 ```
 
-### 1.1 Регистрация сессии — `joinGameClient`
+### 1.1 Регистрация сессии — `joinGameClient` (предварительный шаг — Game Server)
 
-**Направление клиент → сервер:**
+**Клиент → Game Server:**
 
 ```json
 {
   "header": {
     "eventType": "joinGameClient",
-    "clientId": 0,
+    "clientId": 3,
+    "hash": "abc123"
+  },
+  "body": {
+    "characterId": 3
+  }
+}
+```
+
+`clientId` и `hash` — получены с Login Server. `characterId` — выбранный персонаж из списка.
+
+**Game Server → Клиент:**
+
+```json
+{
+  "header": {
+    "eventType": "joinGameClient",
+    "clientId": 3,
+    "hash": "abc123",
+    "status": "success",
+    "message": "Authentication success for user!"
+  },
+  "body": {
+    "chunkServerData": {
+      "chunkId": 1,
+      "chunkIp": "192.168.50.50",
+      "chunkPort": 27017,
+      "chunkPosX": 0.0, "chunkPosY": 0.0, "chunkPosZ": 0.0,
+      "chunkSizeX": 0.0, "chunkSizeY": 0.0, "chunkSizeZ": 0.0
+    }
+  }
+}
+```
+
+После получения ответа: подключиться по `chunkIp:chunkPort` и отправить `joinGameClient` уже на Chunk Server.
+
+> **Параллельно**: Game Server загружает данные персонажа из БД и отправляет `setCharacterData` на Chunk Server (server-to-server, не видимо клиенту). По этой причине `joinGameCharacter` на Chunk Server работает без повторного запроса в БД.
+
+### 1.1' Регистрация сессии — `joinGameClient` (на Chunk Server)
+
+**Клиент → Chunk Server:**
+
+```json
+{
+  "header": {
+    "eventType": "joinGameClient",
+    "clientId": 3,
     "hash": "abc123"
   },
   "body": {}
 }
 ```
 
-`hash` — токен авторизации, полученный с Login Server.
+`clientId` уже назначен с Login Server — не 0.
 
 **Ответ сервера → broadcast (все клиенты):**
 
@@ -86,7 +141,7 @@
 {
   "header": {
     "eventType": "joinGameClient",
-    "clientId": 42,
+    "clientId": 3,
     "hash": "abc123",
     "message": "Authentication success for user!"
   },
@@ -98,7 +153,7 @@
 
 ### 1.2 Вход персонажа — `joinGameCharacter`
 
-**Направление клиент → сервер:**
+**Клиент → Chunk Server:**
 
 ```json
 {
@@ -108,10 +163,12 @@
     "hash": "abc123"
   },
   "body": {
-    "characterId": 7
+    "id": 7
   }
 }
 ```
+
+> **Важно**: поле называется `body.id`, не `body.characterId` — сервер читает именно `body["id"]`.
 
 **Ответ сервера → broadcast (все клиенты):**
 
@@ -1108,3 +1165,354 @@ weightLimit = carry_weight.base + strength * carry_weight.per_strength
 - Максимальная длина `text`: **255 символов**
 - Rate limit: **3 сообщения / 2 секунды** на клиента (превышение игнорируется без уведомления)
 - Имя отправителя заполняется исключительно сервером — клиент не может его подменить
+
+---
+
+## 12. Login Server ↔ Client
+
+Ниже протокол Login Server (источник истины: `mmorpg-prototype-login-server/src/network/NetworkManager.cpp` и `mmorpg-prototype-login-server/src/events/EventHandler.cpp`).
+
+### 12.1 Входящие eventType (клиент → login)
+
+| eventType | Обязательные поля | Назначение |
+|-----------|-------------------|------------|
+| `authentificationClient` | `body.login`, `body.password` | Логин аккаунта. Возвращает `clientId` + `hash`. |
+| `getCharactersList` | `header.clientId`, `header.hash` | Список персонажей аккаунта. |
+| `createCharacter` | `header.clientId`, `header.hash`, `body.characterName`, `body.characterClass`, `body.characterRace`, `body.characterGender` | Создание нового персонажа. |
+| `disconnectClient` | `header.clientId`, `header.hash` | Выход клиента. |
+| `pingClient` | обычно `header.clientId` | Heartbeat/RTT-проверка. |
+
+### 12.2 Пример пакетов login
+
+#### Аутентификация (клиент → login)
+
+```json
+{
+  "header": {
+    "eventType": "authentificationClient",
+    "clientId": 0,
+    "hash": ""
+  },
+  "body": {
+    "login": "player_01",
+    "password": "secret"
+  }
+}
+```
+
+#### Аутентификация OK (login → клиент)
+
+```json
+{
+  "header": {
+    "eventType": "authentificationClient",
+    "status": "success",
+    "message": "Authentication success for user!",
+    "clientId": 42,
+    "hash": "hash_from_server",
+    "timestamp": "2026-03-29 16:20:01.123",
+    "version": "1.0"
+  },
+  "body": {}
+}
+```
+
+#### Список персонажей (клиент → login)
+
+```json
+{
+  "header": {
+    "eventType": "getCharactersList",
+    "clientId": 42,
+    "hash": "hash_from_server"
+  },
+  "body": {}
+}
+```
+
+#### Список персонажей (login → клиент)
+
+```json
+{
+  "header": {
+    "eventType": "getCharactersList",
+    "status": "success",
+    "message": "Characters list retrieved successfully!",
+    "clientId": 42,
+    "hash": "hash_from_server",
+    "timestamp": "2026-03-29 16:20:02.555",
+    "version": "1.0"
+  },
+  "body": {
+    "charactersList": [
+      {
+        "characterId": 7,
+        "characterName": "Aragorn",
+        "characterClass": "Warrior",
+        "characterLevel": 5
+      }
+    ]
+  }
+}
+```
+
+#### Создание персонажа (клиент → login)
+
+```json
+{
+  "header": {
+    "eventType": "createCharacter",
+    "clientId": 42,
+    "hash": "hash_from_server"
+  },
+  "body": {
+    "characterName": "Legolas",
+    "characterClass": "Ranger",
+    "characterRace": "Elf",
+    "characterGender": "Male"
+  }
+}
+```
+
+#### Создание персонажа OK (login → клиент)
+
+```json
+{
+  "header": {
+    "eventType": "createCharacter",
+    "status": "success",
+    "message": "Character created successfully",
+    "clientId": 42,
+    "hash": "hash_from_server",
+    "timestamp": "2026-03-29 16:20:03.777",
+    "version": "1.0"
+  },
+  "body": {
+    "characterId": 12
+  }
+}
+```
+
+#### Ping (клиент → login)
+
+```json
+{
+  "header": {
+    "eventType": "pingClient",
+    "clientId": 42,
+    "hash": "hash_from_server",
+    "requestId": "ping_1711711711000_42_1",
+    "clientSendMsEcho": 1711711711000
+  },
+  "body": {}
+}
+```
+
+#### Pong (login → клиент)
+
+```json
+{
+  "header": {
+    "eventType": "pingClient",
+    "status": "success",
+    "message": "Pong!",
+    "timestamp": "2026-03-29 16:20:04.100",
+    "version": "1.0",
+    "requestId": "ping_1711711711000_42_1",
+    "clientSendMsEcho": 1711711711000,
+    "serverRecvMs": 1711711711010,
+    "serverSendMs": 1711711711012
+  },
+  "body": {}
+}
+```
+
+### 12.3 Критично для клиента
+
+- Строка eventType именно `authentificationClient` (с текущим написанием).
+- Все ответы login-сервера добавляют `\n` в конце пакета.
+- Login сервер читает чанками `1024` байта, поэтому клиент обязан уметь фрагментацию TCP и собирать пакет до `\n`.
+
+---
+
+## 13. Chunk ↔ Game Server (внутренний протокол)
+
+Этот раздел нужен клиент-разработчику, чтобы понимать какие данные chunk получает
+асинхронно от game-server и почему некоторые клиентские ответы приходят не мгновенно.
+
+### 13.1 Handshake chunk → game
+
+Сразу после TCP-подключения chunk отправляет:
+
+```json
+{
+  "header": {
+    "eventType": "chunkServerConnection",
+    "id": 1,
+    "ip": "127.0.0.1",
+    "port": 9003
+  }
+}
+```
+`+ "\n"`
+
+### 13.2 Основные eventType game → chunk
+
+| eventType | Что передает |
+|-----------|--------------|
+| `setChunkData` | Данные чанка |
+| `setSpawnZonesList` | Все spawn-зоны |
+| `setMobsList`, `setMobsAttributes`, `setMobsSkills`, `setMobWeaknessesResistances` | Мобы, их атрибуты/скиллы/резисты |
+| `setNPCsList`, `setNPCsAttributes` | NPC-справочник |
+| `getItemsList`, `getMobLootInfo` | Каталог предметов и лут-таблицы |
+| `getExpLevelTable` | Таблица уровней EXP |
+| `setDialoguesData`, `setNPCDialogueMappings`, `setQuestsData` | Диалоги/квесты |
+| `setGameConfig`, `setVendorData`, `setStatusEffectTemplates`, `setGameZonesList`, `setZoneEventTemplatesList` | Runtime-конфиг и системные справочники |
+| `setCharacterData`, `setCharacterAttributes`, `setCharacterAttributesRefresh` | Персонаж и его атрибуты |
+| `setPlayerQuestsData`, `setPlayerFlagsData`, `setPlayerActiveEffects`, `setPlayerInventoryData` | Состояние персонажа |
+| `setPlayerPityData`, `setPlayerBestiaryData`, `setPlayerReputationsData`, `setPlayerMasteriesData`, `setLearnedSkill` | Progression-состояние |
+| `setRespawnZonesList`, `setTimedChampionTemplatesList` | Respawn/champion системы |
+| `inventoryItemIdSync` | Синхронизация DB-id предмета после вставки |
+
+### 13.3 Основные eventType chunk → game (persist/update)
+
+| eventType | Что сохраняет |
+|-----------|---------------|
+| `savePositions`, `saveHpMana`, `saveCharacterProgress` | Позиция/HP-MP/прогресс персонажа |
+| `saveInventoryChange`, `saveEquipmentChange` | Инвентарь/экипировка |
+| `saveDurabilityChange`, `saveItemKillCount`, `saveExperienceDebt`, `saveActiveEffect` | Износ/киллы/EXP debt/эффекты |
+| `transferInventoryItem`, `nullifyItemOwner`, `deleteInventoryItem` | Трансферы/удаление предметов |
+| `updatePlayerQuestProgress`, `updatePlayerFlag` | Квесты и флаги |
+| `savePityCounter`, `saveBestiaryKill`, `timedChampionKilled` | Pity/bestiary/champion |
+| `saveReputation`, `saveMastery`, `saveLearnedSkill` | Reputation/mastery/изученные скиллы |
+
+### 13.4 Пример persist-пакета chunk → game
+
+```json
+{
+  "header": {
+    "eventType": "saveInventoryChange"
+  },
+  "body": {
+    "characterId": 7,
+    "itemId": 5,
+    "quantity": 1,
+    "isAdd": true
+  }
+}
+```
+`+ "\n"`
+
+### 13.5 Важно по транспорту chunk↔game
+
+- Обе стороны используют NDJSON (каждый JSON заканчивается `\n`).
+- На chunk-стороне запись сериализуется через `asio::strand` для исключения гонок в `async_write`.
+- Chunk обрабатывает входящие от game пакеты только после полной строки до `\n`.
+
+---
+
+## 14. Транспорт, фрейминг, лимиты и timestamps
+
+### 14.1 Фрейминг
+
+- Формат: UTF-8 JSON + разделитель `\n`.
+- TCP может резать пакет на части: клиент обязан буферизовать до `\n`.
+- Несколько JSON могут прийти одним read: клиент должен уметь распаковать очередь сообщений.
+
+### 14.2 Лимиты (chunk client session)
+
+- `MAX_MESSAGE_SIZE = 8 KB` на одно сообщение.
+- `MAX_BUFFER_SIZE = 64 KB` накопленного буфера на соединение.
+- `MAX_MESSAGES_PER_READ = 10` сообщений за один цикл чтения.
+- При переполнении буфера сервер принудительно разрывает соединение.
+
+### 14.3 Timestamp-поля
+
+В проекте используются поля для RTT/lag-компенсации:
+
+```json
+{
+  "header": {
+    "requestId": "sync_1711711711000_42_15_abcd",
+    "clientSendMsEcho": 1711711711000,
+    "serverRecvMs": 1711711711010,
+    "serverSendMs": 1711711711012
+  }
+}
+```
+
+Принцип:
+- Клиент отправляет `requestId` и `clientSendMsEcho`.
+- Сервер добавляет `serverRecvMs` при приёме и `serverSendMs` при ответе.
+- Клиент считает RTT и может корректировать визуальные задержки (анимации, hit feedback).
+
+---
+
+## 15. Полная матрица eventType (по коду)
+
+Матрица ниже собрана из `EventDispatcher`/`EventHandler`/`NetworkManager` текущей реализации.
+
+### 15.1 Client → Login (входящие)
+
+- `authentificationClient`
+- `getCharactersList`
+- `createCharacter`
+- `disconnectClient`
+- `pingClient`
+
+### 15.2 Client → Chunk (входящие)
+
+- `joinGameClient`
+- `joinGameCharacter`
+- `moveCharacter`
+- `disconnectClient`
+- `pingClient`
+- `getConnectedCharacters`
+- `playerAttack`
+- `itemPickup`
+- `getPlayerInventory`
+- `harvestStart`
+- `harvestCancel`
+- `getNearbyCorpses`
+- `corpseLootPickup`
+- `corpseLootInspect`
+- `getCharacterExperience`
+- `npcInteract`
+- `dialogueChoice`
+- `dialogueClose`
+- `openVendorShop`
+- `buyItem`
+- `sellItem`
+- `buyItemBatch`
+- `sellItemBatch`
+- `openRepairShop`
+- `repairItem`
+- `repairAll`
+- `tradeRequest`
+- `tradeAccept`
+- `tradeDecline`
+- `tradeOfferUpdate`
+- `tradeConfirm`
+- `tradeCancel`
+- `equipItem`
+- `unequipItem`
+- `getEquipment`
+- `respawnRequest`
+- `dropItem`
+- `useItem`
+- `getBestiaryEntry`
+- `getBestiaryOverview`
+- `chatMessage`
+
+### 15.3 Chunk/Game межсерверные (основные)
+
+- Инициализация/справочники: `chunkServerConnection`, `setChunkData`, `setSpawnZonesList`, `setMobsList`, `setMobsAttributes`, `setMobsSkills`, `setNPCsList`, `setNPCsAttributes`, `getItemsList`, `getMobLootInfo`, `setMobWeaknessesResistances`, `getExpLevelTable`, `setDialoguesData`, `setNPCDialogueMappings`, `setQuestsData`, `setGameConfig`, `setVendorData`, `setStatusEffectTemplates`, `setGameZonesList`, `setZoneEventTemplatesList`, `setRespawnZonesList`, `setTimedChampionTemplatesList`.
+- Персонаж/прогресс: `setCharacterData`, `setCharacterAttributes`, `setCharacterAttributesRefresh`, `setPlayerQuestsData`, `setPlayerFlagsData`, `setPlayerActiveEffects`, `setPlayerInventoryData`, `setPlayerPityData`, `setPlayerBestiaryData`, `setPlayerReputationsData`, `setPlayerMasteriesData`, `setLearnedSkill`, `inventoryItemIdSync`.
+- Persist от chunk: `savePositions`, `saveHpMana`, `saveCharacterProgress`, `saveInventoryChange`, `saveEquipmentChange`, `saveDurabilityChange`, `saveItemKillCount`, `saveExperienceDebt`, `saveActiveEffect`, `transferInventoryItem`, `nullifyItemOwner`, `deleteInventoryItem`, `updatePlayerQuestProgress`, `updatePlayerFlag`, `savePityCounter`, `saveBestiaryKill`, `timedChampionKilled`, `saveReputation`, `saveMastery`, `saveLearnedSkill`.
+
+### 15.4 Совместимость клиента (обязательно)
+
+- Не полагаться на единый стиль именования (`camelCase`, `snake_case`, UPPER_CASE присутствуют одновременно).
+- Обрабатывать и `header.message`, и `header.status`.
+- Терпимо парсить `int`/`string` для некоторых ID полей (пример: `fromCharacterId` в trade).
+- Не считать, что каждый ответ содержит полный state; часть state приходит отдельными packet-потоками.

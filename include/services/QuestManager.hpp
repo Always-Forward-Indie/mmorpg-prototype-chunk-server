@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // Forward declare to break circular dependency
@@ -134,10 +135,27 @@ class QuestManager
      */
     void flushPendingFlags();
 
+    /** Mark that saved flags have been fully loaded from game-server for a character. */
+    void markFlagsLoaded(int characterId);
+
+    /** Returns true once saved flags have arrived from game-server. Used to guard
+     *  exploration-XP checks that must not fire before flags are known. */
+    bool areFlagsLoaded(int characterId) const;
+
+    /** Clear flags-loaded state when the character disconnects. */
+    void clearFlagsLoaded(int characterId);
+
     /**
      * @brief Whether static quest data has been loaded.
      */
     bool isLoaded() const;
+
+    /**
+     * @brief Return the quest state string for a character by quest slug.
+     * @return State string ("active", "completed", "turned_in", "failed", "offered")
+     *         or empty string if the character has no progress on this quest.
+     */
+    std::string getQuestStateBySlug(int characterId, const std::string &questSlug) const;
 
     /**
      * @brief Set the game server worker used for persistence.
@@ -171,6 +189,9 @@ class QuestManager
 
     /// Pending flag updates waiting for transmission to game-server
     std::vector<UpdatePlayerFlagStruct> pendingFlagUpdates_;
+
+    /// Characters whose persisted flags have been fully loaded from game-server
+    std::unordered_set<int> flagsLoadedCharacters_;
 
     bool loaded_ = false;
 

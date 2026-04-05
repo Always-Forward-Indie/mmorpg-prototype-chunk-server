@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 /**
@@ -380,6 +381,9 @@ struct CharacterDataStruct
     // Experience debt: accumulated on death; 50% of earned XP pays it off before going to real progress
     int experienceDebt = 0;
 
+    // Free skill points available for learning new skills
+    int freeSkillPoints = 0;
+
     // Respawn bind point (0,0,0 = not set, use nearest respawn zone)
     PositionStruct respawnPosition;
 
@@ -401,6 +405,7 @@ struct ClientDataStruct
     std::string hash = "";
     int characterId = 0;
     TimestampStruct timestamps; // Lag compensation timestamps
+    bool isWorldReady = false;  // Set to true when client sends playerReady (scene loaded)
 };
 
 /**
@@ -567,7 +572,7 @@ struct MobMovementParams
     float borderThresholdPercent = 0.10f; // plan §5.4: reduced from 0.25 so mobs use more of the zone
     float maxStepSizePercent = 0.08f;
     float maxStepSizeAbsolute = 450.0f;
-    int maxRetries = 4;
+    int maxRetries = 8; // increased from 4: gives corner/cluster mobs more chances to find a free direction
 };
 
 /**
@@ -600,6 +605,10 @@ struct MobAIConfig
     // для Dead Reckoning: TargetPos = ServerPos + velocity * dt.
     // Должен быть выше скорости игрока, иначе моб не догонит (player ~400-600 u/s).
     float chaseSpeedUnitsPerSec = 450.0f;
+
+    // Return speed — скорость возврата к спавну (units/sec).
+    // Намеренно ниже скорости преследования: моб не спринтует обратно.
+    float returnSpeedUnitsPerSec = 200.0f;
 
     // Network optimization
     // Снижено до 10 потому что при реалистичной chase-скорости один шаг ~45 юнитов,
@@ -708,6 +717,12 @@ struct MobMovementData
     // The movement manager parks the mob just outside the ring until a slot opens.
     bool waitingForMeleeSlot = false;
 
+    // Chase deflection memory: sign of the last successfully used deflection angle
+    // (+1.0 = positive side, -1.0 = negative side, 0.0 = direct path / not set).
+    // Used by calculateChaseMovement to prefer same-side angles on the next tick,
+    // preventing the ±90° oscillation that occurs when multiple mobs crowd the same path.
+    float lastDeflectionSign = 0.0f;
+
     // Per-mob broadcast timestamp (ms). Used by unified mob tick to enforce
     // state-aware rate limiting: patrol=200ms min, combat=100ms min.
     // Replaces the global aggroLastBroadcastTime_ that serialised all zones.
@@ -723,7 +738,8 @@ struct MobMovementResult
     float newDirectionX;
     float newDirectionY;
     bool validMovement;
-    float speed = 0.0f; // Movement speed in units/second for this step (for client-side interpolation)
+    float speed = 0.0f;          // Movement speed in units/second for this step (for client-side interpolation)
+    float deflectionSign = 0.0f; // Sign of the deflection angle used (+1/-1) or 0 if direct path was taken
 };
 
 /**
@@ -965,11 +981,11 @@ struct NPCDataStruct
     PositionStruct position;
 
     // NPC specific properties
-    std::string npcType = ""; // "vendor", "quest_giver", "general", etc.
+    std::string npcType = ""; // "vendor", "quest_giver", "blacksmith", "guard", "trainer", "general"
     bool isInteractable = true;
     std::string dialogueId = "";
-    std::string questId = "";
-    int radius = 200; // Interaction/spawn radius. Used for dialogue range check.
+    std::vector<std::string> questSlugs; ///< Slugs of quests this NPC gives or accepts turn-in for
+    int radius = 200;                    // Interaction/spawn radius. Used for dialogue range check.
 
     // Stage 4 — Reputation (migration 039)
     std::string factionSlug; ///< Faction this NPC belongs to (for rep-gated dialogue & vendor discount)
@@ -1056,6 +1072,10 @@ struct PlayerContextStruct
     // Stage 4 additions
     std::unordered_map<std::string, int> reputations; ///< faction_slug → value
     std::unordered_map<std::string, float> masteries; ///< mastery_slug → value [0..100]
+
+    // Skill system
+    int freeSkillPoints = 0;
+    std::unordered_set<std::string> learnedSkillSlugs; ///< set of skill slugs the character has learned
 };
 
 // ============= QUEST SYSTEM STRUCTS =============

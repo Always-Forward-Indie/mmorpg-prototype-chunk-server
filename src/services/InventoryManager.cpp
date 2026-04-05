@@ -388,7 +388,6 @@ InventoryManager::inventoryItemToJson(const PlayerInventoryItemStruct &item) con
         itemJson["slug"] = itemData.slug;
         itemJson["isQuestItem"] = itemData.isQuestItem;
         itemJson["itemType"] = itemData.itemType;
-        itemJson["itemTypeName"] = itemData.itemTypeName;
         itemJson["itemTypeSlug"] = itemData.itemTypeSlug;
         itemJson["isContainer"] = itemData.isContainer;
         itemJson["isDurable"] = itemData.isDurable;
@@ -398,7 +397,6 @@ InventoryManager::inventoryItemToJson(const PlayerInventoryItemStruct &item) con
         itemJson["isTwoHanded"] = itemData.isTwoHanded;
         itemJson["weight"] = itemData.weight;
         itemJson["rarityId"] = itemData.rarityId;
-        itemJson["rarityName"] = itemData.rarityName;
         itemJson["raritySlug"] = itemData.raritySlug;
         itemJson["stackMax"] = itemData.stackMax;
         itemJson["durabilityMax"] = itemData.durabilityMax;
@@ -407,7 +405,6 @@ InventoryManager::inventoryItemToJson(const PlayerInventoryItemStruct &item) con
         itemJson["vendorPriceBuy"] = itemData.vendorPriceBuy;
         itemJson["vendorPriceSell"] = itemData.vendorPriceSell;
         itemJson["equipSlot"] = itemData.equipSlot;
-        itemJson["equipSlotName"] = itemData.equipSlotName;
         itemJson["equipSlotSlug"] = itemData.equipSlotSlug;
         itemJson["levelRequirement"] = itemData.levelRequirement;
         itemJson["setId"] = itemData.setId;
@@ -422,19 +419,35 @@ InventoryManager::inventoryItemToJson(const PlayerInventoryItemStruct &item) con
         {
             nlohmann::json attributeJson = {
                 {"id", attribute.id},
-                {"name", attribute.name},
                 {"slug", attribute.slug},
                 {"value", attribute.value}};
             itemJson["attributes"].push_back(attributeJson);
         }
+
+        // Add use effects (what happens when the player uses this item)
+        itemJson["useEffects"] = nlohmann::json::array();
+        for (const auto &eff : itemData.useEffects)
+        {
+            nlohmann::json effJson = {
+                {"effectSlug", eff.effectSlug},
+                {"attributeSlug", eff.attributeSlug},
+                {"value", eff.value},
+                {"isInstant", eff.isInstant},
+                {"durationSeconds", eff.durationSeconds},
+                {"tickMs", eff.tickMs},
+                {"cooldownSeconds", eff.cooldownSeconds}};
+            itemJson["useEffects"].push_back(effJson);
+        }
+
+        // Mastery and Item Soul
+        itemJson["masterySlug"] = itemData.masterySlug;
+        itemJson["killCount"] = item.killCount;
     }
     else
     {
         log_->error("[INVENTORY] Item data not found for ID " + std::to_string(item.itemId));
         // Set default values for missing item data
-        itemJson["name"] = "Unknown Item";
         itemJson["slug"] = "unknown";
-        itemJson["description"] = "Item data not found";
         itemJson["attributes"] = nlohmann::json::array();
     }
 

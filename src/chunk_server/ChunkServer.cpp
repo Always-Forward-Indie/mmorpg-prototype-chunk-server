@@ -447,9 +447,35 @@ ChunkServer::mainEventLoopCH()
                     if (!mvData.forceNextUpdate && (nowMs - mvData.lastBroadcastMs) < minIntervalMs)
                         continue;
 
+                    // Skip the shouldSendMobUpdate write-lock for states where the mob
+                    // physically cannot move (PREPARING_ATTACK, ATTACKING, ATTACK_COOLDOWN,
+                    // EVADING).  forceNextUpdate bypasses this guard so state-change packets
+                    // (e.g. CHASING → PREPARING_ATTACK) are still delivered immediately.
+                    if (!mvData.forceNextUpdate)
+                    {
+                        const bool canMobMoveInState =
+                            mvData.combatState == MobCombatState::PATROLLING ||
+                            mvData.combatState == MobCombatState::CHASING ||
+                            mvData.combatState == MobCombatState::RETURNING ||
+                            mvData.combatState == MobCombatState::FLEEING;
+                        if (!canMobMoveInState)
+                        {
+                            // Advance the timer so next poll respects the rate-limit instead
+                            // of perpetually bypassing it on a stationary mob.
+                            gameServices_.getMobMovementManager().updateLastBroadcastMs(mob.uid, nowMs);
+                            continue;
+                        }
+                    }
+
                     // Distance + forceNextUpdate filter (clears forceNextUpdate on true).
                     if (!gameServices_.getMobMovementManager().shouldSendMobUpdate(mob.uid, mob.position))
+                    {
+                        // Mob hasn't moved — reset the broadcast timer so the rate-limit
+                        // fires at the proper interval next time rather than being bypassed
+                        // every tick on a stationary mob.
+                        gameServices_.getMobMovementManager().updateLastBroadcastMs(mob.uid, nowMs);
                         continue;
+                    }
 
                     MobMoveUpdateStruct upd;
                     upd.uid = mob.uid;

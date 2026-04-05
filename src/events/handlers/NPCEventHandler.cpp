@@ -111,9 +111,13 @@ NPCEventHandler::sendNPCSpawnDataToClient(int clientId, const PositionStruct &pl
 
         // Convert NPCs to JSON array
         nlohmann::json npcsSpawnJson = nlohmann::json::array();
+
+        // Get character ID for this client so we can compute per-player quest status
+        const int characterId = gameServices_.getClientManager().getClientData(clientId).characterId;
+
         for (const auto &npc : nearbyNPCs)
         {
-            npcsSpawnJson.push_back(convertNPCToSpawnJson(npc));
+            npcsSpawnJson.push_back(convertNPCToSpawnJson(npc, characterId));
         }
 
         // Build response message
@@ -151,8 +155,32 @@ NPCEventHandler::sendNPCSpawnDataToClient(int clientId, const PositionStruct &pl
 }
 
 nlohmann::json
-NPCEventHandler::convertNPCToSpawnJson(const NPCDataStruct &npc) const
+NPCEventHandler::convertNPCToSpawnJson(const NPCDataStruct &npc, int characterId)
 {
+    // Build per-quest status array for this NPC x this character
+    // Possible statuses: available | in_progress | completable | turned_in | failed
+    nlohmann::json questsJson = nlohmann::json::array();
+    for (const auto &slug : npc.questSlugs)
+    {
+        const std::string state = characterId > 0
+                                      ? gameServices_.getQuestManager().getQuestStateBySlug(characterId, slug)
+                                      : "";
+
+        std::string status;
+        if (state.empty() || state == "offered")
+            status = "available";
+        else if (state == "active")
+            status = "in_progress";
+        else if (state == "completed")
+            status = "completable";
+        else if (state == "turned_in")
+            status = "turned_in";
+        else // failed
+            status = state;
+
+        questsJson.push_back({{"slug", slug}, {"status", status}});
+    }
+
     nlohmann::json npcJson = {
         {"id", npc.id},
         {"name", npc.name},
@@ -162,7 +190,7 @@ NPCEventHandler::convertNPCToSpawnJson(const NPCDataStruct &npc) const
         {"npcType", npc.npcType},
         {"isInteractable", npc.isInteractable},
         {"dialogueId", npc.dialogueId},
-        {"questId", npc.questId},
+        {"quests", questsJson},
         {"stats", {{"health", {{"current", npc.currentHealth}, {"max", npc.maxHealth}}}, {"mana", {{"current", npc.currentMana}, {"max", npc.maxMana}}}}},
         {"position", {{"x", npc.position.positionX}, {"y", npc.position.positionY}, {"z", npc.position.positionZ}, {"rotationZ", npc.position.rotationZ}}},
         {"attributes", nlohmann::json::array()}};

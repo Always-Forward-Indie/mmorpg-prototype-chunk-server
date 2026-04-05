@@ -67,17 +67,56 @@ VendorManager::buildShopJson(int npcId, float buyMarkupPct) const
 
         nlohmann::json entry;
         entry["itemId"] = item.id;
-        entry["name"] = item.slug;
         entry["slug"] = item.slug;
+        entry["itemType"] = item.itemType;
         entry["itemTypeSlug"] = item.itemTypeSlug;
+        entry["rarityId"] = item.rarityId;
         entry["raritySlug"] = item.raritySlug;
         entry["stackMax"] = item.stackMax;
         entry["isDurable"] = item.isDurable;
+        entry["durabilityMax"] = item.durabilityMax;
         entry["isTradable"] = item.isTradable;
+        entry["isEquippable"] = item.isEquippable;
+        entry["isUsable"] = item.isUsable;
+        entry["isQuestItem"] = item.isQuestItem;
+        entry["isContainer"] = item.isContainer;
+        entry["isHarvest"] = item.isHarvest;
+        entry["isTwoHanded"] = item.isTwoHanded;
+        entry["weight"] = item.weight;
+        entry["equipSlot"] = item.equipSlot;
+        entry["equipSlotSlug"] = item.equipSlotSlug;
+        entry["levelRequirement"] = item.levelRequirement;
+        entry["setId"] = item.setId;
+        entry["setSlug"] = item.setSlug;
+        entry["allowedClassIds"] = item.allowedClassIds;
+        entry["masterySlug"] = item.masterySlug;
         entry["priceBuy"] = priceBuy;
         entry["priceSell"] = priceSell;
         entry["stockCurrent"] = slot.stockCurrent;
         entry["stockMax"] = slot.stockMax;
+
+        // Attributes
+        entry["attributes"] = nlohmann::json::array();
+        for (const auto &attr : item.attributes)
+        {
+            entry["attributes"].push_back({{"id", attr.id},
+                {"slug", attr.slug},
+                {"value", attr.value}});
+        }
+
+        // Use effects
+        entry["useEffects"] = nlohmann::json::array();
+        for (const auto &eff : item.useEffects)
+        {
+            entry["useEffects"].push_back({{"effectSlug", eff.effectSlug},
+                {"attributeSlug", eff.attributeSlug},
+                {"value", eff.value},
+                {"isInstant", eff.isInstant},
+                {"durationSeconds", eff.durationSeconds},
+                {"tickMs", eff.tickMs},
+                {"cooldownSeconds", eff.cooldownSeconds}});
+        }
+
         shop.push_back(entry);
     }
     return shop;

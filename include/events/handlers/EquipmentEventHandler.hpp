@@ -30,6 +30,14 @@ class EquipmentEventHandler : public BaseEventHandler
     /** Calculate carry weight and push WEIGHT_STATUS packet to the client. */
     void sendWeightStatus(int clientId, int characterId);
 
+    /**
+     * Broadcast PLAYER_EQUIPMENT_UPDATE to all clients so they can render
+     * the correct gear visuals on other characters.
+     * @param excludeClientId  Client that already received EQUIPMENT_STATE (owner).
+     *                         Pass -1 to broadcast to everyone.
+     */
+    void broadcastEquipmentUpdate(int characterId, int excludeClientId = -1);
+
   private:
     /** Persist equip/unequip to game server (character_equipment table). */
     void saveEquipmentChange(

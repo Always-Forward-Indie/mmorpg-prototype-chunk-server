@@ -25,6 +25,12 @@ class ClientManager
     // set client character ID
     void setClientCharacterId(int clientID, int characterId);
 
+    // Mark client as world-ready (scene loaded on client side)
+    void setClientWorldReady(int clientID, bool ready);
+
+    // Check if client has sent playerReady
+    bool isClientWorldReady(int clientID) const;
+
     // Get clients list
     std::vector<ClientDataStruct> getClientsList();
 

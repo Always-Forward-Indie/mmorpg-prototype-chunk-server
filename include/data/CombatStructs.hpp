@@ -143,19 +143,6 @@ struct CombatResultStruct
 };
 
 /**
- * @brief Animation sync structure
- */
-struct CombatAnimationStruct
-{
-    int characterId;
-    std::string animationName;
-    float duration;
-    PositionStruct position;
-    PositionStruct targetPosition; // For projectiles/directional anims
-    bool isLooping;                // For channeled abilities
-};
-
-/**
  * @brief Simplified combat action for network packets
  */
 struct CombatActionPacket
@@ -167,15 +154,4 @@ struct CombatActionPacket
     int casterId;                // Who is performing the action
     int targetId;                // Who/what is being targeted
     TimestampStruct timestamps;  // Lag compensation timestamps
-};
-
-/**
- * @brief Simplified animation packet for network
- */
-struct CombatAnimationPacket
-{
-    int characterId;
-    std::string animationName;
-    float duration;
-    bool isLooping;
 };

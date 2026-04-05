@@ -64,4 +64,15 @@ class DialogueConditionEvaluator
 
     static bool evaluateMastery(const nlohmann::json &rule,
         const PlayerContextStruct &ctx);
+
+    // Skill system conditions
+    // {"type":"has_skill_points","gte":1}
+    // {"type":"skill_learned","slug":"shield_bash"}
+    // {"type":"skill_not_learned","slug":"whirlwind"}
+    static bool evaluateHasSkillPoints(const nlohmann::json &rule,
+        const PlayerContextStruct &ctx);
+    static bool evaluateSkillLearned(const nlohmann::json &rule,
+        const PlayerContextStruct &ctx);
+    static bool evaluateSkillNotLearned(const nlohmann::json &rule,
+        const PlayerContextStruct &ctx);
 };

@@ -231,6 +231,13 @@ JSONParser::parseCharacterData(const char *data, size_t length)
         characterData.experienceDebt = jsonData["body"]["experienceDebt"].get<int>();
     }
 
+    // free skill points (sent by game server on character join)
+    if (jsonData.contains("body") && jsonData["body"].is_object() &&
+        jsonData["body"].contains("freeSkillPoints") && jsonData["body"]["freeSkillPoints"].is_number_integer())
+    {
+        characterData.freeSkillPoints = jsonData["body"]["freeSkillPoints"].get<int>();
+    }
+
     return characterData;
 }
 
@@ -1413,8 +1420,14 @@ JSONParser::parseNPCsList(const char *data, size_t length)
                 if (npcJson.contains("dialogueId") && npcJson["dialogueId"].is_string())
                     npc.dialogueId = npcJson["dialogueId"].get<std::string>();
 
-                if (npcJson.contains("questId") && npcJson["questId"].is_string())
-                    npc.questId = npcJson["questId"].get<std::string>();
+                if (npcJson.contains("questSlugs") && npcJson["questSlugs"].is_array())
+                {
+                    for (const auto &slugVal : npcJson["questSlugs"])
+                    {
+                        if (slugVal.is_string())
+                            npc.questSlugs.push_back(slugVal.get<std::string>());
+                    }
+                }
 
                 // Social systems (Stage 4, migration 039)
                 if (npcJson.contains("factionSlug") && npcJson["factionSlug"].is_string())
@@ -1746,11 +1759,12 @@ JSONParser::parsePlayerFlags(const char *data, size_t length)
         for (const auto &fj : j["body"]["flags"])
         {
             PlayerFlagStruct flag;
-            flag.flagKey = fj.value("flag_key", "");
-            if (fj.contains("bool_value") && fj["bool_value"].is_boolean())
-                flag.boolValue = fj["bool_value"].get<bool>();
-            if (fj.contains("int_value") && fj["int_value"].is_number_integer())
-                flag.intValue = fj["int_value"].get<int>();
+            // Game-server sends camelCase keys
+            flag.flagKey = fj.value("flagKey", "");
+            if (fj.contains("boolValue") && fj["boolValue"].is_boolean())
+                flag.boolValue = fj["boolValue"].get<bool>();
+            if (fj.contains("intValue") && fj["intValue"].is_number_integer())
+                flag.intValue = fj["intValue"].get<int>();
             result.push_back(std::move(flag));
         }
     }

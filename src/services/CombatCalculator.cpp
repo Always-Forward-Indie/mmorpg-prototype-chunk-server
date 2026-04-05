@@ -94,7 +94,7 @@ CombatCalculator::calculateSkillDamage(
     result.isCritical = rollCriticalHit(effAtk);
     if (result.isCritical)
     {
-        float critMultiplier = getAttributeValue(effAtk, "crit_multiplier") / 100.0f;
+        float critMultiplier = static_cast<float>(getAttributeValue(effAtk, "crit_multiplier"));
         if (critMultiplier <= 0.0f)
             critMultiplier = cfg("combat.default_crit_multiplier", 2.0f);
         result.scaledDamage = static_cast<int>(result.baseDamage * critMultiplier);
@@ -172,7 +172,7 @@ CombatCalculator::calculateMobSkillDamage(
     result.isCritical = rollCriticalHit(attacker.attributes);
     if (result.isCritical)
     {
-        float critMultiplier = getAttributeValue(attacker.attributes, "crit_multiplier") / 100.0f;
+        float critMultiplier = static_cast<float>(getAttributeValue(attacker.attributes, "crit_multiplier"));
         if (critMultiplier <= 0.0f)
             critMultiplier = cfg("combat.default_crit_multiplier", 2.0f);
         result.scaledDamage = static_cast<int>(result.baseDamage * critMultiplier);
@@ -363,5 +363,5 @@ CombatCalculator::applyDefense(int damage, int defenseValue, const std::string &
     damageReduction = std::clamp(damageReduction, 0.0f, cap);
 
     int finalDamage = static_cast<int>(damage * (1.0f - damageReduction));
-    return std::max(1, finalDamage); // Минимум 1 урона
+    return std::max(0, finalDamage);
 }

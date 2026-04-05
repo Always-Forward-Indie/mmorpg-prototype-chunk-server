@@ -138,8 +138,6 @@ DialogueEventHandler::handleSetPlayerFlagsEvent(const Event &event)
         }
 
         const auto &flags = std::get<std::vector<PlayerFlagStruct>>(data);
-        if (flags.empty())
-            return;
 
         // Flags are attached to CharacterDataStruct in CharacterManager
         // The clientId stored in the event allows us to find the character
@@ -169,12 +167,42 @@ DialogueEventHandler::handleSetPlayerFlagsEvent(const Event &event)
             return;
         }
 
-        // Store flags in CharacterDataStruct so buildPlayerContext can use them
-        gameServices_.getCharacterManager().setCharacterFlags(characterId, flags);
+        // Store flags in CharacterDataStruct so buildPlayerContext can use them.
+        // Only replace if non-empty — an empty response means the player has no DB
+        // flags yet; we must not wipe any flags already set in-memory this session.
+        if (!flags.empty())
+        {
+            gameServices_.getCharacterManager().setCharacterFlags(characterId, flags);
+        }
 
         gameServices_.getLogger().log("[DialogueEventHandler] SET_PLAYER_FLAGS: " +
                                       std::to_string(flags.size()) + " flags for character " +
                                       std::to_string(characterId));
+
+        // Mark flags as ready regardless of whether the array was empty.
+        // An empty array is a valid response: the character simply has no saved flags
+        // (fresh player). The deferred exploration check below still needs to run.
+        gameServices_.getQuestManager().markFlagsLoaded(characterId);
+
+        auto charData = gameServices_.getCharacterManager().getCharacterData(characterId);
+        auto zoneOpt = gameServices_.getGameZoneManager().getZoneForPosition(charData.characterPosition);
+        if (zoneOpt.has_value())
+        {
+            const std::string exploredKey = "explored_" + zoneOpt->slug;
+            const bool alreadyExplored = gameServices_.getQuestManager().getFlagBool(characterId, exploredKey);
+            if (!alreadyExplored)
+            {
+                gameServices_.getQuestManager().setFlagBool(characterId, exploredKey, true);
+                if (zoneOpt->explorationXpReward > 0)
+                {
+                    gameServices_.getExperienceManager().grantExperience(
+                        characterId, zoneOpt->explorationXpReward, "zone_explored", 0);
+                }
+                nlohmann::json notifData = {{"zoneSlug", zoneOpt->slug}};
+                gameServices_.getStatsNotificationService().sendWorldNotification(
+                    characterId, "zone_explored", notifData, "medium", "toast");
+            }
+        }
     }
     catch (const std::exception &ex)
     {
@@ -474,6 +502,10 @@ DialogueEventHandler::handleDialogueChoiceEvent(const Event &event)
                     networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", resp));
                 }
             }
+
+            // Forward any pending game-server packets (e.g. saveLearnedSkill)
+            for (const auto &pkt : result.pendingGameServerPackets)
+                gameServerWorker_.sendDataToGameServer(pkt);
         }
 
         // Move to next node
@@ -565,6 +597,11 @@ DialogueEventHandler::buildPlayerContext(const CharacterDataStruct &charData) co
     gameServices_.getReputationManager().fillReputationContext(charData.characterId, ctx);
     gameServices_.getMasteryManager().fillMasteryContext(charData.characterId, ctx);
 
+    // Skill system: fill free skill points and learned skill slugs
+    ctx.freeSkillPoints = charData.freeSkillPoints;
+    for (const auto &skill : charData.skills)
+        ctx.learnedSkillSlugs.insert(skill.skillSlug);
+
     return ctx;
 }
 
@@ -628,6 +665,10 @@ DialogueEventHandler::traverseToInteractiveNode(
                     networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", resp));
                 }
             }
+
+            // Forward any pending game-server packets (e.g. saveLearnedSkill)
+            for (const auto &pkt : result.pendingGameServerPackets)
+                gameServerWorker_.sendDataToGameServer(pkt);
         }
 
         // Jump node: move to target

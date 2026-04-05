@@ -77,6 +77,8 @@ DialogueActionExecutor::executeDispatch(const nlohmann::json &action, const std:
         executeOpenRepairShop(action, characterId, clientId, result);
     else if (type == "change_reputation")
         executeChangeReputation(action, characterId, ctx, result);
+    else if (type == "learn_skill")
+        executeLearnSkill(action, characterId, clientId, ctx, result);
     else
         log_->info("[DialogueAction] Unknown action type: " + type);
 }
@@ -410,4 +412,136 @@ DialogueActionExecutor::executeChangeReputation(const nlohmann::json &action,
     notification["faction"] = faction;
     notification["delta"] = delta;
     result.clientNotifications.push_back(std::move(notification));
+}
+
+// ── learn_skill ───────────────────────────────────────────────────────────
+// Action JSON: {"type":"learn_skill","skill_slug":"shield_bash",
+//               "sp_cost":1,"gold_cost":500,
+//               "requires_book":false,"book_item_id":0}
+void
+DialogueActionExecutor::executeLearnSkill(const nlohmann::json &action,
+    int characterId,
+    int clientId,
+    PlayerContextStruct &ctx,
+    ActionResult &result)
+{
+    const std::string skillSlug = action.value("skill_slug", "");
+    if (skillSlug.empty())
+    {
+        log_->error("[DialogueAction] learn_skill: missing skill_slug");
+        return;
+    }
+
+    int spCost = action.value("sp_cost", 1);
+    int goldCost = action.value("gold_cost", 0);
+    bool requiresBook = action.value("requires_book", false);
+    int bookItemId = action.value("book_item_id", 0);
+
+    // Guard: already learned
+    if (ctx.learnedSkillSlugs.count(skillSlug) > 0)
+    {
+        nlohmann::json notif;
+        notif["type"] = "learn_skill_failed";
+        notif["reason"] = "already_learned";
+        notif["skillSlug"] = skillSlug;
+        result.clientNotifications.push_back(std::move(notif));
+        return;
+    }
+
+    // Guard: SP
+    if (ctx.freeSkillPoints < spCost)
+    {
+        nlohmann::json notif;
+        notif["type"] = "learn_skill_failed";
+        notif["reason"] = "insufficient_sp";
+        notif["skillSlug"] = skillSlug;
+        result.clientNotifications.push_back(std::move(notif));
+        return;
+    }
+
+    // Guard: gold
+    if (goldCost > 0)
+    {
+        const ItemDataStruct *goldItem = services_.getItemManager().getItemBySlug("gold_coin");
+        if (!goldItem)
+        {
+            log_->error("[DialogueAction] learn_skill: gold_coin item not found");
+            return;
+        }
+        const auto &inv = services_.getInventoryManager().getPlayerInventory(characterId);
+        int totalGold = 0;
+        for (const auto &slot : inv)
+            if (slot.itemId == goldItem->id)
+                totalGold += slot.quantity;
+        if (totalGold < goldCost)
+        {
+            nlohmann::json notif;
+            notif["type"] = "learn_skill_failed";
+            notif["reason"] = "insufficient_gold";
+            notif["skillSlug"] = skillSlug;
+            result.clientNotifications.push_back(std::move(notif));
+            return;
+        }
+    }
+
+    // Guard: skill book
+    if (requiresBook && bookItemId > 0)
+    {
+        const auto &inv = services_.getInventoryManager().getPlayerInventory(characterId);
+        bool hasBook = false;
+        for (const auto &slot : inv)
+            if (slot.itemId == bookItemId && slot.quantity > 0)
+            {
+                hasBook = true;
+                break;
+            }
+        if (!hasBook)
+        {
+            nlohmann::json notif;
+            notif["type"] = "learn_skill_failed";
+            notif["reason"] = "missing_skill_book";
+            notif["skillSlug"] = skillSlug;
+            result.clientNotifications.push_back(std::move(notif));
+            return;
+        }
+    }
+
+    // Consume skill book
+    if (requiresBook && bookItemId > 0)
+    {
+        services_.getInventoryManager().removeItemFromInventory(characterId, bookItemId, 1);
+    }
+
+    // Consume gold
+    if (goldCost > 0)
+    {
+        const ItemDataStruct *goldItem = services_.getItemManager().getItemBySlug("gold_coin");
+        if (goldItem)
+            services_.getInventoryManager().removeItemFromInventory(characterId, goldItem->id, goldCost);
+    }
+
+    // Deduct SP in-memory
+    services_.getCharacterManager().modifyFreeSkillPoints(characterId, -spCost);
+    ctx.freeSkillPoints -= spCost;
+    if (ctx.freeSkillPoints < 0)
+        ctx.freeSkillPoints = 0;
+
+    // Update ctx so subsequent conditions work
+    ctx.learnedSkillSlugs.insert(skillSlug);
+
+    // Queue saveLearnedSkill packet to game server
+    nlohmann::json packet;
+    packet["header"]["eventType"] = "saveLearnedSkill";
+    packet["header"]["clientId"] = clientId;
+    packet["header"]["hash"] = "";
+    packet["body"]["characterId"] = characterId;
+    packet["body"]["clientId"] = clientId;
+    packet["body"]["skillSlug"] = skillSlug;
+    result.pendingGameServerPackets.push_back(packet.dump() + "\n");
+
+    log_->info("[DialogueAction] learn_skill: char={} skill={} sp={} gold={}",
+        characterId,
+        skillSlug,
+        spCost,
+        goldCost);
 }

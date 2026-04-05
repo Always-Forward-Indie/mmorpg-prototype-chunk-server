@@ -6,6 +6,7 @@
 #include "services/TradeSessionManager.hpp"
 #include "services/VendorManager.hpp"
 #include "utils/ResponseBuilder.hpp"
+#include <algorithm>
 #include <cmath>
 #include <spdlog/logger.h>
 
@@ -99,28 +100,46 @@ VendorEventHandler::sendTradeState(
     auto &invMgr = gameServices_.getInventoryManager();
     auto &itemMgr = gameServices_.getItemManager();
 
-    auto itemsToJson = [&](const std::vector<TradeOfferItemStruct> &offer)
+    auto itemsToJson = [&](const std::vector<TradeOfferItemStruct> &offer, int charId)
     {
         nlohmann::json arr = nlohmann::json::array();
+        const auto inv = invMgr.getPlayerInventory(charId);
         for (const auto &o : offer)
         {
-            const ItemDataStruct item = itemMgr.getItemById(o.itemId);
-            nlohmann::json entry;
-            entry["inventoryItemId"] = o.inventoryItemId;
-            entry["itemId"] = o.itemId;
-            entry["quantity"] = o.quantity;
-            entry["slug"] = item.slug;
-            arr.push_back(entry);
+            auto it = std::find_if(inv.begin(), inv.end(), [&](const PlayerInventoryItemStruct &s)
+                { return s.id == o.inventoryItemId; });
+            if (it != inv.end())
+            {
+                nlohmann::json entry = invMgr.inventoryItemToJson(*it);
+                // trade quantity may be a partial split; override slot quantity
+                entry["quantity"] = o.quantity;
+                arr.push_back(entry);
+            }
+            else
+            {
+                // fallback: minimal data if inventory slot not found in memory
+                const ItemDataStruct item = itemMgr.getItemById(o.itemId);
+                nlohmann::json entry;
+                entry["inventoryItemId"] = o.inventoryItemId;
+                entry["itemId"] = o.itemId;
+                entry["quantity"] = o.quantity;
+                entry["slug"] = item.slug;
+                arr.push_back(entry);
+            }
         }
         return arr;
     };
+
+    const int myCharId = isSideA ? session.charAId : session.charBId;
+    const int theirCharId = isSideA ? session.charBId : session.charAId;
 
     nlohmann::json body;
     body["sessionId"] = session.sessionId;
     body["myGold"] = isSideA ? session.goldA : session.goldB;
     body["theirGold"] = isSideA ? session.goldB : session.goldA;
-    body["myItems"] = itemsToJson(isSideA ? session.offerA : session.offerB);
-    body["theirItems"] = itemsToJson(isSideA ? session.offerB : session.offerA);
+    body["myGoldBalance"] = invMgr.getGoldAmount(myCharId);
+    body["myItems"] = itemsToJson(isSideA ? session.offerA : session.offerB, myCharId);
+    body["theirItems"] = itemsToJson(isSideA ? session.offerB : session.offerA, theirCharId);
     body["myConfirmed"] = isSideA ? session.confirmedA : session.confirmedB;
     body["theirConfirmed"] = isSideA ? session.confirmedB : session.confirmedA;
 
@@ -278,6 +297,7 @@ VendorEventHandler::handleOpenVendorShopEvent(const Event &event)
                               .setHeader("hash", "")
                               .setBody("npcId", req.npcId)
                               .setBody("npcSlug", npc.slug)
+                              .setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId))
                               .setBody("items", shopJson)
                               .build();
         networkManager_.sendResponse(socket, msg);

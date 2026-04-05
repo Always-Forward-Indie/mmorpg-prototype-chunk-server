@@ -315,6 +315,11 @@ GameServerWorker::processGameServerData(std::string_view data)
         nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_ZONE_EVENT_TEMPLATES, clientData.clientId, body);
     }
+    else if (eventType == "setLearnedSkill")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_LEARNED_SKILL, clientData.clientId, body);
+    }
     else
     {
         log_->info("Unknown event type from Game Server: " + eventType);

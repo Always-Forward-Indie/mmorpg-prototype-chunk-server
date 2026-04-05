@@ -43,8 +43,6 @@ EventHandler::EventHandler(
 void
 EventHandler::dispatchEvent(const Event &event)
 {
-    gameServices_.getLogger().log("EventHandler::dispatchEvent called with event type: " + std::to_string(static_cast<int>(event.getType())), GREEN);
-
     try
     {
         switch (event.getType())
@@ -86,6 +84,9 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::PLAYER_RESPAWN:
             characterEventHandler_->handlePlayerRespawnEvent(event);
+            break;
+        case Event::PLAYER_READY:
+            characterEventHandler_->handlePlayerReadyEvent(event);
             break;
 
         // Mob Events
@@ -233,10 +234,8 @@ EventHandler::dispatchEvent(const Event &event)
             combatEventHandler_->handleCompleteCombatAction(event);
             break;
         case Event::INTERRUPT_COMBAT_ACTION:
-            combatEventHandler_->handleInterruptCombatAction(event);
-            break;
-        case Event::COMBAT_ANIMATION:
-            combatEventHandler_->handleCombatAnimation(event);
+            // Non-cancellable by design: skills execute instantly, no active cast window exists.
+            // Packet is silently ignored.
             break;
         case Event::COMBAT_RESULT:
             combatEventHandler_->handleCombatResult(event);
@@ -338,6 +337,11 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::SAVE_MASTERY:
             // outgoing only — no handler needed
+            break;
+
+        // Skill system
+        case Event::SET_LEARNED_SKILL:
+            handleSetLearnedSkillEvent(event);
             break;
 
         case Event::INVENTORY_ITEM_ID_SYNC:
@@ -707,6 +711,18 @@ EventHandler::handleSetPlayerInventoryEvent(const Event &event)
         // Send full stats snapshot: inventory is now loaded so effective attributes
         // (base + equipment bonuses) and weight are calculated correctly.
         gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+
+        // Notify all OTHER clients about this character's equipment so they can
+        // render the correct gear visuals on this character's model.
+        // Only broadcast once the joining client has sent playerReady — otherwise
+        // the other clients haven't received the joinGameCharacter packet yet and
+        // would try to render equipment on a character that doesn't exist in their
+        // scene. If playerReady hasn't arrived yet, handlePlayerReadyEvent will
+        // perform this broadcast after the Phase 4 world-state push.
+        if (gameServices_.getClientManager().isClientWorldReady(clientId))
+        {
+            equipmentEventHandler_->broadcastEquipmentUpdate(characterId, clientId);
+        }
     }
     catch (const std::exception &e)
     {
@@ -1241,5 +1257,92 @@ EventHandler::handleSetZoneEventTemplatesEvent(const Event &event)
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("Error processing SET_ZONE_EVENT_TEMPLATES: " + std::string(e.what()));
+    }
+}
+
+// ── SET_LEARNED_SKILL ─────────────────────────────────────────────────────
+// Game server responds with full SkillStruct data for the newly learned skill.
+// We update CharacterManager and notify the client.
+void
+EventHandler::handleSetLearnedSkillEvent(const Event &event)
+{
+    const auto &data = event.getData();
+    int clientId = event.getClientID();
+
+    try
+    {
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_LEARNED_SKILL: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+
+        if (characterId <= 0)
+        {
+            log_->error("[EH] SET_LEARNED_SKILL: invalid characterId");
+            return;
+        }
+
+        // Build SkillStruct from the skillData object
+        if (!body.contains("skillData") || !body["skillData"].is_object())
+        {
+            log_->error("[EH] SET_LEARNED_SKILL: missing skillData");
+            return;
+        }
+        const auto &sd = body["skillData"];
+
+        SkillStruct skill;
+        skill.skillName = sd.value("skillName", "");
+        skill.skillSlug = sd.value("skillSlug", "");
+        skill.scaleStat = sd.value("scaleStat", "");
+        skill.school = sd.value("school", "");
+        skill.skillEffectType = sd.value("skillEffectType", "");
+        skill.skillLevel = sd.value("skillLevel", 1);
+        skill.coeff = sd.value("coeff", 0.0);
+        skill.flatAdd = sd.value("flatAdd", 0.0);
+        skill.cooldownMs = sd.value("cooldownMs", 0);
+        skill.gcdMs = sd.value("gcdMs", 0);
+        skill.castMs = sd.value("castMs", 0);
+        skill.costMp = sd.value("costMp", 0);
+        skill.maxRange = sd.value("maxRange", 0);
+        skill.areaRadius = sd.value("areaRadius", 0);
+        skill.swingMs = sd.value("swingMs", 300);
+        skill.animationName = sd.value("animationName", "");
+        skill.isPassive = sd.value("isPassive", false);
+
+        // Persist in-memory
+        gameServices_.getCharacterManager().addCharacterSkill(characterId, skill);
+
+        // Build and send skill_learned notification to client
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (!clientSocket)
+        {
+            log_->error("[EH] SET_LEARNED_SKILL: socket not available for clientId " + std::to_string(clientId));
+            return;
+        }
+
+        int newSp = gameServices_.getCharacterManager().getCharacterFreeSkillPoints(characterId);
+
+        nlohmann::json notif;
+        notif["type"] = "skill_learned";
+        notif["skillSlug"] = skill.skillSlug;
+        notif["skillName"] = skill.skillName;
+        notif["isPassive"] = skill.isPassive;
+        notif["newFreeSkillPoints"] = newSp;
+        notif["skillData"] = sd;
+
+        nlohmann::json resp = ResponseBuilder()
+                                  .setHeader("eventType", "skill_learned")
+                                  .build();
+        resp["body"] = notif;
+        networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", resp));
+
+        log_->info("[EH] SET_LEARNED_SKILL: char={} skill={} newSp={}", characterId, skill.skillSlug, newSp);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_LEARNED_SKILL: " + std::string(e.what()));
     }
 }

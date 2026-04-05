@@ -114,6 +114,11 @@ class CharacterManager
     // Calculate distance between two positions
     float calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2);
 
+    // Skill system helpers
+    void addCharacterSkill(int characterID, const SkillStruct &skill);
+    void modifyFreeSkillPoints(int characterID, int delta);
+    int getCharacterFreeSkillPoints(int characterID) const;
+
   private:
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;

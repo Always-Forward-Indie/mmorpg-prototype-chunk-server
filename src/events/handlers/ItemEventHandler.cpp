@@ -140,6 +140,9 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                 return;
             }
 
+            // Use server-side position instead of client-provided to prevent desync false negatives
+            pickupRequest.playerPosition = gameServices_.getCharacterManager().getCharacterPosition(pickupRequest.characterId);
+
             gameServices_.getLogger().log("[ITEM_PICKUP_EVENT] Processing pickup request - Character: " +
                                           std::to_string(pickupRequest.characterId) +
                                           ", Player ID (verified): " + std::to_string(pickupRequest.playerId) +

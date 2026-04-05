@@ -113,6 +113,7 @@ class EventHandler
     void handleSetPlayerReputationsEvent(const Event &event);
     void handleSetPlayerMasteriesEvent(const Event &event);
     void handleSetZoneEventTemplatesEvent(const Event &event);
+    void handleSetLearnedSkillEvent(const Event &event);
 
     // Specialized event handlers for different event categories
     std::unique_ptr<ClientEventHandler> clientEventHandler_;

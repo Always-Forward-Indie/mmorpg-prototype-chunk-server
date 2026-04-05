@@ -48,10 +48,12 @@ class NPCEventHandler : public BaseEventHandler
 
   private:
     /**
-     * @brief Convert NPC data to JSON format for client transmission
+     * @brief Convert NPC data to JSON format for client transmission.
+     *  Computes per-player quest status for each quest this NPC is involved in.
      *
      * @param npc The NPC data to convert
+     * @param characterId Character whose quest progress determines quest status icons
      * @return JSON object ready for client transmission
      */
-    nlohmann::json convertNPCToSpawnJson(const NPCDataStruct &npc) const;
+    nlohmann::json convertNPCToSpawnJson(const NPCDataStruct &npc, int characterId);
 };

@@ -220,32 +220,6 @@ CombatEventHandler::handleSkillUsage(const Event &event)
 }
 
 void
-CombatEventHandler::handleInterruptCombatAction(const Event &event)
-{
-    const auto &data = event.getData();
-    int clientID = event.getClientID();
-
-    try
-    {
-        // Получаем данные клиента
-        auto clientData = gameServices_.getClientManager().getClientData(clientID);
-        if (clientData.characterId == 0)
-        {
-            return;
-        }
-
-        // Прерываем действие
-        combatSystem_->interruptSkillUsage(clientData.characterId, InterruptionReason::PLAYER_CANCELLED);
-
-        log_->info("Skill usage interrupted for character " + std::to_string(clientData.characterId));
-    }
-    catch (const std::exception &ex)
-    {
-        gameServices_.getLogger().logError("Error in handleInterruptCombatAction: " + std::string(ex.what()));
-    }
-}
-
-void
 CombatEventHandler::updateOngoingActions()
 {
     try
@@ -459,14 +433,6 @@ CombatEventHandler::handleCompleteCombatAction(const Event &event)
     // Этот метод может быть реализован для завершения боевых действий
     // В новой архитектуре это обрабатывается через CombatSystem
     log_->info("handleCompleteCombatAction - using new architecture");
-}
-
-void
-CombatEventHandler::handleCombatAnimation(const Event &event)
-{
-    // Обработка анимации боя
-    // В новой архитектуре это может обрабатываться через CombatSystem
-    log_->info("handleCombatAnimation - using new architecture");
 }
 
 void

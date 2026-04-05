@@ -37,11 +37,6 @@ class CombatSystem
     SkillExecutionResult executeSkillUsage(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType);
 
     /**
-     * @brief Прервать использование скила
-     */
-    void interruptSkillUsage(int casterId, InterruptionReason reason);
-
-    /**
      * @brief Удалить запись об ongoing action для кастера (без side-effects).
      *        Вызывается после немедленного выполнения скила игрока, чтобы
      *        updateOngoingActions() не выполнил его повторно по таймеру.
@@ -156,7 +151,7 @@ class CombatSystem
      * @brief Обработать AoE-скил: найти все цели в area_radius вокруг кастера,
      *  применить урон, отправить broadcast на каждую цель.
      */
-    void executeAoESkillUsage(int casterId, const std::string &skillSlug);
+    bool executeAoESkillUsage(int casterId, const std::string &skillSlug);
 
     /**
      * @brief Send a durability change to the game server for persistence.

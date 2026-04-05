@@ -19,6 +19,7 @@ always replaces its local state with the received values instead of applying a d
 | Item unequipped | `EquipmentEventHandler::handleUnequipItemEvent` |
 | Attribute reload from game server | `CharacterEventHandler::handleSetCharacterAttributesEvent` |
 | Item used (potion, scroll, food) | `ItemEventHandler::handleUseItemEvent` |
+| OOC HP/MP regeneration tick (каждые ~4 с) | `RegenManager::tickRegen` |
 
 > On player join the server sends **two** `stats_update` packets: first after inventory
 > is loaded (equipment state and weight are correct), then after active effects arrive
@@ -162,6 +163,9 @@ effective = base
 | `block_chance` | Probability to block (integer, treated as %) |
 | `block_value` | Flat damage absorbed on block |
 | `strength` | Also drives carry weight limit |
+| `constitution` | Scales HP regeneration per tick (`hpGain += constitution * 0.3`) |
+| `wisdom` | Scales MP regeneration per tick (`mpGain += wisdom * 0.5`) |
+| `move_speed` | Server-side anti-cheat speed cap: `worldUnits/s = move_speed * 40`; default value: `5` |
 
 Additional slugs may appear dynamically from DB — the client should treat the array as
 extensible.

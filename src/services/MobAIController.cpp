@@ -557,6 +557,7 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
             movementData.combatState = MobCombatState::CHASING;
             movementData.stateChangeTime = currentTime;
             mobMovementManager_->updateMobMovementData(mob.uid, movementData);
+            mobMovementManager_->forceMobStateUpdate(mob.uid);
             logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " entering CHASING state");
         }
         break;
@@ -578,23 +579,29 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
             {
                 int lostTargetId = movementData.targetPlayerId;
                 movementData.targetPlayerId = 0;
-                movementData.combatState = MobCombatState::PATROLLING;
+                movementData.combatState = MobCombatState::RETURNING;
+                movementData.isReturningToSpawn = true;
                 movementData.stateChangeTime = currentTime;
+                movementData.threatTable.clear();
+                movementData.attackerTimestamps.clear();
                 mobMovementManager_->updateMobMovementData(mob.uid, movementData);
                 mobMovementManager_->sendMobTargetLost(mob, lostTargetId);
                 logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
-                            " target no longer exists, returning to patrol");
+                            " target no longer exists, returning to spawn");
             }
             else if (!isTargetAlive(movementData.targetPlayerId))
             {
                 int lostTargetId = movementData.targetPlayerId;
                 movementData.targetPlayerId = 0;
-                movementData.combatState = MobCombatState::PATROLLING;
+                movementData.combatState = MobCombatState::RETURNING;
+                movementData.isReturningToSpawn = true;
                 movementData.stateChangeTime = currentTime;
+                movementData.threatTable.clear();
+                movementData.attackerTimestamps.clear();
                 mobMovementManager_->updateMobMovementData(mob.uid, movementData);
                 mobMovementManager_->sendMobTargetLost(mob, lostTargetId);
                 logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
-                            " target is dead, returning to patrol");
+                            " target is dead, returning to spawn");
             }
             else
             {
@@ -743,10 +750,10 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                                         std::to_string(movementData.attackPrepareTime) + "s cd=" +
                                         std::to_string(movementData.postAttackCooldown) + "s");
 
-                        // Send combatInitiation so the client starts the cast/channel animation.
-                        // combatResult (damage) is sent at the END of the cast (PREPARING_ATTACK→ATTACKING).
-                        if (combatSystem_)
-                            combatSystem_->broadcastMobSkillInitiation(mob.uid, movementData.targetPlayerId, chosen);
+                            // Send combatInitiation and combatResult immediately (no cast delay).
+                            if (combatSystem_)
+                                combatSystem_->broadcastMobSkillInitiation(mob.uid, movementData.targetPlayerId, chosen);
+                            executeMobAttack(mob, movementData.targetPlayerId, movementData);
                         }
                         else
                         {
@@ -757,25 +764,23 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                             movementData.attackPrepareTime = 0.0f;
                             movementData.attackDuration = 0.3f;
                             movementData.postAttackCooldown = std::max(mob.attackCooldown, 0.5f);
-                            // Broadcast a fallback combatInitiation so the client knows an
-                            // attack is coming even when no DB skill is available (e.g. all
-                            // skills are on cooldown).
+                            // Broadcast a fallback combatInitiation and apply damage immediately.
                             if (combatSystem_ && movementData.targetPlayerId > 0)
                             {
                                 SkillStruct fallback;
-                                fallback.skillSlug       = "mob_basic_attack";
-                                fallback.skillName       = "Basic Attack";
+                                fallback.skillSlug = "mob_basic_attack";
+                                fallback.skillName = "Basic Attack";
                                 fallback.skillEffectType = "damage";
-                                fallback.school          = "physical";
-                                fallback.castMs          = 0;
-                                fallback.swingMs         = static_cast<int>(movementData.attackDuration * 1000.0f);
-                                fallback.cooldownMs      = static_cast<int>(movementData.postAttackCooldown * 1000.0f);
+                                fallback.school = "physical";
+                                fallback.castMs = 0;
+                                fallback.swingMs = static_cast<int>(movementData.attackDuration * 1000.0f);
+                                fallback.cooldownMs = static_cast<int>(movementData.postAttackCooldown * 1000.0f);
                                 combatSystem_->broadcastMobSkillInitiation(
                                     mob.uid, movementData.targetPlayerId, fallback);
                             }
+                            executeMobAttack(mob, movementData.targetPlayerId, movementData);
                         }
 
-                        // combatResult (executeMobAttack) is sent when the cast ends (PREPARING_ATTACK→ATTACKING).
                         logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
                                     " in attack range, preparing attack");
                         movementData.combatState = MobCombatState::PREPARING_ATTACK;
@@ -838,21 +843,23 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
         {
             if (movementData.targetPlayerId > 0 && !isTargetAlive(movementData.targetPlayerId))
             {
-                // Target died during cast — abort.
+                // Target died during cast — abort and return to spawn.
                 int lostTargetId = movementData.targetPlayerId;
                 movementData.targetPlayerId = 0;
-                movementData.combatState = MobCombatState::PATROLLING;
+                movementData.combatState = MobCombatState::RETURNING;
+                movementData.isReturningToSpawn = true;
                 movementData.stateChangeTime = currentTime;
+                movementData.threatTable.clear();
+                movementData.attackerTimestamps.clear();
                 mobMovementManager_->updateMobMovementData(mob.uid, movementData);
                 mobMovementManager_->sendMobTargetLost(mob, lostTargetId);
                 logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
-                            " target is dead during prepare attack, returning to patrol");
+                            " target is dead during prepare attack, returning to spawn");
             }
             else if (movementData.targetPlayerId > 0)
             {
-                // Cast finished — apply damage now (at cast end, not cast start).
-                executeMobAttack(mob, movementData.targetPlayerId, movementData);
-
+                // Damage was already applied at CHASING→PREPARING_ATTACK entry.
+                // Just advance to ATTACKING (swing animation phase).
                 logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) + " starting attack sequence");
                 movementData.combatState = MobCombatState::ATTACKING;
                 // Use the exact moment the cast ended (stateChangeTime + attackPrepareTime) rather
@@ -875,7 +882,7 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
         break;
 
     case MobCombatState::ATTACKING:
-        // combatResult was already sent at CHASING→PREPARING_ATTACK entry (together with combatInitiation).
+        // combatResult was sent at CHASING→PREPARING_ATTACK (together with combatInitiation).
         // Just wait for the swing window to elapse, then enter cooldown.
         if (timeSinceStateChange >= movementData.attackDuration)
         {
@@ -905,12 +912,15 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                 {
                     int lostTargetId = movementData.targetPlayerId;
                     movementData.targetPlayerId = 0;
-                    movementData.combatState = MobCombatState::PATROLLING;
+                    movementData.combatState = MobCombatState::RETURNING;
+                    movementData.isReturningToSpawn = true;
                     movementData.stateChangeTime = currentTime;
+                    movementData.threatTable.clear();
+                    movementData.attackerTimestamps.clear();
                     mobMovementManager_->updateMobMovementData(mob.uid, movementData);
                     mobMovementManager_->sendMobTargetLost(mob, lostTargetId);
                     logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
-                                " target is dead after cooldown, returning to patrol");
+                                " target is dead after cooldown, returning to spawn");
                 }
                 else
                 {

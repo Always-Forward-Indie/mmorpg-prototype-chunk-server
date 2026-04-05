@@ -1,3 +1,43 @@
+v0.1.2
+05.04.2026
+================
+New:
+Skill Learning System — `DialogueActionExecutor`: new `learn_skill` action type. Validates SP cost, gold cost, and optional skill book requirement before teaching a skill. Consumes the book (removed from inventory) and gold. On failure sends typed `learn_skill_failed` notification to client (`already_learned` / `insufficient_sp` / `insufficient_gold` / `missing_skill_book`). `PlayerContextStruct` extended with `freeSkillPoints` and `learnedSkillSlugs` for validation.
+CharacterManager — `addCharacterSkill()`: upsert skill by slug into the character's in-memory skill list. `modifyFreeSkillPoints(delta)`: thread-safe increment/decrement. `getCharacterFreeSkillPoints()`: read-only SP query.
+SET_LEARNED_SKILL event — `EventHandler::handleSetLearnedSkillEvent()`: receives full `SkillStruct` from game server after DB persistence, adds it to `CharacterManager`, decrements SP, and forwards `setLearnedSkill` packet to the owning client.
+CharacterDataStruct — new field `freeSkillPoints` (int, default 0). Included in the character join response and character data updates.
+playerReady two-phase join protocol — world-state push (mobs, NPCs, ground items, connected players, equipment) is deferred until the client sends `playerReady` (scene finished loading). Phase 1+2 (character private data: stats/quests/flags/inventory/effects/masteries/reputations) still sent immediately on join. `ClientManager`: `setClientWorldReady()` / `isClientWorldReady()` flag per client. New `CharacterEventHandler::handlePlayerReadyEvent()` executes Phase 4.
+Stale session eviction — `CharacterEventHandler::evictStaleSession(characterId, newClientId)`: if a character is already loaded in `CharacterManager` when a new join arrives (crash / reconnect without clean disconnect), the stale session is cleanly flushed: position, HP/Mana, quests, flags, reputation, mastery and ItemSoul `killCount` are persisted, the old client/character entries are removed, and a `disconnectClient` broadcast is sent to all other connected clients. Three guard conditions prevent false evictions: pre-loaded data (no client mapped), duplicate own reconnect (same clientId), and already-absent entries.
+`pendingJoinRequestsMutex_` — mutex added to `CharacterEventHandler` to serialise concurrent access to `pendingJoinRequests_` map.
+Equipment broadcast to other clients — `EquipmentEventHandler::broadcastEquipmentUpdate()`: sends `PLAYER_EQUIPMENT_UPDATE` to all clients except the owner whenever gear changes (equip/unequip). Broadcast is guarded by `isClientWorldReady` to avoid sending equipment for characters that are not yet in other clients' scenes. Phase 4 (`handlePlayerReadyEvent`) also pushes all existing characters' equipment to the newly ready client via `pushConnectedCharactersToClient()`.
+AoE skill execution — `CombatSystem::executeAoESkillUsage()`: iterates nearby mobs and players, applies damage with per-target crit roll, marks caster in-combat, sends batched `combatAoeResult` packet via new `CombatResponseBuilder::buildAoESkillExecutionBroadcast()`. `AoESkillExecutionResult` and `AoETargetResultEntry` structs added.
+ItemSoul kill-count flush on disconnect — `ClientEventHandler` and `evictStaleSession` both send `saveItemKillCount` packet to game server when disconnecting, so unsaved kills are not lost.
+QuestManager: `markFlagsLoaded` / `areFlagsLoaded` / `clearFlagsLoaded` — tracks per-character flag-load state. Used to defer exploration XP awards until the character's persisted flags have arrived from the game server, preventing duplicate exploration grants.
+QuestManager: `getQuestStateBySlug(characterId, questSlug)` — look up quest state by human-readable slug without exposing internal integer quest IDs.
+NPC `questSlugs` field — `NPCDataStruct` and `NPCEventHandler` now expose the list of quest slugs for which an NPC is giver or turn-in target. Sent to clients in the NPC spawn packet.
+DB Migrations (untracked, docs/migrations/): 042_npc_type_quest_binding.sql, 043_skill_system_schema.sql, 044_warrior_skills.sql, 045_mage_skills.sql, 046_skill_books.sql, 047_trainer_npcs_and_dialogues.sql.
+docs/skill-learning-system.md — full specification: trainer NPCs, skill table, skill books, SP/gold/book flow, packet sequence, DB schema notes.
+docs/api/ — new API directory (untracked).
+
+Improvements:
+ClientEventHandler — disconnect handler: idempotency guard skips cleanup if client was already removed (prevents double-free on duplicate disconnect events). Character save path now checks `CharacterManager.getCharacterData()` before attempting position/HP-Mana persist; logs a warning and skips if character was never fully loaded (e.g., incomplete join). `clearFlagsLoaded` called on every character unload path.
+CombatSystem — target re-validation before damage: checks target is still alive (not dead/absent) immediately before spending mana and applying effects. Prevents hitting a mob that died between action initiation and execution. In-combat marking (`markCharacterInCombat`) applied to caster on skill execution to suppress mana regeneration during fights. `finalCasterMana` captured after mana consumption and included in `SkillExecutionResult` and `CombatAoEResult` for client-side HUD updates without a separate stats packet.
+CombatResponseBuilder — `buildSkillExecutionBroadcast()`: adds `cooldownMs`, `gcdMs`, and `finalCasterMana` fields to the response body.
+CombatCalculator — `critMultiplier` now reads from the attacker's **effective** attributes (after skill/buff modifiers) instead of base attributes, fixing under-powered crits for buffed characters.
+MobMovementManager — movement broadcast skip for stationary states: PREPARING_ATTACK / ATTACKING / ATTACK_COOLDOWN / EVADING mobs no longer acquire the write-lock and enqueue a broadcast every tick; the broadcast timer is advanced to preserve the rate-limit on the next tick. Uses `forceNextUpdate` flag to still deliver state-transition packets immediately (e.g., CHASING→PREPARING_ATTACK). Stat reset when mob hasn't moved: broadcast timer reset so rate-limit fires correctly on the next cycle.
+MobMovementData — new fields: `returnSpeedUnitsPerSec` (200 units/sec, intentionally lower than chase speed), `lastDeflectionSign` (±1/0, prevents ±90° oscillation when mobs crowd the same path). `maxRetries` increased from 4 to 8 to give cornered/clustered mobs more attempts to find a free direction. `speed` and `deflectionSign` fields added for client-side interpolation.
+CharacterEventHandler — `handleSetCharacterData()`: upserts character in `CharacterManager` (overwrites stale entry with fresh game-server data instead of silently ignoring it on reconnect).
+ChunkServer — mob broadcast loop extended with state-aware guard: only enters broadcast path for mobs that are physically moving.
+JSONParser — extended to handle new packet types (playerReady, learn_skill-related fields).
+
+Bug Fixes:
+Fixed exploration XP being awarded before persistent flags loaded: zone-entered XP grant now only fires after `areFlagsLoaded()` returns true; deferred check in `DialogueEventHandler::handleSetPlayerFlagsEvent` covers the race window.
+Fixed equipment broadcast timing: `broadcastEquipmentUpdate` is now gated on `isClientWorldReady` so other clients don't try to render gear on characters that have not entered their scene yet.
+Fixed pending join request race: `pendingJoinRequests_` map was accessed from multiple threads without synchronisation; protected by `pendingJoinRequestsMutex_`.
+Fixed double-save on disconnect: HP/Mana now saved once via a single `charData` snapshot; previous code fetched `CharacterManager` twice and could save stale data on the second call if the character was removed between calls.
+
+---
+
 v0.1.1
 21.03.2026
 ================

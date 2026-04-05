@@ -77,6 +77,180 @@ CharacterEventHandler::characterToJson(const CharacterDataStruct &characterData)
 }
 
 void
+CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
+{
+    // Check whether the character is actually loaded (stale session present)
+    CharacterDataStruct staleChar = gameServices_.getCharacterManager().getCharacterData(characterId);
+    if (staleChar.characterId == 0)
+    {
+        return; // Nothing to evict
+    }
+
+    log_->warn("[EVICT] Stale session detected for characterId: " + std::to_string(characterId) +
+               " (reconnected as clientId: " + std::to_string(newClientId) + "). Evicting.");
+
+    // Resolve the old clientId owning this character
+    ClientDataStruct staleClient = gameServices_.getClientManager().getClientDataByCharacterId(characterId);
+    int staleClientId = staleClient.clientId;
+
+    // If no client is currently mapped to this character, the CharacterManager entry was
+    // pre-loaded by the game server's async response to joinGameClient (event type 5) before
+    // joinGameCharacter arrived. This is NOT a stale session — removing it would break the
+    // join flow. Let the normal pending-request path use the pre-loaded data.
+    if (staleClientId == 0)
+    {
+        log_->info("[EVICT] Skipping eviction for characterId: " + std::to_string(characterId) +
+                   " — no client mapped (pre-loaded data, not a stale session)");
+        return;
+    }
+
+    // If the stale session belongs to the SAME client that is now reconnecting, this is a
+    // duplicate joinGameCharacter packet (common UE behaviour). Do NOT evict — the session
+    // is still valid and the socket is still the same.
+    if (staleClientId == newClientId)
+    {
+        log_->info("[EVICT] Skipping eviction for characterId: " + std::to_string(characterId) +
+                   " — duplicate joinGameCharacter from the same clientId: " + std::to_string(newClientId));
+        return;
+    }
+
+    // ── 1. Persist position ───────────────────────────────────────────────────
+    try
+    {
+        PositionStruct lastPos = staleChar.characterPosition;
+        nlohmann::json savePacket;
+        savePacket["header"]["eventType"] = "savePositions";
+        savePacket["header"]["clientId"] = 0;
+        savePacket["header"]["hash"] = "";
+        savePacket["body"]["characters"] = nlohmann::json::array();
+        nlohmann::json entry;
+        entry["characterId"] = characterId;
+        entry["posX"] = lastPos.positionX;
+        entry["posY"] = lastPos.positionY;
+        entry["posZ"] = lastPos.positionZ;
+        entry["rotZ"] = lastPos.rotationZ;
+        savePacket["body"]["characters"].push_back(entry);
+        gameServerWorker_.sendDataToGameServer(savePacket.dump() + "\n");
+        log_->info("[EVICT] Saved position for characterId: " + std::to_string(characterId));
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[EVICT] Failed to save position for characterId: " + std::to_string(characterId) + " - " + ex.what());
+    }
+
+    // ── 2. Persist HP/Mana ───────────────────────────────────────────────────
+    try
+    {
+        nlohmann::json hpManaPacket;
+        hpManaPacket["header"]["eventType"] = "saveHpMana";
+        hpManaPacket["header"]["clientId"] = 0;
+        hpManaPacket["header"]["hash"] = "";
+        hpManaPacket["body"]["characters"] = nlohmann::json::array();
+        nlohmann::json hpEntry;
+        hpEntry["characterId"] = characterId;
+        hpEntry["currentHp"] = staleChar.characterCurrentHealth;
+        hpEntry["currentMana"] = staleChar.characterCurrentMana;
+        hpManaPacket["body"]["characters"].push_back(hpEntry);
+        gameServerWorker_.sendDataToGameServer(hpManaPacket.dump() + "\n");
+        log_->info("[EVICT] Saved HP/Mana for characterId: " + std::to_string(characterId));
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[EVICT] Failed to save HP/Mana for characterId: " + std::to_string(characterId) + " - " + ex.what());
+    }
+
+    // ── 3. Flush quests / flags / reputation / mastery ────────────────────────
+    try
+    {
+        gameServices_.getQuestManager().flushAllProgress(characterId);
+        gameServices_.getQuestManager().flushPendingFlags();
+        gameServices_.getQuestManager().unloadPlayerQuests(characterId);
+        gameServices_.getDialogueSessionManager().cleanupExpiredSessions();
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[EVICT] Quest flush error for characterId: " + std::to_string(characterId) + " - " + ex.what());
+    }
+
+    try
+    {
+        gameServices_.getReputationManager().unloadCharacterReputations(characterId);
+        gameServices_.getMasteryManager().unloadCharacterMasteries(characterId);
+        gameServices_.getQuestManager().clearFlagsLoaded(characterId);
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[EVICT] Rep/Mastery unload error for characterId: " + std::to_string(characterId) + " - " + ex.what());
+    }
+
+    // ── 4. Flush ItemSoul kill-count ─────────────────────────────────────────
+    try
+    {
+        auto weapon = gameServices_.getInventoryManager().getEquippedWeapon(characterId);
+        if (weapon.has_value() && weapon->killCount > 0)
+        {
+            nlohmann::json pkt;
+            pkt["header"]["eventType"] = "saveItemKillCount";
+            pkt["header"]["clientId"] = 0;
+            pkt["header"]["hash"] = "";
+            pkt["body"]["characterId"] = characterId;
+            pkt["body"]["inventoryItemId"] = weapon->id;
+            pkt["body"]["killCount"] = weapon->killCount;
+            gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+            log_->info("[EVICT] Flushed ItemSoul killCount=" + std::to_string(weapon->killCount) +
+                       " for invId=" + std::to_string(weapon->id) +
+                       " charId=" + std::to_string(characterId));
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[EVICT] ItemSoul flush error for characterId: " + std::to_string(characterId) + " - " + ex.what());
+    }
+
+    // ── 5. Remove from managers ──────────────────────────────────────────────
+    gameServices_.getCharacterManager().removeCharacter(characterId);
+    if (staleClientId > 0)
+    {
+        gameServices_.getClientManager().removeClientData(staleClientId);
+    }
+
+    // ── 6. Broadcast disconnectClient to all other players ───────────────────
+    // Exclude both the dead staleClientId and the reconnecting newClientId so
+    // the joining client does not receive a spurious disconnect for itself.
+    if (staleClientId > 0)
+    {
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("message", "Client disconnected!")
+                                      .setHeader("hash", "")
+                                      .setHeader("clientId", staleClientId)
+                                      .setHeader("eventType", "disconnectClient")
+                                      .setBody("", "")
+                                      .build();
+        std::string responseData = networkManager_.generateResponseMessage("success", response);
+
+        // Broadcast to everyone except the old (dead) client and the reconnecting one.
+        // getActiveSockets excludes one id, so we filter out newClientId manually.
+        auto sockets = gameServices_.getClientManager().getActiveSockets(staleClientId);
+        auto sharedData = std::make_shared<const std::string>(responseData);
+        for (auto &sock : sockets)
+        {
+            // Skip the reconnecting client's socket — it hasn't joined yet
+            auto sockClientId = gameServices_.getClientManager().getClientIdBySocket(sock);
+            if (sockClientId == newClientId)
+            {
+                continue;
+            }
+            if (sock && sock->is_open())
+            {
+                networkManager_.sendResponse(sock, sharedData);
+            }
+        }
+
+        log_->info("[EVICT] Broadcasted disconnectClient for stale clientId: " + std::to_string(staleClientId));
+    }
+}
+
+void
 CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
 {
     const auto &data = event.getData();
@@ -91,6 +265,10 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             CharacterDataStruct passedCharacterData = std::get<CharacterDataStruct>(data);
 
             log_->info("Passed Character ID: " + std::to_string(passedCharacterData.characterId));
+
+            // Evict any stale session for this character before registering a new one.
+            // This happens when a client crashes or reconnects without a clean disconnect.
+            evictStaleSession(passedCharacterData.characterId, clientID);
 
             // set client character ID - now handles missing clients automatically
             gameServices_.getClientManager().setClientCharacterId(clientID, passedCharacterData.characterId);
@@ -110,9 +288,11 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 pendingRequest.timestamps = timestamps;
                 pendingRequest.clientSocket = clientSocket;
 
-                pendingJoinRequests_[passedCharacterData.characterId].push_back(pendingRequest);
-
-                gameServices_.getLogger().log("Pending join request added for character ID: " + std::to_string(passedCharacterData.characterId) + ", total pending: " + std::to_string(pendingJoinRequests_[passedCharacterData.characterId].size()));
+                {
+                    std::lock_guard<std::mutex> lock(pendingJoinRequestsMutex_);
+                    pendingJoinRequests_[passedCharacterData.characterId].push_back(pendingRequest);
+                    gameServices_.getLogger().log("Pending join request added for character ID: " + std::to_string(passedCharacterData.characterId) + ", total pending: " + std::to_string(pendingJoinRequests_[passedCharacterData.characterId].size()));
+                }
                 return;
             }
 
@@ -141,6 +321,9 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
 
             broadcastToAllClientsWithTimestamps("success", broadcastResponse, timestamps);
 
+            // ── Phase 2: character-private data ──────────────────────────────────────
+            // These can be sent while the client is still on the loading screen.
+
             // Initialize player skills after successful character join
             if (skillEventHandler_)
             {
@@ -149,32 +332,6 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             else
             {
                 log_->error("SkillEventHandler not set in CharacterEventHandler");
-            }
-
-            // Send NPC spawn data to player after successful character join
-            if (npcEventHandler_)
-            {
-                npcEventHandler_->sendNPCSpawnDataToClient(clientID, characterData.characterPosition, 50000.0f);
-            }
-            else
-            {
-                log_->error("NPCEventHandler not set in CharacterEventHandler");
-            }
-
-            // Send existing ground items snapshot to the joining player
-            if (itemEventHandler_)
-            {
-                itemEventHandler_->sendGroundItemsToClient(clientID, clientSocket);
-            }
-
-            // Server-push all spawn zones with live mob state so client never needs to request them
-            if (mobEventHandler_)
-            {
-                mobEventHandler_->sendSpawnZonesToClient(clientID, clientSocket);
-            }
-            else
-            {
-                log_->error("MobEventHandler not set in CharacterEventHandler");
             }
 
             // Notify client which game zone it is currently in
@@ -199,7 +356,9 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 log_->error("[zone_entered on join] {}", ex.what());
             }
 
-            // Request player quests and flags from game server
+            // Request player quests, flags, effects, inventory and progression data from
+            // game server. Responses arrive asynchronously and are forwarded to the client
+            // directly (safe even during loading screen — client buffers them).
             {
                 int cid = characterData.characterId;
                 nlohmann::json questsReq;
@@ -243,6 +402,13 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 masteriesReq["body"]["characterId"] = cid;
                 gameServerWorker_.sendDataToGameServer(masteriesReq.dump() + "\n");
             }
+
+            // ── Phase 4 world-state push is deferred until the client sends
+            // "playerReady" (handlePlayerReadyEvent). This prevents flooding the
+            // TCP stream with mobs/NPCs/items before the game scene is active.
+            log_->info("[JOIN] Phase 1+2 complete for char=" +
+                       std::to_string(characterData.characterId) +
+                       " — awaiting playerReady for Phase 4 world-state push");
 
             // Also process any pending requests for this character
             processPendingJoinRequests(passedCharacterData.characterId);
@@ -394,28 +560,34 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                             movementData.characterId, "zone_entered", zoneData, "high", "zone_banner");
                     }
 
-                    // One-time exploration XP reward
-                    const std::string exploredKey = "explored_" + zoneOpt->slug;
-                    const bool alreadyExplored =
-                        gameServices_.getQuestManager().getFlagBool(movementData.characterId, exploredKey);
-                    if (!alreadyExplored)
+                    // One-time exploration XP reward.
+                    // Skip entirely if the character's persisted flags haven't arrived
+                    // from the game-server yet — the deferred check in
+                    // DialogueEventHandler::handleSetPlayerFlagsEvent will fire instead.
+                    if (gameServices_.getQuestManager().areFlagsLoaded(movementData.characterId))
                     {
-                        gameServices_.getQuestManager().setFlagBool(movementData.characterId, exploredKey, true);
-                        if (zoneOpt->explorationXpReward > 0)
+                        const std::string exploredKey = "explored_" + zoneOpt->slug;
+                        const bool alreadyExplored =
+                            gameServices_.getQuestManager().getFlagBool(movementData.characterId, exploredKey);
+                        if (!alreadyExplored)
                         {
-                            gameServices_.getExperienceManager().grantExperience(
+                            gameServices_.getQuestManager().setFlagBool(movementData.characterId, exploredKey, true);
+                            if (zoneOpt->explorationXpReward > 0)
+                            {
+                                gameServices_.getExperienceManager().grantExperience(
+                                    movementData.characterId,
+                                    zoneOpt->explorationXpReward,
+                                    "zone_explored",
+                                    0);
+                            }
+                            nlohmann::json notifData = {{"zoneSlug", zoneOpt->slug}};
+                            gameServices_.getStatsNotificationService().sendWorldNotification(
                                 movementData.characterId,
-                                zoneOpt->explorationXpReward,
                                 "zone_explored",
-                                0);
+                                notifData,
+                                "medium",
+                                "toast");
                         }
-                        nlohmann::json notifData = {{"zoneSlug", zoneOpt->slug}};
-                        gameServices_.getStatsNotificationService().sendWorldNotification(
-                            movementData.characterId,
-                            "zone_explored",
-                            notifData,
-                            "medium",
-                            "toast");
                     }
                 }
             }
@@ -469,38 +641,68 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
 void
 CharacterEventHandler::handleGetConnectedCharactersEvent(const Event &event)
 {
-    const auto &data = event.getData();
     int clientID = event.getClientID();
     const auto &timestamps = event.getTimestamps();
     std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
 
-    try
+    if (clientID == 0)
     {
-        std::vector<CharacterDataStruct> charactersList = gameServices_.getCharacterManager().getCharactersList();
-
-        nlohmann::json charactersListJson = nlohmann::json::array();
-        for (const auto &character : charactersList)
-        {
-            nlohmann::json characterJson = characterToJson(character);
-
-            nlohmann::json fullEntry = {
-                {"clientId", character.clientId},
-                {"character", characterJson}};
-
-            charactersListJson.push_back(fullEntry);
-        }
-
-        if (clientID == 0)
-        {
-            sendErrorResponseWithTimestamps(clientSocket, "Getting connected characters failed!", "getConnectedCharacters", clientID, timestamps);
-            return;
-        }
-
-        sendSuccessResponseWithTimestamps(clientSocket, "Getting connected characters success!", "getConnectedCharacters", clientID, timestamps, "characters", charactersListJson);
+        sendErrorResponseWithTimestamps(clientSocket, "Getting connected characters failed!", "getConnectedCharacters", clientID, timestamps);
+        return;
     }
-    catch (const std::bad_variant_access &ex)
+
+    pushConnectedCharactersToClient(clientID, clientSocket, -1 /* send all, excluding none */);
+}
+
+void
+CharacterEventHandler::pushConnectedCharactersToClient(
+    int clientID,
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+    int excludeCharacterId)
+{
+    auto allChars = gameServices_.getCharacterManager().getCharactersList();
+
+    nlohmann::json charactersListJson = nlohmann::json::array();
+    for (const auto &character : allChars)
     {
-        gameServices_.getLogger().log("Error in handleGetConnectedCharactersEvent: " + std::string(ex.what()));
+        if (character.characterId == 0)
+            continue;
+        if (excludeCharacterId > 0 && character.characterId == excludeCharacterId)
+            continue;
+
+        nlohmann::json fullEntry = {
+            {"clientId", character.clientId},
+            {"character", characterToJson(character)}};
+        charactersListJson.push_back(fullEntry);
+    }
+
+    nlohmann::json response = ResponseBuilder()
+                                  .setHeader("message", "success")
+                                  .setHeader("eventType", "getConnectedCharacters")
+                                  .setHeader("clientId", clientID)
+                                  .setBody("characters", charactersListJson)
+                                  .build();
+    networkManager_.sendResponse(clientSocket,
+        networkManager_.generateResponseMessage("success", response));
+
+    // Equipment for each character in the list
+    for (const auto &character : allChars)
+    {
+        if (character.characterId == 0)
+            continue;
+        if (excludeCharacterId > 0 && character.characterId == excludeCharacterId)
+            continue;
+
+        nlohmann::json eq = gameServices_.getEquipmentManager().buildEquipmentStateJson(character.characterId);
+        nlohmann::json eqResp = ResponseBuilder()
+                                    .setHeader("message", "success")
+                                    .setHeader("eventType", "PLAYER_EQUIPMENT_UPDATE")
+                                    .setHeader("clientId", clientID)
+                                    .setBody("characterId", character.characterId)
+                                    .setBody("slots", eq)
+                                    .build();
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", eqResp));
     }
 }
 
@@ -528,6 +730,90 @@ CharacterEventHandler::handleSetCharacterDataEvent(const Event &event)
     {
         gameServices_.getLogger().log("Error here: " + std::string(ex.what()));
     }
+}
+
+// ── Phase 4: world-state push — called when client sends "playerReady" ────────
+void
+CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
+{
+    const auto &data = event.getData();
+    int clientID = event.getClientID();
+
+    if (!std::holds_alternative<CharacterDataStruct>(data))
+    {
+        log_->error("[PLAYER_READY] unexpected data type for clientId=" + std::to_string(clientID));
+        return;
+    }
+
+    const int characterId = std::get<CharacterDataStruct>(data).characterId;
+
+    // Guard: ignore duplicate or stale ready signals
+    if (gameServices_.getClientManager().isClientWorldReady(clientID))
+    {
+        log_->warn("[PLAYER_READY] duplicate playerReady ignored for clientId=" +
+                   std::to_string(clientID) + " char=" + std::to_string(characterId));
+        return;
+    }
+
+    gameServices_.getClientManager().setClientWorldReady(clientID, true);
+    log_->info("[PLAYER_READY] scene loaded — pushing world state to clientId=" +
+               std::to_string(clientID) + " char=" + std::to_string(characterId));
+
+    auto clientSocket = gameServices_.getClientManager().getClientSocket(clientID);
+    if (!clientSocket || !clientSocket->is_open())
+    {
+        log_->error("[PLAYER_READY] socket not available for clientId=" + std::to_string(clientID));
+        return;
+    }
+
+    CharacterDataStruct characterData = gameServices_.getCharacterManager().getCharacterData(characterId);
+    if (characterData.characterId == 0)
+    {
+        log_->error("[PLAYER_READY] character " + std::to_string(characterId) + " not found in manager");
+        return;
+    }
+
+    // 1. NPCs in range
+    if (npcEventHandler_)
+    {
+        npcEventHandler_->sendNPCSpawnDataToClient(clientID, characterData.characterPosition, 50000.0f);
+    }
+    else
+    {
+        log_->error("[PLAYER_READY] NPCEventHandler not set");
+    }
+
+    // 2. Mob spawn zones with live mob instances
+    if (mobEventHandler_)
+    {
+        mobEventHandler_->sendSpawnZonesToClient(clientID, clientSocket);
+    }
+    else
+    {
+        log_->error("[PLAYER_READY] MobEventHandler not set");
+    }
+
+    // 3. Ground items snapshot
+    if (itemEventHandler_)
+    {
+        itemEventHandler_->sendGroundItemsToClient(clientID, clientSocket);
+    }
+
+    // 4. Full snapshot of every other online player: character data + equipment.
+    //    The client needs full data (name, level, position, class) to spawn other
+    //    players in the world — equipment-only is insufficient.
+    pushConnectedCharactersToClient(clientID, clientSocket, characterId);
+
+    // Acknowledge receipt so client can hide the loading screen / enable input
+    nlohmann::json ack = ResponseBuilder()
+                             .setHeader("message", "success")
+                             .setHeader("eventType", "playerReady")
+                             .setHeader("clientId", clientID)
+                             .build();
+    networkManager_.sendResponse(clientSocket,
+        networkManager_.generateResponseMessage("success", ack));
+
+    log_->info("[PLAYER_READY] Phase 4 complete for char=" + std::to_string(characterId));
 }
 
 void
@@ -588,22 +874,32 @@ void
 CharacterEventHandler::processPendingJoinRequests(int characterId)
 {
     log_->info("processPendingJoinRequests called for character ID: " + std::to_string(characterId));
-    gameServices_.getLogger().log("Current pendingJoinRequests_ size: " + std::to_string(pendingJoinRequests_.size()));
 
-    auto it = pendingJoinRequests_.find(characterId);
-    if (it == pendingJoinRequests_.end())
+    // Extract pending requests under lock, then process without holding the lock
+    // to avoid blocking handleJoinCharacterEvent on other threads.
+    std::vector<PendingJoinRequest> requests;
     {
-        log_->info("No pending requests map entry found for character ID: " + std::to_string(characterId));
-        return;
+        std::lock_guard<std::mutex> lock(pendingJoinRequestsMutex_);
+        gameServices_.getLogger().log("Current pendingJoinRequests_ size: " + std::to_string(pendingJoinRequests_.size()));
+
+        auto it = pendingJoinRequests_.find(characterId);
+        if (it == pendingJoinRequests_.end())
+        {
+            log_->info("No pending requests map entry found for character ID: " + std::to_string(characterId));
+            return;
+        }
+
+        if (it->second.empty())
+        {
+            log_->info("Pending requests vector is empty for character ID: " + std::to_string(characterId));
+            return;
+        }
+
+        requests = std::move(it->second);
+        pendingJoinRequests_.erase(it);
     }
 
-    if (it->second.empty())
-    {
-        log_->info("Pending requests vector is empty for character ID: " + std::to_string(characterId));
-        return;
-    }
-
-    gameServices_.getLogger().log("Processing " + std::to_string(it->second.size()) + " pending join requests for character ID: " + std::to_string(characterId));
+    gameServices_.getLogger().log("Processing " + std::to_string(requests.size()) + " pending join requests for character ID: " + std::to_string(characterId));
 
     // Get character data
     CharacterDataStruct characterData = gameServices_.getCharacterManager().getCharacterData(characterId);
@@ -615,7 +911,7 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
     }
 
     // Process all pending requests for this character
-    for (const auto &request : it->second)
+    for (const auto &request : requests)
     {
         // Prepare character data in json format
         nlohmann::json characterJson = characterToJson(characterData);
@@ -649,27 +945,10 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
             log_->error("SkillEventHandler not set in CharacterEventHandler");
         }
 
-        // Send NPC spawn data — this was missing from the pending path
-        if (npcEventHandler_)
-        {
-            npcEventHandler_->sendNPCSpawnDataToClient(request.clientID, characterData.characterPosition, 50000.0f);
-        }
-        else
-        {
-            log_->error("NPCEventHandler not set in CharacterEventHandler");
-        }
-
-        // Send existing ground items snapshot to the joining player
-        if (itemEventHandler_)
-        {
-            itemEventHandler_->sendGroundItemsToClient(request.clientID, request.clientSocket);
-        }
-
-        // Server-push all spawn zones with live mob state
-        if (mobEventHandler_)
-        {
-            mobEventHandler_->sendSpawnZonesToClient(request.clientID, request.clientSocket);
-        }
+        // Phase 4 world-state (NPCs, mobs, ground items, other players' equipment)
+        // is intentionally NOT sent here. It will be pushed in handlePlayerReadyEvent
+        // once the client sends "playerReady" (scene fully loaded). This mirrors the
+        // non-pending join path and prevents flooding the client before the scene is active.
 
         // Notify client which game zone it is currently in
         try
@@ -740,8 +1019,6 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
         gameServerWorker_.sendDataToGameServer(masteriesReq.dump() + "\n");
     }
 
-    // Clear processed requests
-    pendingJoinRequests_.erase(it);
     log_->info("Cleared pending requests for character ID: " + std::to_string(characterId));
 }
 

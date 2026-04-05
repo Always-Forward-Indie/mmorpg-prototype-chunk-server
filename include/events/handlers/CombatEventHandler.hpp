@@ -43,11 +43,6 @@ class CombatEventHandler : public BaseEventHandler
     void handleSkillUsage(const Event &event);
 
     /**
-     * @brief Handle combat action interruption
-     */
-    void handleInterruptCombatAction(const Event &event);
-
-    /**
      * @brief Handle combat action initiation
      */
     void handleInitiateCombatAction(const Event &event);
@@ -56,11 +51,6 @@ class CombatEventHandler : public BaseEventHandler
      * @brief Handle combat action completion
      */
     void handleCompleteCombatAction(const Event &event);
-
-    /**
-     * @brief Handle combat animation
-     */
-    void handleCombatAnimation(const Event &event);
 
     /**
      * @brief Handle combat result

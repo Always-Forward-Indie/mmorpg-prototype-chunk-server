@@ -744,6 +744,7 @@ QuestManager::sendQuestUpdate(int characterId,
     // Build QUEST_UPDATE packet
     nlohmann::json body;
     body["questId"] = quest.id;
+    body["questSlug"] = quest.slug;
     body["clientQuestKey"] = quest.clientQuestKey;
     body["state"] = pq.state;
     body["currentStep"] = pq.currentStep;
@@ -926,4 +927,44 @@ QuestManager::flushPendingFlags()
         }
     }
     pendingFlagUpdates_.clear();
+}
+
+void
+QuestManager::markFlagsLoaded(int characterId)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    flagsLoadedCharacters_.insert(characterId);
+}
+
+bool
+QuestManager::areFlagsLoaded(int characterId) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return flagsLoadedCharacters_.count(characterId) > 0;
+}
+
+void
+QuestManager::clearFlagsLoaded(int characterId)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    flagsLoadedCharacters_.erase(characterId);
+}
+
+std::string
+QuestManager::getQuestStateBySlug(int characterId, const std::string &questSlug) const
+{
+    const QuestStruct *quest = getQuestBySlug(questSlug); // read-only after startup
+    if (!quest)
+        return "";
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto charIt = playerProgress_.find(characterId);
+    if (charIt == playerProgress_.end())
+        return "";
+
+    auto questIt = charIt->second.find(quest->id);
+    if (questIt == charIt->second.end())
+        return "";
+
+    return questIt->second.state;
 }

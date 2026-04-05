@@ -187,6 +187,10 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleChatMessage(context, socket);
     }
+    else if (context.eventType == "playerReady")
+    {
+        handlePlayerReady(context, socket);
+    }
     else
     {
         log_->error("Unknown event type: " + context.eventType);
@@ -1789,4 +1793,28 @@ EventDispatcher::handleChatMessage(const EventContext &context,
     {
         log_->error("[EventDispatcher] handleChatMessage: " + std::string(e.what()));
     }
+}
+
+// ── Player Ready (scene loaded, client ACK) ───────────────────────────────────
+void
+EventDispatcher::handlePlayerReady(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.clientData.clientId <= 0 || context.characterData.characterId <= 0)
+    {
+        log_->warn("[EventDispatcher] playerReady: invalid clientId or characterId");
+        return;
+    }
+
+    CharacterDataStruct charData;
+    charData.characterId = context.characterData.characterId;
+
+    eventsBatch_.push_back(Event(Event::PLAYER_READY,
+        context.clientData.clientId,
+        charData,
+        context.timestamps));
+
+    log_->info("[EventDispatcher] playerReady queued: client=" +
+               std::to_string(context.clientData.clientId) +
+               " char=" + std::to_string(context.characterData.characterId));
 }

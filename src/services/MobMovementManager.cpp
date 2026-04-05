@@ -328,7 +328,8 @@ MobMovementManager::runMobTick(
             movementData.movementDirectionY,
             movementData.lastMoveTime,
             movementData.nextMoveTime,
-            movementResult->speed);
+            movementResult->speed,
+            movementResult->deflectionSign);
 
         mobInstanceManager_->updateMobPosition(mob.uid, movementResult->newPosition);
         return true;
@@ -343,6 +344,25 @@ MobMovementManager::runMobTick(
         if (freshData.combatState == MobCombatState::CHASING && freshData.targetPlayerId > 0)
             mobAIController_.updateMobCombatState(mob, freshData, currentTime);
     }
+
+    // STUCK-GUARD: patrolling mob failed to find a valid position (corner / cluster).
+    // Back off nextMoveTime so the scheduler does not retry the same blocked spot
+    // every 50 ms.  Also reset direction and waypoint so the next attempt explores
+    // a fresh random heading instead of repeating the one that just failed.
+    if (!hasTarget)
+    {
+        auto stuckData = getMobMovementDataInternal(mob.uid);
+        if (stuckData.combatState == MobCombatState::PATROLLING)
+        {
+            std::uniform_real_distribution<float> waitTime(params.moveTimeMin, params.moveTimeMax);
+            stuckData.nextMoveTime = currentTime + waitTime(rng_);
+            stuckData.movementDirectionX = 0.0f;
+            stuckData.movementDirectionY = 0.0f;
+            stuckData.hasPatrolTarget = false; // force a new waypoint on next attempt
+            updateMobMovementData(mob.uid, stuckData);
+        }
+    }
+
     return false;
 }
 
@@ -482,21 +502,80 @@ MobMovementManager::calculateNewPosition(
 
     if (!foundValidDirection)
     {
-        // Try to adjust current direction
-        std::uniform_real_distribution<float> directionAdjust(params.directionAdjustMin, params.directionAdjustMax);
-        float adjustFactor = directionAdjust(rng_);
-        newDirectionX = (newDirectionX * adjustFactor) + (movementData.movementDirectionX * (1.0f - adjustFactor));
-        newDirectionY = (newDirectionY * adjustFactor) + (movementData.movementDirectionY * (1.0f - adjustFactor));
+        if (atBorder)
+        {
+            // Emergency escape: aim straight at zone centre with no angle jitter.
+            // Regular retries already tried centre±scatter and all failed (border corner);
+            // a pure centre vector is the only direction guaranteed to clear the wall.
+            float cx = (minX + maxX) * 0.5f;
+            float cy = (minY + maxY) * 0.5f;
+            float ex = cx - mob.position.positionX;
+            float ey = cy - mob.position.positionY;
+            float ed = std::sqrt(ex * ex + ey * ey);
+            if (ed > 0.0f)
+            {
+                newDirectionX = ex / ed;
+                newDirectionY = ey / ed;
+            }
+        }
+        else
+        {
+            // Blend with previous heading for interior mobs.
+            std::uniform_real_distribution<float> directionAdjust(params.directionAdjustMin, params.directionAdjustMax);
+            float adjustFactor = directionAdjust(rng_);
+            newDirectionX = (newDirectionX * adjustFactor) + (movementData.movementDirectionX * (1.0f - adjustFactor));
+            newDirectionY = (newDirectionY * adjustFactor) + (movementData.movementDirectionY * (1.0f - adjustFactor));
+        }
     }
 
     // Calculate final position
     float newX = std::clamp(mob.position.positionX + (newDirectionX * stepSize), minX, maxX);
     float newY = std::clamp(mob.position.positionY + (newDirectionY * stepSize), minY, maxY);
 
-    // Final validation
+    // Overshoot guard: if this step carried the mob past its patrol waypoint,
+    // stop exactly at the waypoint.  Without this, (waypoint - newPos) points
+    // BACKWARD in the next broadcast, causing the client to move the mob in
+    // reverse until the server picks a fresh waypoint on the next step.
+    if (!atBorder && movementData.hasPatrolTarget)
+    {
+        float oldToWpX = movementData.patrolTargetPoint.positionX - mob.position.positionX;
+        float oldToWpY = movementData.patrolTargetPoint.positionY - mob.position.positionY;
+        float newToWpX = movementData.patrolTargetPoint.positionX - newX;
+        float newToWpY = movementData.patrolTargetPoint.positionY - newY;
+        // Dot-product sign flip means the mob crossed the waypoint
+        if ((oldToWpX * newToWpX + oldToWpY * newToWpY) < 0.f)
+        {
+            newX = std::clamp(movementData.patrolTargetPoint.positionX, minX, maxX);
+            newY = std::clamp(movementData.patrolTargetPoint.positionY, minY, maxY);
+            // Recalculate step length so result.speed stays correct
+            float dx = newX - mob.position.positionX;
+            float dy = newY - mob.position.positionY;
+            stepSize = std::sqrt(dx * dx + dy * dy);
+            if (stepSize < 0.001f)
+                stepSize = 0.001f;
+            // Clear waypoint — next call will pick a fresh patrol target
+            movementData.hasPatrolTarget = false;
+            updateMobMovementData(mob.uid, movementData);
+        }
+    }
+
+    // Final validation.
+    // If the full step is blocked by a nearby mob, try a minimal nudge in the
+    // same direction so a tightly-packed cluster can shuffle itself free.
     if (!isValidPosition(newX, newY, zone, otherMobs, mob, params))
     {
-        return std::nullopt; // No valid movement
+        const float nudge = params.minMoveDistance * 0.5f;
+        float nudgeX = std::clamp(mob.position.positionX + (newDirectionX * nudge), minX, maxX);
+        float nudgeY = std::clamp(mob.position.positionY + (newDirectionY * nudge), minY, maxY);
+        if (isValidPosition(nudgeX, nudgeY, zone, otherMobs, mob, params))
+        {
+            newX = nudgeX;
+            newY = nudgeY;
+        }
+        else
+        {
+            return std::nullopt; // No valid movement
+        }
     }
 
     // Create result
@@ -727,7 +806,7 @@ MobMovementManager::updateMobMovementData(int mobUID, const MobMovementData &dat
 
 void
 MobMovementManager::updateMobMovementPositionFields(
-    int mobUID, float dirX, float dirY, float lastMoveTime, float nextMoveTime, float currentSpeed)
+    int mobUID, float dirX, float dirY, float lastMoveTime, float nextMoveTime, float currentSpeed, float deflectionSign)
 {
     const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch())
@@ -743,6 +822,7 @@ MobMovementManager::updateMobMovementPositionFields(
         it->second.nextMoveTime = nextMoveTime;
         it->second.currentSpeedUnitsPerSec = currentSpeed;
         it->second.lastStepTimestampMs = nowMs;
+        it->second.lastDeflectionSign = deflectionSign;
     }
 }
 
@@ -846,11 +926,14 @@ MobMovementManager::calculateChaseMovement(
     // waitingForMeleeSlot when all physical slots around the target are taken.
     // We stop movement at (attackRange + kWaitBuffer) — the mob stands still
     // facing its target without twitching or slow-rotating in place.
+    // prevDeflectionSign is read here too, sharing the same lock acquisition.
+    float prevDeflectionSign = 0.0f;
     {
         constexpr float kWaitBuffer = 20.0f;
         auto md = getMobMovementDataInternal(mob.uid);
         if (md.waitingForMeleeSlot && distance <= mob.attackRange + kWaitBuffer)
             return std::nullopt;
+        prevDeflectionSign = md.lastDeflectionSign;
     }
 
     // 5) Avoid jitter if extremely close
@@ -895,20 +978,52 @@ MobMovementManager::calculateChaseMovement(
     float newY = mob.position.positionY + dy * stepSize;
 
     // 8+1) Validate collisions (skip zone bounds).
-    // If the direct path is blocked by another mob, try progressively wider
-    // deflection angles so mobs steer around each other instead of stacking.
+    // If the direct path is blocked, try deflection angles so mobs steer around
+    // each other instead of stacking. The candidate angles are ordered so that
+    // the same sign as the previous tick is always tried first at each magnitude.
+    // This prevents the ±90° alternation that causes a mob to oscillate ~20 units
+    // back and forth when all smaller deflections are blocked by a crowd.
+    float usedDeflectionSign = 0.0f; // 0 = direct path; set below when deflecting
     if (!isValidPositionForChase(newX, newY, otherMobs, mob, params))
     {
-        // Angles tried in order of increasing deviation so the mob always
-        // picks the least deflection that clears the obstacle.
-        static const float kDeflectAngles[] = {
-            static_cast<float>(M_PI) / 6.0f,  //  30°
-            -static_cast<float>(M_PI) / 6.0f, // -30°
-            static_cast<float>(M_PI) / 3.0f,  //  60°
-            -static_cast<float>(M_PI) / 3.0f, // -60°
-            static_cast<float>(M_PI) / 2.0f,  //  90°
-            -static_cast<float>(M_PI) / 2.0f, // -90°
-        };
+        // Build angle list: prefer same-sign as last tick at every magnitude so the
+        // mob maintains a consistent side when threading through a crowd.
+        const float pos30 = static_cast<float>(M_PI) / 6.0f;
+        const float neg30 = -static_cast<float>(M_PI) / 6.0f;
+        const float pos60 = static_cast<float>(M_PI) / 3.0f;
+        const float neg60 = -static_cast<float>(M_PI) / 3.0f;
+        const float pos90 = static_cast<float>(M_PI) / 2.0f;
+        const float neg90 = -static_cast<float>(M_PI) / 2.0f;
+
+        float kDeflectAngles[6];
+        if (prevDeflectionSign > 0.0f)
+        {
+            kDeflectAngles[0] = pos30;
+            kDeflectAngles[1] = pos60;
+            kDeflectAngles[2] = pos90;
+            kDeflectAngles[3] = neg30;
+            kDeflectAngles[4] = neg60;
+            kDeflectAngles[5] = neg90;
+        }
+        else if (prevDeflectionSign < 0.0f)
+        {
+            kDeflectAngles[0] = neg30;
+            kDeflectAngles[1] = neg60;
+            kDeflectAngles[2] = neg90;
+            kDeflectAngles[3] = pos30;
+            kDeflectAngles[4] = pos60;
+            kDeflectAngles[5] = pos90;
+        }
+        else
+        {
+            // No prior preference — interleave ± to minimise deviation on average.
+            kDeflectAngles[0] = pos30;
+            kDeflectAngles[1] = neg30;
+            kDeflectAngles[2] = pos60;
+            kDeflectAngles[3] = neg60;
+            kDeflectAngles[4] = pos90;
+            kDeflectAngles[5] = neg90;
+        }
 
         const float baseAngle = std::atan2(dy, dx);
         bool steeredAround = false;
@@ -926,6 +1041,7 @@ MobMovementManager::calculateChaseMovement(
                 dx = testDx;
                 dy = testDy;
                 steeredAround = true;
+                usedDeflectionSign = (delta > 0.0f) ? 1.0f : -1.0f;
                 break;
             }
         }
@@ -944,6 +1060,7 @@ MobMovementManager::calculateChaseMovement(
     result.newDirectionY = dy;
     result.validMovement = true;
     result.speed = chaseSpeed;
+    result.deflectionSign = usedDeflectionSign;
     return result;
 }
 
@@ -960,7 +1077,10 @@ MobMovementManager::calculateReturnToSpawnMovement(
     float dy = spawnPosition.positionY - mob.position.positionY;
     float dist = std::sqrt(dx * dx + dy * dy);
 
-    float stepSize = params.baseSpeedMax;
+    // Use the configured return speed (units/sec) so the mob walks back at a
+    // controlled pace instead of using the raw baseSpeedMax patrol step.
+    const float returnSpeed = aiConfig_.returnSpeedUnitsPerSec;
+    float stepSize = returnSpeed * aiConfig_.returnMovementInterval;
 
     // Проверяем, находится ли моб уже очень близко к точке спавна
     const float SPAWN_THRESHOLD = 10.0f; // Минимальное расстояние до точки спавна для считания "на месте"

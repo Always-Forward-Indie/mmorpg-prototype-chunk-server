@@ -153,15 +153,17 @@ CharacterManager::addCharacter(const CharacterDataStruct &characterData)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
-    // HIGH-9: O(1) duplicate check
     if (charactersMap_.count(characterData.characterId))
     {
-        log_->error("Character with ID " + std::to_string(characterData.characterId) + " already exists. Skipping add.");
-        return;
+        // Character already cached (e.g. from a previous session that did not cleanly
+        // disconnect).  Overwrite with the fresh data received from the Game Server so
+        // that position and stats always reflect the current DB state on login.
+        log_->warn("Character with ID " + std::to_string(characterData.characterId) +
+                   " already exists — overwriting with fresh Game Server data.");
     }
 
     charactersMap_[characterData.characterId] = characterData;
-    log_->info("Character with ID " + std::to_string(characterData.characterId) + " added.");
+    log_->info("Character with ID " + std::to_string(characterData.characterId) + " added/updated.");
 }
 
 // remove character by ID
@@ -597,4 +599,49 @@ CharacterManager::removeExpiredActiveEffects(int characterID)
         std::remove_if(effects.begin(), effects.end(), [&](const ActiveEffectStruct &eff)
             { return eff.expiresAt != 0 && eff.expiresAt <= nowSec; }),
         effects.end());
+}
+
+// ── Skill system helpers ──────────────────────────────────────────────────
+
+void
+CharacterManager::addCharacterSkill(int characterID, const SkillStruct &skill)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+        return;
+    // Avoid duplicates (same slug) — replace if already present
+    auto &skills = it->second.skills;
+    for (auto &s : skills)
+    {
+        if (s.skillSlug == skill.skillSlug)
+        {
+            s = skill;
+            return;
+        }
+    }
+    skills.push_back(skill);
+}
+
+void
+CharacterManager::modifyFreeSkillPoints(int characterID, int delta)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+        return;
+    int updated = it->second.freeSkillPoints + delta;
+    if (updated < 0)
+        updated = 0;
+    it->second.freeSkillPoints = updated;
+}
+
+int
+CharacterManager::getCharacterFreeSkillPoints(int characterID) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+        return 0;
+    return it->second.freeSkillPoints;
 }

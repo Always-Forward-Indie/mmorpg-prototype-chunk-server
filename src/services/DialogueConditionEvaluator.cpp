@@ -61,6 +61,12 @@ DialogueConditionEvaluator::evaluateRule(const nlohmann::json &rule,
         return evaluateReputation(rule, ctx);
     if (type == "mastery")
         return evaluateMastery(rule, ctx);
+    if (type == "has_skill_points")
+        return evaluateHasSkillPoints(rule, ctx);
+    if (type == "skill_learned")
+        return evaluateSkillLearned(rule, ctx);
+    if (type == "skill_not_learned")
+        return evaluateSkillNotLearned(rule, ctx);
 
     // Unknown rule type → permissive
     return true;
@@ -286,4 +292,42 @@ DialogueConditionEvaluator::evaluateMastery(const nlohmann::json &rule,
         return value < rule["lt"].get<float>();
 
     return true;
+}
+
+// ── Skill system conditions ────────────────────────────────────────────────
+// Rule: {"type":"has_skill_points","gte":1}
+bool
+DialogueConditionEvaluator::evaluateHasSkillPoints(const nlohmann::json &rule,
+    const PlayerContextStruct &ctx)
+{
+    int sp = ctx.freeSkillPoints;
+    if (rule.contains("gte"))
+        return sp >= rule["gte"].get<int>();
+    if (rule.contains("gt"))
+        return sp > rule["gt"].get<int>();
+    if (rule.contains("eq"))
+        return sp == rule["eq"].get<int>();
+    return sp > 0;
+}
+
+// Rule: {"type":"skill_learned","slug":"shield_bash"}
+bool
+DialogueConditionEvaluator::evaluateSkillLearned(const nlohmann::json &rule,
+    const PlayerContextStruct &ctx)
+{
+    if (!rule.contains("slug"))
+        return true;
+    const std::string slug = rule["slug"].get<std::string>();
+    return ctx.learnedSkillSlugs.count(slug) > 0;
+}
+
+// Rule: {"type":"skill_not_learned","slug":"whirlwind"}
+bool
+DialogueConditionEvaluator::evaluateSkillNotLearned(const nlohmann::json &rule,
+    const PlayerContextStruct &ctx)
+{
+    if (!rule.contains("slug"))
+        return true;
+    const std::string slug = rule["slug"].get<std::string>();
+    return ctx.learnedSkillSlugs.count(slug) == 0;
 }

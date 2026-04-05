@@ -4,6 +4,7 @@
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
 #include <nlohmann/json.hpp>
+#include <vector>
 
 // Forward declarations
 namespace spdlog
@@ -31,6 +32,8 @@ struct SkillInitiationResult
     std::string skillSlug;
     std::string skillEffectType; // damage, heal, buff, debuff, etc.
     std::string skillSchool;     // physical, fire, ice, etc.
+    int cooldownMs = 0;          ///< skill-specific cooldown in ms (for client UI bar)
+    int gcdMs = 0;               ///< global cooldown in ms triggered by this skill
 };
 
 /**
@@ -52,7 +55,38 @@ struct SkillExecutionResult
     std::string skillSlug;
     std::string skillEffectType; // damage, heal, buff, debuff, etc.
     std::string skillSchool;     // physical, fire, ice, etc.
+    int finalCasterMana = 0;     ///< caster's remaining mana after skill use
     int64_t serverTimestamp = 0; ///< unix ms when packet was generated
+};
+
+/**
+ * @brief Single-target entry inside an AoE broadcast.
+ */
+struct AoETargetResultEntry
+{
+    int targetId = 0;
+    CombatTargetType targetType = CombatTargetType::NONE;
+    int damage = 0;
+    bool isCritical = false;
+    bool isBlocked = false;
+    bool isMissed = false;
+    bool targetDied = false;
+    int finalTargetHealth = 0;
+};
+
+/**
+ * @brief Batched result for AoE skill execution — sent as ONE broadcast packet.
+ */
+struct AoESkillExecutionResult
+{
+    int casterId = 0;
+    std::string skillSlug;
+    std::string skillName;
+    std::string skillEffectType;
+    std::string skillSchool;
+    int64_t serverTimestamp = 0;
+    int finalCasterMana = 0;
+    std::vector<AoETargetResultEntry> targets;
 };
 
 /**
@@ -74,14 +108,14 @@ class CombatResponseBuilder
     nlohmann::json buildSkillExecutionBroadcast(const SkillExecutionResult &result);
 
     /**
+     * @brief Создать батч-broadcast для AoE-скила (один пакет на все цели).
+     */
+    nlohmann::json buildAoESkillExecutionBroadcast(const AoESkillExecutionResult &result);
+
+    /**
      * @brief Создать ответ об ошибке
      */
     nlohmann::json buildErrorResponse(const std::string &errorMessage, const std::string &eventType, int clientId);
-
-    /**
-     * @brief Создать пакет анимации
-     */
-    nlohmann::json buildAnimationPacket(int characterId, const std::string &animationName, float duration, const PositionStruct &position, const PositionStruct &targetPosition = {});
 
     /**
      * @brief Создать broadcast-пакет тика DoT/HoT эффекта.
