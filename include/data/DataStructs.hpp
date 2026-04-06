@@ -1551,7 +1551,6 @@ struct ClassSkillTreeEntryStruct
     int skillId = 0;
     std::string skillSlug;
     std::string skillName;
-    std::string description;
     bool isPassive = false;
     int requiredLevel = 1;
     int spCost = 1;   ///< Skill points required to learn

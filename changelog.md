@@ -1,3 +1,16 @@
+v0.1.4
+06.04.2026
+================
+Bug Fixes:
+`requestLearnSkill` — `npc_not_found` при открытии магазина через диалог: клиент может не передавать `npcId` в теле пакета, если магазин был открыт через `open_skill_shop` action диалога. `handleRequestLearnSkillEvent` теперь, при `npcId == 0`, получает `npcId` из активной диалоговой сессии персонажа (`DialogueSessionManager::getSessionByCharacter`). Оба сценария работают корректно: прямое открытие (с `npcId`) и через диалог (без `npcId`).
+
+Improvements:
+`stats_update` packet — добавлено поле `freeSkillPoints` (int). Ранее свободные очки навыков приходили клиенту только при входе на сервер и в пакете `skill_learned`. Теперь актуальное значение отправляется при каждой генерации `stats_update` (level-up, equip-change, xp-gain и т.д.), что гарантирует синхронизацию HUD после получения уровня.
+docs/api/05-npc-dialogue-quests-protocol.md — полная актуализация: исправлены форматы пакетов `spawnNPCs` (поле `npcsSpawn`, добавлены `spawnRadius`, `npcCount`, поля NPC), `npcInteract` (убраны лишние поля тела), `dialogueChoice` / `dialogueClose` (убраны `characterId`, `playerId`), формат нотификаций от actions, условная опциональность полей `QUEST_UPDATE`; добавлено поведение авто-нод при невыполненном условии.
+docs/stats-update-protocol.md — добавлено поле `freeSkillPoints` в пример пакета и таблицу полей.
+
+---
+
 v0.1.3
 06.04.2026
 ================

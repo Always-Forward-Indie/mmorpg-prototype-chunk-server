@@ -211,7 +211,6 @@ SkillEventHandler::handleSetTrainerDataEvent(const Event &event)
                     entry.skillId = sj.value("skillId", 0);
                     entry.skillSlug = sj.value("skillSlug", "");
                     entry.skillName = sj.value("skillName", "");
-                    entry.description = sj.value("description", "");
                     entry.isPassive = sj.value("isPassive", false);
                     entry.requiredLevel = sj.value("requiredLevel", 1);
                     entry.spCost = sj.value("spCost", 1);
@@ -262,7 +261,7 @@ SkillEventHandler::handleOpenSkillShopEvent(const Event &event)
         // Proximity check (same tolerance as vendor shop)
         auto distSq = [](const PositionStruct &a, const PositionStruct &b)
         {
-            float dx = a.x - b.x, dy = a.y - b.y;
+            float dx = a.positionX - b.positionX, dy = a.positionY - b.positionY;
             return dx * dx + dy * dy;
         };
         float rangeLimit = npc.radius + 2.0f;
@@ -340,8 +339,18 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
             networkManager_.sendResponse(socket, resp.dump() + "\n");
         };
 
+        // Resolve NPC id — client may omit npcId when opening shop through dialogue
+        int effectiveNpcId = req.npcId;
+        if (effectiveNpcId == 0)
+        {
+            auto *session = gameServices_.getDialogueSessionManager()
+                                .getSessionByCharacter(req.characterId);
+            if (session)
+                effectiveNpcId = session->npcId;
+        }
+
         // Validate NPC
-        const auto &npc = gameServices_.getNPCManager().getNPCById(req.npcId);
+        const auto &npc = gameServices_.getNPCManager().getNPCById(effectiveNpcId);
         if (npc.id == 0)
         {
             sendFailed("npc_not_found");
@@ -351,7 +360,7 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         // Proximity check
         auto distSq = [](const PositionStruct &a, const PositionStruct &b)
         {
-            float dx = a.x - b.x, dy = a.y - b.y;
+            float dx = a.positionX - b.positionX, dy = a.positionY - b.positionY;
             return dx * dx + dy * dy;
         };
         float rangeLimit = npc.radius + 2.0f;
@@ -369,7 +378,7 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
 
         // Look up skill cost data from TrainerManager
         const ClassSkillTreeEntryStruct *entry =
-            gameServices_.getTrainerManager().getSkillEntry(req.npcId, req.skillSlug);
+            gameServices_.getTrainerManager().getSkillEntry(effectiveNpcId, req.skillSlug);
         if (!entry)
         {
             sendFailed("skill_not_available");
@@ -475,7 +484,7 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
 
         log_->info("[SkillEventHandler] REQUEST_LEARN_SKILL: char={} npc={} skill={}",
             req.characterId,
-            req.npcId,
+            effectiveNpcId,
             req.skillSlug);
     }
     catch (const std::exception &ex)

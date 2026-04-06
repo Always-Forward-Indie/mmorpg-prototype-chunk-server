@@ -55,6 +55,7 @@ always replaces its local state with the received values instead of applying a d
   "body": {
     "characterId": 42,
     "level": 7,
+    "freeSkillPoints": 2,
     "experience": {
       "current": 3400,
       "levelStart": 2500,
@@ -116,6 +117,7 @@ always replaces its local state with the received values instead of applying a d
 |---|---|---|
 | `characterId` | int | Identifies whose stats these are |
 | `level` | int | Current character level |
+| `freeSkillPoints` | int | Unspent skill points available for learning skills |
 | `experience.current` | int | Total accumulated experience points |
 | `experience.levelStart` | int | XP threshold at the **start** of the current level |
 | `experience.nextLevel` | int | XP threshold to reach the **next** level |

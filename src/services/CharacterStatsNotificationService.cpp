@@ -252,6 +252,7 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
 
     builder.setBody("characterId", characterId)
         .setBody("level", characterData.characterLevel)
+        .setBody("freeSkillPoints", characterData.freeSkillPoints)
         .setBody("experience", nlohmann::json{{"current", characterData.characterExperiencePoints}, {"levelStart", levelStart}, {"nextLevel", characterData.expForNextLevel}, {"debt", characterData.experienceDebt}})
         .setBody("health", nlohmann::json{{"current", characterData.characterCurrentHealth}, {"max", characterData.characterMaxHealth}})
         .setBody("mana", nlohmann::json{{"current", characterData.characterCurrentMana}, {"max", characterData.characterMaxMana}})

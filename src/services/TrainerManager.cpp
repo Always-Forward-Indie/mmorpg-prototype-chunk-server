@@ -107,7 +107,6 @@ TrainerManager::buildSkillShopJson(
         entry["skillId"] = e.skillId;
         entry["skillSlug"] = e.skillSlug;
         entry["skillName"] = e.skillName;
-        entry["description"] = e.description;
         entry["isPassive"] = e.isPassive;
         entry["requiredLevel"] = e.requiredLevel;
         entry["spCost"] = e.spCost;

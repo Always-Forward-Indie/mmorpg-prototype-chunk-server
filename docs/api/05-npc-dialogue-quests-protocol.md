@@ -37,25 +37,59 @@ struct NPCDataStruct {
 {
   "header": {
     "eventType": "spawnNPCs",
-    "message": "success"
+    "status": "success",
+    "clientId": 7,
+    "timestamp": "2026-04-06T17:00:00.000Z",
+    "version": "1.0"
   },
   "body": {
-    "npcs": [
+    "npcsSpawn": [
       {
         "id": 42,
         "name": "Merchant John",
         "slug": "merchant_john",
-        "npcType": "vendor",
+        "race": "human",
         "level": 10,
-        "position": { "x": 200.0, "y": 150.0, "z": 0.0, "rotationZ": 90.0 },
+        "npcType": "vendor",
         "isInteractable": true,
-        "factionSlug": "traders_guild",
-        "radius": 200
+        "dialogueId": "merchant_john_main",
+        "quests": [
+          { "slug": "wolf_hunt", "status": "available" }
+        ],
+        "stats": {
+          "health": { "current": 100, "max": 100 },
+          "mana": { "current": 0, "max": 0 }
+        },
+        "position": { "x": 200.0, "y": 150.0, "z": 0.0, "rotationZ": 90.0 },
+        "attributes": []
       }
-    ]
+    ],
+    "spawnRadius": 50000.0,
+    "npcCount": 1
   }
 }
 ```
+
+> `factionSlug` и `radius` — серверные поля NPCDataStruct, в spawn-пакет **не включаются**.
+
+### Поля NPC в `npcsSpawn[]`
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `id` | int | ID NPC |
+| `name` | string | Имя NPC |
+| `slug` | string | Slug NPC |
+| `race` | string | Раса |
+| `level` | int | Уровень |
+| `npcType` | string | Тип NPC: `"vendor"`, `"quest_giver"`, `"blacksmith"`, `"guard"`, `"trainer"`, `"general"` |
+| `isInteractable` | bool | Можно ли взаимодействовать |
+| `dialogueId` | string | Slug диалога |
+| `quests[]` | array | Квесты, связанные с NPC — статус для текущего персонажа |
+| `quests[].slug` | string | Slug квеста |
+| `quests[].status` | string | `available` / `in_progress` / `completable` / `turned_in` / `failed` |
+| `stats` | object | HP и мана |
+| `position` | object | Позиция + поворот |
+| `attributes[]` | array | Атрибуты NPC: `{ id, name, slug, value }` |
 
 ---
 
@@ -75,11 +109,12 @@ struct NPCDataStruct {
     }
   },
   "body": {
-    "characterId": 101,
-    "npcId": 42,
-    "playerId": 1
+    "npcId": 42
   }
 }
+```
+
+> Только `body.npcId` является обязательным. `characterId` и `playerId` в теле не читаются — они определяются из контекста аутентификации.
 ```
 
 ### Серверная обработка
@@ -163,7 +198,7 @@ struct NPCDataStruct {
 |-----|---------|
 | `NPC_NOT_FOUND` | NPC не существует |
 | `OUT_OF_RANGE` | Слишком далеко от NPC |
-| `BLOCKED_BY_REPUTATION` | Репутация с фракцией NPC < -500 |
+| `BLOCKED_BY_REPUTATION` | Репутация с фракцией NPC < -500. Также в `body.factionSlug` = slug фракции |
 | `NO_DIALOGUE` | Нет подходящего диалога для текущего контекста |
 
 ---
@@ -184,10 +219,8 @@ struct NPCDataStruct {
     }
   },
   "body": {
-    "characterId": 101,
     "sessionId": "dlg_7_1709834400000",
-    "edgeId": 1,
-    "playerId": 1
+    "edgeId": 1
   }
 }
 ```
@@ -196,6 +229,8 @@ struct NPCDataStruct {
 |------|-----|----------|
 | `sessionId` | string | ID активной сессии |
 | `edgeId` | int | ID выбранного ребра (из `choices[].edgeId`) |
+
+> `characterId` и `playerId` в теле сервером не читаются — определяются из контекста аутентификации.
 
 ### Серверная обработка
 
@@ -212,12 +247,12 @@ struct NPCDataStruct {
 
 ### Сервер → Unicast (поток ответов)
 
-**Сначала**: Нотификации от actions (0+):
+**Сначала**: Нотификации от actions (0+). Каждая нотификация оборачивается так: `header.eventType` = `body.type`, `header.status = "success"`:
 ```json
-{ "header": { "eventType": "quest_offered" }, "body": { "type": "quest_offered", "questId": 10, "clientQuestKey": "quest_wolf_hunt" } }
+{ "header": { "eventType": "quest_offered", "status": "success", "timestamp": "...", "version": "1.0" }, "body": { "type": "quest_offered", "questId": 10, "clientQuestKey": "quest_wolf_hunt" } }
 ```
 ```json
-{ "header": { "eventType": "item_received" }, "body": { "type": "item_received", "itemId": 7, "quantity": 3 } }
+{ "header": { "eventType": "item_received", "status": "success", "timestamp": "...", "version": "1.0" }, "body": { "type": "item_received", "itemId": 7, "quantity": 3 } }
 ```
 
 **Затем**: Следующая нода (или закрытие):
@@ -262,12 +297,12 @@ struct NPCDataStruct {
     }
   },
   "body": {
-    "characterId": 101,
-    "sessionId": "dlg_7_1709834400000",
-    "playerId": 1
+    "sessionId": "dlg_7_1709834400000"
   }
 }
 ```
+
+> Только `body.sessionId` читается сервером.
 
 ### Сервер → Unicast
 
@@ -296,6 +331,8 @@ struct NPCDataStruct {
 | `action` | ❌ | Выполняет `actionGroup`, автоматически переходит по первому ребру |
 | `jump` | ❌ | Безусловный переход к `jumpTargetNodeId` |
 | `end` | ❌ | Конец диалога → закрытие сессии |
+
+> Авто-ноды (`action`, `jump`) могут иметь `conditionGroup`. Если условие **не выполнено** — диалог немедленно завершается (`DIALOGUE_CLOSE`), а не переходит дальше.
 
 ### Обход графа
 
@@ -840,10 +877,12 @@ struct QuestStepStruct {
 | `currentStep` | int | Индекс текущего шага (0-based) |
 | `progress` | object | Прогресс текущего шага |
 | `totalSteps` | int | Общее количество шагов |
-| `clientStepKey` | string | Ключ локализации шага |
-| `stepType` | string | Тип текущего шага |
-| `completionMode` | string | Режим завершения |
-| `required` | object | Параметры шага (что нужно сделать) |
+| `clientStepKey` | string | Ключ локализации шага. **Отсутствует**, если `currentStep >= totalSteps` (квест завершён/провален) |
+| `stepType` | string | Тип текущего шага. Отсутствует, если шагов нет |
+| `completionMode` | string | Режим завершения. Отсутствует, если шагов нет |
+| `required` | object | Параметры шага. Отсутствует, если шагов нет |
+
+> Поля `clientStepKey`, `stepType`, `completionMode`, `required` присутствуют только если `currentStep < totalSteps`, т.е. есть активный шаг.
 
 ---
 
