@@ -212,9 +212,107 @@ Sent when a skill purchase attempt fails validation.
 | Code | Meaning |
 |------|---------|
 | `already_learned` | Player already knows this skill |
+| `insufficient_level` | Character level below `requiredLevel` |
+| `missing_prerequisite` | Prerequisite skill not yet learned |
 | `insufficient_sp` | Not enough free skill points |
 | `insufficient_gold` | Not enough gold coins in inventory |
 | `missing_skill_book` | Required skill book not in inventory |
+| `npc_not_found` | Referenced NPC does not exist |
+| `out_of_range` | Player is too far from the trainer |
+| `skill_not_available` | NPC does not teach this skill |
+
+---
+
+## Skill Trainer Shop UI (direct packets)
+
+In addition to the dialogue-based `learn_skill` action, clients can open a dedicated
+**skill trainer shop window** — a UI showing all skills the trainer teaches, along
+with per-skill affordability flags.  This is the preferred path for new UI work;
+the dialogue path is kept for backward compatibility.
+
+### Packet: `openSkillShop` (client → chunk)
+
+Opens the trainer shop window without going through a dialogue.
+
+```json
+{
+  "header": { "eventType": "openSkillShop", "clientId": 42 },
+  "body": {
+    "npcId": 4,
+    "posX": 1200, "posY": -2800, "posZ": 200
+  }
+}
+```
+
+### Response: `skillShop` (chunk → client)
+
+```json
+{
+  "header": { "eventType": "skillShop", "status": "success", "clientId": 42 },
+  "body": {
+    "npcId": 4,
+    "npcSlug": "theron",
+    "freeSkillPoints": 2,
+    "goldBalance": 350,
+    "skills": [
+      {
+        "skillId": 4,
+        "skillSlug": "shield_bash",
+        "skillName": "Shield Bash",
+        "description": "Stuns the target briefly with your shield.",
+        "isPassive": false,
+        "requiredLevel": 1,
+        "spCost": 1,
+        "goldCost": 50,
+        "requiresBook": false,
+        "bookItemId": 0,
+        "prerequisiteSkillSlug": "",
+        "isLearned": false,
+        "canLearn": true,
+        "prereqMet": true,
+        "levelMet": true,
+        "spMet": true,
+        "goldMet": true,
+        "bookMet": true
+      }
+    ]
+  }
+}
+```
+
+**Per-skill flags:**
+
+| Flag | Meaning |
+|------|---------|
+| `isLearned` | Player already knows this skill |
+| `canLearn` | All other flags are true (shortcut for UI enable/disable) |
+| `prereqMet` | Prerequisite skill is learned (or none required) |
+| `levelMet` | Character level ≥ `requiredLevel` |
+| `spMet` | `freeSkillPoints` ≥ `spCost` |
+| `goldMet` | Gold balance ≥ `goldCost` |
+| `bookMet` | Skill book is in inventory (or not required) |
+
+### Packet: `requestLearnSkill` (client → chunk)
+
+Sent when the player clicks "Learn" in the skill shop UI.
+
+```json
+{
+  "header": { "eventType": "requestLearnSkill", "clientId": 42 },
+  "body": {
+    "npcId": 4,
+    "skillSlug": "shield_bash",
+    "posX": 1200, "posY": -2800, "posZ": 200
+  }
+}
+```
+
+On success the server deducts SP, gold, and the skill book, sends `saveLearnedSkill`
+to the game server, and the usual `skill_learned` / `learn_skill_failed` response is
+returned (see above).
+
+Error codes from `requestLearnSkill` are identical to the `learn_skill_failed` reason
+table above, plus `npc_not_found`, `out_of_range`, and `skill_not_available`.
 
 ---
 

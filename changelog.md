@@ -1,3 +1,18 @@
+v0.1.3
+06.04.2026
+================
+New:
+Skill Trainer Shop UI — новое окно с полным списком навыков тренера и флагами доступности. Клиент отправляет прямой пакет `openSkillShop {npcId}` без прохождения диалога; chunk-сервер отвечает пакетом `skillShop` с массивом навыков, где каждый элемент содержит флаги `isLearned`, `canLearn`, `prereqMet`, `levelMet`, `spMet`, `goldMet`, `bookMet`. Параллельно добавлена диалоговая экшн-команда `open_skill_shop` в `DialogueActionExecutor` — отправляет тот же пакет прямо из узла диалога.
+`requestLearnSkill` packet — прямой пакет обучения из UI тренера (без диалога). Проходит ту же цепочку валидаций, что и `learn_skill` в диалоге: уровень персонажа, пресет навыков, SP, золото, наличие книги навыка. При успехе потребляет ресурсы и отправляет `saveLearnedSkill` на game-сервер; ответ приходит стандартным `skill_learned` / `learn_skill_failed`. Новые коды ошибок: `insufficient_level`, `missing_prerequisite`, `npc_not_found`, `out_of_range`, `skill_not_available`.
+TrainerManager — новый сервис (аналог `VendorManager`): хранит в памяти списки навыков для каждого NPC-тренера. Методы: `setTrainerData()`, `getTrainerByNpcId()`, `getSkillEntry()`, `buildSkillShopJson()`. Потокобезопасен (`shared_mutex`). Зарегистрирован в `GameServices`.
+`SET_TRAINER_DATA` / `OPEN_SKILL_SHOP` / `REQUEST_LEARN_SKILL` — три новых типа событий. `GameServerWorker` маршрутизирует входящий пакет `setTrainerData` от game-сервера в `SET_TRAINER_DATA`; `EventDispatcher` парсит `openSkillShop` и `requestLearnSkill` от клиента. Все три случая обрабатываются `SkillEventHandler`.
+`ClassSkillTreeEntryStruct` / `TrainerNPCDataStruct` / `OpenSkillShopRequestStruct` / `RequestLearnSkillRequestStruct` — четыре новых структуры данных в `DataStructs.hpp`.
+DB Migration 048 — таблица `npc_trainer_class`: связывает NPC-тренера с классом, навыки которого он преподаёт. Seed: Theron (id=4) → Warrior (class_id=2), Sylara (id=5) → Mage (class_id=1). Дамп обновлён.
+docs/skill-learning-system.md — новый раздел «Skill Trainer Shop UI»: описание пакетов `openSkillShop` / `skillShop` / `requestLearnSkill`, таблица флагов, таблица кодов ошибок.
+docs/api/05-npc-dialogue-quests-protocol.md — добавлен блок `open_skill_shop` с примерами пакетов.
+
+---
+
 v0.1.2
 05.04.2026
 ================

@@ -250,6 +250,11 @@ GameServerWorker::processGameServerData(std::string_view data)
         nlohmann::json bodyJson = jsonParser_.parseCombatActionData(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_VENDOR_DATA, clientData.clientId, bodyJson);
     }
+    else if (eventType == "setTrainerData")
+    {
+        nlohmann::json bodyJson = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_TRAINER_DATA, clientData.clientId, bodyJson);
+    }
     else if (eventType == "setPlayerActiveEffects")
     {
         auto effects = jsonParser_.parsePlayerActiveEffects(data.data(), data.size());

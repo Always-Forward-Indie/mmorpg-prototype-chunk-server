@@ -49,6 +49,36 @@ class SkillEventHandler : public BaseEventHandler
      */
     void initializeFromCharacterData(const CharacterDataStruct &characterData, int clientID, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket);
 
+    /**
+     * @brief Handle SET_TRAINER_DATA event (game-server → chunk-server startup data).
+     *
+     * Parses the trainer skill list payload and populates TrainerManager.
+     *
+     * @param event Event carrying nlohmann::json body with "trainers" array
+     */
+    void handleSetTrainerDataEvent(const Event &event);
+
+    /**
+     * @brief Handle OPEN_SKILL_SHOP event (client → chunk-server direct packet).
+     *
+     * Validates NPC proximity, builds skill shop JSON via TrainerManager
+     * and sends a skillShop response.
+     *
+     * @param event Event carrying OpenSkillShopRequestStruct
+     */
+    void handleOpenSkillShopEvent(const Event &event);
+
+    /**
+     * @brief Handle REQUEST_LEARN_SKILL event (client → chunk-server from skill shop UI).
+     *
+     * Validates proximity / active dialogue session, looks up skill costs from
+     * TrainerManager, performs the same SP / gold / book validation as the
+     * dialogue learn_skill action, and either sends skill_learned or learn_skill_failed.
+     *
+     * @param event Event carrying RequestLearnSkillRequestStruct
+     */
+    void handleRequestLearnSkillEvent(const Event &event);
+
   private:
     /**
      * @brief Build skills JSON response

@@ -105,10 +105,15 @@ class Event
         VENDOR_STOCK_UPDATE, // Restock notification from game-server scheduler
         // Vendor events (client → chunk-server)
         OPEN_VENDOR_SHOP, // Player opens NPC vendor window
-        BUY_ITEM,         // Player buys item from NPC vendor
-        SELL_ITEM,        // Player sells item to NPC vendor
-        BUY_ITEM_BATCH,   // Player buys multiple items (cart purchase) from NPC vendor
-        SELL_ITEM_BATCH,  // Player sells multiple items (cart sell) to NPC vendor
+        // Skill trainer events (game-server → chunk-server, static data)
+        SET_TRAINER_DATA, // Load trainer NPC skill lists from game-server on chunk startup
+        // Skill trainer events (client → chunk-server)
+        OPEN_SKILL_SHOP,     // Player opens skill trainer shop window directly
+        REQUEST_LEARN_SKILL, // Player requests to learn a skill from the skill shop UI
+        BUY_ITEM,            // Player buys item from NPC vendor
+        SELL_ITEM,           // Player sells item to NPC vendor
+        BUY_ITEM_BATCH,      // Player buys multiple items (cart purchase) from NPC vendor
+        SELL_ITEM_BATCH,     // Player sells multiple items (cart sell) to NPC vendor
         // Repair shop events (client → chunk-server)
         OPEN_REPAIR_SHOP, // Player opens blacksmith repair window
         REPAIR_ITEM,      // Player repairs one item

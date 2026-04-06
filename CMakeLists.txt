@@ -50,6 +50,7 @@ set(SOURCE_FILES
     src/services/ClientManager.cpp
     src/services/GameConfigService.cpp
     src/services/VendorManager.cpp
+    src/services/TrainerManager.cpp
     src/services/TradeSessionManager.cpp
     src/services/EquipmentManager.cpp
     src/services/RespawnZoneManager.cpp
@@ -129,6 +130,7 @@ set(HEADER_FILES
     include/services/DialogueActionExecutor.hpp
     include/services/QuestManager.hpp
     include/services/VendorManager.hpp
+    include/services/TrainerManager.hpp
     include/services/TradeSessionManager.hpp
     include/services/RespawnZoneManager.hpp
     include/services/GameZoneManager.hpp

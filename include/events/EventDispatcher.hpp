@@ -33,6 +33,8 @@ class EventDispatcher
     void handleDialogueClose(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     // Vendor / Repair / Trade
     void handleOpenVendorShop(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleOpenSkillShop(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleRequestLearnSkill(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleBuyItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleSellItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleBuyItemBatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);

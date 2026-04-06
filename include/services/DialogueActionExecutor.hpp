@@ -24,6 +24,10 @@ class GameServices;
  *   give_item         – add item to player inventory
  *   give_exp          – grant experience
  *   give_gold         – grant gold coins (item id resolved by slug "gold_coin")
+ *   open_vendor_shop  – open the NPC vendor shop UI
+ *   open_repair_shop  – open the NPC repair shop UI
+ *   open_skill_shop   – open the skill trainer shop UI (lists all teachable skills with costs)
+ *   learn_skill       – validate and execute a single skill purchase
  */
 class DialogueActionExecutor
 {
@@ -104,6 +108,14 @@ class DialogueActionExecutor
     void executeOpenRepairShop(const nlohmann::json &action,
         int characterId,
         int clientId,
+        ActionResult &result);
+
+    // Skill trainer: open skill shop UI showing all learnable skills with costs
+    // {"type":"open_skill_shop"}  — NPC resolved from active dialogue session
+    void executeOpenSkillShop(const nlohmann::json &action,
+        int characterId,
+        int clientId,
+        PlayerContextStruct &ctx,
         ActionResult &result);
 
     // Stage 4: change faction reputation via dialogue action

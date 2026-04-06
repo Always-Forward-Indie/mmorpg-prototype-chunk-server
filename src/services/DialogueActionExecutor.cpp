@@ -2,6 +2,7 @@
 #include "services/GameServices.hpp"
 #include "services/ItemManager.hpp"
 #include "services/QuestManager.hpp"
+#include "services/TrainerManager.hpp"
 #include <cmath>
 #include <spdlog/logger.h>
 
@@ -75,6 +76,8 @@ DialogueActionExecutor::executeDispatch(const nlohmann::json &action, const std:
         executeOpenVendorShop(action, characterId, clientId, result);
     else if (type == "open_repair_shop")
         executeOpenRepairShop(action, characterId, clientId, result);
+    else if (type == "open_skill_shop")
+        executeOpenSkillShop(action, characterId, clientId, ctx, result);
     else if (type == "change_reputation")
         executeChangeReputation(action, characterId, ctx, result);
     else if (type == "learn_skill")
@@ -414,8 +417,53 @@ DialogueActionExecutor::executeChangeReputation(const nlohmann::json &action,
     result.clientNotifications.push_back(std::move(notification));
 }
 
+// ── open_skill_shop ───────────────────────────────────────────────────────
+// Action JSON: {"type":"open_skill_shop"}
+// Resolves the NPC from the active dialogue session, queries TrainerManager
+// for the full skill list with per-skill affordability flags and sends
+// an openSkillShop notification to the client.
+void
+DialogueActionExecutor::executeOpenSkillShop(const nlohmann::json & /*action*/,
+    int characterId,
+    int /*clientId*/,
+    PlayerContextStruct &ctx,
+    ActionResult &result)
+{
+    auto *session = services_.getDialogueSessionManager().getSessionByCharacter(characterId);
+    if (!session)
+    {
+        log_->error("[DialogueAction] open_skill_shop: no active session for char {}", characterId);
+        return;
+    }
+    int npcId = session->npcId;
+
+    const CharacterDataStruct &charData = services_.getCharacterManager().getCharacterData(characterId);
+    ctx.characterLevel = charData.characterLevel;
+
+    nlohmann::json skillsJson = services_.getTrainerManager().buildSkillShopJson(
+        npcId, ctx, services_.getInventoryManager());
+
+    if (skillsJson.is_null())
+    {
+        log_->warn("[DialogueAction] open_skill_shop: npc {} is not a registered trainer", npcId);
+        return;
+    }
+
+    const auto &npc = services_.getNPCManager().getNPCById(npcId);
+
+    nlohmann::json notification;
+    notification["type"] = "openSkillShop";
+    notification["npcId"] = npcId;
+    notification["npcSlug"] = npc.slug;
+    notification["freeSkillPoints"] = ctx.freeSkillPoints;
+    notification["goldBalance"] = services_.getInventoryManager().getGoldAmount(characterId);
+    notification["skills"] = std::move(skillsJson);
+    result.clientNotifications.push_back(std::move(notification));
+
+    log_->info("[DialogueAction] open_skill_shop: char={} npc={}", characterId, npcId);
+}
+
 // ── learn_skill ───────────────────────────────────────────────────────────
-// Action JSON: {"type":"learn_skill","skill_slug":"shield_bash",
 //               "sp_cost":1,"gold_cost":500,
 //               "requires_book":false,"book_item_id":0}
 void

@@ -99,6 +99,14 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleOpenVendorShop(context, socket);
     }
+    else if (context.eventType == "openSkillShop")
+    {
+        handleOpenSkillShop(context, socket);
+    }
+    else if (context.eventType == "requestLearnSkill")
+    {
+        handleRequestLearnSkill(context, socket);
+    }
     else if (context.eventType == "buyItem")
     {
         handleBuyItem(context, socket);
@@ -1189,6 +1197,56 @@ EventDispatcher::handleOpenVendorShop(const EventContext &context, std::shared_p
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("[EventDispatcher] handleOpenVendorShop: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleOpenSkillShop(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        OpenSkillShopRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::OPEN_SKILL_SHOP, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleOpenSkillShop: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleRequestLearnSkill(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        auto j = nlohmann::json::parse(context.fullMessage);
+        RequestLearnSkillRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.skillSlug = j["body"].value("skillSlug", "");
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        if (req.skillSlug.empty())
+        {
+            gameServices_.getLogger().logError("[EventDispatcher] handleRequestLearnSkill: missing skillSlug");
+            return;
+        }
+        eventsBatch_.push_back(Event(Event::REQUEST_LEARN_SKILL, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleRequestLearnSkill: " + std::string(e.what()));
     }
 }
 

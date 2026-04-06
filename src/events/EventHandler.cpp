@@ -344,6 +344,17 @@ EventHandler::dispatchEvent(const Event &event)
             handleSetLearnedSkillEvent(event);
             break;
 
+        // ── Skill trainer events ───────────────────────────────────────────
+        case Event::SET_TRAINER_DATA:
+            skillEventHandler_->handleSetTrainerDataEvent(event);
+            break;
+        case Event::OPEN_SKILL_SHOP:
+            skillEventHandler_->handleOpenSkillShopEvent(event);
+            break;
+        case Event::REQUEST_LEARN_SKILL:
+            skillEventHandler_->handleRequestLearnSkillEvent(event);
+            break;
+
         case Event::INVENTORY_ITEM_ID_SYNC:
             handleInventoryItemIdSyncEvent(event);
             break;

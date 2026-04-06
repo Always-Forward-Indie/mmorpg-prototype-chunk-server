@@ -31,6 +31,7 @@
 #include "services/SpawnZoneManager.hpp"
 #include "services/StatusEffectTemplateManager.hpp"
 #include "services/TradeSessionManager.hpp"
+#include "services/TrainerManager.hpp"
 #include "services/VendorManager.hpp"
 #include "services/ZoneEventManager.hpp"
 #include "utils/Logger.hpp"
@@ -63,6 +64,7 @@ class GameServices
           statsNotificationService_(this),
           gameConfigService_(logger_),
           vendorManager_(itemManager_, logger_),
+          trainerManager_(itemManager_, logger_),
           tradeSessionManager_(logger_),
           equipmentManager_(inventoryManager_, itemManager_, characterManager_, logger_),
           respawnZoneManager_(logger_),
@@ -181,6 +183,10 @@ class GameServices
     {
         return vendorManager_;
     }
+    TrainerManager &getTrainerManager()
+    {
+        return trainerManager_;
+    }
     TradeSessionManager &getTradeSessionManager()
     {
         return tradeSessionManager_;
@@ -253,6 +259,7 @@ class GameServices
     ExperienceCacheManager experienceCacheManager_;
     CharacterStatsNotificationService statsNotificationService_;
     VendorManager vendorManager_;
+    TrainerManager trainerManager_;
     TradeSessionManager tradeSessionManager_;
     EquipmentManager equipmentManager_;
     RespawnZoneManager respawnZoneManager_;

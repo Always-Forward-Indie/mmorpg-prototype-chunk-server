@@ -646,6 +646,49 @@ struct NPCDialogueMappingStruct {
 
 Возможные причины: `insufficient_sp`, `insufficient_gold`, `missing_skill_book`, `already_learned`
 
+#### open_skill_shop
+
+Открывает окно тренера навыков (Skill Trainer Shop UI) с полным списком навыков и флагами доступности.
+
+```json
+{
+  "type": "open_skill_shop"
+}
+```
+
+**Нотификация** — клиент получает пакет `openSkillShop` (`skillShop` ответ):
+```json
+{
+  "header": { "eventType": "skillShop", "status": "success", "clientId": 42 },
+  "body": {
+    "npcId": 4,
+    "npcSlug": "theron",
+    "freeSkillPoints": 2,
+    "goldBalance": 350,
+    "skills": [
+      {
+        "skillId": 4,
+        "skillSlug": "shield_bash",
+        "skillName": "Shield Bash",
+        "isLearned": false,
+        "canLearn": true,
+        "spCost": 1,
+        "goldCost": 50,
+        "requiresBook": false,
+        "prerequisiteSkillSlug": "",
+        "prereqMet": true,
+        "levelMet": true,
+        "spMet": true,
+        "goldMet": true,
+        "bookMet": true
+      }
+    ]
+  }
+}
+```
+
+Клиент также может отправить `openSkillShop` напрямую (без диалога) — см. `docs/skill-learning-system.md`.
+
 ---
 
 ## Система квестов

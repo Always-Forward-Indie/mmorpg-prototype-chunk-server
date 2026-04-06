@@ -154,6 +154,11 @@ using EventData = std::variant<
     SaveEquipmentChangeStruct,
     std::vector<VendorNPCDataStruct>,
     std::vector<VendorStockUpdateStruct>,
+    // Skill trainer system payloads
+    TrainerNPCDataStruct,
+    OpenSkillShopRequestStruct,
+    RequestLearnSkillRequestStruct,
+    std::vector<TrainerNPCDataStruct>,
     // Respawn system payloads
     RespawnZoneStruct,
     RespawnRequestStruct,

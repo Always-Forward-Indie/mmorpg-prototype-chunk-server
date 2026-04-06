@@ -1542,6 +1542,54 @@ struct RespawnRequestStruct
     TimestampStruct timestamps;
 };
 
+// ============= SKILL TRAINER STRUCTS =============
+
+/// One entry from class_skill_tree for a single teachable skill.
+/// Populated by game-server at startup via setTrainerData and held in TrainerManager.
+struct ClassSkillTreeEntryStruct
+{
+    int skillId = 0;
+    std::string skillSlug;
+    std::string skillName;
+    std::string description;
+    bool isPassive = false;
+    int requiredLevel = 1;
+    int spCost = 1;   ///< Skill points required to learn
+    int goldCost = 0; ///< Gold coins required to learn (0 = free)
+    bool requiresBook = false;
+    int bookItemId = 0;                ///< 0 if no book required
+    std::string prerequisiteSkillSlug; ///< "" if no prerequisite
+};
+
+/// Trainer NPC data: the set of skills one trainer teaches.
+/// Keyed by npcId and held in TrainerManager (analogous to VendorNPCDataStruct).
+struct TrainerNPCDataStruct
+{
+    int npcId = 0;
+    std::vector<ClassSkillTreeEntryStruct> skills;
+};
+
+/// Client → chunk: open skill trainer shop window directly (without dialogue)
+struct OpenSkillShopRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: learn a specific skill from the skill shop window
+struct RequestLearnSkillRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    std::string skillSlug;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
 /// Chunk-server → game-server: a timed champion was killed (need DB update).
 struct TimedChampionKilledStruct
 {
