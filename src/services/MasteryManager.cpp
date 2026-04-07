@@ -46,6 +46,16 @@ MasteryManager::getMasteryValue(int characterId,
     return mit != cit->second.end() ? mit->second : 0.0f;
 }
 
+std::unordered_map<std::string, float>
+MasteryManager::getAllMasteries(int characterId) const
+{
+    std::shared_lock lk(mutex_);
+    auto cit = data_.find(characterId);
+    if (cit == data_.end())
+        return {};
+    return cit->second;
+}
+
 void
 MasteryManager::fillMasteryContext(int characterId,
     PlayerContextStruct &ctx) const
@@ -188,19 +198,33 @@ MasteryManager::persist(int characterId,
     const std::string &masterySlug,
     float value)
 {
-    if (!saveCallback_)
-        return;
-    try
+    if (saveCallback_)
     {
-        nlohmann::json pkt;
-        pkt["header"]["eventType"] = "saveMastery";
-        pkt["body"]["characterId"] = characterId;
-        pkt["body"]["masterySlug"] = masterySlug;
-        pkt["body"]["value"] = value;
-        saveCallback_(pkt.dump() + "\n");
+        try
+        {
+            nlohmann::json pkt;
+            pkt["header"]["eventType"] = "saveMastery";
+            pkt["body"]["characterId"] = characterId;
+            pkt["body"]["masterySlug"] = masterySlug;
+            pkt["body"]["value"] = value;
+            saveCallback_(pkt.dump() + "\n");
+        }
+        catch (const std::exception &e)
+        {
+            log_->error("[Mastery] persist error: {}", e.what());
+        }
     }
-    catch (const std::exception &e)
+
+    // Notify client with incremental progress update
+    if (clientNotifyCallback_)
     {
-        log_->error("[Mastery] persist error: {}", e.what());
+        try
+        {
+            clientNotifyCallback_(characterId, masterySlug, value, "");
+        }
+        catch (const std::exception &e)
+        {
+            log_->error("[Mastery] clientNotifyCallback error: {}", e.what());
+        }
     }
 }

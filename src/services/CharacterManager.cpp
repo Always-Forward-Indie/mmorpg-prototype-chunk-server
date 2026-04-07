@@ -435,6 +435,26 @@ CharacterManager::addActiveEffect(int characterID, const ActiveEffectStruct &eff
     }
 }
 
+void
+CharacterManager::removeActiveEffectBySlug(int characterID, const std::string &effectSlug)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+    {
+        log_->error("[CharacterManager] removeActiveEffectBySlug: character " + std::to_string(characterID) + " not found");
+        return;
+    }
+    auto &effects = it->second.activeEffects;
+    auto before = effects.size();
+    effects.erase(
+        std::remove_if(effects.begin(), effects.end(), [&effectSlug](const ActiveEffectStruct &e)
+            { return e.effectSlug == effectSlug; }),
+        effects.end());
+    if (effects.size() < before)
+        log_->info("[CharacterManager] Removed effect '{}' from character {}", effectSlug, characterID);
+}
+
 int
 CharacterManager::restoreManaToCharacter(int characterID, int amount)
 {

@@ -338,7 +338,7 @@ LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruc
     }
 
     // Validate distance - player must be within pickup range (no locks needed)
-    const float MAX_PICKUP_DISTANCE = 100.0f; // Maximum distance for item pickup
+    const float MAX_PICKUP_DISTANCE = 200.0f; // Maximum distance for item pickup
     float distance = calculateDistance(playerPosition, droppedItem.position);
 
     if (distance > MAX_PICKUP_DISTANCE)

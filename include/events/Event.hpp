@@ -158,6 +158,12 @@ class Event
         SET_ZONE_EVENT_TEMPLATES,       // Game-server sends zone event template list to chunk-server
         SET_MOB_WEAKNESSES_RESISTANCES, // Game-server sends mob weaknesses/resistances tables
 
+        // Stage 4: Title system
+        SET_TITLE_DEFINITIONS, // Game-server sends static title definitions to chunk-server
+        SET_PLAYER_TITLES,     // Load earned + equipped title state for a character (on join)
+        GET_PLAYER_TITLES,     // Client requests their full title list
+        EQUIP_TITLE,           // Client requests to equip (or unequip) a title
+
         // Chat events (client → chunk-server)
         CHAT_MESSAGE, ///< Player sends a chat message (local / zone / whisper)
         PLAYER_READY  ///< Client notifies server that the game scene has finished loading

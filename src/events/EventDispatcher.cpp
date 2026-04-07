@@ -199,6 +199,14 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handlePlayerReady(context, socket);
     }
+    else if (context.eventType == "getTitles")
+    {
+        handleGetPlayerTitles(context, socket);
+    }
+    else if (context.eventType == "equipTitle")
+    {
+        handleEquipTitle(context, socket);
+    }
     else
     {
         log_->error("Unknown event type: " + context.eventType);
@@ -1875,4 +1883,60 @@ EventDispatcher::handlePlayerReady(const EventContext &context,
     log_->info("[EventDispatcher] playerReady queued: client=" +
                std::to_string(context.clientData.clientId) +
                " char=" + std::to_string(context.characterData.characterId));
+}
+
+// ── getTitles ──────────────────────────────────────────────────────────────
+void
+EventDispatcher::handleGetPlayerTitles(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.clientData.clientId <= 0 || context.characterData.characterId <= 0)
+    {
+        log_->warn("[EventDispatcher] getTitles: invalid clientId or characterId");
+        return;
+    }
+
+    nlohmann::json body;
+    body["characterId"] = context.characterData.characterId;
+    body["clientId"] = context.clientData.clientId;
+
+    eventsBatch_.push_back(Event(Event::GET_PLAYER_TITLES,
+        context.clientData.clientId,
+        body,
+        context.timestamps));
+}
+
+// ── equipTitle ─────────────────────────────────────────────────────────────
+void
+EventDispatcher::handleEquipTitle(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.clientData.clientId <= 0 || context.characterData.characterId <= 0)
+    {
+        log_->warn("[EventDispatcher] equipTitle: invalid clientId or characterId");
+        return;
+    }
+
+    std::string titleSlug;
+    try
+    {
+        const auto &jsonData = nlohmann::json::parse(context.rawMessage);
+        titleSlug = jsonData.value("body", nlohmann::json::object()).value("titleSlug", "");
+    }
+    catch (...)
+    {
+        log_->error("[EventDispatcher] equipTitle: failed to parse rawMessage");
+        return;
+    }
+
+    EquipTitleRequestStruct req;
+    req.characterId = context.characterData.characterId;
+    req.clientId = context.clientData.clientId;
+    req.titleSlug = titleSlug;
+    req.timestamps = context.timestamps;
+
+    eventsBatch_.push_back(Event(Event::EQUIP_TITLE,
+        context.clientData.clientId,
+        req,
+        context.timestamps));
 }

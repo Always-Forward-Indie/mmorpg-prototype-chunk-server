@@ -1,6 +1,7 @@
 #include "events/EventHandler.hpp"
 #include "services/CombatResponseBuilder.hpp"
 #include "services/CombatSystem.hpp"
+#include "services/ReputationManager.hpp"
 #include <spdlog/logger.h>
 
 EventHandler::EventHandler(
@@ -337,6 +338,20 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::SAVE_MASTERY:
             // outgoing only — no handler needed
+            break;
+
+        // ── Title system ──────────────────────────────────────────────────────
+        case Event::SET_TITLE_DEFINITIONS:
+            handleSetTitleDefinitionsEvent(event);
+            break;
+        case Event::SET_PLAYER_TITLES:
+            handleSetPlayerTitlesEvent(event);
+            break;
+        case Event::GET_PLAYER_TITLES:
+            handleGetPlayerTitlesEvent(event);
+            break;
+        case Event::EQUIP_TITLE:
+            handleEquipTitleEvent(event);
             break;
 
         // Skill system
@@ -1179,6 +1194,38 @@ EventHandler::handleSetPlayerReputationsEvent(const Event &event)
         gameServices_.getReputationManager().loadCharacterReputations(characterId, reps);
         log_->info("[EH] SET_PLAYER_REPUTATIONS: loaded " + std::to_string(reps.size()) +
                    " entries for character " + std::to_string(characterId));
+
+        // Push reputation state to the client immediately (same pattern as SET_PLAYER_INVENTORY)
+        int clientId = 0;
+        {
+            auto characters = gameServices_.getCharacterManager().getCharactersList();
+            for (const auto &c : characters)
+            {
+                if (c.characterId == characterId)
+                {
+                    clientId = c.clientId;
+                    break;
+                }
+            }
+        }
+        if (clientId > 0)
+        {
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+            if (clientSocket && clientSocket->is_open())
+            {
+                nlohmann::json entriesArr = nlohmann::json::array();
+                for (const auto &[faction, value] : reps)
+                    entriesArr.push_back({{"factionSlug", faction}, {"value", value}, {"tier", ReputationManager::getTier(value)}});
+
+                nlohmann::json response;
+                response["header"]["eventType"] = "player_reputations";
+                response["header"]["status"] = "success";
+                response["body"]["characterId"] = characterId;
+                response["body"]["entries"] = entriesArr;
+                networkManager_.sendResponse(clientSocket,
+                    networkManager_.generateResponseMessage("success", response));
+            }
+        }
     }
     catch (const std::exception &e)
     {
@@ -1216,6 +1263,38 @@ EventHandler::handleSetPlayerMasteriesEvent(const Event &event)
         gameServices_.getMasteryManager().loadCharacterMasteries(characterId, masteries);
         log_->info("[EH] SET_PLAYER_MASTERIES: loaded " + std::to_string(masteries.size()) +
                    " entries for character " + std::to_string(characterId));
+
+        // Push mastery state to the client immediately
+        int clientId = 0;
+        {
+            auto characters = gameServices_.getCharacterManager().getCharactersList();
+            for (const auto &c : characters)
+            {
+                if (c.characterId == characterId)
+                {
+                    clientId = c.clientId;
+                    break;
+                }
+            }
+        }
+        if (clientId > 0)
+        {
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+            if (clientSocket && clientSocket->is_open())
+            {
+                nlohmann::json entriesArr = nlohmann::json::array();
+                for (const auto &[slug, value] : masteries)
+                    entriesArr.push_back({{"masterySlug", slug}, {"value", value}});
+
+                nlohmann::json response;
+                response["header"]["eventType"] = "player_masteries";
+                response["header"]["status"] = "success";
+                response["body"]["characterId"] = characterId;
+                response["body"]["entries"] = entriesArr;
+                networkManager_.sendResponse(clientSocket,
+                    networkManager_.generateResponseMessage("success", response));
+            }
+        }
     }
     catch (const std::exception &e)
     {
@@ -1355,5 +1434,207 @@ EventHandler::handleSetLearnedSkillEvent(const Event &event)
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("Error processing SET_LEARNED_SKILL: " + std::string(e.what()));
+    }
+}
+
+// ── SET_TITLE_DEFINITIONS ──────────────────────────────────────────────────
+void
+EventHandler::handleSetTitleDefinitionsEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_TITLE_DEFINITIONS: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+
+        std::vector<TitleDefinitionStruct> defs;
+        if (body.contains("titles") && body["titles"].is_array())
+        {
+            for (const auto &t : body["titles"])
+            {
+                TitleDefinitionStruct td;
+                td.id = t.value("id", 0);
+                td.slug = t.value("slug", "");
+                td.displayName = t.value("displayName", "");
+                td.description = t.value("description", "");
+                td.earnCondition = t.value("earnCondition", "");
+                if (t.contains("bonuses") && t["bonuses"].is_array())
+                {
+                    for (const auto &b : t["bonuses"])
+                    {
+                        TitleBonusStruct bonus;
+                        bonus.attributeSlug = b.value("attributeSlug", "");
+                        bonus.value = b.value("value", 0.0f);
+                        if (!bonus.attributeSlug.empty())
+                            td.bonuses.push_back(bonus);
+                    }
+                }
+                if (!td.slug.empty())
+                    defs.push_back(std::move(td));
+            }
+        }
+
+        gameServices_.getTitleManager().loadTitleDefinitions(defs);
+        log_->info("[EH] SET_TITLE_DEFINITIONS: loaded {} definitions", defs.size());
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_TITLE_DEFINITIONS: " + std::string(e.what()));
+    }
+}
+
+// ── SET_PLAYER_TITLES ─────────────────────────────────────────────────────
+void
+EventHandler::handleSetPlayerTitlesEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_PLAYER_TITLES: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+        if (characterId <= 0)
+        {
+            log_->error("SET_PLAYER_TITLES: missing characterId");
+            return;
+        }
+
+        PlayerTitleStateStruct state;
+        state.characterId = characterId;
+        state.equippedSlug = body.value("equippedSlug", "");
+        if (body.contains("earnedSlugs") && body["earnedSlugs"].is_array())
+        {
+            for (const auto &s : body["earnedSlugs"])
+                if (s.is_string())
+                    state.earnedSlugs.push_back(s.get<std::string>());
+        }
+
+        gameServices_.getTitleManager().loadPlayerTitles(characterId, state);
+        log_->info("[EH] SET_PLAYER_TITLES: loaded {} titles for char={}", state.earnedSlugs.size(), characterId);
+
+        // Push title state to client immediately (same pattern as SET_PLAYER_INVENTORY)
+        // notifyClientCallback_ fires sendTitleUpdateToClient → already handles this
+        // But we need it explicitly if the callback isn't wired yet during login ordering.
+        // The callback wired in ChunkServer will re-send on any future change.
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_PLAYER_TITLES: " + std::string(e.what()));
+    }
+}
+
+// ── GET_PLAYER_TITLES ─────────────────────────────────────────────────────
+void
+EventHandler::handleGetPlayerTitlesEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("GET_PLAYER_TITLES: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+        int clientId = body.value("clientId", 0);
+
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (!clientSocket || !clientSocket->is_open())
+        {
+            log_->error("[EH] GET_PLAYER_TITLES: socket not available for clientId={}", clientId);
+            return;
+        }
+
+        PlayerTitleStateStruct state = gameServices_.getTitleManager().getPlayerTitles(characterId);
+
+        nlohmann::json earnedArr = nlohmann::json::array();
+        for (const auto &slug : state.earnedSlugs)
+        {
+            TitleDefinitionStruct def = gameServices_.getTitleManager().getTitleDefinition(slug);
+            nlohmann::json entry;
+            entry["slug"] = slug;
+            entry["displayName"] = def.displayName;
+            entry["description"] = def.description;
+            entry["earnCondition"] = def.earnCondition;
+            nlohmann::json bonusArr = nlohmann::json::array();
+            for (const auto &b : def.bonuses)
+                bonusArr.push_back({{"attributeSlug", b.attributeSlug}, {"value", b.value}});
+            entry["bonuses"] = bonusArr;
+            earnedArr.push_back(entry);
+        }
+
+        nlohmann::json equippedEntry = nullptr;
+        if (!state.equippedSlug.empty())
+        {
+            TitleDefinitionStruct def = gameServices_.getTitleManager().getTitleDefinition(state.equippedSlug);
+            equippedEntry = {{"slug", state.equippedSlug}, {"displayName", def.displayName}, {"description", def.description}, {"earnCondition", def.earnCondition}};
+            nlohmann::json bonusArr = nlohmann::json::array();
+            for (const auto &b : def.bonuses)
+                bonusArr.push_back({{"attributeSlug", b.attributeSlug}, {"value", b.value}});
+            equippedEntry["bonuses"] = bonusArr;
+        }
+
+        nlohmann::json response;
+        response["header"]["eventType"] = "player_titles_update";
+        response["header"]["status"] = "success";
+        response["body"]["characterId"] = characterId;
+        response["body"]["equippedTitle"] = equippedEntry;
+        response["body"]["earnedTitles"] = earnedArr;
+
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", response));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing GET_PLAYER_TITLES: " + std::string(e.what()));
+    }
+}
+
+// ── EQUIP_TITLE ───────────────────────────────────────────────────────────
+void
+EventHandler::handleEquipTitleEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<EquipTitleRequestStruct>(data))
+        {
+            log_->error("EQUIP_TITLE: unexpected data type");
+            return;
+        }
+        const auto &req = std::get<EquipTitleRequestStruct>(data);
+
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(req.clientId);
+        if (!clientSocket || !clientSocket->is_open())
+        {
+            log_->error("[EH] EQUIP_TITLE: socket not available for clientId={}", req.clientId);
+            return;
+        }
+
+        bool ok = gameServices_.getTitleManager().equipTitle(req.characterId, req.titleSlug);
+
+        nlohmann::json response;
+        response["header"]["eventType"] = "equip_title_result";
+        response["header"]["status"] = ok ? "success" : "error";
+        response["body"]["characterId"] = req.characterId;
+        response["body"]["titleSlug"] = req.titleSlug;
+        if (!ok)
+            response["body"]["error"] = "title_not_earned";
+
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage(ok ? "success" : "error", response));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing EQUIP_TITLE: " + std::string(e.what()));
     }
 }

@@ -1618,3 +1618,42 @@ struct ChatMessageStruct
     float localRadius = 50.0f; ///< only used for LOCAL channel
     TimestampStruct timestamps;
 };
+
+// ── Title system ─────────────────────────────────────────────────────────────
+
+/// A single attribute bonus granted by a title
+struct TitleBonusStruct
+{
+    std::string attributeSlug; ///< e.g. "physical_attack", "crit_chance"
+    float value = 0.0f;        ///< additive flat bonus (same unit as ActiveEffectStruct::value)
+};
+
+/// Static title definition loaded from game-server (table: titles)
+struct TitleDefinitionStruct
+{
+    int id = 0;
+    std::string slug;                      ///< unique key, e.g. "wolf_slayer"
+    std::string displayName;               ///< e.g. "Wolf Slayer"
+    std::string description;               ///< flavour text / unlock condition hint
+    std::vector<TitleBonusStruct> bonuses; ///< stat bonuses while this title is equipped
+    /// How the title may be earned: "quest" | "reputation" | "mastery" | "bestiary" | "admin_grant"
+    std::string earnCondition;
+};
+
+/// Runtime state of a character's title collection
+struct PlayerTitleStateStruct
+{
+    int characterId = 0;
+    std::vector<std::string> earnedSlugs; ///< all titles the player has unlocked
+    std::string equippedSlug;             ///< currently displayed title (empty = none)
+};
+
+/// Client → chunk-server: request to equip/unequip a title
+struct EquipTitleRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    /// Slug to equip, or empty string "" to unequip current title
+    std::string titleSlug;
+    TimestampStruct timestamps;
+};

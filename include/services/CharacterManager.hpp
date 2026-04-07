@@ -82,6 +82,7 @@ class CharacterManager
     // Add a single active effect. If an effect with the same effectSlug already exists,
     // its expiresAt is refreshed (no stacking). Handles both stat modifiers and HoT/DoT.
     void addActiveEffect(int characterID, const ActiveEffectStruct &effect);
+    void removeActiveEffectBySlug(int characterID, const std::string &effectSlug);
 
     // Atomically restore mana: reads mana, adds amount, clamps to maxMana, writes back. Returns new mana.
     int restoreManaToCharacter(int characterID, int amount);

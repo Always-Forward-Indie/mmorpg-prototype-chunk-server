@@ -173,4 +173,6 @@ using EventData = std::variant<
     TimedChampionKilledStruct, // Chat system
     ChatMessageStruct,         // Mob weaknesses and resistances: {mobTemplateId -> [elementSlugs], ...} x2
     std::pair<std::unordered_map<int, std::vector<std::string>>,
-        std::unordered_map<int, std::vector<std::string>>>>;
+        std::unordered_map<int, std::vector<std::string>>>,
+    // Title system payloads
+    EquipTitleRequestStruct>;

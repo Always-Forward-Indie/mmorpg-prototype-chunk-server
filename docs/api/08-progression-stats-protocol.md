@@ -1,14 +1,15 @@
-# 08. Прогрессия: опыт, уровни, статы, регенерация, мастерство, репутация
+# 08. Прогрессия: опыт, уровни, статы, регенерация, мастерство, репутация, титулы
 
 ## Обзор
 
-Прогрессия включает 6 взаимосвязанных систем:
+Прогрессия включает 7 взаимосвязанных систем:
 - **Опыт и уровни**: XP → level up → stat bonuses
 - **XP-долг**: Штраф за смерть, погашается из нового XP
-- **Статы**: base + equipment + effects + mastery + item soul
+- **Статы**: base + equipment + effects + mastery + item soul + title bonuses
 - **OOC-регенерация**: Пассивное восстановление HP/MP вне боя
 - **Мастерство**: Прогресс 0-100 за каждый тип оружия
 - **Репутация**: Отношения с фракциями
+- **Титулы**: Заработанные звания с постоянными бонусами к статам
 
 ---
 
@@ -223,6 +224,7 @@ expForLevel(n) = BASE_EXP_PER_LEVEL × (EXP_MULTIPLIER ^ (n - 2))
       "current": 155,
       "max": 155
     },
+    "freeSkillPoints": 3,
     "weight": {
       "current": 18.5,
       "max": 74.0
@@ -256,6 +258,8 @@ expForLevel(n) = BASE_EXP_PER_LEVEL × (EXP_MULTIPLIER ^ (n - 2))
 ```
 
 ### Расчёт effective атрибута
+
+> **`freeSkillPoints`** — количество незатраченных скилл-поинтов персонажа. Передаётся в каждом `stats_update`. Клиент должен отображать это значение в UI (например, панель прокачки скиллов). Скилл-поинты тратятся через тренера (NPC action `learn_skill`) и начисляются при level-up.
 
 ```
 effective = base
@@ -330,10 +334,65 @@ newValue = min(currentValue + delta, 100.0)
 }
 ```
 
+### player_masteries — Полное состояние при входе в зону
+
+**Сервер → Unicast** (при логине: сразу после ответа game-server на `getPlayerMasteriesData`)
+
+**Последовательность событий:**
+1. `joinGameCharacter` от клиента
+2. Chunk-server → game-server: `getPlayerMasteriesData` (async request)
+3. Game-server → DB: `SELECT FROM character_skill_mastery WHERE character_id = ?`
+4. Game-server → chunk-server: `setPlayerMasteriesData`
+5. Chunk-server загружает в `MasteryManager`
+6. Chunk-server → клиент: **`player_masteries`**
+
+```json
+{
+  "header": {
+    "eventType": "player_masteries",
+    "status": "success"
+  },
+  "body": {
+    "characterId": 7,
+    "entries": [
+      { "masterySlug": "sword_mastery",  "value": 47.5 },
+      { "masterySlug": "axe_mastery",    "value": 12.0 },
+      { "masterySlug": "magic_mastery",  "value": 0.0  }
+    ]
+  }
+}
+```
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `masterySlug` | string | Идентификатор типа мастерства |
+| `value` | float | Текущий прогресс 0.0 – 100.0 |
+
+### mastery_update — Дельта обновления
+
+**Сервер → Unicast** (при каждом flush в БД: каждые 10 ударов или при пересечении тира)
+
+```json
+{
+  "header": {
+    "eventType": "mastery_update",
+    "status": "success"
+  },
+  "body": {
+    "characterId": 7,
+    "masterySlug": "sword_mastery",
+    "value": 50.3
+  }
+}
+```
+
+> **Примечание:** `mastery_update` содержит только изменившийся слот. Поля `tier` нет —
+> достижение тира всегда сопровождается отдельным `world_notification` типа `mastery_tier_up`.
+
 ### Персистентность мастерства
 
 - Сохранение каждые **10 ударов** или при пересечении тира
-- Пакет: `saveMastery` → game-server
+- Пакет на game-server: `saveMastery`
 
 ---
 
@@ -345,26 +404,61 @@ newValue = min(currentValue + delta, 100.0)
 |-----|-------------------:|------|
 | `enemy` | < -500 | 0 |
 | `stranger` | -500 ... -1 | 1 |
-| `neutral` | 0 ... 199 | 2 |
+| `neutral` | 0 ... 199 | 2
 | `friendly` | 200 ... 499 | 3 |
 | `ally` | ≥ 500 | 4 |
 
-### Изменение репутации
+### player_reputations — Полное состояние при входе в зону
 
-Происходит через:
-- Dialogue action `change_reputation`
-- Mob kill (если настроено)
-- Quest rewards
+**Сервер → Unicast** (при логине: сразу после ответа game-server на `getPlayerReputationsData`)
 
-При изменении тира → callback, возможно `world_notification`.
-
-### Нотификация при изменении (через диалог)
+**Последовательность событий:**
+1. `joinGameCharacter` от клиента
+2. Chunk-server → game-server: `getPlayerReputationsData` (async request)
+3. Game-server → DB: `SELECT FROM character_reputation WHERE character_id = ?`
+4. Game-server → chunk-server: `setPlayerReputationsData`
+5. Chunk-server загружает в `ReputationManager`
+6. Chunk-server → клиент: **`player_reputations`**
 
 ```json
 {
-  "type": "reputationChanged",
-  "faction": "bandits",
-  "delta": 50
+  "header": {
+    "eventType": "player_reputations",
+    "status": "success"
+  },
+  "body": {
+    "characterId": 7,
+    "entries": [
+      { "factionSlug": "bandits",  "value": 350,  "tier": "friendly" },
+      { "factionSlug": "guards",   "value": -120, "tier": "stranger" },
+      { "factionSlug": "merchants","value": 0,    "tier": "neutral"  }
+    ]
+  }
+}
+```
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `factionSlug` | string | Идентификатор фракции |
+| `value` | int | Текущее значение репутации |
+| `tier` | string | Текущий тир: `enemy`, `stranger`, `neutral`, `friendly`, `ally` |
+
+### reputation_update — Дельта при изменении репутации
+
+**Сервер → Unicast** (при каждом изменении через `ReputationManager::changeReputation`)
+
+```json
+{
+  "header": {
+    "eventType": "reputation_update",
+    "status": "success"
+  },
+  "body": {
+    "characterId": 7,
+    "factionSlug": "bandits",
+    "value": 400,
+    "tier": "friendly"
+  }
 }
 ```
 
@@ -461,3 +555,198 @@ newMp   = min(currentMp + mpGain, maxMp)
 | `mastery.db_flush_every_hits` | 10 | Интервал сохранения |
 | `item_soul.tier1_kills` ... `tier3_kills` | 50/200/500 | Пороги Kill Count |
 | `item_soul.tier1_bonus_flat` ... `tier3_bonus_flat` | 1/2/3 | Бонусы Item Soul |
+
+---
+
+## 8.7. Система титулов (Titles)
+
+Титулы — это заработанные звания с постоянными бонусами к статам. Игрок может надеть один активный титул. Бонус активного титула хранится как `ActiveEffect` с `sourceType = "title"` и `expiresAt = 0` (постоянный).
+
+### Жизненный цикл на сервере
+
+1. **Чанк-сервер подключается к game-server** → game-server отправляет `setTitleDefinitionsData` (глобальный каталог, загружается один раз вместе с зонами, квестами и т.д.)
+2. **Игрок логинится** (`joinGameCharacter`) → chunk-server отправляет `getPlayerTitlesData` → game-server читает `character_titles` → отвечает `setPlayerTitlesData` → chunk-server загружает в `TitleManager` → **`player_titles_update`** отправляется клиенту
+3. При `equipTitle` от клиента → снять эффекты старого, надеть эффекты нового, персистировать (`savePlayerTitle` → game-server → DB), отправить `player_titles_update`
+
+### Где создаются и настраиваются титулы
+
+| Данные | Место |
+|--------|-------|
+| Список доступных титулов + их бонусы | Таблица `title_definitions` в БД (настраивается вручную / миграциями) |
+| Какие титулы заработал персонаж | Таблица `character_titles` (character_id, title_slug, equipped) |
+| Бонусы в runtime | `TitleManager` применяет как `ActiveEffectStruct` с `sourceType="title"`, `expiresAt=0` |
+| Выдача нового титула | Через `TitleManager::grantTitle()` — вызывается из game-logic (например, при убийстве N мобов) |
+
+### Пример записи в `title_definitions`
+```sql
+INSERT INTO title_definitions (slug, display_name, description, earn_condition, bonuses)
+VALUES ('wolf_slayer', 'Wolf Slayer', 'Slain 100 wolves', 'kill_wolves_100',
+        '[{"attributeSlug":"physical_attack","value":2.0},{"attributeSlug":"move_speed","value":1.0}]');
+```
+
+### Бонусы как ActiveEffects при экипировке
+
+```
+effectSlug = "title_{titleSlug}_{attributeSlug}"  // напр. "title_wolf_slayer_physical_attack"
+effectTypeSlug = "title_bonus"
+sourceType = "title"
+expiresAt = 0   // постоянный эффект
+value = bonusValue
+```
+
+---
+
+### getTitles — Запрос полного списка титулов
+
+**Клиент → Сервер**
+
+```json
+{
+  "header": {
+    "eventType": "getTitles",
+    "clientId": 42,
+    "hash": "auth_token"
+  },
+  "body": {
+    "characterId": 7
+  }
+}
+```
+
+### player_titles_update — Полное состояние титулов
+
+**Сервер → Unicast** (ответ на `getTitles`, после `setPlayerTitlesData`, после успешного `equipTitle`)
+
+```json
+{
+  "header": {
+    "eventType": "player_titles_update",
+    "status": "success"
+  },
+  "body": {
+    "characterId": 7,
+    "equippedTitleSlug": "wolf_slayer",
+    "equippedTitle": {
+      "slug": "wolf_slayer",
+      "displayName": "Wolf Slayer",
+      "description": "Slain 100 wolves",
+      "earnCondition": "kill_wolves",
+      "bonuses": [
+        { "attributeSlug": "physical_attack", "value": 2.0 },
+        { "attributeSlug": "move_speed",      "value": 1.0 }
+      ]
+    },
+    "earnedTitles": [
+      {
+        "slug": "wolf_slayer",
+        "displayName": "Wolf Slayer",
+        "description": "Slain 100 wolves",
+        "earnCondition": "kill_wolves",
+        "bonuses": [
+          { "attributeSlug": "physical_attack", "value": 2.0 },
+          { "attributeSlug": "move_speed",      "value": 1.0 }
+        ]
+      },
+      {
+        "slug": "first_blood",
+        "displayName": "First Blood",
+        "description": "First PvP kill",
+        "earnCondition": "pvp_kill",
+        "bonuses": [
+          { "attributeSlug": "crit_chance", "value": 0.5 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `equippedTitleSlug` | string | Slug надетого титула (пустая строка = нет) |
+| `equippedTitle` | object\|null | Полное описание надетого титула |
+| `earnedTitles` | array | Все заработанные титулы с описаниями и бонусами |
+| `earnedTitles[].slug` | string | Уникальный идентификатор титула |
+| `earnedTitles[].displayName` | string | Отображаемое название |
+| `earnedTitles[].description` | string | Описание условия получения |
+| `earnedTitles[].bonuses` | array | Массив `{ attributeSlug, value }` |
+
+---
+
+### equipTitle — Надеть титул
+
+**Клиент → Сервер**
+
+```json
+{
+  "header": {
+    "eventType": "equipTitle",
+    "clientId": 42,
+    "hash": "auth_token"
+  },
+  "body": {
+    "characterId": 7,
+    "titleSlug": "wolf_slayer"
+  }
+}
+```
+
+| Поле | Описание |
+|------|----------|
+| `titleSlug` | Slug надеваемого титула. Пустая строка `""` — снять текущий |
+
+**Ответ при успехе:** `player_titles_update` (полное состояние, описано выше)
+
+**Ответ при ошибке:**
+
+```json
+{
+  "header": { "eventType": "equipTitle", "status": "error" },
+  "body": { "message": "Title not found or not earned" }
+}
+```
+
+---
+
+### title_granted — Серверная нотификация о получении нового титула
+
+**Сервер → Unicast** (когда game-server выдаёт новый титул через `grantTitle`)
+
+```json
+{
+  "header": {
+    "eventType": "world_notification",
+    "status": "success"
+  },
+  "body": {
+    "characterId": 7,
+    "notificationId": "title_granted_7_wolf_slayer",
+    "notificationType": "title_granted",
+    "priority": "high",
+    "channel": "toast",
+    "text": "",
+    "data": {
+      "titleSlug": "wolf_slayer",
+      "displayName": "Wolf Slayer"
+    }
+  }
+}
+```
+
+> После `title_granted` клиент должен перезапросить `getTitles` для обновления полного списка,
+> либо сервер отправит обновлённый `player_titles_update` автоматически.
+
+---
+
+### Взаимодействие с stats_update
+
+Бонусы экипированного титула **включены в `attributes[].effective`** в пакете `stats_update`.
+При смене надетого титула клиент получает `player_titles_update`, затем `stats_update` с пересчитанными эффективными значениями.
+
+```
+effective_attr = base
+               + Σ(equipment bonuses)
+               + Σ(active effects, в т.ч. title_bonus с expiresAt=0)
+               + item_soul_bonus
+               + mastery_tier_bonus
+```

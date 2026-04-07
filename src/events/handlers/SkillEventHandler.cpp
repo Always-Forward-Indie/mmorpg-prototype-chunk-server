@@ -258,14 +258,16 @@ SkillEventHandler::handleOpenSkillShopEvent(const Event &event)
             return;
         }
 
-        // Proximity check (same tolerance as vendor shop)
+        // Proximity check — use server-cached position (client may omit it in this packet)
+        const PositionStruct playerPos =
+            gameServices_.getCharacterManager().getCharacterPosition(req.characterId);
         auto distSq = [](const PositionStruct &a, const PositionStruct &b)
         {
             float dx = a.positionX - b.positionX, dy = a.positionY - b.positionY;
             return dx * dx + dy * dy;
         };
         float rangeLimit = npc.radius + 2.0f;
-        if (distSq(req.playerPosition, npc.position) > rangeLimit * rangeLimit)
+        if (distSq(playerPos, npc.position) > rangeLimit * rangeLimit)
         {
             sendErrorResponseWithTimestamps(socket, "OUT_OF_RANGE", "skillShop", req.clientId, req.timestamps);
             return;
@@ -357,14 +359,16 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
             return;
         }
 
-        // Proximity check
+        // Proximity check — use server-cached position (client may omit it in this packet)
+        const PositionStruct playerPos =
+            gameServices_.getCharacterManager().getCharacterPosition(req.characterId);
         auto distSq = [](const PositionStruct &a, const PositionStruct &b)
         {
             float dx = a.positionX - b.positionX, dy = a.positionY - b.positionY;
             return dx * dx + dy * dy;
         };
         float rangeLimit = npc.radius + 2.0f;
-        bool inRange = distSq(req.playerPosition, npc.position) <= rangeLimit * rangeLimit;
+        bool inRange = distSq(playerPos, npc.position) <= rangeLimit * rangeLimit;
 
         // Also accept if an active dialogue session exists (player in dialogue)
         bool hasSession = (gameServices_.getDialogueSessionManager()

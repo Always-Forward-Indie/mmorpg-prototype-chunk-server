@@ -41,6 +41,16 @@ ReputationManager::getReputation(int characterId,
     return fit != cit->second.end() ? fit->second : 0;
 }
 
+std::unordered_map<std::string, int>
+ReputationManager::getAllReputations(int characterId) const
+{
+    std::shared_lock lk(mutex_);
+    auto cit = data_.find(characterId);
+    if (cit == data_.end())
+        return {};
+    return cit->second;
+}
+
 void
 ReputationManager::fillReputationContext(int characterId,
     PlayerContextStruct &ctx) const
@@ -88,6 +98,10 @@ ReputationManager::changeReputation(int characterId,
     }
 
     persist(characterId, factionSlug, newValue);
+
+    // Notify client on every change
+    if (clientNotifyCallback_)
+        clientNotifyCallback_(characterId, factionSlug, newValue, getTier(newValue));
 
     // Fire tier-change callback if boundary crossed
     if (tierChangeCallback_)

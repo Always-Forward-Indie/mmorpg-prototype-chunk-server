@@ -325,6 +325,16 @@ GameServerWorker::processGameServerData(std::string_view data)
         nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_LEARNED_SKILL, clientData.clientId, body);
     }
+    else if (eventType == "setTitleDefinitionsData")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_TITLE_DEFINITIONS, clientData.clientId, body);
+    }
+    else if (eventType == "setPlayerTitlesData")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_PLAYER_TITLES, clientData.clientId, body);
+    }
     else
     {
         log_->info("Unknown event type from Game Server: " + eventType);

@@ -30,6 +30,7 @@
 #include "services/SkillManager.hpp"
 #include "services/SpawnZoneManager.hpp"
 #include "services/StatusEffectTemplateManager.hpp"
+#include "services/TitleManager.hpp"
 #include "services/TradeSessionManager.hpp"
 #include "services/TrainerManager.hpp"
 #include "services/VendorManager.hpp"
@@ -76,6 +77,7 @@ class GameServices
           championManager_(this),
           reputationManager_(logger_),
           masteryManager_(this),
+          titleManager_(this),
           zoneEventManager_(this)
     {
         // Set up manager dependencies
@@ -231,6 +233,10 @@ class GameServices
     {
         return masteryManager_;
     }
+    TitleManager &getTitleManager()
+    {
+        return titleManager_;
+    }
     ZoneEventManager &getZoneEventManager()
     {
         return zoneEventManager_;
@@ -271,5 +277,6 @@ class GameServices
     ChampionManager championManager_;
     ReputationManager reputationManager_;
     MasteryManager masteryManager_;
+    TitleManager titleManager_;
     ZoneEventManager zoneEventManager_;
 };

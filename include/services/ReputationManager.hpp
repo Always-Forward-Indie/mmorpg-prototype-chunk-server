@@ -42,6 +42,9 @@ class ReputationManager
     /// Returns 0 if faction/character not found.
     int getReputation(int characterId, const std::string &factionSlug) const;
 
+    /// Returns all faction reputations for a character (empty map if not loaded).
+    std::unordered_map<std::string, int> getAllReputations(int characterId) const;
+
     /// Fills PlayerContextStruct::reputations for condition evaluation.
     void fillReputationContext(int characterId, PlayerContextStruct &ctx) const;
 
@@ -62,6 +65,20 @@ class ReputationManager
     void setSaveCallback(SaveCallback cb)
     {
         saveCallback_ = std::move(cb);
+    }
+
+    /**
+     * @brief Called on every reputation change so the chunk-server can push a
+     *        realtime update packet to the owning client.
+     * @param characterId  Affected character.
+     * @param factionSlug  Changed faction.
+     * @param newValue     New raw value.
+     * @param newTier      New tier string ("enemy" | "stranger" | "neutral" | "friendly" | "ally").
+     */
+    using ClientNotifyCallback = std::function<void(int, const std::string &, int, const std::string &)>;
+    void setClientNotifyCallback(ClientNotifyCallback cb)
+    {
+        clientNotifyCallback_ = std::move(cb);
     }
 
     /** Optional: called when a tier boundary is crossed. */
@@ -86,4 +103,5 @@ class ReputationManager
 
     SaveCallback saveCallback_;
     TierChangeCallback tierChangeCallback_;
+    ClientNotifyCallback clientNotifyCallback_;
 };

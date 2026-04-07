@@ -1,3 +1,25 @@
+v0.1.5
+07.04.2026
+================
+New:
+Title System — `TitleManager` (новый сервис): хранит каталог определений титулов (`TitleDefinitionStruct`) и персональное состояние персонажей (`PlayerTitleStateStruct`). Методы: `setTitleDefinitions()`, `setPlayerTitles()`, `getAllTitles()`, `equipTitle()`, `grantTitle()`. При экипировке применяет бонусы как `ActiveEffectStruct` с `sourceType="title"`, `expiresAt=0`; при снятии — удаляет эффекты по slug через `CharacterManager::removeActiveEffectBySlug()`. `grantTitle()` отправляет `world_notification` типа `title_granted` и вызывает `ClientNotifyCallback` для отправки `player_titles_update`.
+`TitleBonusStruct`, `TitleDefinitionStruct`, `PlayerTitleStateStruct`, `EquipTitleRequestStruct` — четыре новых структуры данных в `DataStructs.hpp`.
+`SET_TITLE_DEFINITIONS_DATA`, `SET_PLAYER_TITLES_DATA`, `GET_TITLES`, `EQUIP_TITLE` — четыре новых типа событий в `Event.hpp`. `EquipTitleRequestStruct` добавлена в `EventData.hpp` variant.
+`EventHandler` — 4 новых обработчика: `handleSetTitleDefinitionsDataEvent`, `handleSetPlayerTitlesDataEvent`, `handleGetTitlesEvent`, `handleEquipTitleEvent`. `handleEquipTitleEvent` после успешного экипирования отправляет `stats_update` с пересчитанными эффективными атрибутами.
+`EventDispatcher` — маршрутизация клиентских пакетов `getTitles` и `equipTitle`.
+`GameServerWorker` — маршрутизация входящих пакетов `setTitleDefinitionsData` и `setPlayerTitlesData` от game-сервера.
+`CharacterManager::removeActiveEffectBySlug()` — удаление активного эффекта по slug (используется при смене надетого титула).
+`CharacterEventHandler` — при `joinGameCharacter` отправляет `getPlayerTitlesData` на game-сервер вслед за запросами мастерства и репутации (оба login flow: нормальный и stale-eviction повторный вход).
+`docs/migrations/049_title_system.sql` — миграция создаёт таблицы `title_definitions` и `character_titles`, seed из 4 тестовых титулов (wolf_slayer, first_blood, dungeon_delver, merchant). Миграция применена; дамп обновлён.
+
+Improvements:
+`ReputationManager` — `getAllReputations()` + `ClientNotifyCallback`: push `player_reputations` клиенту сразу после загрузки данных от game-сервера при логине.
+`MasteryManager` — `getAllMasteries()` + `ClientNotifyCallback`: push `player_masteries` клиенту сразу после загрузки данных от game-сервера при логине.
+`ChunkServer` — подключены callback'и `TitleManager`, `ReputationManager`, `MasteryManager` для уведомления клиента при логине.
+`docs/api/08-progression-stats-protocol.md` — добавлены разделы 8.7 (система титулов): жизненный цикл на сервере, таблица мест хранения, формат бонусов как ActiveEffects, пакеты `getTitles`, `player_titles_update`, `equipTitle`, `title_granted`; уточнена последовательность событий при логине для репутации и мастерства; `freeSkillPoints` добавлен в JSON-пример `stats_update` и сопроводительную заметку.
+
+---
+
 v0.1.4
 06.04.2026
 ================

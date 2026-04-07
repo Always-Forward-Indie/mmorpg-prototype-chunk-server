@@ -401,6 +401,12 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 masteriesReq["header"]["eventType"] = "getPlayerMasteriesData";
                 masteriesReq["body"]["characterId"] = cid;
                 gameServerWorker_.sendDataToGameServer(masteriesReq.dump() + "\n");
+
+                // Stage 4: request title data
+                nlohmann::json titlesReq;
+                titlesReq["header"]["eventType"] = "getPlayerTitlesData";
+                titlesReq["body"]["characterId"] = cid;
+                gameServerWorker_.sendDataToGameServer(titlesReq.dump() + "\n");
             }
 
             // ── Phase 4 world-state push is deferred until the client sends
@@ -1017,6 +1023,12 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
         masteriesReq["header"]["eventType"] = "getPlayerMasteriesData";
         masteriesReq["body"]["characterId"] = characterId;
         gameServerWorker_.sendDataToGameServer(masteriesReq.dump() + "\n");
+
+        // Stage 4: request title data
+        nlohmann::json titlesReq;
+        titlesReq["header"]["eventType"] = "getPlayerTitlesData";
+        titlesReq["body"]["characterId"] = characterId;
+        gameServerWorker_.sendDataToGameServer(titlesReq.dump() + "\n");
     }
 
     log_->info("Cleared pending requests for character ID: " + std::to_string(characterId));

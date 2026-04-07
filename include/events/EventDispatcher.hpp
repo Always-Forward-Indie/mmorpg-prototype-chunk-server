@@ -61,6 +61,9 @@ class EventDispatcher
     void handleGetBestiaryOverview(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleChatMessage(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handlePlayerReady(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // Title system (client → chunk)
+    void handleGetPlayerTitles(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleEquipTitle(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;

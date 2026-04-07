@@ -204,10 +204,126 @@ ChunkServer::ChunkServer(GameServices &gameServices,
         [this](const std::string &data)
         { gameServerWorker_.sendDataToGameServer(data); });
 
+    // Wire up ReputationManager → client notification on every rep change
+    gameServices_.getReputationManager().setClientNotifyCallback(
+        [this](int characterId, const std::string &factionSlug, int newValue, const std::string &newTier)
+        {
+            try
+            {
+                int clientId = 0;
+                auto chars = gameServices_.getCharacterManager().getCharactersList();
+                for (const auto &c : chars)
+                    if (c.characterId == characterId)
+                    {
+                        clientId = c.clientId;
+                        break;
+                    }
+                if (clientId <= 0)
+                    return;
+                auto sock = gameServices_.getClientManager().getClientSocket(clientId);
+                if (!sock || !sock->is_open())
+                    return;
+
+                nlohmann::json pkt;
+                pkt["header"]["eventType"] = "reputation_update";
+                pkt["header"]["status"] = "success";
+                pkt["body"]["characterId"] = characterId;
+                pkt["body"]["factionSlug"] = factionSlug;
+                pkt["body"]["value"] = newValue;
+                pkt["body"]["tier"] = newTier;
+                networkManager_.sendResponse(sock, networkManager_.generateResponseMessage("success", pkt));
+            }
+            catch (...)
+            {
+            }
+        });
+
+    // Wire up ReputationManager tier-change → world_notification callback
+    gameServices_.getReputationManager().setTierChangeCallback(
+        [this](int characterId, const std::string &factionSlug, const std::string &newTier, int value)
+        {
+            try
+            {
+                gameServices_.getStatsNotificationService().sendWorldNotification(
+                    characterId,
+                    "reputation_tier_change",
+                    nlohmann::json{{"factionSlug", factionSlug}, {"newTier", newTier}, {"value", value}},
+                    "high",
+                    "toast");
+            }
+            catch (...)
+            {
+            }
+        });
+
     // Wire up MasteryManager persistence callbacks
     gameServices_.getMasteryManager().setSaveCallback(
         [this](const std::string &data)
         { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire up MasteryManager → client notification on mastery progress flush
+    gameServices_.getMasteryManager().setClientNotifyCallback(
+        [this](int characterId, const std::string &masterySlug, float newValue, const std::string & /*tierSlug*/)
+        {
+            try
+            {
+                int clientId = 0;
+                auto chars = gameServices_.getCharacterManager().getCharactersList();
+                for (const auto &c : chars)
+                    if (c.characterId == characterId)
+                    {
+                        clientId = c.clientId;
+                        break;
+                    }
+                if (clientId <= 0)
+                    return;
+                auto sock = gameServices_.getClientManager().getClientSocket(clientId);
+                if (!sock || !sock->is_open())
+                    return;
+
+                nlohmann::json pkt;
+                pkt["header"]["eventType"] = "mastery_update";
+                pkt["header"]["status"] = "success";
+                pkt["body"]["characterId"] = characterId;
+                pkt["body"]["masterySlug"] = masterySlug;
+                pkt["body"]["value"] = newValue;
+                networkManager_.sendResponse(sock, networkManager_.generateResponseMessage("success", pkt));
+            }
+            catch (...)
+            {
+            }
+        });
+
+    // Wire up TitleManager persistence callbacks
+    gameServices_.getTitleManager().setSaveCallback(
+        [this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire up TitleManager → client direct-send callback
+    gameServices_.getTitleManager().setNotifyClientCallback(
+        [this](int characterId, const nlohmann::json &pkt)
+        {
+            try
+            {
+                int clientId = 0;
+                auto chars = gameServices_.getCharacterManager().getCharactersList();
+                for (const auto &c : chars)
+                    if (c.characterId == characterId)
+                    {
+                        clientId = c.clientId;
+                        break;
+                    }
+                if (clientId <= 0)
+                    return;
+                auto sock = gameServices_.getClientManager().getClientSocket(clientId);
+                if (!sock || !sock->is_open())
+                    return;
+                networkManager_.sendResponse(sock, networkManager_.generateResponseMessage("success", pkt));
+            }
+            catch (...)
+            {
+            }
+        });
 }
 
 void
