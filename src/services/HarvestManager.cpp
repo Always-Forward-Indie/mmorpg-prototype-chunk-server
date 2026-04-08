@@ -317,6 +317,12 @@ HarvestManager::cleanupOldCorpses(int maxAgeSeconds)
             }
         }
     }
+
+    // Уведомляем клиентов об удалении трупов (после освобождения всех мьютексов)
+    for (int corpseUID : corpsesToCleanup)
+    {
+        broadcastCorpseRemoved(corpseUID);
+    }
 }
 
 HarvestManager::HarvestValidationResult
@@ -618,10 +624,25 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
     }
 
     // Если лут закончился, удаляем запись о луте
-    if (availableLoot.empty())
+    bool allLootTaken = availableLoot.empty();
+    if (allLootTaken)
     {
         corpseLoot_.erase(lootIt);
         log_->info("[HARVEST] All loot picked up from corpse: " + std::to_string(corpseUID));
+    }
+
+    // Освобождаем lootMutex_ ДО захвата corpsesMutex_ — соблюдаем порядок блокировок
+    lootLock.unlock();
+
+    if (allLootTaken)
+    {
+        // Немедленно удаляем труп из реестра
+        {
+            std::unique_lock<std::shared_mutex> corpseLock(corpsesMutex_);
+            harvestableCorpses_.erase(corpseUID);
+        }
+        log_->info("[HARVEST] Corpse fully looted and removed immediately: " + std::to_string(corpseUID));
+        broadcastCorpseRemoved(corpseUID);
     }
 
     // Логируем результат
@@ -838,6 +859,49 @@ HarvestManager::broadcastHarvestCancel(int characterId, int corpseUID, const std
     catch (const std::exception &e)
     {
         logger_.logError("[HARVEST] Exception in broadcastHarvestCancel: " + std::string(e.what()));
+    }
+}
+
+void
+HarvestManager::broadcastCorpseRemoved(int corpseUID)
+{
+    if (!clientManager_ || !networkManager_)
+    {
+        log_->error("[HARVEST] Cannot broadcast corpse removed - managers not set");
+        return;
+    }
+
+    try
+    {
+        auto clientsList = clientManager_->getClientsListReadOnly();
+
+        nlohmann::json broadcastMessage;
+        broadcastMessage["header"]["eventType"] = "corpseRemoved";
+        broadcastMessage["header"]["message"] = "Corpse removed";
+
+        broadcastMessage["body"]["type"] = "CORPSE_REMOVED";
+        broadcastMessage["body"]["corpseUID"] = corpseUID;
+        broadcastMessage["body"]["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+                                                    .count();
+
+        std::string messageData = networkManager_->generateResponseMessage("success", broadcastMessage);
+
+        for (const auto &client : clientsList)
+        {
+            auto clientSocket = clientManager_->getClientSocket(client.clientId);
+            if (clientSocket)
+            {
+                networkManager_->sendResponse(clientSocket, messageData);
+            }
+        }
+
+        logger_.log("[HARVEST] Broadcasted corpse removed (UID=" + std::to_string(corpseUID) +
+                    ") to " + std::to_string(clientsList.size()) + " clients");
+    }
+    catch (const std::exception &e)
+    {
+        logger_.logError("[HARVEST] Exception in broadcastCorpseRemoved: " + std::string(e.what()));
     }
 }
 

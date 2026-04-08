@@ -724,7 +724,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getHarvestManager().updateHarvestProgress();
 
                 // Clean up old corpses that can no longer be harvested
-                gameServices_.getHarvestManager().cleanupOldCorpses(600); // 10 minutes
+                gameServices_.getHarvestManager().cleanupOldCorpses(30); // 30 seconds
             }
             catch (const std::exception &ex)
             {

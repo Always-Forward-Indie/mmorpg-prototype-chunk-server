@@ -189,6 +189,12 @@ class HarvestManager
      */
     void broadcastHarvestCancel(int characterId, int corpseUID, const std::string &reason);
 
+    /**
+     * @brief Broadcast corpse removal notification to all clients
+     * @param corpseUID UID of the removed corpse
+     */
+    void broadcastCorpseRemoved(int corpseUID);
+
   private:
     ItemManager &itemManager_;
     Logger &logger_;

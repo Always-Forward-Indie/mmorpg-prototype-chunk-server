@@ -1,3 +1,17 @@
+v0.1.8
+08.04.2026
+================
+Bug Fixes:
+Cast-time skill dispatch — `dispatchSkillAction` теперь корректно разделяет каст-скилы и мгновенные. При `castTime > 0` функция отправляет только `combatInitiation` и выходит; `updateOngoingActions()` вызывает `executeSkillUsage` по таймеру через `castMs` мс. Мгновенные скилы (`castMs == 0`) выполняются в `dispatchSkillAction` немедленно, как прежде. До фикса оба типа всегда выполнялись немедленно — каст-таймер фактически не работал.
+Combat result timing — `action->endTime` теперь вычисляется как `startTime + castMs - swingMs`, а не `startTime + castMs`. Это означает, что `combatResult` прилетает клиенту в начале swing-фазы анимации (удар наносится визуально корректно) вместо того, чтобы прилетать уже после окончания всего каста. `animationDuration` упрощён до `castTime + swingTime` без предыдущего cap-логики с циклом и margin.
+
+Improvements:
+Reputation live updates — `ReputationManager::setClientNotifyCallback` и `setTierChangeCallback` теперь подключены в `ChunkServer`. При любом изменении репутации клиент получает пакет `reputation_update` (`characterId`, `factionSlug`, `value`, `tier`). При смене тира — `world_notification` типа `reputation_tier_change` (toast).
+Mastery live updates — `MasteryManager::setClientNotifyCallback` теперь подключён в `ChunkServer`. При флаше прогресса мастерства клиент получает пакет `mastery_update` (`characterId`, `masterySlug`, `value`). Ранее обновления мастерства отправлялись клиенту только на логине.
+Title callbacks — `TitleManager::setSaveCallback` и `setNotifyClientCallback` подключены в `ChunkServer`. Сохранение данных тайтлов на game-сервер и прямая отправка пакетов клиенту теперь работают в реальном времени.
+
+---
+
 v0.1.7
 08.04.2026
 ================

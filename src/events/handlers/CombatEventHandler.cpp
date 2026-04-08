@@ -411,7 +411,10 @@ CombatEventHandler::dispatchSkillAction(int characterId,
                "' for char " + std::to_string(characterId) +
                " -> target " + std::to_string(targetId) + "'");
 
-    auto executionResult = combatSystem_->executeSkillUsage(characterId, skillSlug, targetId, targetType);
+    // cooldownAlreadySet=true: initiateSkillUsage already called trySetCooldown above.
+    // Passing false (the default) would cause useSkill to re-check the cooldown, see
+    // it as already set, and return "Skill is on cooldown or not available".
+    auto executionResult = combatSystem_->executeSkillUsage(characterId, skillSlug, targetId, targetType, /*cooldownAlreadySet=*/true);
 
     // Clear the ongoingActions_ entry so updateOngoingActions() doesn't fire it again.
     combatSystem_->clearOngoingAction(characterId);

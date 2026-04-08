@@ -469,6 +469,21 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                         }
                     }
 
+                    // Apply active effects that additively modify move_speed (non-tick stat modifiers).
+                    // Without this, speed buffs/debuffs from skills/items/quests are not accounted for,
+                    // causing false-positive positionCorrection rejections on the buffed client.
+                    {
+                        const int64_t nowSec = srvNowMs / 1000;
+                        for (const auto &eff : charData.activeEffects)
+                        {
+                            if (eff.attributeSlug == "move_speed" && eff.tickMs == 0 &&
+                                (eff.expiresAt == 0 || eff.expiresAt > nowSec))
+                            {
+                                moveSpeed += eff.value;
+                            }
+                        }
+                    }
+
                     // move_speed is an abstract stat (DB stores e.g. 5), not world-space units/s.
                     // The client applies the same scale to set MaxWalkSpeed.
                     // Scale factor deduced from logs: ~193 actual units/s / 5 stat = ~38.6.
@@ -476,11 +491,12 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                     static constexpr float MOVE_SPEED_SCALE = 40.0f;
                     const float moveSpeedUnits = moveSpeed * MOVE_SPEED_SCALE;
 
-                    log_->debug("[MOVE_VALIDATE] char {} move_speed_stat={:.1f} (found={}, attrs={}) -> {:.1f} units/s",
+                    log_->debug("[MOVE_VALIDATE] char {} move_speed_stat={:.1f} (found={}, attrs={}, effects={}) -> {:.1f} units/s",
                         movementData.characterId,
                         moveSpeed,
                         moveSpeedFound,
                         charData.attributes.size(),
+                        charData.activeEffects.size(),
                         moveSpeedUnits);
 
                     const float deltaMs = static_cast<float>(srvNowMs - charData.lastMoveSrvMs);
