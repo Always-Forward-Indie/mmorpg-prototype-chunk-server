@@ -251,23 +251,20 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         action->targetId = targetId;
         action->skillSlug = skillSlug; // Сохраняем оригинальный slug для выполнения
         action->castTime = static_cast<float>(skill.castMs) / 1000.0f;
+        // Skills with castMs > 0 are deferred (CASTING); castMs == 0 are instant.
         action->state = (skill.castMs > 0) ? CombatActionState::CASTING : CombatActionState::EXECUTING;
         action->startTime = std::chrono::steady_clock::now();
-        action->endTime = action->startTime + std::chrono::milliseconds(skill.castMs);
+        float kSwing = static_cast<float>(skill.swingMs) / 1000.0f;
+
         action->animationName = skill.animationName.empty() ? "skill_" + skillSlug : skill.animationName;
         {
-            // animationDuration = cast + swing, but capped to just below
-            // the full attack cycle so the next attack's animation never overlaps.
-            constexpr float kMargin = 0.05f;
-            float kSwing = static_cast<float>(skill.swingMs) / 1000.0f;
-            float cdSec = static_cast<float>(std::max(skill.cooldownMs, skill.gcdMs)) / 1000.0f;
-            if (cdSec < 0.5f)
-                cdSec = 0.5f; // mirrors the minimum in MobAIController
-            float cycleTime = action->castTime + kSwing + cdSec;
-            action->animationDuration = std::min(action->castTime + kSwing, cycleTime - kMargin);
-            if (action->animationDuration < kSwing)
-                action->animationDuration = kSwing;
+            // animationDuration = castTime + swingTime (full animation coverage; no capping).
+
+            action->animationDuration = action->castTime + kSwing;
         }
+
+        // Fire the result at the exact end of castMs. castMs == 0 fires immediately.
+        action->endTime = action->startTime + std::chrono::milliseconds(skill.castMs - skill.swingMs);
 
         // Сохраняем ongoing action
         {
@@ -1337,15 +1334,8 @@ CombatSystem::broadcastMobSkillInitiation(int mobId, int targetPlayerId, const S
     r.castTime = static_cast<float>(skill.castMs) / 1000.0f;
     r.animationName = skill.animationName.empty() ? "skill_" + skill.skillSlug : skill.animationName;
     {
-        constexpr float kMargin = 0.05f;
         float kSwing = static_cast<float>(skill.swingMs) / 1000.0f;
-        float cdSec = static_cast<float>(std::max(skill.cooldownMs, skill.gcdMs)) / 1000.0f;
-        if (cdSec < 0.5f)
-            cdSec = 0.5f;
-        float cycleTime = r.castTime + kSwing + cdSec;
-        r.animationDuration = std::min(r.castTime + kSwing, cycleTime - kMargin);
-        if (r.animationDuration < kSwing)
-            r.animationDuration = kSwing;
+        r.animationDuration = r.castTime + kSwing;
     }
     auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch())

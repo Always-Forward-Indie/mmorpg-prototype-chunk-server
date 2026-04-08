@@ -395,8 +395,9 @@ CombatEventHandler::dispatchSkillAction(int characterId,
         return;
     }
 
-    // Skills with cast time are deferred: the ongoingAction is CASTING in the queue.
-    // updateOngoingActions() executes and broadcasts the result after castMs has elapsed.
+    // Skills with castMs > 0 are deferred: ongoingAction stays CASTING until castMs
+    // elapses, then updateOngoingActions() fires the result.
+    // Skills with castMs == 0 are instant and executed here.
     if (initiationResult.castTime > 0.0f)
     {
         log_->info("[dispatchSkillAction] Skill '" + skillSlug +
