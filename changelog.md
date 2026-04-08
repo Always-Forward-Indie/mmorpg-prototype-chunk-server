@@ -1,3 +1,15 @@
+v0.1.6
+08.04.2026
+================
+Bug Fixes:
+Combat cast blocking — во время активного каста (`CombatActionState::CASTING`) игрок больше не может использовать ни другой каст, ни мгновенный скил. Ранее проверка `initiateSkillUsage` применялась только к скилам с `castMs > 0`, позволяя мгновенным скилам обходить блокировку. Теперь проверка наличия CASTING-записи в `ongoingActions_` выполняется безусловно для любого скила.
+Cast-time result timing — скилы с ненулевым `castTime` больше не выполняются немедленно. `dispatchSkillAction` теперь при `castTime > 0` отправляет только `combatInitiation` и возвращает управление; `updateOngoingActions()` пробуждает действие по таймеру через `castMs` мс и рассылает `combatResult` факт — что соответствует реальному времени каста.
+
+Improvements:
+Skill properties — всем активным скилам в БД установлены `cast_ms ≥ 1000 мс` и `swing_ms > cast_ms` (swing_ms ≥ 1000 мс). Для скилов `basic_attack`, `shield_bash`, `whirlwind` исправлены занулённые/слишком малые значения; для `power_slash`, `fireball`, `frost_bolt`, `arcane_blast`, `chain_lightning` добавлены ранее отсутствующие записи `swing_ms`. Итоговые значения cast → swing: basic_attack 1000→1200, shield_bash 1000→1100, whirlwind 1000→1200, power_slash 2000→2300, fireball 4000→4500, frost_bolt 2000→2300, arcane_blast 3000→3500, chain_lightning 2500→3000.
+
+---
+
 v0.1.5
 07.04.2026
 ================

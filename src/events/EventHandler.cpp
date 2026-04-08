@@ -642,6 +642,9 @@ EventHandler::handleSetPlayerActiveEffectsEvent(const Event &event)
             }
         }
 
+        // Re-apply equipped title bonuses — may have been wiped by the setCharacterActiveEffects() call above.
+        gameServices_.getTitleManager().reapplyEquippedBonuses(characterId);
+
         // Refresh HUD: active effects may modify attributes (stat buffs/debuffs).
         gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
 

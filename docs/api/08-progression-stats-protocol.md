@@ -625,7 +625,6 @@ value = bonusValue
   },
   "body": {
     "characterId": 7,
-    "equippedTitleSlug": "wolf_slayer",
     "equippedTitle": {
       "slug": "wolf_slayer",
       "displayName": "Wolf Slayer",
@@ -663,8 +662,8 @@ value = bonusValue
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `equippedTitleSlug` | string | Slug надетого титула (пустая строка = нет) |
-| `equippedTitle` | object\|null | Полное описание надетого титула |
+| `equippedTitle` | object\|null | Полное описание надетого титула (null = ничего не надето) |
+| `equippedTitle.slug` | string | Slug надетого титула |
 | `earnedTitles` | array | Все заработанные титулы с описаниями и бонусами |
 | `earnedTitles[].slug` | string | Уникальный идентификатор титула |
 | `earnedTitles[].displayName` | string | Отображаемое название |
@@ -695,14 +694,23 @@ value = bonusValue
 |------|----------|
 | `titleSlug` | Slug надеваемого титула. Пустая строка `""` — снять текущий |
 
-**Ответ при успехе:** `player_titles_update` (полное состояние, описано выше)
-
-**Ответ при ошибке:**
+**Ответ: `equip_title_result`** (подтверждение операции, приходит первым)
 
 ```json
 {
-  "header": { "eventType": "equipTitle", "status": "error" },
-  "body": { "message": "Title not found or not earned" }
+  "header": { "eventType": "equip_title_result", "status": "success" },
+  "body": { "characterId": 7, "titleSlug": "wolf_slayer" }
+}
+```
+
+При успехе — сразу после `equip_title_result` приходит `player_titles_update` с обновлённым состоянием.
+
+**При ошибке** (титул не заработан):
+
+```json
+{
+  "header": { "eventType": "equip_title_result", "status": "error" },
+  "body": { "characterId": 7, "titleSlug": "unknown_title", "error": "title_not_earned" }
 }
 ```
 

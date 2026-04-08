@@ -1920,7 +1920,7 @@ EventDispatcher::handleEquipTitle(const EventContext &context,
     std::string titleSlug;
     try
     {
-        const auto &jsonData = nlohmann::json::parse(context.rawMessage);
+        const auto &jsonData = nlohmann::json::parse(context.fullMessage);
         titleSlug = jsonData.value("body", nlohmann::json::object()).value("titleSlug", "");
     }
     catch (...)

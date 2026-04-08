@@ -54,6 +54,9 @@ TitleManager::loadPlayerTitles(int characterId, const PlayerTitleStateStruct &st
     if (!state.equippedSlug.empty())
         applyTitleBonuses(characterId, state.equippedSlug);
 
+    // Push current title state to client so they see earned/equipped titles immediately on login
+    sendTitleUpdateToClient(characterId);
+
     log_->info("[Title] Loaded {} titles for char={}, equipped='{}'",
         state.earnedSlugs.size(),
         characterId,
@@ -65,6 +68,20 @@ TitleManager::unloadPlayerTitles(int characterId)
 {
     std::unique_lock lk(mutex_);
     data_.erase(characterId);
+}
+
+void
+TitleManager::reapplyEquippedBonuses(int characterId)
+{
+    std::string equipped;
+    {
+        std::shared_lock lk(mutex_);
+        auto it = data_.find(characterId);
+        if (it == data_.end() || it->second.equippedSlug.empty())
+            return;
+        equipped = it->second.equippedSlug;
+    }
+    applyTitleBonuses(characterId, equipped);
 }
 
 // ── Query ──────────────────────────────────────────────────────────────────────

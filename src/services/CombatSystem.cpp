@@ -124,16 +124,15 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
             return result;
         }
 
-        // Проверяем, что у кастера нет активного каста (защита от спама во время cast time).
-        // Только для скилов с castMs > 0 — мгновенные можно спамить свободно.
-        if (skill.castMs > 0)
+        // Проверяем, что у кастера нет активного каста — во время каста нельзя использовать
+        // ни другой каст, ни мгновенный скил.
         {
             std::lock_guard<std::mutex> lock(actionsMutex_);
             auto it = ongoingActions_.find(casterId);
             if (it != ongoingActions_.end() && it->second->state == CombatActionState::CASTING)
             {
                 log_->warn("[initiateSkillUsage] Caster " + std::to_string(casterId) +
-                           " is already casting '" + it->second->skillSlug + "' — rejecting new cast '" + skillSlug + "'");
+                           " is already casting '" + it->second->skillSlug + "' — rejecting skill '" + skillSlug + "'");
                 result.errorMessage = "Already casting";
                 return result;
             }

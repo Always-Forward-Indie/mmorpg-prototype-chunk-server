@@ -395,9 +395,18 @@ CombatEventHandler::dispatchSkillAction(int characterId,
         return;
     }
 
-    // Always execute immediately (optimistic broadcast, same as mob AI).
-    // The client uses the animation hit trigger to time the visual hit effect.
-    log_->info("[dispatchSkillAction] Executing skill '" + skillSlug +
+    // Skills with cast time are deferred: the ongoingAction is CASTING in the queue.
+    // updateOngoingActions() executes and broadcasts the result after castMs has elapsed.
+    if (initiationResult.castTime > 0.0f)
+    {
+        log_->info("[dispatchSkillAction] Skill '" + skillSlug +
+                   "' for char " + std::to_string(characterId) +
+                   " deferred — cast time " + std::to_string(initiationResult.castTime) + "s");
+        return;
+    }
+
+    // Instant skill (castMs == 0): execute immediately.
+    log_->info("[dispatchSkillAction] Executing instant skill '" + skillSlug +
                "' for char " + std::to_string(characterId) +
                " -> target " + std::to_string(targetId) + "'");
 
@@ -413,7 +422,7 @@ CombatEventHandler::dispatchSkillAction(int characterId,
     }
     else
     {
-        log_->info("[dispatchSkillAction] Skill '" + skillSlug + "' executed OK for char " +
+        log_->info("[dispatchSkillAction] Instant skill '" + skillSlug + "' executed OK for char " +
                    std::to_string(characterId) + " -> target " + std::to_string(targetId) +
                    " damage=" + std::to_string(executionResult.skillResult.damageResult.totalDamage));
     }

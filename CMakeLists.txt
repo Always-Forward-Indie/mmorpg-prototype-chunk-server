@@ -62,6 +62,7 @@ set(SOURCE_FILES
     src/services/ChampionManager.cpp
     src/services/ReputationManager.cpp
     src/services/MasteryManager.cpp
+    src/services/TitleManager.cpp
     src/services/ZoneEventManager.cpp
     src/network/GameServerWorker.cpp
     src/network/NetworkManager.cpp

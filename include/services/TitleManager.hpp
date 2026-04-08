@@ -71,6 +71,12 @@ class TitleManager
      */
     bool equipTitle(int characterId, const std::string &titleSlug);
 
+    /**
+     * @brief Re-apply bonuses for the currently equipped title.
+     *        Call after setCharacterActiveEffects() to ensure title bonuses survive the replace.
+     */
+    void reapplyEquippedBonuses(int characterId);
+
     // ── Persistence ───────────────────────────────────────────────────────────
     /// JSON string ("eventType":"savePlayerTitle") sent to Game Server.
     using SaveCallback = std::function<void(const std::string &)>;
