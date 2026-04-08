@@ -34,9 +34,12 @@ class SkillSystem
      * @param skillSlug Slug скила
      * @param targetId ID цели
      * @param targetType Тип цели
+     * @param cooldownAlreadySet When true, skip the trySetCooldown check —
+     *        the cooldown was already set at initiateSkillUsage time so we
+     *        must not try to set it again (it would be "on cooldown" and fail).
      * @return Результат использования скила
      */
-    SkillUsageResult useSkill(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType);
+    SkillUsageResult useSkill(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, bool cooldownAlreadySet = false);
 
     /**
      * @brief Проверить доступность скила

@@ -564,7 +564,9 @@ MobEventHandler::handleMobMoveUpdateEvent(const Event &event)
                                       .build();
 
         std::string responseData = networkManager_.generateResponseMessage("success", response);
-        networkManager_.sendResponse(clientSocket, responseData);
+        // Use bulk priority so mob position updates never block combat/stats packets
+        // that might already be queued in the per-socket critical priority lane.
+        networkManager_.sendResponseBulk(clientSocket, std::make_shared<const std::string>(std::move(responseData)));
     }
     catch (const std::bad_variant_access &ex)
     {

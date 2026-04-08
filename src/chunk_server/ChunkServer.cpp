@@ -534,6 +534,14 @@ ChunkServer::mainEventLoopCH()
                 std::chrono::system_clock::now().time_since_epoch())
                                       .count();
 
+            // Collect updates for ALL zones, keyed by clientId, so we can push one
+            // event per client instead of one per zone — reduces async_write frequency
+            // by N_zones and prevents mob-position packets from head-of-line-blocking
+            // combat packets in the per-socket write queue.
+            auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
+            std::unordered_map<int, std::vector<MobMoveUpdateStruct>> clientUpdates;
+            clientUpdates.reserve(connectedClients.size());
+
             for (const auto &zone : spawnZones)
             {
                 if (!zone.second.spawnEnabled || zone.second.spawnedMobsCount == 0)
@@ -546,7 +554,6 @@ ChunkServer::mainEventLoopCH()
 
                 // Collect mobs that need a broadcast this tick.
                 auto mobsInZone = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
-                std::vector<MobMoveUpdateStruct> updates;
 
                 for (const auto &mob : mobsInZone)
                 {
@@ -610,21 +617,24 @@ ChunkServer::mainEventLoopCH()
                     upd.waypointX = mvData.patrolTargetPoint.positionX;
                     upd.waypointY = mvData.patrolTargetPoint.positionY;
 
-                    updates.push_back(upd);
                     gameServices_.getMobMovementManager().updateLastBroadcastMs(mob.uid, nowMs);
-                }
 
-                if (!updates.empty())
-                {
-                    auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
                     for (const auto &client : connectedClients)
                     {
                         if (client.clientId <= 0)
                             continue;
-                        Event mobUpdateEvent(Event::MOB_MOVE_UPDATE, client.clientId, updates);
-                        eventQueueGameServer_.push(std::move(mobUpdateEvent));
+                        clientUpdates[client.clientId].push_back(upd);
                     }
                 }
+            }
+
+            // Push ONE event per connected client containing ALL zone updates.
+            // This replaces the old per-zone-per-client approach that produced
+            // N_zones × N_clients events per tick.
+            for (auto &[clientId, updates] : clientUpdates)
+            {
+                Event mobUpdateEvent(Event::MOB_MOVE_UPDATE, clientId, std::move(updates));
+                eventQueueGameServer_.push(std::move(mobUpdateEvent));
             }
         },
         50, // 50ms scheduling resolution; actual mob movement is gated internally

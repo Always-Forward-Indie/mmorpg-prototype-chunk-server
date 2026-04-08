@@ -1,3 +1,15 @@
+v0.1.7
+08.04.2026
+================
+Bug Fixes:
+Cooldown starts at cast initiation — кулдаун скила теперь начинает отсчёт в момент нажатия кнопки (`initiateSkillUsage`), а не в момент прилёта результата (`executeSkillUsage`). Ранее при касте 4 с + кулдауне 5 с игрок вынужден был ждать суммарно ~9 с вместо ожидаемых 5 с. Изменение: `initiateSkillUsage` вызывает `trySetCooldown` атомарно (проверка + установка под одним `unique_lock`), заменяя отдельные вызовы `isOnCooldown` + `isGCDActive`. `CombatActionStruct` получил поле `cooldownPreset`; `updateOngoingActions` передаёт флаг в `executeSkillUsage` → `useSkill`, которая пропускает повторную проверку кулдауна.
+TCP head-of-line blocking — пакеты позиций мобов больше не блокируют доставку боевых пакетов. Добавлена приоритетная очередь записи (`SocketWriteQueue`) с двумя уровнями: CRITICAL (бой, статы, все существующие `sendResponse`) и BULK (позиции мобов). Каждый сокет получает собственный ASIO `strand`, что также устраняет потенциальный UB от конкурентных `async_write` на одном сокете в многопоточном `io_context`. Новый метод `sendResponseBulk` используется в `MobEventHandler::handleMobMoveUpdateEvent`.
+
+Improvements:
+Mob update batching — тик мобов (50 мс) теперь собирает обновления из всех зон в единый `clientId → vector<MobMoveUpdateStruct>` и пушит **одно** событие `MOB_MOVE_UPDATE` на клиента вместо одного события на зону на клиента. При 5 зонах это снижает число `async_write` вызовов в 5 раз — меньше давления на буфер TCP-сокета.
+
+---
+
 v0.1.6
 08.04.2026
 ================

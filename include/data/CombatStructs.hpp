@@ -102,9 +102,10 @@ struct CombatActionStruct
     CombatActionState state;            // Current state
     InterruptionReason interruptReason; // Reason for interruption (if any)
 
-    bool requiresLineOfSight; // Whether line of sight is required
-    bool canBeInterrupted;    // Whether action can be interrupted
-    int cooldownMs;           // Cooldown in milliseconds
+    bool requiresLineOfSight;   // Whether line of sight is required
+    bool canBeInterrupted;      // Whether action can be interrupted
+    int cooldownMs;             // Cooldown in milliseconds
+    bool cooldownPreset{false}; // True when initiateSkillUsage already set the cooldown
 
     // Animation data
     std::string animationName; // Animation to play

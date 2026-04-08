@@ -47,6 +47,12 @@ class ClientSession : public std::enable_shared_from_this<ClientSession>
         }
     }
 
+    // Expose the underlying socket so NetworkManager can look up the write queue.
+    std::shared_ptr<boost::asio::ip::tcp::socket> getSocket() const
+    {
+        return socket_;
+    }
+
     ~ClientSession()
     {
         // Explicitly clear the accumulated data buffer to free memory

@@ -34,7 +34,7 @@ class CombatSystem
     /**
      * @brief Выполнить использование скила
      */
-    SkillExecutionResult executeSkillUsage(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType);
+    SkillExecutionResult executeSkillUsage(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, bool cooldownAlreadySet = false);
 
     /**
      * @brief Удалить запись об ongoing action для кастера (без side-effects).
@@ -151,7 +151,7 @@ class CombatSystem
      * @brief Обработать AoE-скил: найти все цели в area_radius вокруг кастера,
      *  применить урон, отправить broadcast на каждую цель.
      */
-    bool executeAoESkillUsage(int casterId, const std::string &skillSlug);
+    bool executeAoESkillUsage(int casterId, const std::string &skillSlug, bool cooldownAlreadySet = false);
 
     /**
      * @brief Send a durability change to the game server for persistence.

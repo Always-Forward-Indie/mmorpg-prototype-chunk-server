@@ -119,44 +119,8 @@ NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clien
         return;
     }
 
-    try
-    {
-        if (!clientSocket->is_open())
-        {
-            log_->error("Attempted write on closed socket.");
-            return;
-        }
-    }
-    catch (const std::exception &e)
-    {
-        gameServices_.getLogger().logError("Exception while checking socket state: " + std::string(e.what()), RED);
-        return;
-    }
-
-    // CRITICAL-1 fix: responseString is a const-ref parameter; it may be destroyed before
-    // async_write completes. Copy once into a shared_ptr so the buffer stays alive
-    // across the async boundary. All callers share refcount increments — no extra copies.
     auto dataPtr = std::make_shared<const std::string>(responseString);
-
-    boost::asio::async_write(*clientSocket, boost::asio::buffer(*dataPtr), [this, clientSocket, dataPtr](const boost::system::error_code &error, size_t bytes_transferred)
-        {
-            if (error) {
-                log_->error("Error during async_write: " + error.message());
-                if (clientSocket->is_open()) {
-                    boost::system::error_code close_ec;
-                    clientSocket->close(close_ec);
-                    if (close_ec) {
-                        log_->error("Error closing socket after write failure: " + close_ec.message());
-                    }
-                }
-            } else {
-                log_->debug("Bytes sent: " + std::to_string(bytes_transferred));
-                boost::system::error_code ec;
-                auto remoteEndpoint = clientSocket->remote_endpoint(ec);
-                if (!ec) {
-                    gameServices_.getLogger().log("Data sent successfully to Client: " + remoteEndpoint.address().to_string() + ":" + std::to_string(remoteEndpoint.port()), BLUE);
-                }
-            } });
+    enqueueWrite(std::move(clientSocket), std::move(dataPtr), true /* critical */);
 }
 
 // CRITICAL-8: shared_ptr overload — buffer stays alive until async_write completes.
@@ -168,23 +132,110 @@ NetworkManager::sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clien
     if (!clientSocket || !data)
         return;
 
-    try
+    enqueueWrite(std::move(clientSocket), std::move(data), true /* critical */);
+}
+
+void
+NetworkManager::sendResponseBulk(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+    std::shared_ptr<const std::string> data)
+{
+    if (!clientSocket || !data)
+        return;
+
+    enqueueWrite(std::move(clientSocket), std::move(data), false /* bulk */);
+}
+
+std::shared_ptr<NetworkManager::SocketWriteQueue>
+NetworkManager::getOrCreateWriteQueue(boost::asio::ip::tcp::socket *key)
+{
+    std::lock_guard<std::mutex> lock(writeQueuesMutex_);
+    auto it = writeQueues_.find(key);
+    if (it != writeQueues_.end())
+        return it->second;
+    auto q = std::make_shared<SocketWriteQueue>(io_context_);
+    writeQueues_.emplace(key, q);
+    return q;
+}
+
+void
+NetworkManager::removeWriteQueue(boost::asio::ip::tcp::socket *key)
+{
+    std::lock_guard<std::mutex> lock(writeQueuesMutex_);
+    writeQueues_.erase(key);
+}
+
+void
+NetworkManager::enqueueWrite(std::shared_ptr<boost::asio::ip::tcp::socket> socket,
+    std::shared_ptr<const std::string> data,
+    bool critical)
+{
+    auto queue = getOrCreateWriteQueue(socket.get());
+    boost::asio::post(queue->strand,
+        [this, socket = std::move(socket), queue, data = std::move(data), critical]() mutable
+        {
+            if (critical)
+                queue->criticalQ.push_back(std::move(data));
+            else
+                queue->bulkQ.push_back(std::move(data));
+            if (!queue->writing)
+                doNextWrite(std::move(socket), std::move(queue));
+        });
+}
+
+void
+NetworkManager::doNextWrite(std::shared_ptr<boost::asio::ip::tcp::socket> socket,
+    std::shared_ptr<SocketWriteQueue> queue)
+{
+    // Must be called on queue->strand.
+    std::shared_ptr<const std::string> data;
+    if (!queue->criticalQ.empty())
     {
-        if (!clientSocket->is_open())
-            return;
+        data = std::move(queue->criticalQ.front());
+        queue->criticalQ.pop_front();
     }
-    catch (...)
+    else if (!queue->bulkQ.empty())
     {
+        data = std::move(queue->bulkQ.front());
+        queue->bulkQ.pop_front();
+    }
+    else
+    {
+        queue->writing = false;
         return;
     }
 
-    boost::asio::async_write(*clientSocket, boost::asio::buffer(*data), [clientSocket, data](const boost::system::error_code &error, size_t)
-        {
-            if (error && clientSocket->is_open())
+    if (!socket || !socket->is_open())
+    {
+        queue->writing = false;
+        queue->criticalQ.clear();
+        queue->bulkQ.clear();
+        return;
+    }
+
+    queue->writing = true;
+    boost::asio::async_write(*socket,
+        boost::asio::buffer(*data),
+        boost::asio::bind_executor(queue->strand,
+            [this, socket, queue, data](const boost::system::error_code &error, size_t bytes_transferred) mutable
             {
-                boost::system::error_code ec;
-                clientSocket->close(ec);
-            } });
+                if (error)
+                {
+                    log_->error("Priority write error: " + error.message());
+                    queue->writing = false;
+                    queue->criticalQ.clear();
+                    queue->bulkQ.clear();
+                    if (socket->is_open())
+                    {
+                        boost::system::error_code ec;
+                        socket->close(ec);
+                    }
+                }
+                else
+                {
+                    log_->debug("Bytes sent: " + std::to_string(bytes_transferred));
+                    doNextWrite(std::move(socket), std::move(queue));
+                }
+            }));
 }
 
 std::string
@@ -261,11 +312,14 @@ NetworkManager::addActiveSession(std::shared_ptr<ClientSession> session)
 void
 NetworkManager::removeActiveSession(std::shared_ptr<ClientSession> session)
 {
+    // Remove the per-socket write queue to free memory and stop future enqueues.
+    if (session)
+        removeWriteQueue(session->getSocket().get());
+
     std::lock_guard<std::mutex> lock(sessionsMutex_);
     activeSessions_.erase(session);
     gameServices_.getLogger().log("Removed session from active sessions. Total active: " + std::to_string(activeSessions_.size()), GREEN);
 }
-
 void
 NetworkManager::cleanupInactiveSessions()
 {

@@ -105,23 +105,31 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         result.skillSchool = skill.school;
 
         // Проверяем базовые требования (без потребления ресурсов)
-        if (skillSystem_->isOnCooldown(casterId, skillSlug))
+        // Use trySetCooldown here to atomically check + start the cooldown at cast
+        // initiation time.  This means:
+        //   • The cooldown ticks from the moment the player presses the button, not
+        //     when the fireball lands — matching standard MMO behaviour.
+        //   • The TOCTOU race between isOnCooldown and setCooldown is eliminated.
+        // executeSkillUsage will pass cooldownAlreadySet=true to useSkill so that
+        // the cooldown is not re-checked (it would look "on cooldown" and fail).
         {
-            log_->warn("[initiateSkillUsage] Skill '" + skillSlug + "' is on cooldown for caster " +
-                       std::to_string(casterId));
-            result.errorMessage = "Skill is on cooldown";
-            return result;
-        }
-
-        // Проверяем GCD до создания ongoingAction — предотвращает паттерн
-        // «инициация успешна, результат проваливается» — клиент не должен
-        // запускать анимацию если GCD ещё активен.
-        if (skill.gcdMs > 0 && skillSystem_->isGCDActive(casterId))
-        {
-            log_->warn("[initiateSkillUsage] GCD active for caster " + std::to_string(casterId) +
-                       " skill='" + skillSlug + "'");
-            result.errorMessage = "Global cooldown active";
-            return result;
+            bool onGCD = false;
+            if (!skillSystem_->trySetCooldown(casterId, skillSlug, skill.cooldownMs, skill.gcdMs, &onGCD))
+            {
+                if (onGCD)
+                {
+                    log_->warn("[initiateSkillUsage] GCD active for caster " + std::to_string(casterId) +
+                               " skill='" + skillSlug + "'");
+                    result.errorMessage = "Global cooldown active";
+                }
+                else
+                {
+                    log_->warn("[initiateSkillUsage] Skill '" + skillSlug + "' is on cooldown for caster " +
+                               std::to_string(casterId));
+                    result.errorMessage = "Skill is on cooldown";
+                }
+                return result;
+            }
         }
 
         // Проверяем, что у кастера нет активного каста — во время каста нельзя использовать
@@ -254,6 +262,10 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         // Skills with castMs > 0 are deferred (CASTING); castMs == 0 are instant.
         action->state = (skill.castMs > 0) ? CombatActionState::CASTING : CombatActionState::EXECUTING;
         action->startTime = std::chrono::steady_clock::now();
+        // Cooldown was already claimed by trySetCooldown above; mark this so
+        // executeSkillUsage (called later by updateOngoingActions) skips the
+        // duplicate cooldown check inside useSkill.
+        action->cooldownPreset = true;
         float kSwing = static_cast<float>(skill.swingMs) / 1000.0f;
 
         action->animationName = skill.animationName.empty() ? "skill_" + skillSlug : skill.animationName;
@@ -294,7 +306,7 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
 }
 
 SkillExecutionResult
-CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType)
+CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, bool cooldownAlreadySet)
 {
     SkillExecutionResult result;
     result.casterId = casterId;
@@ -348,7 +360,7 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         // Route AoE skills to dedicated handler (resource management handled inside)
         if (targetType == CombatTargetType::AREA)
         {
-            result.success = executeAoESkillUsage(casterId, skillSlug);
+            result.success = executeAoESkillUsage(casterId, skillSlug, cooldownAlreadySet);
             return result;
         }
 
@@ -373,7 +385,10 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         }
 
         // Выполняем скил через SkillSystem
-        auto skillResult = skillSystem_->useSkill(casterId, skillSlug, targetId, targetType);
+        // Pass cooldownAlreadySet so that skills initiated via initiateSkillUsage
+        // do not attempt to re-set the cooldown (which would fail because it was
+        // already claimed at cast-start time).
+        auto skillResult = skillSystem_->useSkill(casterId, skillSlug, targetId, targetType, cooldownAlreadySet);
         result.skillResult = skillResult;
 
         if (!skillResult.success)
@@ -634,7 +649,7 @@ CombatSystem::updateOngoingActions()
 
     // Snapshot actions that are ready to execute, erase them under lock,
     // then execute outside the lock to avoid holding it during heavy work.
-    std::vector<std::tuple<int, std::string, int, CombatTargetType, std::string>> toExecute;
+    std::vector<std::tuple<int, std::string, int, CombatTargetType, std::string, bool>> toExecute;
     {
         std::lock_guard<std::mutex> lock(actionsMutex_);
         for (auto it = ongoingActions_.begin(); it != ongoingActions_.end();)
@@ -643,7 +658,7 @@ CombatSystem::updateOngoingActions()
             if (action->state == CombatActionState::CASTING && now >= action->endTime)
             {
                 action->state = CombatActionState::EXECUTING;
-                toExecute.emplace_back(action->casterId, action->skillSlug, action->targetId, action->targetType, action->actionName);
+                toExecute.emplace_back(action->casterId, action->skillSlug, action->targetId, action->targetType, action->actionName, action->cooldownPreset);
                 it = ongoingActions_.erase(it);
             }
             else if (action->state == CombatActionState::EXECUTING)
@@ -659,9 +674,9 @@ CombatSystem::updateOngoingActions()
         }
     }
 
-    for (auto &[casterId, skillSlug, targetId, targetType, actionName] : toExecute)
+    for (auto &[casterId, skillSlug, targetId, targetType, actionName, cooldownPreset] : toExecute)
     {
-        auto result = executeSkillUsage(casterId, skillSlug, targetId, targetType);
+        auto result = executeSkillUsage(casterId, skillSlug, targetId, targetType, cooldownPreset);
 
         if (responseBuilder_ && broadcastCallback_)
         {
@@ -720,13 +735,13 @@ CombatSystem::tickEffects()
 }
 
 bool
-CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug)
+CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug, bool cooldownAlreadySet)
 {
     try
     {
         // Let SkillSystem handle mana consumption, cooldown, and validation.
         // AREA targetType: validateTarget returns true, no damage calc inside useSkill.
-        auto skillResult = skillSystem_->useSkill(casterId, skillSlug, 0, CombatTargetType::AREA);
+        auto skillResult = skillSystem_->useSkill(casterId, skillSlug, 0, CombatTargetType::AREA, cooldownAlreadySet);
         if (!skillResult.success)
         {
             log_->error(

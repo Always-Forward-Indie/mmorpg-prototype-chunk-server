@@ -17,7 +17,7 @@ SkillSystem::SkillSystem(GameServices *gameServices)
 }
 
 SkillUsageResult
-SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType)
+SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, bool cooldownAlreadySet)
 {
     SkillUsageResult result;
     result.success = false;
@@ -73,25 +73,30 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
         // HIGH-1: atomic check-AND-set under a single unique_lock — prevents two
         // concurrent calls from both passing the cooldown check simultaneously.
         // For player casters, also enforces the per-caster Global Cooldown.
-        const int gcdMs = (casterType == CasterType::PLAYER) ? skill.gcdMs : 0;
-        bool onGCD = false;
-        if (!trySetCooldown(casterId, skillSlug, skill.cooldownMs, gcdMs, &onGCD))
+        // Skip when cooldownAlreadySet=true: initiateSkillUsage already claimed the
+        // cooldown slot at cast-start time; re-checking would always fail.
+        if (!cooldownAlreadySet)
         {
-            // Mana was already consumed — refund it since the skill is on cooldown.
-            if (skill.costMp > 0 && casterType == CasterType::PLAYER)
-                gameServices_->getCharacterManager().restoreManaToCharacter(casterId, skill.costMp);
-            if (onGCD)
+            const int gcdMs = (casterType == CasterType::PLAYER) ? skill.gcdMs : 0;
+            bool onGCD = false;
+            if (!trySetCooldown(casterId, skillSlug, skill.cooldownMs, gcdMs, &onGCD))
             {
-                log_->warn("[useSkill] Global cooldown active for caster " + std::to_string(casterId));
-                result.errorMessage = "Global cooldown active";
+                // Mana was already consumed — refund it since the skill is on cooldown.
+                if (skill.costMp > 0 && casterType == CasterType::PLAYER)
+                    gameServices_->getCharacterManager().restoreManaToCharacter(casterId, skill.costMp);
+                if (onGCD)
+                {
+                    log_->warn("[useSkill] Global cooldown active for caster " + std::to_string(casterId));
+                    result.errorMessage = "Global cooldown active";
+                }
+                else
+                {
+                    log_->warn("[useSkill] Skill '" + skillSlug + "' is on cooldown for caster " +
+                               std::to_string(casterId));
+                    result.errorMessage = "Skill is on cooldown or not available";
+                }
+                return result;
             }
-            else
-            {
-                log_->warn("[useSkill] Skill '" + skillSlug + "' is on cooldown for caster " +
-                           std::to_string(casterId));
-                result.errorMessage = "Skill is on cooldown or not available";
-            }
-            return result;
         }
 
         // Проверяем цель
