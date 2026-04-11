@@ -39,6 +39,11 @@ EventHandler::EventHandler(
 
     // Set mob event handler reference in character event handler (server-push spawn zones on join)
     characterEventHandler_->setMobEventHandler(mobEventHandler_.get());
+
+    // Set equipment event handler so Phase 4 can broadcast the new player's own
+    // equipment to all existing clients (covers the race where inventory arrives
+    // before playerReady and the EventHandler guard skips the broadcast).
+    characterEventHandler_->setEquipmentEventHandler(equipmentEventHandler_.get());
 }
 
 void
@@ -746,8 +751,8 @@ EventHandler::handleSetPlayerInventoryEvent(const Event &event)
         // Only broadcast once the joining client has sent playerReady — otherwise
         // the other clients haven't received the joinGameCharacter packet yet and
         // would try to render equipment on a character that doesn't exist in their
-        // scene. If playerReady hasn't arrived yet, handlePlayerReadyEvent will
-        // perform this broadcast after the Phase 4 world-state push.
+        // scene. If playerReady hasn't arrived yet, handlePlayerReadyEvent performs
+        // this broadcast as a catch-up step (step 5, after pushConnectedCharactersToClient).
         if (gameServices_.getClientManager().isClientWorldReady(clientId))
         {
             equipmentEventHandler_->broadcastEquipmentUpdate(characterId, clientId);

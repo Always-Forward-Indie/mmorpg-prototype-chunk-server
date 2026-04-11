@@ -58,20 +58,20 @@ EquipmentManager::buildFromInventory(int characterId)
 {
     const float threshold = getWarningThreshold();
 
+    // 1. Fetch inventory OUTSIDE the equipment lock to avoid deadlock
+    //    (InventoryManager has its own mutex).
+    auto items = inventoryManager_.getPlayerInventory(characterId);
+
+    // 2. Lock and rebuild equipment state ATOMICALLY — clear + populate in
+    //    a single critical section so concurrent buildEquipmentStateJson()
+    //    calls never observe an intermediate "cleared but not yet populated"
+    //    state (which would broadcast empty equipment to other clients).
     std::unique_lock lock(mutex_);
 
     CharacterEquipmentStruct &equip = equipment_[characterId];
     equip.characterId = characterId;
     equip.slots.clear();
     equip.twoHandedActive = false;
-
-    // Need to release the equipment lock before calling InventoryManager (separate mutex)
-    lock.unlock();
-
-    auto items = inventoryManager_.getPlayerInventory(characterId);
-
-    lock.lock();
-    equip = equipment_[characterId]; // re-fetch after re-lock (might have been cleared)
 
     for (const auto &invItem : items)
     {

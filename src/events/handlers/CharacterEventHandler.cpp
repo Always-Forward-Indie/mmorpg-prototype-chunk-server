@@ -1,5 +1,6 @@
 #include "events/handlers/CharacterEventHandler.hpp"
 #include "events/EventData.hpp"
+#include "events/handlers/EquipmentEventHandler.hpp"
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/handlers/MobEventHandler.hpp"
 #include "events/handlers/NPCEventHandler.hpp"
@@ -16,7 +17,8 @@ CharacterEventHandler::CharacterEventHandler(
       skillEventHandler_(nullptr),
       npcEventHandler_(nullptr),
       itemEventHandler_(nullptr),
-      mobEventHandler_(nullptr)
+      mobEventHandler_(nullptr),
+      equipmentEventHandler_(nullptr)
 {
     log_ = gameServices_.getLogger().getSystem("character");
 }
@@ -43,6 +45,12 @@ void
 CharacterEventHandler::setItemEventHandler(ItemEventHandler *itemEventHandler)
 {
     itemEventHandler_ = itemEventHandler;
+}
+
+void
+CharacterEventHandler::setEquipmentEventHandler(EquipmentEventHandler *equipmentEventHandler)
+{
+    equipmentEventHandler_ = equipmentEventHandler;
 }
 
 bool
@@ -719,7 +727,7 @@ CharacterEventHandler::pushConnectedCharactersToClient(
         nlohmann::json eqResp = ResponseBuilder()
                                     .setHeader("message", "success")
                                     .setHeader("eventType", "PLAYER_EQUIPMENT_UPDATE")
-                                    .setHeader("clientId", clientID)
+                                    .setHeader("clientId", character.clientId)
                                     .setBody("characterId", character.characterId)
                                     .setBody("slots", eq)
                                     .build();
@@ -825,6 +833,17 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     //    The client needs full data (name, level, position, class) to spawn other
     //    players in the world — equipment-only is insufficient.
     pushConnectedCharactersToClient(clientID, clientSocket, characterId);
+
+    // 5. Broadcast this player's own equipment to all other already-online clients.
+    //    Covers the race where SET_PLAYER_INVENTORY arrived before playerReady:
+    //    the isClientWorldReady guard in EventHandler::handleSetPlayerInventoryEvent
+    //    would have skipped the broadcast then, so we do it here as a catch-up.
+    //    If inventory hasn't arrived yet the broadcast is a no-op (all-null slots)
+    //    and the real update fires once SET_PLAYER_INVENTORY is processed.
+    if (equipmentEventHandler_)
+    {
+        equipmentEventHandler_->broadcastEquipmentUpdate(characterId, clientID);
+    }
 
     // Acknowledge receipt so client can hide the loading screen / enable input
     nlohmann::json ack = ResponseBuilder()

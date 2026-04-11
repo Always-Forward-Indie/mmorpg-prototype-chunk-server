@@ -852,24 +852,24 @@ MobMovementManager::calculateChaseMovement(
         return std::nullopt;
     }
 
-    // 1) Compute vector to player
-    float dx = targetPlayer.characterPosition.positionX - mob.position.positionX;
-    float dy = targetPlayer.characterPosition.positionY - mob.position.positionY;
+    // ---- 1. Vector to target ----
+    const float targetX = targetPlayer.characterPosition.positionX;
+    const float targetY = targetPlayer.characterPosition.positionY;
+    float dx = targetX - mob.position.positionX;
+    float dy = targetY - mob.position.positionY;
     float distance = std::sqrt(dx * dx + dy * dy);
 
-    // 2) Abandon if too far
+    // ---- 2. Leash check (max chase distance from mob's per-mob settings) ----
     float maxChaseDistance = mob.aggroRange * mob.chaseMultiplier;
     if (distance > maxChaseDistance)
     {
         auto updated = getMobMovementDataInternal(mob.uid);
-        int lostTargetId = updated.targetPlayerId; // Save target ID before clearing
+        int lostTargetId = updated.targetPlayerId;
         updated.targetPlayerId = 0;
         updated.isReturningToSpawn = true;
         updated.threatTable.clear();
         updated.attackerTimestamps.clear();
         updateMobMovementData(mob.uid, updated);
-
-        // Send target lost event to clients
         sendMobTargetLost(mob, lostTargetId);
 
         logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
@@ -878,18 +878,16 @@ MobMovementManager::calculateChaseMovement(
         return std::nullopt;
     }
 
-    // 3) Abandon if zone boundary exceeded
+    // ---- 3. Zone boundary check ----
     if (shouldStopChasing(mob.position, zone))
     {
         auto updated = getMobMovementDataInternal(mob.uid);
-        int lostTargetId = updated.targetPlayerId; // Save target ID before clearing
+        int lostTargetId = updated.targetPlayerId;
         updated.targetPlayerId = 0;
         updated.isReturningToSpawn = true;
         updated.threatTable.clear();
         updated.attackerTimestamps.clear();
         updateMobMovementData(mob.uid, updated);
-
-        // Send target lost event to clients
         sendMobTargetLost(mob, lostTargetId);
 
         log_->info("[INFO] Mob UID: " + std::to_string(mob.uid) +
@@ -897,11 +895,7 @@ MobMovementManager::calculateChaseMovement(
         return std::nullopt;
     }
 
-    // 4) If within attack range → stop movement (combat state system will handle attacks)
-    // NOTE: previously there was a constant ATTACK_BUFFER = 10.0f added here, which caused
-    // a dead zone: the mob would stop moving at (attackRange + 10) but the combat state
-    // machine only transitions to PREPARING_ATTACK at (attackRange). The mob would
-    // stand still without attacking until the player closed the gap manually.
+    // ---- 4. Attack range — stop movement, let combat state machine handle attacks ----
     {
         std::lock_guard<std::mutex> lg(logMutex_);
         if (distance <= mob.attackRange)
@@ -912,7 +906,6 @@ MobMovementManager::calculateChaseMovement(
                             " reached attack range of player " + std::to_string(targetPlayerId) +
                             " (distance: " + std::to_string(distance) + ") - stopping movement");
             }
-            // Don't move, let combat state system handle the attack sequence
             return std::nullopt;
         }
         else
@@ -921,38 +914,107 @@ MobMovementManager::calculateChaseMovement(
         }
     }
 
-    // 4b) Melee-slot waiting: park this mob just outside the melee ring so it
-    // doesn't jitter while waiting for a free spot. The AI controller sets
-    // waitingForMeleeSlot when all physical slots around the target are taken.
-    // We stop movement at (attackRange + kWaitBuffer) — the mob stands still
-    // facing its target without twitching or slow-rotating in place.
-    // prevDeflectionSign is read here too, sharing the same lock acquisition.
-    float prevDeflectionSign = 0.0f;
+    // ---- 5. Melee-slot waiting: park outside melee ring to prevent crowd jitter ----
+    auto md = getMobMovementDataInternal(mob.uid);
     {
         constexpr float kWaitBuffer = 20.0f;
-        auto md = getMobMovementDataInternal(mob.uid);
         if (md.waitingForMeleeSlot && distance <= mob.attackRange + kWaitBuffer)
             return std::nullopt;
-        prevDeflectionSign = md.lastDeflectionSign;
     }
 
-    // 5) Avoid jitter if extremely close
+    // ---- 6. Skip micro-movements ----
     if (distance < 1.0f)
-    {
         return std::nullopt;
+
+    // ---- 7. Desired direction (normalized vector to target) ----
+    float desiredDx = dx / distance;
+    float desiredDy = dy / distance;
+
+    // ---- 8. Separation steering ----
+    // Soft repulsion force from nearby mobs. Produces smooth crowd navigation
+    // instead of the discrete ±30/60/90° deflection angles that caused oscillation.
+    float sepX = 0.0f;
+    float sepY = 0.0f;
+    {
+        const float mobRadius = (mob.radius > 0) ? static_cast<float>(mob.radius) : 70.0f;
+        const float sepRadius = std::max(aiConfig_.separationRadius, mobRadius * 4.0f);
+
+        for (const auto &other : otherMobs)
+        {
+            if (other.first == mob.uid)
+                continue;
+
+            float ox = mob.position.positionX - other.second.positionX;
+            float oy = mob.position.positionY - other.second.positionY;
+            float od2 = ox * ox + oy * oy;
+
+            if (od2 >= sepRadius * sepRadius || od2 < 0.01f)
+                continue;
+
+            float od = std::sqrt(od2);
+            // Strength: inverse-linear falloff (strongest when touching, zero at sepRadius).
+            float strength = (sepRadius - od) / sepRadius;
+            // Square the strength for a sharper near-field repulsion.
+            strength *= strength;
+            sepX += (ox / od) * strength;
+            sepY += (oy / od) * strength;
+        }
     }
 
-    // 6) Normalize direction
-    dx /= distance;
-    dy /= distance;
+    // ---- 9. Direction smoothing (exponential steering) ----
+    // Blend desired chase direction with separation, then smoothly steer from
+    // the previous tick's heading. Eliminates the "saw" pattern caused by
+    // snapping to a new direction vector every tick.
+    float blendedDx = desiredDx + sepX * aiConfig_.separationWeight;
+    float blendedDy = desiredDy + sepY * aiConfig_.separationWeight;
+    {
+        float len = std::sqrt(blendedDx * blendedDx + blendedDy * blendedDy);
+        if (len > 0.0001f)
+        {
+            blendedDx /= len;
+            blendedDy /= len;
+        }
+        else
+        {
+            blendedDx = desiredDx;
+            blendedDy = desiredDy;
+        }
+    }
 
-    // 7) Compute step size from the mob's move_speed attribute (same stat system as
-    // players: stat_value * MOVE_SPEED_SCALE = units/sec).  Falls back to the global
-    // aiConfig_.chaseSpeedUnitsPerSec when the mob has no move_speed stat defined.
-    // This speed is also sent verbatim in the packet so the client Dead Reckoning
-    // uses exactly the same value:  TargetPos = ServerPos + velocity * dt.
+    // Exponential steering: smoothly rotate from previous direction toward blended target.
+    // factor = 1 - exp(-turnSpeed * dt); e.g. turnSpeed=10, dt=0.1 → factor≈0.63
+    float prevDx = md.movementDirectionX;
+    float prevDy = md.movementDirectionY;
+    bool hasPrev = (prevDx * prevDx + prevDy * prevDy) > 0.0001f;
+
+    float finalDx, finalDy;
+    if (hasPrev)
+    {
+        float turnFactor = 1.0f - std::exp(-aiConfig_.chaseTurnSpeed * aiConfig_.chaseMovementInterval);
+        finalDx = prevDx + (blendedDx - prevDx) * turnFactor;
+        finalDy = prevDy + (blendedDy - prevDy) * turnFactor;
+        float fLen = std::sqrt(finalDx * finalDx + finalDy * finalDy);
+        if (fLen > 0.0001f)
+        {
+            finalDx /= fLen;
+            finalDy /= fLen;
+        }
+        else
+        {
+            finalDx = blendedDx;
+            finalDy = blendedDy;
+        }
+    }
+    else
+    {
+        finalDx = blendedDx;
+        finalDy = blendedDy;
+    }
+
+    // ---- 10. Speed calculation ----
+    // Read mob's move_speed attribute; fallback to global config.
     static constexpr float MOVE_SPEED_SCALE = 40.0f;
-    float mobChaseSpeed = aiConfig_.chaseSpeedUnitsPerSec; // default
+    float mobChaseSpeed = aiConfig_.chaseSpeedUnitsPerSec;
     for (const auto &attr : mob.attributes)
     {
         if (attr.slug == "move_speed" && attr.value > 0)
@@ -962,105 +1024,47 @@ MobMovementManager::calculateChaseMovement(
         }
     }
 
+    // Arrival deceleration: smoothly reduce speed approaching attack range.
+    // Prevents the jarring hard-stop at attackRange.
+    float distToAttackRange = distance - mob.attackRange;
+    if (aiConfig_.arrivalSlowdownDistance > 0.0f &&
+        distToAttackRange > 0.0f &&
+        distToAttackRange < aiConfig_.arrivalSlowdownDistance)
+    {
+        float t = distToAttackRange / aiConfig_.arrivalSlowdownDistance; // 0 at range, 1 at full speed
+        float minSpeed = mobChaseSpeed * aiConfig_.arrivalMinSpeedFraction;
+        mobChaseSpeed = minSpeed + (mobChaseSpeed - minSpeed) * t;
+    }
+
+    // Step size — distance the mob moves this tick.
     const float kAttackEntryBuffer = 2.0f;
     float stepSize = mobChaseSpeed * aiConfig_.chaseMovementInterval;
     stepSize = std::min(stepSize, params.maxStepSizeAbsolute);
     float overshoot = distance - std::max(0.0f, mob.attackRange - kAttackEntryBuffer);
     stepSize = std::min(stepSize, overshoot);
     if (stepSize <= 0.0f)
-    {
         return std::nullopt;
-    }
 
-    // 9) Report the per-mob speed so client Dead Reckoning velocity is consistent.
-    const float chaseSpeed = mobChaseSpeed;
-    float newX = mob.position.positionX + dx * stepSize;
-    float newY = mob.position.positionY + dy * stepSize;
+    // ---- 11. Compute new position ----
+    // No hard collision check during active pursuit: separation steering (step 8)
+    // continuously pushes mobs apart via soft forces, so rigid per-tick position
+    // validation is unnecessary. Hard checks caused alternating blocked/free ticks
+    // (the oscillation "saw") and are not how AAA MMORPGs handle mob crowds during
+    // combat — slight overlap is acceptable and visually unnoticeable at these scales.
+    float newX = mob.position.positionX + finalDx * stepSize;
+    float newY = mob.position.positionY + finalDy * stepSize;
 
-    // 8+1) Validate collisions (skip zone bounds).
-    // If the direct path is blocked, try deflection angles so mobs steer around
-    // each other instead of stacking. The candidate angles are ordered so that
-    // the same sign as the previous tick is always tried first at each magnitude.
-    // This prevents the ±90° alternation that causes a mob to oscillate ~20 units
-    // back and forth when all smaller deflections are blocked by a crowd.
-    float usedDeflectionSign = 0.0f; // 0 = direct path; set below when deflecting
-    if (!isValidPositionForChase(newX, newY, otherMobs, mob, params))
-    {
-        // Build angle list: prefer same-sign as last tick at every magnitude so the
-        // mob maintains a consistent side when threading through a crowd.
-        const float pos30 = static_cast<float>(M_PI) / 6.0f;
-        const float neg30 = -static_cast<float>(M_PI) / 6.0f;
-        const float pos60 = static_cast<float>(M_PI) / 3.0f;
-        const float neg60 = -static_cast<float>(M_PI) / 3.0f;
-        const float pos90 = static_cast<float>(M_PI) / 2.0f;
-        const float neg90 = -static_cast<float>(M_PI) / 2.0f;
-
-        float kDeflectAngles[6];
-        if (prevDeflectionSign > 0.0f)
-        {
-            kDeflectAngles[0] = pos30;
-            kDeflectAngles[1] = pos60;
-            kDeflectAngles[2] = pos90;
-            kDeflectAngles[3] = neg30;
-            kDeflectAngles[4] = neg60;
-            kDeflectAngles[5] = neg90;
-        }
-        else if (prevDeflectionSign < 0.0f)
-        {
-            kDeflectAngles[0] = neg30;
-            kDeflectAngles[1] = neg60;
-            kDeflectAngles[2] = neg90;
-            kDeflectAngles[3] = pos30;
-            kDeflectAngles[4] = pos60;
-            kDeflectAngles[5] = pos90;
-        }
-        else
-        {
-            // No prior preference — interleave ± to minimise deviation on average.
-            kDeflectAngles[0] = pos30;
-            kDeflectAngles[1] = neg30;
-            kDeflectAngles[2] = pos60;
-            kDeflectAngles[3] = neg60;
-            kDeflectAngles[4] = pos90;
-            kDeflectAngles[5] = neg90;
-        }
-
-        const float baseAngle = std::atan2(dy, dx);
-        bool steeredAround = false;
-        for (float delta : kDeflectAngles)
-        {
-            const float testAngle = baseAngle + delta;
-            const float testDx = std::cos(testAngle);
-            const float testDy = std::sin(testAngle);
-            const float testX = mob.position.positionX + testDx * stepSize;
-            const float testY = mob.position.positionY + testDy * stepSize;
-            if (isValidPositionForChase(testX, testY, otherMobs, mob, params))
-            {
-                newX = testX;
-                newY = testY;
-                dx = testDx;
-                dy = testDy;
-                steeredAround = true;
-                usedDeflectionSign = (delta > 0.0f) ? 1.0f : -1.0f;
-                break;
-            }
-        }
-
-        if (!steeredAround)
-            return std::nullopt;
-    }
-
-    // 11) Return movement result
+    // ---- 12. Return result ----
     MobMovementResult result;
     result.newPosition = mob.position;
     result.newPosition.positionX = newX;
     result.newPosition.positionY = newY;
-    result.newPosition.rotationZ = atan2(dy, dx) * (180.0f / M_PI);
-    result.newDirectionX = dx;
-    result.newDirectionY = dy;
+    result.newPosition.rotationZ = std::atan2(finalDy, finalDx) * (180.0f / static_cast<float>(M_PI));
+    result.newDirectionX = finalDx;
+    result.newDirectionY = finalDy;
     result.validMovement = true;
-    result.speed = chaseSpeed;
-    result.deflectionSign = usedDeflectionSign;
+    result.speed = mobChaseSpeed;
+    result.deflectionSign = 0.0f; // No longer used — steering handles collision avoidance
     return result;
 }
 

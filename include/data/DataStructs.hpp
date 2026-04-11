@@ -614,6 +614,23 @@ struct MobAIConfig
     // Снижено до 10 потому что при реалистичной chase-скорости один шаг ~45 юнитов,
     // а порог 50 срезал бы большинство обновлений.
     float minimumMoveDistance = 10.0f; // Минимальное расстояние для отправки обновления
+
+    // ---- Steering behavior parameters (chase movement) ----
+    // Turn speed controls how fast the mob rotates toward the target direction.
+    // Higher = snappier turns, lower = smoother/wider arcs.
+    // Factor per tick: 1 - exp(-chaseTurnSpeed * chaseMovementInterval).
+    // With turnSpeed=10 and interval=0.1s → factor≈0.63 (turn 63% toward target per tick).
+    float chaseTurnSpeed = 10.0f;
+
+    // Separation steering: soft repulsion force pushing mobs apart.
+    // Eliminates hard-collision deflection angles and produces smooth crowd movement.
+    float separationWeight = 0.35f;  // Blend weight of separation vs chase direction
+    float separationRadius = 300.0f; // Radius within which other mobs exert repulsion
+
+    // Arrival deceleration: slow down approaching attack range for smooth stop.
+    // 0.0 = disabled (hard stop), > 0 = deceleration starts this many units before attack range.
+    float arrivalSlowdownDistance = 80.0f;
+    float arrivalMinSpeedFraction = 0.25f; // Minimum speed as fraction of full chase speed during arrival
 };
 
 /**

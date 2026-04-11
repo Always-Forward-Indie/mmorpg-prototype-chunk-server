@@ -1,3 +1,21 @@
+v0.1.9
+11.04.2026
+================
+New:
+`corpseRemoved` broadcast — новый пакет `corpseRemoved` рассылается всем клиентам при удалении трупа (полностью разграблен или истёк TTL). Тело: `{ type: "CORPSE_REMOVED", corpseUID, timestamp }`. До этого трупы накапливались на клиенте бесконечно — сервер удалял их молча, без уведомления.
+
+Bug Fixes:
+Move speed effects в positionCorrection — активные эффекты с `attributeSlug == "move_speed"` (не-тик модификаторы) теперь суммируются при валидации позиции игрока. Ранее скоростные баффы/дебаффы от скилов, предметов и квестов игнорировались, вызывая ложные `positionCorrection`-отклонения на забаффованных клиентах.
+Cast-time skill false cooldown — `dispatchSkillAction` теперь вызывает `executeSkillUsage` с флагом `cooldownAlreadySet=true`. Без него `useSkill` повторно проверяла кулдаун (уже выставленный в `initiateSkillUsage`), считала скил на кд и прерывала выполнение — скилы с castTime никогда не наносили урон после завершения каста.
+Corpse removal on full loot — полностью разграбленный труп теперь немедленно удаляется из реестра (`harvestableCorpses_`) и рассылает `corpseRemoved` всем клиентам прямо в `pickupCorpseLoot()`. Ранее запись оставалась до следующего прохода `cleanupOldCorpses`.
+Mutex ordering deadlock prevention — в `pickupCorpseLoot()` `lootMutex_` освобождается до захвата `corpsesMutex_`. Ранее оба мьютекса могли удерживаться одновременно в разном порядке, создавая потенциальный дедлок с `cleanupOldCorpses`.
+Corpse TTL cleanup broadcast — `cleanupOldCorpses()` теперь рассылает `corpseRemoved` для каждого истёкшего трупа после освобождения всех мьютексов.
+
+Improvements:
+Corpse TTL — уменьшен с 600 с (10 мин) до 30 с. Трупы убираются из мира значительно быстрее.
+
+---
+
 v0.1.8
 08.04.2026
 ================

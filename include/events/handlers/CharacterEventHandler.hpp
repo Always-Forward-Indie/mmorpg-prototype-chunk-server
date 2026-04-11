@@ -11,6 +11,7 @@
 class NPCEventHandler;
 class ItemEventHandler;
 class MobEventHandler;
+class EquipmentEventHandler;
 
 /**
  * @brief Structure to hold pending join requests
@@ -60,6 +61,11 @@ class CharacterEventHandler : public BaseEventHandler
      * @brief Set mob event handler for server-push spawn zones on join
      */
     void setMobEventHandler(MobEventHandler *mobEventHandler);
+
+    /**
+     * @brief Set equipment event handler for broadcasting equipment updates on join
+     */
+    void setEquipmentEventHandler(EquipmentEventHandler *equipmentEventHandler);
 
     /**
      * @brief Handle character join event
@@ -227,6 +233,9 @@ class CharacterEventHandler : public BaseEventHandler
 
     // Reference to mob event handler for server-push spawn zones on join
     MobEventHandler *mobEventHandler_;
+
+    // Reference to equipment event handler for broadcasting equipment on player join
+    EquipmentEventHandler *equipmentEventHandler_;
 
     // Last known GameZone id per characterId — used to detect zone transitions
     std::unordered_map<int, int> lastZoneByCharacter_;
