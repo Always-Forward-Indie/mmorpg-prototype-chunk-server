@@ -164,9 +164,17 @@ class Event
         GET_PLAYER_TITLES,     // Client requests their full title list
         EQUIP_TITLE,           // Client requests to equip (or unequip) a title
 
+        // Skill bar (hotbar slot assignments)
+        SET_SKILL_BAR_SLOT, // Client assigns or clears a hotbar slot
+
         // Chat events (client → chunk-server)
         CHAT_MESSAGE, ///< Player sends a chat message (local / zone / whisper)
-        PLAYER_READY  ///< Client notifies server that the game scene has finished loading
+        PLAYER_READY, ///< Client notifies server that the game scene has finished loading
+
+        // ── Emote system ────────────────────────────────────────────────────
+        SET_EMOTE_DEFINITIONS, ///< Game-server sends static emote catalog to chunk-server
+        SET_PLAYER_EMOTES,     ///< Load unlocked emotes for a character (on join)
+        USE_EMOTE              ///< Client requests to play an emote animation
     }; // Define more event types as needed
 
     Event() = default; // Default constructor

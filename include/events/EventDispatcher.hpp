@@ -64,6 +64,10 @@ class EventDispatcher
     // Title system (client → chunk)
     void handleGetPlayerTitles(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleEquipTitle(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // Skill bar (client → chunk)
+    void handleSetSkillBarSlot(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // Emote system (client → chunk)
+    void handleUseEmote(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;

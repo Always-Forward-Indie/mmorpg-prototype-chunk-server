@@ -230,6 +230,9 @@ One unit of the item is consumed from the inventory. The server validates:
 - Character is alive.
 - Character owns the item.
 - `isUsable = true` и `useEffects` не пустой.
+- Per-item cooldown не активен (`cooldownSeconds` из первого use-effect).
+
+**Тimed-эффекты** (`isInstant = false`) сохраняются в `player_active_effect` (game server) и переживают реконнект. `sourceType` таких эффектов всегда `"item"`.
 
 ---
 

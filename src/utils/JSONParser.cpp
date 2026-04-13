@@ -238,6 +238,22 @@ JSONParser::parseCharacterData(const char *data, size_t length)
         characterData.freeSkillPoints = jsonData["body"]["freeSkillPoints"].get<int>();
     }
 
+    // skill bar slot assignments (sent by game server on character join)
+    if (jsonData.contains("body") && jsonData["body"].is_object() &&
+        jsonData["body"].contains("skillBarData") && jsonData["body"]["skillBarData"].is_array())
+    {
+        for (const auto &slot : jsonData["body"]["skillBarData"])
+        {
+            SkillBarSlotStruct s;
+            if (slot.contains("slotIndex") && slot["slotIndex"].is_number_integer())
+                s.slotIndex = slot["slotIndex"].get<int>();
+            if (slot.contains("skillSlug") && slot["skillSlug"].is_string())
+                s.skillSlug = slot["skillSlug"].get<std::string>();
+            if (s.slotIndex >= 0 && !s.skillSlug.empty())
+                characterData.skillBarSlots.push_back(s);
+        }
+    }
+
     return characterData;
 }
 

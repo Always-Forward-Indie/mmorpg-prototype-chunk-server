@@ -8,6 +8,7 @@
 #include "services/DialogueConditionEvaluator.hpp"
 #include "services/DialogueManager.hpp"
 #include "services/DialogueSessionManager.hpp"
+#include "services/EmoteManager.hpp"
 #include "services/EquipmentManager.hpp"
 #include "services/ExperienceCacheManager.hpp"
 #include "services/ExperienceManager.hpp"
@@ -78,7 +79,8 @@ class GameServices
           reputationManager_(logger_),
           masteryManager_(this),
           titleManager_(this),
-          zoneEventManager_(this)
+          zoneEventManager_(this),
+          emoteManager_(this)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
@@ -241,6 +243,10 @@ class GameServices
     {
         return zoneEventManager_;
     }
+    EmoteManager &getEmoteManager()
+    {
+        return emoteManager_;
+    }
 
   private:
     Logger &logger_;
@@ -279,4 +285,5 @@ class GameServices
     MasteryManager masteryManager_;
     TitleManager titleManager_;
     ZoneEventManager zoneEventManager_;
+    EmoteManager emoteManager_;
 };

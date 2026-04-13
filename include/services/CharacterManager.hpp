@@ -119,6 +119,8 @@ class CharacterManager
     void addCharacterSkill(int characterID, const SkillStruct &skill);
     void modifyFreeSkillPoints(int characterID, int delta);
     int getCharacterFreeSkillPoints(int characterID) const;
+    /// Assign or clear a hotbar slot for a character (in-memory only; persist via game server)
+    void updateSkillBarSlot(int characterID, int slotIndex, const std::string &skillSlug);
 
   private:
     Logger &logger_;

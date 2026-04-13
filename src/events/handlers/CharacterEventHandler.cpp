@@ -342,6 +342,22 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 log_->error("SkillEventHandler not set in CharacterEventHandler");
             }
 
+            // Push skill bar state to client
+            {
+                nlohmann::json slots = nlohmann::json::array();
+                for (const auto &slot : characterData.skillBarSlots)
+                {
+                    slots.push_back({{"slotIndex", slot.slotIndex}, {"skillSlug", slot.skillSlug}});
+                }
+                nlohmann::json skillBarResponse;
+                skillBarResponse["header"]["eventType"] = "skillBarState";
+                skillBarResponse["header"]["clientId"] = clientID;
+                skillBarResponse["header"]["message"] = "skill bar state";
+                skillBarResponse["body"]["slots"] = slots;
+                std::string responseData = networkManager_.generateResponseMessage("success", skillBarResponse);
+                networkManager_.sendResponse(clientSocket, responseData);
+            }
+
             // Notify client which game zone it is currently in
             try
             {
@@ -415,6 +431,12 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 titlesReq["header"]["eventType"] = "getPlayerTitlesData";
                 titlesReq["body"]["characterId"] = cid;
                 gameServerWorker_.sendDataToGameServer(titlesReq.dump() + "\n");
+
+                // Emote system: request unlocked emotes for this character
+                nlohmann::json emotesReq;
+                emotesReq["header"]["eventType"] = "getPlayerEmotesData";
+                emotesReq["body"]["characterId"] = cid;
+                gameServerWorker_.sendDataToGameServer(emotesReq.dump() + "\n");
             }
 
             // ── Phase 4 world-state push is deferred until the client sends
@@ -986,6 +1008,22 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
             log_->error("SkillEventHandler not set in CharacterEventHandler");
         }
 
+        // Push skill bar state to client (pending join path)
+        {
+            nlohmann::json slots = nlohmann::json::array();
+            for (const auto &slot : characterData.skillBarSlots)
+            {
+                slots.push_back({{"slotIndex", slot.slotIndex}, {"skillSlug", slot.skillSlug}});
+            }
+            nlohmann::json skillBarResponse;
+            skillBarResponse["header"]["eventType"] = "skillBarState";
+            skillBarResponse["header"]["clientId"] = request.clientID;
+            skillBarResponse["header"]["message"] = "skill bar state";
+            skillBarResponse["body"]["slots"] = slots;
+            std::string responseData = networkManager_.generateResponseMessage("success", skillBarResponse);
+            networkManager_.sendResponse(request.clientSocket, responseData);
+        }
+
         // Phase 4 world-state (NPCs, mobs, ground items, other players' equipment)
         // is intentionally NOT sent here. It will be pushed in handlePlayerReadyEvent
         // once the client sends "playerReady" (scene fully loaded). This mirrors the
@@ -1064,6 +1102,12 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
         titlesReq["header"]["eventType"] = "getPlayerTitlesData";
         titlesReq["body"]["characterId"] = characterId;
         gameServerWorker_.sendDataToGameServer(titlesReq.dump() + "\n");
+
+        // Emote system: request unlocked emotes for this character
+        nlohmann::json emotesReq;
+        emotesReq["header"]["eventType"] = "getPlayerEmotesData";
+        emotesReq["body"]["characterId"] = characterId;
+        gameServerWorker_.sendDataToGameServer(emotesReq.dump() + "\n");
     }
 
     log_->info("Cleared pending requests for character ID: " + std::to_string(characterId));

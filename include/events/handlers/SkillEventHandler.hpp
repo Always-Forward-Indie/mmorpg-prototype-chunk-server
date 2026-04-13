@@ -79,6 +79,9 @@ class SkillEventHandler : public BaseEventHandler
      */
     void handleRequestLearnSkillEvent(const Event &event);
 
+    // Skill bar (hotbar slot management)
+    void handleSetSkillBarSlotEvent(const Event &event);
+
   private:
     /**
      * @brief Build skills JSON response

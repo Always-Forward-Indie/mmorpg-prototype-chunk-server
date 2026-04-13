@@ -336,13 +336,16 @@
 
 ### Серверная обработка
 
-1. Проверяет `isUsable` на предмете
-2. Проверяет кулдаун (`cooldownSeconds`)
-3. Применяет каждый `useEffects[]` из `ItemDataStruct`
-4. Если `isInstant`: мгновенное восстановление HP/MP
-5. Если не `isInstant`: создаёт `ActiveEffectStruct` с длительностью
-6. Убирает 1 из стака (или удаляет предмет при `quantity == 1`)
-7. Отправляет обновление инвентаря и хил-результат
+1. Персонаж должен быть жив
+2. Персонаж должен иметь предмет в инвентаре
+3. Проверяет `isUsable = true` и `useEffects` не пустой
+4. Проверяет и устанавливает per-character кулдаун (`cooldownSeconds`)
+5. Убирает 1 из стака (или удаляет предмет при `quantity == 1`)
+6. Для каждого `useEffect`:
+   - `isInstant = true, attributeSlug = "hp"` → `applyHealToCharacter()`, бродкаст `healingResult`
+   - `isInstant = true, attributeSlug = "mp"` → `restoreManaToCharacter()`
+   - `isInstant = false` → создаёт `ActiveEffectStruct` (`sourceType = "item"`) и добавляет в `CharacterManager`; персистирует в `player_active_effect` через game server (переживает реконнект)
+7. Отправляет `stats_update` владельцу
 
 ### Сервер → Broadcast (healingResult для HP/MP предметов)
 

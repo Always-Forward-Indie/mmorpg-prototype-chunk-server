@@ -962,6 +962,7 @@ ItemEventHandler::handleUseItemEvent(const Event &event)
                 effect.value = ue.value;
                 effect.tickMs = ue.tickMs > 0 ? ue.tickMs : 1000;
                 effect.expiresAt = nowSec + ue.durationSeconds; // Unix seconds
+                effect.sourceType = "item";
 
                 // Derive effectTypeSlug so CombatSystem handles ticking correctly
                 if (ue.attributeSlug == "hp" && ue.value > 0)
@@ -976,6 +977,20 @@ ItemEventHandler::handleUseItemEvent(const Event &event)
                                     std::chrono::milliseconds(effect.tickMs);
 
                 gameServices_.getCharacterManager().addActiveEffect(characterId, effect);
+
+                // Persist timed effect to DB so it survives reconnect
+                nlohmann::json effectPacket;
+                effectPacket["header"]["eventType"] = "saveActiveEffect";
+                effectPacket["header"]["clientId"] = 0;
+                effectPacket["header"]["hash"] = "";
+                effectPacket["body"]["characterId"] = characterId;
+                effectPacket["body"]["effectSlug"] = effect.effectSlug;
+                effectPacket["body"]["attributeSlug"] = effect.attributeSlug;
+                effectPacket["body"]["sourceType"] = "item";
+                effectPacket["body"]["value"] = static_cast<double>(effect.value);
+                effectPacket["body"]["expiresAt"] = effect.expiresAt;
+                effectPacket["body"]["tickMs"] = effect.tickMs;
+                gameServerWorker_.sendDataToGameServer(effectPacket.dump() + "\n");
             }
         }
 

@@ -63,6 +63,7 @@ set(SOURCE_FILES
     src/services/ReputationManager.cpp
     src/services/MasteryManager.cpp
     src/services/TitleManager.cpp
+    src/services/EmoteManager.cpp
     src/services/ZoneEventManager.cpp
     src/network/GameServerWorker.cpp
     src/network/NetworkManager.cpp
@@ -86,6 +87,7 @@ set(SOURCE_FILES
     src/events/handlers/VendorEventHandler.cpp
     src/events/handlers/EquipmentEventHandler.cpp
     src/events/handlers/ChatEventHandler.cpp
+    src/events/handlers/EmoteEventHandler.cpp
     src/events/ExperienceEventHandler.cpp
     src/data/AttackSystem.cpp
     src/utils/Scheduler.cpp

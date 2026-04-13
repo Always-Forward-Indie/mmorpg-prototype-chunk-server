@@ -207,6 +207,14 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleEquipTitle(context, socket);
     }
+    else if (context.eventType == "setSkillBarSlot")
+    {
+        handleSetSkillBarSlot(context, socket);
+    }
+    else if (context.eventType == "useEmote")
+    {
+        handleUseEmote(context, socket);
+    }
     else
     {
         log_->error("Unknown event type: " + context.eventType);
@@ -1936,6 +1944,92 @@ EventDispatcher::handleEquipTitle(const EventContext &context,
     req.timestamps = context.timestamps;
 
     eventsBatch_.push_back(Event(Event::EQUIP_TITLE,
+        context.clientData.clientId,
+        req,
+        context.timestamps));
+}
+
+// ── setSkillBarSlot ────────────────────────────────────────────────────────
+void
+EventDispatcher::handleSetSkillBarSlot(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.clientData.clientId <= 0 || context.characterData.characterId <= 0)
+    {
+        log_->warn("[EventDispatcher] setSkillBarSlot: invalid clientId or characterId");
+        return;
+    }
+
+    int slotIndex = -1;
+    std::string skillSlug;
+    try
+    {
+        const auto &jsonData = nlohmann::json::parse(context.fullMessage);
+        const auto &body = jsonData.value("body", nlohmann::json::object());
+        slotIndex = body.value("slotIndex", -1);
+        skillSlug = body.value("skillSlug", std::string{});
+    }
+    catch (...)
+    {
+        log_->error("[EventDispatcher] setSkillBarSlot: failed to parse message");
+        return;
+    }
+
+    if (slotIndex < 0 || slotIndex >= 12)
+    {
+        log_->warn("[EventDispatcher] setSkillBarSlot: invalid slotIndex={} from client {}", slotIndex, context.clientData.clientId);
+        return;
+    }
+
+    SetSkillBarSlotRequestStruct req;
+    req.characterId = context.characterData.characterId;
+    req.clientId = context.clientData.clientId;
+    req.slotIndex = slotIndex;
+    req.skillSlug = skillSlug;
+    req.timestamps = context.timestamps;
+
+    eventsBatch_.push_back(Event(Event::SET_SKILL_BAR_SLOT,
+        context.clientData.clientId,
+        req,
+        context.timestamps));
+}
+
+// ── useEmote ───────────────────────────────────────────────────────────────
+void
+EventDispatcher::handleUseEmote(const EventContext &context,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.clientData.clientId <= 0 || context.characterData.characterId <= 0)
+    {
+        log_->warn("[EventDispatcher] useEmote: invalid clientId or characterId");
+        return;
+    }
+
+    std::string emoteSlug;
+    try
+    {
+        const auto &jsonData = nlohmann::json::parse(context.fullMessage);
+        emoteSlug = jsonData.value("body", nlohmann::json::object()).value("emoteSlug", "");
+    }
+    catch (...)
+    {
+        log_->error("[EventDispatcher] useEmote: failed to parse message");
+        return;
+    }
+
+    if (emoteSlug.empty())
+    {
+        log_->warn("[EventDispatcher] useEmote: missing emoteSlug from client={}", context.clientData.clientId);
+        return;
+    }
+
+    UseEmoteRequestStruct req;
+    req.characterId = context.characterData.characterId;
+    req.clientId = context.clientData.clientId;
+    req.emoteSlug = emoteSlug;
+    req.timestamps = context.timestamps;
+
+    eventsBatch_.push_back(Event(Event::USE_EMOTE,
         context.clientData.clientId,
         req,
         context.timestamps));

@@ -301,6 +301,7 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                     gameServices_.getReputationManager().unloadCharacterReputations(passedClientData.characterId);
                     gameServices_.getMasteryManager().unloadCharacterMasteries(passedClientData.characterId);
                     gameServices_.getQuestManager().clearFlagsLoaded(passedClientData.characterId);
+                    gameServices_.getEmoteManager().unloadPlayerEmotes(passedClientData.characterId);
                 }
                 catch (const std::exception &ex)
                 {

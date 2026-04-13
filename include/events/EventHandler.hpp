@@ -9,6 +9,7 @@
 #include "events/handlers/ClientEventHandler.hpp"
 #include "events/handlers/CombatEventHandler.hpp"
 #include "events/handlers/DialogueEventHandler.hpp"
+#include "events/handlers/EmoteEventHandler.hpp"
 #include "events/handlers/EquipmentEventHandler.hpp"
 #include "events/handlers/HarvestEventHandler.hpp"
 #include "events/handlers/ItemEventHandler.hpp"
@@ -119,6 +120,11 @@ class EventHandler
     void handleSetPlayerTitlesEvent(const Event &event);
     void handleGetPlayerTitlesEvent(const Event &event);
     void handleEquipTitleEvent(const Event &event);
+    void handleSetSkillBarSlotEvent(const Event &event);
+    // Emote system
+    void handleSetEmoteDefinitionsEvent(const Event &event);
+    void handleSetPlayerEmotesEvent(const Event &event);
+    void handleUseEmoteEvent(const Event &event);
 
     // Specialized event handlers for different event categories
     std::unique_ptr<ClientEventHandler> clientEventHandler_;
@@ -136,6 +142,7 @@ class EventHandler
     std::unique_ptr<VendorEventHandler> vendorEventHandler_;
     std::unique_ptr<EquipmentEventHandler> equipmentEventHandler_;
     std::unique_ptr<ChatEventHandler> chatEventHandler_;
+    std::unique_ptr<EmoteEventHandler> emoteEventHandler_;
 
     // References for logging and error handling
     NetworkManager &networkManager_;

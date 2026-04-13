@@ -665,3 +665,34 @@ CharacterManager::getCharacterFreeSkillPoints(int characterID) const
         return 0;
     return it->second.freeSkillPoints;
 }
+
+void
+CharacterManager::updateSkillBarSlot(int characterID, int slotIndex, const std::string &skillSlug)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+        return;
+    auto &slots = it->second.skillBarSlots;
+    if (skillSlug.empty())
+    {
+        // Clear the slot: remove the entry if present
+        slots.erase(
+            std::remove_if(slots.begin(), slots.end(), [slotIndex](const SkillBarSlotStruct &s)
+                { return s.slotIndex == slotIndex; }),
+            slots.end());
+    }
+    else
+    {
+        // Assign: replace existing entry or append new one
+        for (auto &s : slots)
+        {
+            if (s.slotIndex == slotIndex)
+            {
+                s.skillSlug = skillSlug;
+                return;
+            }
+        }
+        slots.push_back({slotIndex, skillSlug});
+    }
+}

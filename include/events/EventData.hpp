@@ -175,4 +175,9 @@ using EventData = std::variant<
     std::pair<std::unordered_map<int, std::vector<std::string>>,
         std::unordered_map<int, std::vector<std::string>>>,
     // Title system payloads
-    EquipTitleRequestStruct>;
+    EquipTitleRequestStruct,
+    // Skill bar payloads
+    SetSkillBarSlotRequestStruct,
+    // Emote system payloads
+    UseEmoteRequestStruct,
+    std::vector<EmoteDefinitionStruct>>;

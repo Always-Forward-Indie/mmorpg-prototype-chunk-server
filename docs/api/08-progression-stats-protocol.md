@@ -2,7 +2,7 @@
 
 ## Обзор
 
-Прогрессия включает 7 взаимосвязанных систем:
+Прогрессия включает 8 взаимосвязанных систем:
 - **Опыт и уровни**: XP → level up → stat bonuses
 - **XP-долг**: Штраф за смерть, погашается из нового XP
 - **Статы**: base + equipment + effects + mastery + item soul + title bonuses
@@ -10,6 +10,7 @@
 - **Мастерство**: Прогресс 0-100 за каждый тип оружия
 - **Репутация**: Отношения с фракциями
 - **Титулы**: Заработанные звания с постоянными бонусами к статам
+- **Скилл-бар**: Привязка выученных скиллов к слотам 0–11, персистентна в БД
 
 ---
 
@@ -758,3 +759,232 @@ effective_attr = base
                + item_soul_bonus
                + mastery_tier_bonus
 ```
+
+---
+
+## 8.8. Скилл-бар (Hotbar)
+
+Скилл-бар — панель с 12 слотами (индексы 0–11), в каждом из которых игрок может разместить выученный скилл. Привязка хранится в БД, загружается при входе в зону и отправляется клиенту в составе процедуры логина.
+
+### Хранение данных
+
+| Что | Где |
+|-----|-----|
+| Привязки слотов | Таблица `character_skill_bar` (character_id, slot_index, skill_slug) |
+| Runtime-состояние | `CharacterDataStruct::skillBarSlots` на чанк-сервере (вектор `SkillBarSlotStruct`) |
+| Загрузка | Game-server читает при обработке `joinGame`, передаёт в `setCharacterData` |
+| Сохранение | Чанк-сервер → game-server fire-and-forget: `saveSkillBarSlot` |
+
+Отсутствие строки в `character_skill_bar` = пустой слот. NULL-значения не хранятся.
+
+---
+
+### Жизненный цикл при логине
+
+```
+Game Server                     Chunk Server                    Client
+     |                               |                               |
+     | <-- joinGame                  |                               |
+     |  loadCharacterFromDB()        |                               |
+     |  + read character_skill_bar   |                               |
+     |                               |                               |
+     | ------- setCharacterData ---> |  (включает поле skillBarData) |
+     |                               |  parseCharacterData()         |
+     |                               |  → CharacterDataStruct        |
+     |                               |    .skillBarSlots populated   |
+     |                               |                               |
+     |                               | -- initializePlayerSkills --> |
+     |                               |                               |
+     |                               | ------- skillBarState ------> |
+     |                               |                               |
+```
+
+### setCharacterData — Поле skillBarData
+
+Поле `skillBarData` является частью существующего пакета `setCharacterData` (game-server → chunk-server). Содержит массив ненулевых слотов. Пустые слоты **не включаются**.
+
+Формат поля внутри `body` пакета `setCharacterData`:
+
+```json
+"skillBarData": [
+  { "slotIndex": 0, "skillSlug": "basic_attack" },
+  { "slotIndex": 1, "skillSlug": "shield_bash" },
+  { "slotIndex": 3, "skillSlug": "whirlwind" }
+]
+```
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `slotIndex` | int | Индекс слота 0–11 |
+| `skillSlug` | string | Slug выученного скилла |
+
+---
+
+### skillBarState — Начальное состояние скилл-бара
+
+**Chunk Server → Client (Unicast)**  
+Отправляется сразу после `initializePlayerSkills` при входе персонажа в зону (в обоих путях: обычном и pending-join).
+
+```json
+{
+  "header": {
+    "eventType": "skillBarState",
+    "clientId": 42,
+    "message": "skill bar state"
+  },
+  "body": {
+    "slots": [
+      { "slotIndex": 0, "skillSlug": "basic_attack" },
+      { "slotIndex": 1, "skillSlug": "shield_bash" },
+      { "slotIndex": 3, "skillSlug": "whirlwind" }
+    ]
+  }
+}
+```
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `slots` | array | Массив заполненных слотов. Пустые слоты отсутствуют |
+| `slotIndex` | int | Индекс слота 0–11 |
+| `skillSlug` | string | Slug скилла в этом слоте |
+
+> Клиент должен сначала очистить все слоты, затем заполнить только те, что пришли в массиве.
+
+---
+
+### setSkillBarSlot — Назначение/очистка слота
+
+**Client → Chunk Server**  
+Клиент отправляет каждый раз, когда игрок перетаскивает скилл в слот или убирает его.
+
+```json
+{
+  "header": {
+    "eventType": "setSkillBarSlot",
+    "clientId": 42,
+    "hash": "auth_token"
+  },
+  "body": {
+    "slotIndex": 1,
+    "skillSlug": "shield_bash"
+  }
+}
+```
+
+Для **очистки слота** — передать пустую строку:
+
+```json
+{
+  "header": {
+    "eventType": "setSkillBarSlot",
+    "clientId": 42,
+    "hash": "auth_token"
+  },
+  "body": {
+    "slotIndex": 1,
+    "skillSlug": ""
+  }
+}
+```
+
+| Поле | Тип | Ограничение |
+|------|-----|-------------|
+| `slotIndex` | int | 0–11 (проверяется сервером) |
+| `skillSlug` | string | Должен быть выученным навыком, или `""` для очистки |
+
+#### Серверная валидация (SkillEventHandler::handleSetSkillBarSlotEvent)
+
+1. `slotIndex` должен быть в диапазоне `[0, 12)` — иначе error `"invalid_slot_index"`
+2. Если `skillSlug` не пуст — скилл должен присутствовать в `CharacterDataStruct::skills` — иначе error `"skill_not_learned"`
+3. Обновление in-memory: `CharacterManager::updateSkillBarSlot(characterId, slotIndex, skillSlug)`
+4. Персистенция: fire-and-forget пакет `saveSkillBarSlot` → game-server (без ожидания ответа)
+5. ACK клиенту: `skillBarSlotUpdated`
+
+---
+
+### skillBarSlotUpdated — Подтверждение обновления
+
+**Chunk Server → Client (Unicast)**  
+Ответ после успешной обработки `setSkillBarSlot`.
+
+```json
+{
+  "header": {
+    "eventType": "skillBarSlotUpdated",
+    "clientId": 42,
+    "message": "ok"
+  },
+  "body": {
+    "slotIndex": 1,
+    "skillSlug": "shield_bash"
+  }
+}
+```
+
+При **очистке** слота `skillSlug` будет пустой строкой `""`.
+
+При **ошибке** — стандартный error response:
+
+```json
+{
+  "header": {
+    "eventType": "error",
+    "clientId": 42,
+    "message": "skill_not_learned"
+  },
+  "body": {}
+}
+```
+
+| Код ошибки | Причина |
+|------------|---------|
+| `invalid_slot_index` | `slotIndex` вне диапазона 0–11 |
+| `skill_not_learned` | Скилл не изучен персонажем |
+
+---
+
+### saveSkillBarSlot — Межсерверный пакет персистенции
+
+**Chunk Server → Game Server (fire-and-forget, без ответа)**
+
+```json
+{
+  "header": {
+    "eventType": "saveSkillBarSlot",
+    "clientId": 42,
+    "hash": ""
+  },
+  "body": {
+    "characterId": 7,
+    "slotIndex": 1,
+    "skillSlug": "shield_bash"
+  }
+}
+```
+
+При очистке `skillSlug` = `""` — game-server выполнит `DELETE FROM character_skill_bar WHERE character_id = $1 AND slot_index = $2`.  
+При назначении — `INSERT INTO character_skill_bar ... ON CONFLICT DO UPDATE SET skill_slug = ...`.
+
+> Пакет одностороннний — game-server не отправляет ответа. In-memory обновление уже произошло до отправки пакета.
+
+---
+
+### Схема таблицы БД
+
+```sql
+CREATE TABLE public.character_skill_bar (
+    character_id  INTEGER     NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+    slot_index    SMALLINT    NOT NULL CHECK (slot_index >= 0 AND slot_index < 12),
+    skill_slug    VARCHAR(64) NOT NULL,
+    PRIMARY KEY (character_id, slot_index)
+);
+CREATE INDEX idx_skill_bar_character ON public.character_skill_bar(character_id);
+```
+
+### Prepared Statements (game-server Database.cpp)
+
+| Имя | SQL |
+|-----|-----|
+| `get_character_skill_bar` | `SELECT slot_index, skill_slug FROM character_skill_bar WHERE character_id = $1 ORDER BY slot_index` |
+| `save_skill_bar_slot` | `INSERT INTO character_skill_bar (character_id, slot_index, skill_slug) VALUES ($1,$2,$3) ON CONFLICT (character_id, slot_index) DO UPDATE SET skill_slug = $3` |
+| `clear_skill_bar_slot` | `DELETE FROM character_skill_bar WHERE character_id = $1 AND slot_index = $2` |

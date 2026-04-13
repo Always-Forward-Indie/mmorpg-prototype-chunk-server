@@ -1,3 +1,57 @@
+v0.2.1
+13.04.2026
+================
+New:
+Emote System — реализована полная система анимаций-эмоций. Игрок получает список разблокированных эмоций при входе в мир и может воспроизводить их; анимация транслируется всем клиентам зоны. Доступные эмоции хранятся в БД, серверная сторона валидирует что эмоция разблокирована перед трансляцией (anti-cheat).
+
+Migration 053 (`emote_definitions`, `character_emotes`) — таблица `emote_definitions` (id, slug, display_name, animation_name, category, is_default, sort_order, created_at); таблица `character_emotes` (character_id FK→characters, emote_slug FK→emote_definitions, unlocked_at, UNIQUE per character). Индекс `idx_char_emotes_character`. Seed: 13 эмоций (6 дефолтных `sit/wave/bow/laugh/cry/point`, 4 social, 3 dance). Дефолтные эмоции выданы всем существующим персонажам через CROSS JOIN INSERT ON CONFLICT DO NOTHING. Миграция применена; дамп обновлён.
+
+`EmoteDefinitionStruct` / `UseEmoteRequestStruct` — два новых struct в `DataStructs.hpp`. `EmoteDefinitionStruct`: id, slug, displayName, animationName, category, isDefault, sortOrder. `UseEmoteRequestStruct`: characterId, clientId, emoteSlug, timestamps.
+
+`SET_EMOTE_DEFINITIONS`, `SET_PLAYER_EMOTES`, `USE_EMOTE` — три новых типа событий в `Event.hpp` (chunk-server). `UseEmoteRequestStruct` и `std::vector<EmoteDefinitionStruct>` добавлены в `EventData` variant.
+
+`EmoteManager` (новый сервис) — потокобезопасный runtime-кэш с `std::shared_mutex`. Хранит глобальный каталог определений (`unordered_map<string, EmoteDefinitionStruct>`) и per-player unlocks (`unordered_map<int, vector<string>>`). Методы: `loadEmoteDefinitions()`, `getEmoteDefinition(slug)`, `getAllDefinitions()` (сортировка по sortOrder), `loadPlayerEmotes(charId, slugs)`, `unloadPlayerEmotes(charId)`, `isUnlocked(charId, slug)`, `getPlayerEmotes(charId)`. Подключён в `GameServices` как `emoteManager_`.
+
+`EmoteEventHandler` (новый обработчик) — расширяет `BaseEventHandler`. `handleSetEmoteDefinitionsEvent`: парсит JSON `body.emotes[]` → `EmoteManager::loadEmoteDefinitions`. `handleSetPlayerEmotesEvent`: парсит `characterId` + `emotes[]` slugs → `loadPlayerEmotes` → немедленно отправляет `player_emotes` пакет клиенту через `ClientManager`. `handleUseEmoteEvent`: валидирует `isUnlocked(charId, slug)`, при успехе транслирует `emoteAction` всем клиентам зоны (characterId, emoteSlug, animationName, serverTimestamp). `onPlayerDisconnect(charId)`: вызывает `unloadPlayerEmotes`.
+
+`EventHandler` (chunk-server) — добавлен `emoteEventHandler_` (`unique_ptr<EmoteEventHandler>`), dispatch по `SET_EMOTE_DEFINITIONS`, `SET_PLAYER_EMOTES`, `USE_EMOTE`, методы-форвардеры.
+
+`EventDispatcher` (chunk-server) — роутинг `eventType == "useEmote"` → `handleUseEmote()`: извлекает `emoteSlug` из `body`, создаёт `UseEmoteRequestStruct`, пушит `USE_EMOTE` событие.
+
+`CharacterEventHandler` — при завершении pending-join запрашивает `getPlayerEmotesData` у game-server (аналогично `getPlayerTitlesData`).
+
+`ClientEventHandler` — при отключении персонажа вызывает `EmoteManager::unloadPlayerEmotes(characterId)` в блоке unload (Stage 4, рядом с Reputation/Mastery).
+
+`GameServerWorker` — добавлена маршрутизация входящих пакетов `setEmoteDefinitionsData` и `setPlayerEmotesData` от game-server.
+
+`CMakeLists.txt` — добавлены `src/services/EmoteManager.cpp` и `src/events/handlers/EmoteEventHandler.cpp`.
+
+`docs/client-emote-protocol.md` — новый документ: DB-схема, диаграммы потоков (chunk connect, character join, useEmote, disconnect), полные примеры JSON-пакетов (`useEmote`, `emoteAction`, `player_emotes`, межсерверные пакеты), таблица методов EmoteManager и EmoteEventHandler, инструкция добавления новых эмоций.
+
+---
+
+v0.2.0
+13.04.2026
+================
+New:
+Skill Bar Persistence — реализована система сохранения скилл-бара. Игрок может привязать выученный скилл к любому из 12 слотов (0–11). Привязки хранятся в новой таблице `character_skill_bar` (migration 051). При входе персонажа в зону слоты загружаются из БД и отправляются клиенту пакетом `skillBarState`. При изменении слота клиент отправляет `setSkillBarSlot`, сервер валидирует (скилл должен быть выучен), обновляет состояние in-memory через `CharacterManager::updateSkillBarSlot()` и персистирует fire-and-forget пакетом `saveSkillBarSlot` на game-server.
+
+Migration 051 (`character_skill_bar`) — новая таблица хранения скилл-бара с PK (character_id, slot_index), CHECK slot_index 0-11, CASCADE DELETE.
+
+`SkillBarSlotStruct` — новая структура данных в `DataStructs.hpp` (chunk-server и game-server): `slotIndex`, `skillSlug`. Game-server: `CharacterDataStruct` дополнен полем `skillBarSlots`. Chunk-server: аналогично + `SetSkillBarSlotRequestStruct` для запросов от клиента.
+
+`SAVE_SKILL_BAR_SLOT` (game-server Event) — новый тип события для персистенции слота. `SET_SKILL_BAR_SLOT` (chunk-server Event) — новый тип события для обработки запроса клиента. `SetSkillBarSlotRequestStruct` добавлен в `EventData` variant.
+
+Game-server DB — три новых prepared statements: `get_character_skill_bar`, `save_skill_bar_slot` (INSERT...ON CONFLICT DO UPDATE), `clear_skill_bar_slot` (DELETE).
+
+`CharacterManager::updateSkillBarSlot()` (chunk-server) — thread-safe мутация in-memory вектора `skillBarSlots`: replace если слот занят, erase если `skillSlug` пуст, push_back иначе.
+
+`setCharacterData` расширен полем `skillBarData` — массив объектов `{slotIndex, skillSlug}`. Пустые слоты не включаются.
+
+`docs/api/08-progression-stats-protocol.md` — добавлен раздел 8.8 «Скилл-бар»: жизненный цикл, схема БД, все пакеты (`skillBarState`, `setSkillBarSlot`, `skillBarSlotUpdated`, `saveSkillBarSlot`), коды ошибок, prepared statements.
+
+---
+
 v0.1.9
 11.04.2026
 ================

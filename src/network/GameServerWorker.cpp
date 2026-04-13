@@ -335,6 +335,16 @@ GameServerWorker::processGameServerData(std::string_view data)
         nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_PLAYER_TITLES, clientData.clientId, body);
     }
+    else if (eventType == "setEmoteDefinitionsData")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_EMOTE_DEFINITIONS, clientData.clientId, body);
+    }
+    else if (eventType == "setPlayerEmotesData")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_PLAYER_EMOTES, clientData.clientId, body);
+    }
     else
     {
         log_->info("Unknown event type from Game Server: " + eventType);

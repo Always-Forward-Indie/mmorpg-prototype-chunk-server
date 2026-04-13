@@ -496,3 +496,89 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         log_->error("[SkillEventHandler] handleRequestLearnSkillEvent: {}", ex.what());
     }
 }
+
+// ── SET_SKILL_BAR_SLOT ────────────────────────────────────────────────────
+void
+SkillEventHandler::handleSetSkillBarSlotEvent(const Event &event)
+{
+    const auto &data = event.getData();
+    int clientId = event.getClientID();
+
+    try
+    {
+        if (!std::holds_alternative<SetSkillBarSlotRequestStruct>(data))
+        {
+            log_->error("[SkillBar] unexpected data type for SET_SKILL_BAR_SLOT");
+            return;
+        }
+        const auto &req = std::get<SetSkillBarSlotRequestStruct>(data);
+
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (!clientSocket || !clientSocket->is_open())
+        {
+            log_->error("[SkillBar] socket not available for clientId={}", clientId);
+            return;
+        }
+
+        // ── Server-authoritative validation ──────────────────────────────
+        if (req.slotIndex < 0 || req.slotIndex >= 12)
+        {
+            sendErrorResponse("invalid_slot_index", clientId, clientSocket);
+            return;
+        }
+
+        if (!req.skillSlug.empty())
+        {
+            // The skill must be learned before it can be slotted
+            const CharacterDataStruct charData =
+                gameServices_.getCharacterManager().getCharacterData(req.characterId);
+            bool learned = false;
+            for (const auto &s : charData.skills)
+            {
+                if (s.skillSlug == req.skillSlug)
+                {
+                    learned = true;
+                    break;
+                }
+            }
+            if (!learned)
+            {
+                sendErrorResponse("skill_not_learned", clientId, clientSocket);
+                return;
+            }
+        }
+
+        // ── Update in-memory skill bar ────────────────────────────────────
+        gameServices_.getCharacterManager().updateSkillBarSlot(
+            req.characterId, req.slotIndex, req.skillSlug);
+
+        // ── Persist to game server (fire-and-forget) ──────────────────────
+        nlohmann::json packet;
+        packet["header"]["eventType"] = "saveSkillBarSlot";
+        packet["header"]["clientId"] = req.clientId;
+        packet["header"]["hash"] = "";
+        packet["body"]["characterId"] = req.characterId;
+        packet["body"]["slotIndex"] = req.slotIndex;
+        packet["body"]["skillSlug"] = req.skillSlug;
+        gameServerWorker_.sendDataToGameServer(packet.dump() + "\n");
+
+        // ── ACK to client ─────────────────────────────────────────────────
+        nlohmann::json ack;
+        ack["header"]["eventType"] = "skillBarSlotUpdated";
+        ack["header"]["clientId"] = clientId;
+        ack["header"]["message"] = "ok";
+        ack["body"]["slotIndex"] = req.slotIndex;
+        ack["body"]["skillSlug"] = req.skillSlug;
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", ack));
+
+        log_->info("[SkillBar] char={} slot={} slug='{}'",
+            req.characterId,
+            req.slotIndex,
+            req.skillSlug);
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[SkillBar] handleSetSkillBarSlotEvent: {}", ex.what());
+    }
+}

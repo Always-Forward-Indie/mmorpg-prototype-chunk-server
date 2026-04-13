@@ -352,6 +352,13 @@ struct EffectTickResult
     bool targetDied = false;
 };
 
+/// One hotbar slot assignment stored in CharacterDataStruct
+struct SkillBarSlotStruct
+{
+    int slotIndex = -1;
+    std::string skillSlug = "";
+};
+
 struct CharacterDataStruct
 {
     int clientId = 0;
@@ -396,6 +403,9 @@ struct CharacterDataStruct
     // Used by RegenManager to suppress regen during/after combat.
     // zero-initialised = "never been in combat" → regen is allowed immediately on join.
     std::chrono::steady_clock::time_point lastInCombatAt = {};
+
+    // Hotbar slot assignments (loaded on join from character_skill_bar, updated on setSkillBarSlot)
+    std::vector<SkillBarSlotStruct> skillBarSlots;
 };
 
 struct ClientDataStruct
@@ -1672,5 +1682,40 @@ struct EquipTitleRequestStruct
     int clientId = 0;
     /// Slug to equip, or empty string "" to unequip current title
     std::string titleSlug;
+    TimestampStruct timestamps;
+};
+
+// ── Skill Bar ─────────────────────────────────────────────────────────────
+
+/// Client → chunk-server: assign or clear a hotbar slot
+struct SetSkillBarSlotRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int slotIndex = -1;
+    std::string skillSlug = ""; ///< empty = clear slot
+    TimestampStruct timestamps;
+};
+
+// ── Emote system ─────────────────────────────────────────────────────────────
+
+/// Static emote definition loaded from game-server (table: emote_definitions)
+struct EmoteDefinitionStruct
+{
+    int id = 0;
+    std::string slug;          ///< unique key, e.g. "dance_basic"
+    std::string displayName;   ///< localised display name, e.g. "Танцевать"
+    std::string animationName; ///< client-side animation clip name, e.g. "emote_dance_basic"
+    std::string category;      ///< UI grouping: "basic" | "social" | "dance" | "sit" | ...
+    bool isDefault = false;    ///< TRUE = granted automatically to every character
+    int sortOrder = 0;         ///< ordering within category for the UI list
+};
+
+/// Client → chunk-server: request to play an emote animation
+struct UseEmoteRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    std::string emoteSlug; ///< slug of the emote to play
     TimestampStruct timestamps;
 };

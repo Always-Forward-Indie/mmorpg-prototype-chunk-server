@@ -27,6 +27,7 @@ EventHandler::EventHandler(
     vendorEventHandler_ = std::make_unique<VendorEventHandler>(networkManager, gameServerWorker, gameServices);
     equipmentEventHandler_ = std::make_unique<EquipmentEventHandler>(networkManager, gameServerWorker, gameServices);
     chatEventHandler_ = std::make_unique<ChatEventHandler>(networkManager, gameServerWorker, gameServices);
+    emoteEventHandler_ = std::make_unique<EmoteEventHandler>(networkManager, gameServerWorker, gameServices);
 
     // Set skill event handler reference in character event handler
     characterEventHandler_->setSkillEventHandler(skillEventHandler_.get());
@@ -357,6 +358,20 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::EQUIP_TITLE:
             handleEquipTitleEvent(event);
+            break;
+        case Event::SET_SKILL_BAR_SLOT:
+            handleSetSkillBarSlotEvent(event);
+            break;
+
+        // ── Emote system ──────────────────────────────────────────────────────
+        case Event::SET_EMOTE_DEFINITIONS:
+            handleSetEmoteDefinitionsEvent(event);
+            break;
+        case Event::SET_PLAYER_EMOTES:
+            handleSetPlayerEmotesEvent(event);
+            break;
+        case Event::USE_EMOTE:
+            handleUseEmoteEvent(event);
             break;
 
         // Skill system
@@ -1645,4 +1660,43 @@ EventHandler::handleEquipTitleEvent(const Event &event)
     {
         gameServices_.getLogger().logError("Error processing EQUIP_TITLE: " + std::string(e.what()));
     }
+}
+
+// ── SET_SKILL_BAR_SLOT ────────────────────────────────────────────────────
+void
+EventHandler::handleSetSkillBarSlotEvent(const Event &event)
+{
+    if (skillEventHandler_)
+        skillEventHandler_->handleSetSkillBarSlotEvent(event);
+    else
+        log_->error("handleSetSkillBarSlotEvent: skillEventHandler_ is null");
+}
+
+// ── Emote system ──────────────────────────────────────────────────────────
+
+void
+EventHandler::handleSetEmoteDefinitionsEvent(const Event &event)
+{
+    if (emoteEventHandler_)
+        emoteEventHandler_->handleSetEmoteDefinitionsEvent(event);
+    else
+        log_->error("handleSetEmoteDefinitionsEvent: emoteEventHandler_ is null");
+}
+
+void
+EventHandler::handleSetPlayerEmotesEvent(const Event &event)
+{
+    if (emoteEventHandler_)
+        emoteEventHandler_->handleSetPlayerEmotesEvent(event);
+    else
+        log_->error("handleSetPlayerEmotesEvent: emoteEventHandler_ is null");
+}
+
+void
+EventHandler::handleUseEmoteEvent(const Event &event)
+{
+    if (emoteEventHandler_)
+        emoteEventHandler_->handleUseEmoteEvent(event);
+    else
+        log_->error("handleUseEmoteEvent: emoteEventHandler_ is null");
 }
