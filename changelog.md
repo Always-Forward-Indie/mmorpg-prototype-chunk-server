@@ -1,3 +1,13 @@
+v0.2.2
+13.04.2026
+================
+Bug Fixes:
+Item Soul tier bonus лаг атрибутов — при пересечении тира (50/200/500 убийств) `CombatSystem::handleMobDeath` теперь вызывает `CharacterStatsNotificationService::sendStatsUpdate(killerId)` сразу после отправки `weapon_kill_count_update`. До фикса сервер правильно вычислял тир-бонус в `buildStatsUpdatePacket`, но `stats_update` не отправлялся до следующего combat-события — клиент показывал устаревшие `effective`-атрибуты на весь следующий бой.
+
+HP/MP через зелья (manaHealing поле) — поле `manaHealing` теперь задокументировано в `healingResult`; для зелий маны `healing == 0`, `manaHealing > 0`; для комбо-зелий оба поля могут быть ненулевыми. Серверная реализация всегда отправляла оба поля корректно.
+
+---
+
 v0.2.1
 13.04.2026
 ================

@@ -209,6 +209,57 @@ Gold itself also appears as a normal item in the `items` array (slug `gold_coin`
 
 ---
 
+## 5а. Item Soul — обновление kill count
+
+Каждый раз при убийстве моба с экипированным оружием сервер отправляет **только владельцу** пакет `worldNotification` с типом `weapon_kill_count_update`. Это легковесное уведомление для обновления тултипа/счётчика оружия. Полный `stats_update` приходит **только** при пересечении тира (50 / 200 / 500 убийств), когда изменяется `effective` значение атрибута.
+
+**Direction:** Server → Client (owner only)  
+**eventType:** `worldNotification`
+
+```json
+{
+  "header": {
+    "eventType": "worldNotification"
+  },
+  "body": {
+    "type": "weapon_kill_count_update",
+    "scope": "low",
+    "displayType": "silent",
+    "data": {
+      "inventoryItemId": 137,
+      "killCount": 51
+    }
+  }
+}
+```
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `inventoryItemId` | int | `PlayerInventoryItemStruct.id` — конкретный экземпляр оружия |
+| `killCount` | int | Новое значение счётчика убийств |
+
+### Тиры Item Soul
+
+| Тир | Порог | Эффект |
+|-----|-------|--------|
+| 1 | 50 убийств | +1 плоский бонус к primary-атрибуту оружия |
+| 2 | 200 убийств | +2 плоский бонус |
+| 3 | 500 убийств | +3 плоский бонус |
+
+Бонус виден в `stats_update.attributes[].effective`. При пересечении порога сервер отправляет оба пакета: `weapon_kill_count_update` и `stats_update`.
+
+### Логика клиента
+
+```
+on worldNotification where type == "weapon_kill_count_update":
+    weapon = GetInventoryItem(data.inventoryItemId)
+    weapon.killCount = data.killCount
+    RefreshWeaponTooltip(weapon)
+    // НЕ обновлять атрибуты — подождать stats_update (придёт только на тире)
+```
+
+---
+
 ## 6. Use Consumable Item
 
 ### Client → Server
@@ -254,7 +305,9 @@ One unit of the item is consumed from the inventory. The server validates:
       "skillSlug": "potion_hp_small",
       "skillEffectType": "heal",
       "healing": 150,
+      "manaHealing": 0,
       "finalTargetHealth": 480,
+      "finalTargetMana": 320,
       "success": true
     }
   }
@@ -262,6 +315,8 @@ One unit of the item is consumed from the inventory. The server validates:
 ```
 
 `casterId == targetId` — персонаж хилит сам себя.
+
+> Для **зелий маны** (`attributeSlug == "mp"`): `healing` будет `0`, `manaHealing` — восстановленное количество маны. Для комбо-зелий (эффекты на HP и MP) оба поля могут быть > 0 одновременно.
 
 ---
 
@@ -364,6 +419,7 @@ One unit of the item is consumed from the inventory. The server validates:
 | Server → Client | `stats_update` | Full stats + active effects + weight update (owner only, после useItem) |
 | Server → Client | `effectTick` | One DoT/HoT tick (HP change + effect slug, broadcast, см. §9) |
 | Server → Client | `getPlayerInventory` | Full inventory refresh (now includes `gold` field) |
+| Server → Client | `worldNotification` (`weapon_kill_count_update`) | Kill count на оружии — owner only, каждое убийство |
 
 ---
 

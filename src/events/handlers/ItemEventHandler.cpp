@@ -929,6 +929,8 @@ ItemEventHandler::handleUseItemEvent(const Event &event)
 
         int totalHeal = 0;
         int finalHp = 0;
+        int totalManaHeal = 0;
+        int finalMp = 0;
 
         // Apply each use-effect
         for (const auto &ue : itemInfo.useEffects)
@@ -944,8 +946,9 @@ ItemEventHandler::handleUseItemEvent(const Event &event)
                 }
                 else if (ue.attributeSlug == "mp")
                 {
-                    gameServices_.getCharacterManager().restoreManaToCharacter(
+                    finalMp = gameServices_.getCharacterManager().restoreManaToCharacter(
                         characterId, static_cast<int>(ue.value));
+                    totalManaHeal += static_cast<int>(ue.value);
                 }
                 // Other instant slugs: value is applied directly via stat modifier
                 // and reflected in the stats_update packet sent below.
@@ -994,19 +997,23 @@ ItemEventHandler::handleUseItemEvent(const Event &event)
             }
         }
 
-        // Broadcast heal number to all clients (floating combat text).
+        // Broadcast heal numbers to all clients (floating combat text).
         // Uses the same "healingResult" eventType as heal skills — client
         // needs no special handling for potion heals.
-        if (totalHeal > 0)
+        if (totalHeal > 0 || totalManaHeal > 0)
         {
             nlohmann::json skillResult;
             skillResult["casterId"] = characterId;
             skillResult["targetId"] = characterId;
+            skillResult["casterTypeString"] = "PLAYER";
+            skillResult["targetTypeString"] = "PLAYER";
             skillResult["skillName"] = itemInfo.slug;
             skillResult["skillSlug"] = itemInfo.slug;
             skillResult["skillEffectType"] = "heal";
             skillResult["healing"] = totalHeal;
+            skillResult["manaHealing"] = totalManaHeal;
             skillResult["finalTargetHealth"] = finalHp;
+            skillResult["finalTargetMana"] = finalMp;
             skillResult["success"] = true;
 
             nlohmann::json healResponse = ResponseBuilder()

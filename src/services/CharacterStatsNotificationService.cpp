@@ -35,6 +35,26 @@ CharacterStatsNotificationService::sendStatsUpdate(int characterId)
 }
 
 void
+CharacterStatsNotificationService::sendStatsUpdate(int characterId, const std::string &source)
+{
+    if (statsUpdateCallback_)
+    {
+        try
+        {
+            auto packet = buildStatsUpdatePacket(characterId);
+            if (!source.empty())
+                packet["body"]["source"] = source;
+            statsUpdateCallback_(packet);
+        }
+        catch (const std::exception &e)
+        {
+            gameServices_->getLogger().logError("Failed to send stats update for character " +
+                                                std::to_string(characterId) + ": " + e.what());
+        }
+    }
+}
+
+void
 CharacterStatsNotificationService::sendWorldNotification(int characterId,
     const std::string &notificationType,
     const nlohmann::json &data,

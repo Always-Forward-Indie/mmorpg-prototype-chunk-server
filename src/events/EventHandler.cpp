@@ -1547,6 +1547,23 @@ EventHandler::handleSetPlayerTitlesEvent(const Event &event)
         // notifyClientCallback_ fires sendTitleUpdateToClient → already handles this
         // But we need it explicitly if the callback isn't wired yet during login ordering.
         // The callback wired in ChunkServer will re-send on any future change.
+
+        // If the player is already world-ready (titles arrived late — after playerReady),
+        // broadcast their equipped title to all other zone clients so nameplates update.
+        // If not yet ready, handlePlayerReadyEvent (Phase 4, step 6) does it as catch-up.
+        auto chars = gameServices_.getCharacterManager().getCharactersList();
+        int clientId = 0;
+        for (const auto &c : chars)
+            if (c.characterId == characterId)
+            {
+                clientId = c.clientId;
+                break;
+            }
+
+        if (clientId > 0 && gameServices_.getClientManager().isClientWorldReady(clientId) && characterEventHandler_)
+        {
+            characterEventHandler_->broadcastTitleChanged(characterId, clientId);
+        }
     }
     catch (const std::exception &e)
     {
@@ -1655,6 +1672,11 @@ EventHandler::handleEquipTitleEvent(const Event &event)
 
         networkManager_.sendResponse(clientSocket,
             networkManager_.generateResponseMessage(ok ? "success" : "error", response));
+
+        // Broadcast the new equipped title (or empty = unequip) to all other zone
+        // clients so they can update the nameplate display in real time.
+        if (ok && characterEventHandler_)
+            characterEventHandler_->broadcastTitleChanged(req.characterId, req.clientId);
     }
     catch (const std::exception &e)
     {

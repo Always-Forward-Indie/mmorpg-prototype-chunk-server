@@ -162,6 +162,22 @@ class CharacterEventHandler : public BaseEventHandler
     void handlePlayerRespawnEvent(const Event &event);
 
     /**
+     * @brief Broadcast a PLAYER_TITLE_CHANGED packet to all zone clients except one.
+     *
+     * Sends the currently equipped title slug of @p characterId to every connected
+     * client, excluding @p excludeClientId (use the owner's clientId so they don't
+     * receive a redundant update on top of the private player_titles_update).
+     * Called from:
+     *  – handlePlayerReadyEvent (Phase 4 catch-up, in case titles loaded before ready)
+     *  – EventHandler::handleSetPlayerTitlesEvent (catch-up if titles load after ready)
+     *  – EventHandler::handleEquipTitleEvent (live title change by the owner)
+     *
+     * @param characterId      Owner whose equipped title is broadcast.
+     * @param excludeClientId  Client to skip (-1 = include everyone).
+     */
+    void broadcastTitleChanged(int characterId, int excludeClientId = -1);
+
+    /**
      * @brief Initialize player skills after successful character join
      *
      * @param characterData Character data containing skills

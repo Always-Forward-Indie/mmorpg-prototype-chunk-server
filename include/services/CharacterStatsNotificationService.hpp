@@ -32,6 +32,13 @@ class CharacterStatsNotificationService
      */
     void sendStatsUpdate(int characterId);
 
+        /**
+     * @brief Send a stats update packet with an optional source tag.
+     * @param characterId The ID of the character whose stats changed
+     * @param source      Free-form string identifying the cause (e.g. "regen")
+     */
+    void sendStatsUpdate(int characterId, const std::string &source);
+
     /**
      * @brief Send a world notification to a specific character.
      *

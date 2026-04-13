@@ -65,6 +65,13 @@ CharacterEventHandler::characterToJson(const CharacterDataStruct &characterData)
     // Получаем опыт для текущего уровня (порог текущего уровня из DB)
     int expForCurrentLevel = gameServices_.getExperienceManager().getExperienceForLevelFromGameServer(characterData.characterLevel);
 
+    // Equipped title shown above the nameplate for other players.
+    // May be empty if the player has no title equipped or titles haven't loaded yet;
+    // in that case PLAYER_TITLE_CHANGED is broadcast once titles are loaded.
+    std::string equippedTitleSlug = gameServices_.getTitleManager()
+                                        .getPlayerTitles(characterData.characterId)
+                                        .equippedSlug;
+
     nlohmann::json characterJson = {
         {"id", characterData.characterId},
         {"name", characterData.characterName},
@@ -74,7 +81,8 @@ CharacterEventHandler::characterToJson(const CharacterDataStruct &characterData)
         {"exp", {{"current", characterData.characterExperiencePoints}, {"levelStart", expForCurrentLevel}, {"levelEnd", characterData.expForNextLevel}}},
         {"stats", {{"health", {{"current", characterData.characterCurrentHealth}, {"max", characterData.characterMaxHealth}}}, {"mana", {{"current", characterData.characterCurrentMana}, {"max", characterData.characterMaxMana}}}}},
         {"position", {{"x", characterData.characterPosition.positionX}, {"y", characterData.characterPosition.positionY}, {"z", characterData.characterPosition.positionZ}, {"rotationZ", characterData.characterPosition.rotationZ}}},
-        {"isDead", characterData.characterCurrentHealth <= 0}};
+        {"isDead", characterData.characterCurrentHealth <= 0},
+        {"equippedTitleSlug", equippedTitleSlug}};
 
     // Note: attributes/stats are intentionally omitted here.
     // They are delivered to the owning client via a dedicated stats_update packet
@@ -691,6 +699,25 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
 }
 
 void
+CharacterEventHandler::broadcastTitleChanged(int characterId, int excludeClientId)
+{
+    std::string equippedSlug = gameServices_.getTitleManager()
+                                   .getPlayerTitles(characterId)
+                                   .equippedSlug;
+
+    nlohmann::json response = ResponseBuilder()
+                                  .setHeader("message", "success")
+                                  .setHeader("eventType", "PLAYER_TITLE_CHANGED")
+                                  .setHeader("clientId", 0)
+                                  .setBody("characterId", characterId)
+                                  .setBody("equippedTitleSlug", equippedSlug)
+                                  .build();
+
+    std::string responseData = networkManager_.generateResponseMessage("success", response);
+    broadcastToAllClients(responseData, excludeClientId);
+}
+
+void
 CharacterEventHandler::handleGetConnectedCharactersEvent(const Event &event)
 {
     int clientID = event.getClientID();
@@ -866,6 +893,13 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     {
         equipmentEventHandler_->broadcastEquipmentUpdate(characterId, clientID);
     }
+
+    // 6. Broadcast this player's equipped title to all other already-online clients.
+    //    Mirrors the equipment catch-up above: if SET_PLAYER_TITLES arrived before
+    //    playerReady the zone broadcast was deferred to here; if titles haven't
+    //    loaded yet the slug will be "" (no title) and the real broadcast fires once
+    //    handleSetPlayerTitlesEvent processes the async response from Game Server.
+    broadcastTitleChanged(characterId, clientID);
 
     // Acknowledge receipt so client can hide the loading screen / enable input
     nlohmann::json ack = ResponseBuilder()

@@ -196,15 +196,20 @@
         "mana":   { "current": 100, "max": 100 }
       },
       "position": { "x": 100.5, "y": 200.3, "z": 0.0, "rotationZ": 1.57 },
-      "isDead": false
+      "isDead": false,
+      "equippedTitleSlug": "wolf_slayer"
     }
   }
 }
 ```
 
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `equippedTitleSlug` | string | Slug активного тайтла (пустая строка — нет тайтла). Может быть `""` если тайтл ещё не загрузился — в этом случае последует пакет `PLAYER_TITLE_CHANGED`. |
+
 > **Важно:** `character` в `joinGameCharacter` содержит только базовые поля для отображения nameplate у других игроков. Полные статы (атрибуты, эффекты) получает только **сам вошедший** через `stats_update`.
 
-**Обработка другими клиентами:** При получении `joinGameCharacter` — создать/обновить nameplate для `character.id` с именем, уровнем, расой, классом и позицией.
+**Обработка другими клиентами:** При получении `joinGameCharacter` — создать/обновить nameplate для `character.id` с именем, уровнем, расой, классом, позицией и `equippedTitleSlug` (отобразить над именем).
 
 ### 1.3 Отключение персонажа — `disconnectClient`
 
@@ -225,7 +230,38 @@
 
 Удалить персонажа `characterId` из отображаемого мира.
 
-### 1.4 Список предметов мира — `getItemsList` (внутренний)
+### 1.4 Смена тайтла игроком — `PLAYER_TITLE_CHANGED` (broadcast)
+
+Рассылается **всем клиентам зоны, кроме владельца** в двух случаях:
+1. Игрок экипировал/снял тайтл (`equipTitle`).
+2. Данные тайтлов пришли от Game Server уже после того, как персонаж стал world-ready (догоняющий broadcast).
+
+**Направление:** Chunk Server → все клиенты зоны (кроме владельца)  
+**eventType:** `PLAYER_TITLE_CHANGED`
+
+```json
+{
+  "header": {
+    "eventType": "PLAYER_TITLE_CHANGED",
+    "message": "success"
+  },
+  "body": {
+    "characterId": 7,
+    "equippedTitleSlug": "wolf_slayer"
+  }
+}
+```
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `characterId` | int | ID персонажа, сменившего тайтл |
+| `equippedTitleSlug` | string | Новый активный тайтл; пустая строка `""` означает снятие тайтла |
+
+**Обработка клиентом:** Найти персонажа `characterId` в сцене и обновить отображение тайтла над nameplate. Пустой `equippedTitleSlug` — скрыть строку тайтла.
+
+---
+
+### 1.5 Список предметов мира — `getItemsList` (внутренний)
 
 Чанк-сервер получает каталог всех предметов от Game Server при запуске. Клиент этот пакет не получает — предметы всегда приходят с полными данными в инвентарных пакетах.
 
@@ -1503,11 +1539,13 @@ weightLimit = carry_weight.base + strength * carry_weight.per_strength
 - `getBestiaryEntry`
 - `getBestiaryOverview`
 - `chatMessage`
+- `equipTitle`
+- `useEmote`
 
 ### 15.3 Chunk/Game межсерверные (основные)
 
 - Инициализация/справочники: `chunkServerConnection`, `setChunkData`, `setSpawnZonesList`, `setMobsList`, `setMobsAttributes`, `setMobsSkills`, `setNPCsList`, `setNPCsAttributes`, `getItemsList`, `getMobLootInfo`, `setMobWeaknessesResistances`, `getExpLevelTable`, `setDialoguesData`, `setNPCDialogueMappings`, `setQuestsData`, `setGameConfig`, `setVendorData`, `setStatusEffectTemplates`, `setGameZonesList`, `setZoneEventTemplatesList`, `setRespawnZonesList`, `setTimedChampionTemplatesList`.
-- Персонаж/прогресс: `setCharacterData`, `setCharacterAttributes`, `setCharacterAttributesRefresh`, `setPlayerQuestsData`, `setPlayerFlagsData`, `setPlayerActiveEffects`, `setPlayerInventoryData`, `setPlayerPityData`, `setPlayerBestiaryData`, `setPlayerReputationsData`, `setPlayerMasteriesData`, `setLearnedSkill`, `inventoryItemIdSync`.
+- Персонаж/прогресс: `setCharacterData`, `setCharacterAttributes`, `setCharacterAttributesRefresh`, `setPlayerQuestsData`, `setPlayerFlagsData`, `setPlayerActiveEffects`, `setPlayerInventoryData`, `setPlayerPityData`, `setPlayerBestiaryData`, `setPlayerReputationsData`, `setPlayerMasteriesData`, `setLearnedSkill`, `inventoryItemIdSync`, `setPlayerTitlesData`, `setPlayerEmotesData`, `setTitleDefinitionsData`, `setEmoteDefinitionsData`.
 - Persist от chunk: `savePositions`, `saveHpMana`, `saveCharacterProgress`, `saveInventoryChange`, `saveEquipmentChange`, `saveDurabilityChange`, `saveItemKillCount`, `saveExperienceDebt`, `saveActiveEffect`, `transferInventoryItem`, `nullifyItemOwner`, `deleteInventoryItem`, `updatePlayerQuestProgress`, `updatePlayerFlag`, `savePityCounter`, `saveBestiaryKill`, `timedChampionKilled`, `saveReputation`, `saveMastery`, `saveLearnedSkill`.
 
 ### 15.4 Совместимость клиента (обязательно)

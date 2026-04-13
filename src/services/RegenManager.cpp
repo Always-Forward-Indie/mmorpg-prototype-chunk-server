@@ -109,7 +109,7 @@ RegenManager::tickRegen()
         // ── Notify client if anything changed ────────────────────────────────
         if (changed)
         {
-            statsNotif.sendStatsUpdate(cid);
+            statsNotif.sendStatsUpdate(cid, "regen");
         }
     }
 }

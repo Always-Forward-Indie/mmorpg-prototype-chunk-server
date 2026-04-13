@@ -1228,6 +1228,19 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
                     if (newKillCount % flushEvery == 0 || tierCrossed)
                         saveItemKillCountChange(killerId, weapon->id, newKillCount);
 
+                    // Notify the killer's client immediately so the weapon tooltip stays in sync.
+                    nlohmann::json killData;
+                    killData["inventoryItemId"] = weapon->id;
+                    killData["killCount"] = newKillCount;
+                    gameServices_->getStatsNotificationService().sendWorldNotification(
+                        killerId, "weapon_kill_count_update", killData, "low", "silent");
+
+                    // When a tier boundary is crossed the soul bonus to effective attributes
+                    // changes. Push a full stats_update so the client reflects the new
+                    // effective values immediately (without waiting for the next combat event).
+                    if (tierCrossed)
+                        gameServices_->getStatsNotificationService().sendStatsUpdate(killerId);
+
                     log_->info("[ItemSoul] Weapon invId=" + std::to_string(weapon->id) +
                                " killCount=" + std::to_string(newKillCount));
                 }
