@@ -15,10 +15,27 @@ TitleManager::TitleManager(GameServices *gs)
 void
 TitleManager::loadTitleDefinitions(const std::vector<TitleDefinitionStruct> &definitions)
 {
-    std::unique_lock lk(mutex_);
-    definitions_.clear();
-    for (const auto &d : definitions)
-        definitions_[d.slug] = d;
+    // Collect already-loaded characters with equipped titles so we can re-apply bonuses after
+    // releasing the lock. This is a defensive measure for the rare edge case where player-specific
+    // title data (SET_PLAYER_TITLES) arrives before the global definitions (SET_TITLE_DEFINITIONS).
+    // In that scenario applyTitleBonuses silently no-ops (def.id == 0); calling it again after
+    // definitions are available corrects the character's active effects.
+    std::vector<std::pair<int, std::string>> toReapply;
+    {
+        std::unique_lock lk(mutex_);
+        definitions_.clear();
+        for (const auto &d : definitions)
+            definitions_[d.slug] = d;
+        for (const auto &[charId, state] : data_)
+            if (!state.equippedSlug.empty())
+                toReapply.emplace_back(charId, state.equippedSlug);
+    }
+    for (const auto &[charId, slug] : toReapply)
+    {
+        applyTitleBonuses(charId, slug);
+        if (gs_)
+            gs_->getStatsNotificationService().sendStatsUpdate(charId);
+    }
     log_->info("[Title] Loaded {} title definitions", definitions.size());
 }
 
@@ -52,7 +69,15 @@ TitleManager::loadPlayerTitles(int characterId, const PlayerTitleStateStruct &st
     }
     // Re-apply equipped title bonuses on every login (effects may have been wiped by SET_PLAYER_ACTIVE_EFFECTS)
     if (!state.equippedSlug.empty())
+    {
         applyTitleBonuses(characterId, state.equippedSlug);
+        // CRITICAL: SET_PLAYER_TITLES is requested last in the login sequence, so it arrives
+        // after SET_PLAYER_ACTIVE_EFFECTS. The stats_update from SET_PLAYER_ACTIVE_EFFECTS does
+        // not include title bonuses (title data not loaded yet at that point). We must push a
+        // fresh stats_update here so the client HUD reflects title bonuses on every login.
+        if (gs_)
+            gs_->getStatsNotificationService().sendStatsUpdate(characterId);
+    }
 
     // Push current title state to client so they see earned/equipped titles immediately on login
     sendTitleUpdateToClient(characterId);

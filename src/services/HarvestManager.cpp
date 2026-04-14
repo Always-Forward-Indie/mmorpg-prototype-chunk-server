@@ -463,10 +463,11 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
     // Генерируем лут
     harvestLoot = generateHarvestLoot(corpse.mobId);
 
-    // Помечаем труп как заха рвещенный, очищаем текущего харвестера
-    // и сразу удаляем из реестра — broadcastCorpseRemoved ниже уберёт
-    // труп у всех клиентов до того, как сработает cleanup-таймер ChunkServer,
-    // который мог бы повторно показать труп через mobDeath-пакет.
+    // Помечаем труп как захарвещённый и сохраняем владельца лута.
+    // Труп НЕ удаляем из реестра — он должен оставаться до тех пор, пока
+    // игрок не подберёт весь лут через pickupCorpseLoot.
+    // Cleanup-таймер ChunkServer теперь использует hasBeenHarvested==true
+    // как признак «труп уже обработан» и не рассылает mobDeath повторно.
     {
         std::unique_lock<std::shared_mutex> corpselock(corpsesMutex_);
         auto corpseIt = harvestableCorpses_.find(harvestProgress.corpseUID);
@@ -475,7 +476,6 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
             corpseIt->second.hasBeenHarvested = true;
             corpseIt->second.harvestedByCharacterId = characterId;
             corpseIt->second.currentHarvesterCharacterId = 0; // Clear current harvester
-            harvestableCorpses_.erase(corpseIt);              // Remove immediately to prevent re-notification
         }
     }
 
@@ -496,13 +496,12 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
         activeHarvests_.erase(characterId);
     }
 
-    // Broadcast harvest completion to all clients
+    // Broadcast harvest completion to all clients.
+    // НЕ отправляем corpseRemoved здесь — труп должен оставаться видимым
+    // до тех пор, пока игрок не подберёт весь лут.
+    // corpseRemoved будет отправлен из pickupCorpseLoot (когда лут закончится)
+    // или из cleanupOldCorpses (если игрок не забрал лут).
     broadcastHarvestComplete(characterId, harvestProgress.corpseUID, harvestProgress.startPosition);
-
-    // Немедленно уведомляем всех клиентов об удалении трупа.
-    // Это предотвращает повторное появление трупа из-за mobDeath-пакета,
-    // который ChunkServer отправляет при очистке мёртвых мобов (~30 с).
-    broadcastCorpseRemoved(harvestProgress.corpseUID);
 
     logger_.log("[HARVEST] Completed harvest for character " + std::to_string(characterId) +
                 " on corpse " + std::to_string(harvestProgress.corpseUID) +

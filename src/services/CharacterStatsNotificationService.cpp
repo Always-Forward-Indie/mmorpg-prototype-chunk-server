@@ -262,6 +262,17 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
     }
 
     // ── Build packet ──────────────────────────────────────────────────────────
+    // Use effective (base + active-effect bonuses) max values in the health/mana objects
+    // so the client bar is drawn against the real cap, not the stripped base value.
+    // This matches what is reported in the attributes array and prevents false "current > max"
+    // warnings when passive skills (e.g. mana_shield) raise the effective maximum.
+    const int effectiveMaxHealth = effectiveValues.count("max_health")
+                                       ? effectiveValues.at("max_health")
+                                       : characterData.characterMaxHealth;
+    const int effectiveMaxMana = effectiveValues.count("max_mana")
+                                     ? effectiveValues.at("max_mana")
+                                     : characterData.characterMaxMana;
+
     TimestampStruct timestamps = TimestampUtils::createReceiveTimestamp(0, requestId);
     ResponseBuilder builder;
 
@@ -274,8 +285,8 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
         .setBody("level", characterData.characterLevel)
         .setBody("freeSkillPoints", characterData.freeSkillPoints)
         .setBody("experience", nlohmann::json{{"current", characterData.characterExperiencePoints}, {"levelStart", levelStart}, {"nextLevel", characterData.expForNextLevel}, {"debt", characterData.experienceDebt}})
-        .setBody("health", nlohmann::json{{"current", characterData.characterCurrentHealth}, {"max", characterData.characterMaxHealth}})
-        .setBody("mana", nlohmann::json{{"current", characterData.characterCurrentMana}, {"max", characterData.characterMaxMana}})
+        .setBody("health", nlohmann::json{{"current", characterData.characterCurrentHealth}, {"max", effectiveMaxHealth}})
+        .setBody("mana", nlohmann::json{{"current", characterData.characterCurrentMana}, {"max", effectiveMaxMana}})
         .setBody("weight", nlohmann::json{{"current", currentWeight}, {"max", weightLimit}})
         .setBody("attributes", attributesJson)
         .setBody("activeEffects", activeEffectsJson);

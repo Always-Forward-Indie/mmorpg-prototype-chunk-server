@@ -178,7 +178,7 @@ struct HarvestableCorpseStruct
     bool hasBeenHarvested = false;                   // Track if corpse has been harvested
     int harvestedByCharacterId = 0;                  // Track who harvested it (0 = no one)
     int currentHarvesterCharacterId = 0;             // Track who is currently harvesting (0 = no one)
-    float interactionRadius = 150.0f;                // How close player needs to be
+    float interactionRadius = 250.0f;                // How close player needs to be
 };
 
 // Structure for storing loot generated for a corpse

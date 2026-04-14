@@ -352,11 +352,11 @@ DialogueActionExecutor::executeOpenRepairShop(const nlohmann::json &action,
         return;
     }
 
-    // Collect equipped durable items with repair cost
-    auto equipped = services_.getInventoryManager().getEquippedItems(characterId);
+    // Collect ALL durable items (equipped and non-equipped) with repair cost
+    auto inventory = services_.getInventoryManager().getPlayerInventory(characterId);
 
     nlohmann::json items = nlohmann::json::array();
-    for (const auto &invSlot : equipped)
+    for (const auto &invSlot : inventory)
     {
         const auto &iData = services_.getItemManager().getItemById(invSlot.itemId);
         if (!iData.isDurable || iData.durabilityMax <= 0)
@@ -384,6 +384,7 @@ DialogueActionExecutor::executeOpenRepairShop(const nlohmann::json &action,
     nlohmann::json notification;
     notification["type"] = "openRepairShop";
     notification["npcId"] = session->npcId;
+    notification["playerGold"] = services_.getInventoryManager().getGoldAmount(characterId);
     notification["items"] = std::move(items);
     result.clientNotifications.push_back(std::move(notification));
 }

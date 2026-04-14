@@ -462,8 +462,23 @@ CharacterManager::restoreManaToCharacter(int characterID, int amount)
     auto it = charactersMap_.find(characterID);
     if (it != charactersMap_.end())
     {
-        int newMana = std::min(it->second.characterMaxMana,
-            it->second.characterCurrentMana + amount);
+        // Compute effective max mana (base + permanent active-effect bonuses)
+        // so that passive skills like mana_shield are respected as the true cap.
+        int effectiveMaxMana = it->second.characterMaxMana;
+        const int64_t nowSec = static_cast<int64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                .count());
+        for (const auto &eff : it->second.activeEffects)
+        {
+            if (eff.attributeSlug != "max_mana")
+                continue;
+            if (eff.tickMs > 0)
+                continue; // skip DoT/HoT
+            if (eff.expiresAt != 0 && eff.expiresAt <= nowSec)
+                continue;
+            effectiveMaxMana += static_cast<int>(eff.value);
+        }
+        int newMana = std::min(effectiveMaxMana, it->second.characterCurrentMana + amount);
         it->second.characterCurrentMana = newMana;
         return newMana;
     }

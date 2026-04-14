@@ -1,3 +1,30 @@
+v0.2.5
+14.04.2026
+================
+Bug Fixes:
+
+Труп удалялся до того, как игрок забирал лут — предыдущий фикс v0.2.3 (против повторного появления трупа) в `completeHarvestAndGenerateLoot` сразу вызывал `harvestableCorpses_.erase()` и `broadcastCorpseRemoved` сразу после завершения анимации харвеста, ещё до того как игрок подобрал предметы. При последующем `corpseLootPickup` `getCorpseByUID` возвращал пустую структуру (`mobUID == 0`) → сервер отвечал `CORPSE_NOT_FOUND`. Фикс: труп НЕ удаляется из `harvestableCorpses_` после харвеста — флаг `hasBeenHarvested = true` только помечает его как «заспавненный лут доступен»; `corpseRemoved` по-прежнему рассылается из `pickupCorpseLoot` (лут полностью подобран) или из `cleanupOldCorpses` (таймаут). `deadMobCleanupTask` обновлён: условие `corpseAlreadyRemoved` расширено — `mobUID == 0 || hasBeenHarvested == true`, чтобы cleanup-таймер не рассылал `mobDeath` для трупов с лутом, ожидающих подбора.
+
+`stats_update` не отправлялся при изучении скила без пассивных эффектов — `handleSetLearnedSkillEvent` слал `sendStatsUpdate` только если `skill.effects` не пуст. При изучении любого активного скила `freeSkillPoints` уменьшался, но клиент не получал обновлённый пакет. Фикс: `sendStatsUpdate` вынесен за условие `!skill.effects.empty()` и вызывается безусловно — клиент всегда получает актуальные `freeSkillPoints` и `activeEffects`.
+
+Тайтл-бонусы не применялись при быстрой инициализации сервера — если `SET_PLAYER_TITLES` приходил до `SET_TITLE_DEFINITIONS`, `applyTitleBonuses` для `equippedSlug` молча срабатывал вхолостую (определение не найдено). Фикс: `TitleManager::loadTitleDefinitions` после загрузки определений перебирает всех уже загруженных игроков с `equippedSlug != ""`, повторно вызывает `applyTitleBonuses` и `sendStatsUpdate`. Дополнительно: `loadPlayerTitles` теперь сразу отправляет `stats_update` после `applyTitleBonuses` при логине — клиент получает тайтл-бонусы в HUD без реконнекта.
+
+Ремонт показывал только экипированные предметы вместо всего инвентаря — `buildRepairableItemsJson` (`VendorEventHandler`) и `executeOpenRepairShop` (`DialogueActionExecutor`) использовали `getEquippedItems`, а не `getPlayerInventory`. Предметы в рюкзаке было невозможно починить. Фикс: оба места переключены на `getPlayerInventory`; `handleRepairItemEvent` снял проверку `invSlot->isEquipped` (любой предмет инвентаря можно ремонтировать); `handleRepairAllEvent` убрал `if (!invSlot.isEquipped) continue`. Поле `"slug"` переименовано в `"itemName"` в JSON-ответе `repairShop` — совпадает с путём `openRepairShop` в клиенте. `executeOpenRepairShop` теперь добавляет поле `"playerGold"` в нотификацию — клиенту не нужен отдельный запрос баланса.
+
+`repairItem` падал с `item_not_equipped` для предметов в рюкзаке — `handleRepairItemEvent` проверял `!invSlot->isEquipped` и возвращал ошибку `item_not_equipped`. После снятия проверки экипированности ошибка заменена на `item_not_found` (инвентарный объект не найден по `inventoryItemId`).
+
+`restoreManaToCharacter` не учитывал `max_mana`-бонусы от активных эффектов — кап маны брался из `characterMaxMana` (базовое значение), игнорируя постоянные `ActiveEffectStruct` с `attributeSlug == "max_mana"` (например, пассивный скил `mana_shield`). Рестор截切клипал ману по базовому значению, не по эффективному. Фикс: `restoreManaToCharacter` суммирует непросроченные не-тикающие `max_mana`-эффекты и использует `effectiveMaxMana` как кап.
+
+`buildStatsUpdatePacket` использовал базовые `characterMaxHealth`/`characterMaxMana` в полях `health.max`/`mana.max` — клиент рисовал полосу HP/MP по базовому значению, даже если пассивные скилы поднимали реальный кап. Фикс: `buildStatsUpdatePacket` вычисляет `effectiveMaxHealth`/`effectiveMaxMana` из `effectiveValues`-кэша (уже посчитанного в том же методе) и подставляет их в `health.max`/`mana.max`.
+
+Тренер показывал уже изученные скилы — `buildSkillShopJson` добавлял их в JSON-массив с `canLearn = false`, занимая место в UI. Фикс: уже изученные скилы пропускаются через `continue` до формирования `entry`; поле `isLearned` из пакета удалено за ненадобностью.
+
+`HarvestableCorpseStruct::interactionRadius` увеличен с 150 до 250 юнитов — был слишком маленьким относительно радиуса прицеливания у клиента.
+
+VendorEventHandler — все ответы переведены на `networkManager_.generateResponseMessage` — устранено несоответствие формата ответов (ранее ряд обработчиков vendor/trade/repair строил сырой JSON минуя `generateResponseMessage`).
+
+---
+
 v0.2.4
 14.04.2026
 ================

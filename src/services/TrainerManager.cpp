@@ -101,7 +101,12 @@ TrainerManager::buildSkillShopJson(
                 bookSlug = bookData.slug;
         }
 
-        bool canLearn = !isLearned && prereqMet && levelMet && spMet && goldMet && bookMet;
+        // Already-learned skills are excluded from the shop list entirely.
+        // The client has no reason to display or interact with them.
+        if (isLearned)
+            continue;
+
+        bool canLearn = prereqMet && levelMet && spMet && goldMet && bookMet;
 
         nlohmann::json entry;
         entry["skillId"] = e.skillId;

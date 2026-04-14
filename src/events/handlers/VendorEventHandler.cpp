@@ -144,13 +144,7 @@ VendorEventHandler::sendTradeState(
     body["theirConfirmed"] = isSideA ? session.confirmedB : session.confirmedA;
 
     ResponseBuilder builder;
-    std::string msg = builder
-                          .setHeader("eventType", "tradeState")
-                          .setHeader("status", "success")
-                          .setHeader("clientId", clientId)
-                          .setHeader("hash", "")
-                          .setBody("trade", body)
-                          .build();
+    std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "tradeState").setHeader("status", "success").setHeader("clientId", clientId).setHeader("hash", "").setBody("trade", body).build());
     networkManager_.sendResponse(socket, msg);
 }
 
@@ -167,14 +161,7 @@ VendorEventHandler::cancelAndNotify(
         if (!socket)
             continue;
         ResponseBuilder builder;
-        std::string msg = builder
-                              .setHeader("eventType", "tradeCancelled")
-                              .setHeader("status", "cancelled")
-                              .setHeader("clientId", cid)
-                              .setHeader("hash", "")
-                              .setBody("sessionId", sessionId)
-                              .setBody("reason", reason)
-                              .build();
+        std::string msg = networkManager_.generateResponseMessage("cancelled", builder.setHeader("eventType", "tradeCancelled").setHeader("status", "cancelled").setHeader("clientId", cid).setHeader("hash", "").setBody("sessionId", sessionId).setBody("reason", reason).build());
         networkManager_.sendResponse(socket, msg);
     }
     gameServices_.getTradeSessionManager().closeSession(sessionId);
@@ -290,16 +277,7 @@ VendorEventHandler::handleOpenVendorShopEvent(const Event &event)
         }
 
         ResponseBuilder builder;
-        std::string msg = builder
-                              .setHeader("eventType", "vendorShop")
-                              .setHeader("status", "success")
-                              .setHeader("clientId", req.clientId)
-                              .setHeader("hash", "")
-                              .setBody("npcId", req.npcId)
-                              .setBody("npcSlug", npc.slug)
-                              .setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId))
-                              .setBody("items", shopJson)
-                              .build();
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "vendorShop").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).setBody("items", shopJson).build());
         networkManager_.sendResponse(socket, msg);
     }
     catch (const std::exception &ex)
@@ -356,17 +334,7 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
         saveCurrencyTransaction(req.characterId, req.npcId, req.itemId, req.quantity, result.totalPrice, "buy");
 
         ResponseBuilder builder;
-        std::string msg = builder
-                              .setHeader("eventType", "buyItemResult")
-                              .setHeader("status", "success")
-                              .setHeader("clientId", req.clientId)
-                              .setHeader("hash", "")
-                              .setBody("npcId", req.npcId)
-                              .setBody("npcSlug", npc.slug)
-                              .setBody("itemId", req.itemId)
-                              .setBody("quantity", req.quantity)
-                              .setBody("totalPrice", result.totalPrice)
-                              .build();
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buyItemResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("itemId", req.itemId).setBody("quantity", req.quantity).setBody("totalPrice", result.totalPrice).build());
         networkManager_.sendResponse(socket, msg);
     }
     catch (const std::exception &ex)
@@ -425,15 +393,7 @@ VendorEventHandler::handleSellItemEvent(const Event &event)
         saveCurrencyTransaction(req.characterId, req.npcId, 0, req.quantity, result.goldReceived, "sell");
 
         ResponseBuilder builder;
-        std::string msg = builder
-                              .setHeader("eventType", "sellItemResult")
-                              .setHeader("status", "success")
-                              .setHeader("clientId", req.clientId)
-                              .setHeader("hash", "")
-                              .setBody("npcId", req.npcId)
-                              .setBody("npcSlug", npc.slug)
-                              .setBody("goldReceived", result.goldReceived)
-                              .build();
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "sellItemResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("goldReceived", result.goldReceived).build());
         networkManager_.sendResponse(socket, msg);
     }
     catch (const std::exception &ex)
@@ -495,16 +455,7 @@ VendorEventHandler::handleBuyItemBatchEvent(const Event &event)
             itemsJson.push_back({{"itemId", r.itemId}, {"quantity", r.quantity}, {"totalPrice", r.totalPrice}});
 
         ResponseBuilder builder;
-        std::string msg = builder
-                              .setHeader("eventType", "buyItemBatchResult")
-                              .setHeader("status", "success")
-                              .setHeader("clientId", req.clientId)
-                              .setHeader("hash", "")
-                              .setBody("npcId", req.npcId)
-                              .setBody("npcSlug", npc.slug)
-                              .setBody("totalGoldSpent", result.totalGoldSpent)
-                              .setBody("items", itemsJson)
-                              .build();
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buyItemBatchResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("totalGoldSpent", result.totalGoldSpent).setBody("items", itemsJson).build());
         networkManager_.sendResponse(socket, msg);
     }
     catch (const std::exception &ex)
@@ -565,16 +516,7 @@ VendorEventHandler::handleSellItemBatchEvent(const Event &event)
             itemsJson.push_back({{"inventoryItemId", r.inventoryItemId}, {"quantity", r.quantity}, {"goldReceived", r.goldReceived}});
 
         ResponseBuilder builder;
-        std::string msg = builder
-                              .setHeader("eventType", "sellItemBatchResult")
-                              .setHeader("status", "success")
-                              .setHeader("clientId", req.clientId)
-                              .setHeader("hash", "")
-                              .setBody("npcId", req.npcId)
-                              .setBody("npcSlug", npc.slug)
-                              .setBody("totalGoldReceived", result.totalGoldReceived)
-                              .setBody("items", itemsJson)
-                              .build();
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "sellItemBatchResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("totalGoldReceived", result.totalGoldReceived).setBody("items", itemsJson).build());
         networkManager_.sendResponse(socket, msg);
     }
     catch (const std::exception &ex)
@@ -628,11 +570,12 @@ VendorEventHandler::buildRepairableItemsJson(int characterId, int &outTotalCost)
 {
     auto &inventoryMgr = gameServices_.getInventoryManager();
     auto &itemMgr = gameServices_.getItemManager();
-    const auto &equippedItems = inventoryMgr.getEquippedItems(characterId);
+    // Use full inventory — repair shop shows ALL durable items, not just equipped ones
+    const auto inventory = inventoryMgr.getPlayerInventory(characterId);
 
     nlohmann::json items = nlohmann::json::array();
     outTotalCost = 0;
-    for (const auto &invSlot : equippedItems)
+    for (const auto &invSlot : inventory)
     {
         const ItemDataStruct item = itemMgr.getItemById(invSlot.itemId);
         if (!item.isDurable || item.durabilityMax <= 0)
@@ -645,7 +588,7 @@ VendorEventHandler::buildRepairableItemsJson(int characterId, int &outTotalCost)
         nlohmann::json entry;
         entry["inventoryItemId"] = invSlot.id;
         entry["itemId"] = item.id;
-        entry["slug"] = item.slug;
+        entry["itemName"] = item.slug; // field name matches openRepairShop dialogue path
         entry["durabilityMax"] = item.durabilityMax;
         entry["durabilityCurrent"] = current;
         entry["repairCost"] = cost;
@@ -685,17 +628,7 @@ VendorEventHandler::handleOpenRepairShopEvent(const Event &event)
         nlohmann::json repairableItems = buildRepairableItemsJson(req.characterId, totalRepairCost);
 
         ResponseBuilder builder;
-        std::string msg = builder
-                              .setHeader("eventType", "repairShop")
-                              .setHeader("status", "success")
-                              .setHeader("clientId", req.clientId)
-                              .setHeader("hash", "")
-                              .setBody("npcId", req.npcId)
-                              .setBody("npcSlug", npc.slug)
-                              .setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId))
-                              .setBody("items", repairableItems)
-                              .setBody("totalRepairCost", totalRepairCost)
-                              .build();
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "repairShop").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).setBody("items", repairableItems).setBody("totalRepairCost", totalRepairCost).build());
         networkManager_.sendResponse(socket, msg);
     }
     catch (const std::exception &ex)
@@ -748,9 +681,9 @@ VendorEventHandler::handleRepairItemEvent(const Event &event)
                 break;
             }
 
-        if (!invSlot || !invSlot->isEquipped)
+        if (!invSlot)
         {
-            sendErrorResponseWithTimestamps(socket, "item_not_equipped", "repairItem", req.clientId, req.timestamps);
+            sendErrorResponseWithTimestamps(socket, "item_not_found", "repairItem", req.clientId, req.timestamps);
             return;
         }
 
@@ -763,32 +696,14 @@ VendorEventHandler::handleRepairItemEvent(const Event &event)
 
         const ItemDataStruct item = gameServices_.getItemManager().getItemById(invSlot->itemId);
         ResponseBuilder builder;
-        std::string msg = builder
-                              .setHeader("eventType", "repairItemResult")
-                              .setHeader("status", "success")
-                              .setHeader("clientId", req.clientId)
-                              .setHeader("hash", "")
-                              .setBody("inventoryItemId", req.inventoryItemId)
-                              .setBody("durabilityCurrent", item.durabilityMax)
-                              .setBody("goldSpent", result.goldCost)
-                              .build();
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "repairItemResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("inventoryItemId", req.inventoryItemId).setBody("durabilityCurrent", item.durabilityMax).setBody("goldSpent", result.goldCost).build());
         networkManager_.sendResponse(socket, msg);
 
         // Send refreshed repair shop list so the client window updates
         int updatedTotalCost = 0;
         nlohmann::json updatedItems = buildRepairableItemsJson(req.characterId, updatedTotalCost);
         ResponseBuilder shopBuilder;
-        std::string shopMsg = shopBuilder
-                                  .setHeader("eventType", "repairShop")
-                                  .setHeader("status", "success")
-                                  .setHeader("clientId", req.clientId)
-                                  .setHeader("hash", "")
-                                  .setBody("npcId", req.npcId)
-                                  .setBody("npcSlug", npc.slug)
-                                  .setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId))
-                                  .setBody("items", updatedItems)
-                                  .setBody("totalRepairCost", updatedTotalCost)
-                                  .build();
+        std::string shopMsg = networkManager_.generateResponseMessage("success", shopBuilder.setHeader("eventType", "repairShop").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).setBody("items", updatedItems).setBody("totalRepairCost", updatedTotalCost).build());
         networkManager_.sendResponse(socket, shopMsg);
     }
     catch (const std::exception &ex)
@@ -837,8 +752,6 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
 
         for (auto &invSlot : inventory)
         {
-            if (!invSlot.isEquipped)
-                continue;
             const ItemDataStruct item = gameServices_.getItemManager().getItemById(invSlot.itemId);
             if (!item.isDurable || item.durabilityMax <= 0)
                 continue;
@@ -857,31 +770,14 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
         }
 
         ResponseBuilder builder;
-        std::string msg = builder
-                              .setHeader("eventType", "repairAllResult")
-                              .setHeader("status", "success")
-                              .setHeader("clientId", req.clientId)
-                              .setHeader("hash", "")
-                              .setBody("repairedItems", repairedItems)
-                              .setBody("totalGoldSpent", totalGoldSpent)
-                              .build();
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "repairAllResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("repairedItems", repairedItems).setBody("totalGoldSpent", totalGoldSpent).build());
         networkManager_.sendResponse(socket, msg);
 
         // Send refreshed repair shop list (should be empty after all repairs)
         int updatedTotalCost = 0;
         nlohmann::json updatedItems = buildRepairableItemsJson(req.characterId, updatedTotalCost);
         ResponseBuilder shopBuilder;
-        std::string shopMsg = shopBuilder
-                                  .setHeader("eventType", "repairShop")
-                                  .setHeader("status", "success")
-                                  .setHeader("clientId", req.clientId)
-                                  .setHeader("hash", "")
-                                  .setBody("npcId", req.npcId)
-                                  .setBody("npcSlug", npc.slug)
-                                  .setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId))
-                                  .setBody("items", updatedItems)
-                                  .setBody("totalRepairCost", updatedTotalCost)
-                                  .build();
+        std::string shopMsg = networkManager_.generateResponseMessage("success", shopBuilder.setHeader("eventType", "repairShop").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).setBody("items", updatedItems).setBody("totalRepairCost", updatedTotalCost).build());
         networkManager_.sendResponse(socket, shopMsg);
     }
     catch (const std::exception &ex)
@@ -953,14 +849,7 @@ VendorEventHandler::handleTradeRequestEvent(const Event &event)
 
         const auto &myChar = gameServices_.getCharacterManager().getCharacterData(req.characterId);
         ResponseBuilder inviteBuilder;
-        std::string inviteMsg = inviteBuilder
-                                    .setHeader("eventType", "tradeInvite")
-                                    .setHeader("status", "pending")
-                                    .setHeader("clientId", targetChar.clientId)
-                                    .setHeader("hash", "")
-                                    .setBody("fromCharacterId", req.characterId)
-                                    .setBody("fromCharacterName", myChar.characterName)
-                                    .build();
+        std::string inviteMsg = networkManager_.generateResponseMessage("pending", inviteBuilder.setHeader("eventType", "tradeInvite").setHeader("status", "pending").setHeader("clientId", targetChar.clientId).setHeader("hash", "").setBody("fromCharacterId", req.characterId).setBody("fromCharacterName", myChar.characterName).build());
         networkManager_.sendResponse(targetSocket, inviteMsg);
 
         // Ack to initiator
@@ -1054,13 +943,7 @@ VendorEventHandler::handleTradeDeclineEvent(const Event &event)
             {
                 const auto &declinerChar = gameServices_.getCharacterManager().getCharacterData(req.characterId);
                 ResponseBuilder builder;
-                std::string msg = builder
-                                      .setHeader("eventType", "tradeDeclined")
-                                      .setHeader("status", "declined")
-                                      .setHeader("clientId", initiatorChar.clientId)
-                                      .setHeader("hash", "")
-                                      .setBody("byCharacterName", declinerChar.characterName)
-                                      .build();
+                std::string msg = networkManager_.generateResponseMessage("declined", builder.setHeader("eventType", "tradeDeclined").setHeader("status", "declined").setHeader("clientId", initiatorChar.clientId).setHeader("hash", "").setBody("byCharacterName", declinerChar.characterName).build());
                 networkManager_.sendResponse(initiatorSocket, msg);
             }
         }
@@ -1276,13 +1159,7 @@ VendorEventHandler::handleTradeConfirmEvent(const Event &event)
                 if (!s)
                     continue;
                 ResponseBuilder builder;
-                std::string msg = builder
-                                      .setHeader("eventType", "tradeComplete")
-                                      .setHeader("status", "success")
-                                      .setHeader("clientId", cid)
-                                      .setHeader("hash", "")
-                                      .setBody("sessionId", req.sessionId)
-                                      .build();
+                std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "tradeComplete").setHeader("status", "success").setHeader("clientId", cid).setHeader("hash", "").setBody("sessionId", req.sessionId).build());
                 networkManager_.sendResponse(s, msg);
             }
 

@@ -1466,10 +1466,11 @@ EventHandler::handleSetLearnedSkillEvent(const Event &event)
                 eff.tickMs = 0;    // passives never tick
                 gameServices_.getCharacterManager().addActiveEffect(characterId, eff);
             }
-            // Push updated stats (with new passive bonus) to the client
-            if (!skill.effects.empty())
-                gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
         }
+
+        // Always send a full stats update: freeSkillPoints changed for every skill learned,
+        // and passive effects (if any) must appear in activeEffects immediately.
+        gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
 
         // Build and send skill_learned notification to client
         auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
