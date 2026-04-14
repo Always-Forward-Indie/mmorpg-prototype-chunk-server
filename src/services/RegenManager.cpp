@@ -66,42 +66,103 @@ RegenManager::tickRegen()
             continue;
         }
 
-        // ── Compute effective attributes from snapshot ────────────────────────
-        // Start with base attributes from the character snapshot (avoids N+1 lock
-        // calls to CharacterManager) and layer active-effect modifiers on top.
-        int conValue = findAttr(ch.attributes, "constitution");
-        int wisValue = findAttr(ch.attributes, "wisdom");
+        // ── Compute effective regen and max values ────────────────────────────
+        // Start from base character attributes, then layer active effects and
+        // equipped item bonuses, exactly as CharacterStatsNotificationService does.
+        int hpRegenBase = findAttr(ch.attributes, "hp_regen_per_s");
+        int mpRegenBase = findAttr(ch.attributes, "mp_regen_per_s");
+        int maxHpEff = findAttr(ch.attributes, "max_health");
+        int maxMpEff = findAttr(ch.attributes, "max_mana");
+        // Fallback to stored struct values if the attribute list is incomplete
+        if (maxHpEff <= 0)
+            maxHpEff = ch.characterMaxHealth;
+        if (maxMpEff <= 0)
+            maxMpEff = ch.characterMaxMana;
 
+        // Layer active-effect stat modifiers (skip DoT/HoT ticks)
         for (const auto &eff : ch.activeEffects)
         {
-            // Permanent effects (expiresAt==0) or effects not yet expired
             if (eff.expiresAt != 0 && eff.expiresAt <= nowSec)
                 continue;
             if (eff.tickMs > 0)
-                continue; // DoT/HoT – not a stat modifier
-            if (eff.attributeSlug == "constitution")
-                conValue += static_cast<int>(eff.value);
-            else if (eff.attributeSlug == "wisdom")
-                wisValue += static_cast<int>(eff.value);
+                continue;
+            const auto &slug = eff.attributeSlug;
+            const int val = static_cast<int>(eff.value);
+            if (slug == "hp_regen_per_s")
+                hpRegenBase += val;
+            else if (slug == "mp_regen_per_s")
+                mpRegenBase += val;
+            else if (slug == "max_health")
+                maxHpEff += val;
+            else if (slug == "max_mana")
+                maxMpEff += val;
         }
 
-        const int hpGain = baseHpRegen + std::max(0, static_cast<int>(conValue * hpRegenConCoeff));
-        const int mpGain = baseMpRegen + std::max(0, static_cast<int>(wisValue * mpRegenWisCoeff));
+        // Layer equipped-item bonuses (apply_on == "equip")
+        try
+        {
+            const auto equipState =
+                gameServices_->getEquipmentManager().getEquipmentState(cid);
+            for (const auto &[slotSlug, slot] : equipState.slots)
+            {
+                if (slot.inventoryItemId == 0)
+                    continue;
+                const auto item =
+                    gameServices_->getItemManager().getItemById(slot.itemId);
+                for (const auto &attr : item.attributes)
+                {
+                    if (attr.apply_on != "equip")
+                        continue;
+                    const int v = attr.value;
+                    if (attr.slug == "hp_regen_per_s")
+                        hpRegenBase += v;
+                    else if (attr.slug == "mp_regen_per_s")
+                        mpRegenBase += v;
+                    else if (attr.slug == "max_health")
+                        maxHpEff += v;
+                    else if (attr.slug == "max_mana")
+                        maxMpEff += v;
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+
+        // Final per-tick gains.  Regen attributes are stored as per-second values;
+        // tick interval is configurable (default 4 s) so multiply accordingly.
+        // The old constitution/wisdom formula is kept as a fallback base bonus.
+        const int conValue = findAttr(ch.attributes, "constitution");
+        const int wisValue = findAttr(ch.attributes, "wisdom");
+        const int hpFromStats = baseHpRegen + std::max(0, static_cast<int>(conValue * hpRegenConCoeff));
+        const int mpFromStats = baseMpRegen + std::max(0, static_cast<int>(wisValue * mpRegenWisCoeff));
+
+        const float tickSec = static_cast<float>(disableInCombatMs > 0
+                                                     ? cfg.getInt("regen.tickIntervalMs", 4000)
+                                                     : 4000) /
+                              1000.0f;
+        const int hpGain = std::max(hpFromStats,
+            static_cast<int>(std::max(0, hpRegenBase) * tickSec));
+        const int mpGain = std::max(mpFromStats,
+            static_cast<int>(std::max(0, mpRegenBase) * tickSec));
+
+        const int effectiveMaxHp = std::max(maxHpEff, ch.characterMaxHealth);
+        const int effectiveMaxMp = std::max(maxMpEff, ch.characterMaxMana);
 
         bool changed = false;
 
         // ── Apply HP regen ────────────────────────────────────────────────────
-        if (ch.characterCurrentHealth < ch.characterMaxHealth && hpGain > 0)
+        if (ch.characterCurrentHealth < effectiveMaxHp && hpGain > 0)
         {
-            const int newHp = std::min(ch.characterCurrentHealth + hpGain, ch.characterMaxHealth);
+            const int newHp = std::min(ch.characterCurrentHealth + hpGain, effectiveMaxHp);
             charMgr.updateCharacterHealth(cid, newHp);
             changed = true;
         }
 
         // ── Apply MP regen ────────────────────────────────────────────────────
-        if (ch.characterCurrentMana < ch.characterMaxMana && mpGain > 0)
+        if (ch.characterCurrentMana < effectiveMaxMp && mpGain > 0)
         {
-            const int newMp = std::min(ch.characterCurrentMana + mpGain, ch.characterMaxMana);
+            const int newMp = std::min(ch.characterCurrentMana + mpGain, effectiveMaxMp);
             charMgr.updateCharacterMana(cid, newMp);
             changed = true;
         }

@@ -92,11 +92,14 @@ class TitleManager
         notifyClientCallback_ = std::move(cb);
     }
 
+    /// Push the current title state (earned list + equipped) to the owning client.
+    /// Public so that PlayerReady phase can re-send after the scene is loaded.
+    void sendTitleUpdateToClient(int characterId);
+
   private:
     void applyTitleBonuses(int characterId, const std::string &titleSlug);
     void removeTitleBonuses(int characterId, const std::string &titleSlug);
     void persist(int characterId, const std::string &equippedSlug, const std::vector<std::string> &earned);
-    void sendTitleUpdateToClient(int characterId);
 
     GameServices *gs_;
     std::shared_ptr<spdlog::logger> log_;

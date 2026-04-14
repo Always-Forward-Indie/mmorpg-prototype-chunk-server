@@ -463,7 +463,10 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
     // Генерируем лут
     harvestLoot = generateHarvestLoot(corpse.mobId);
 
-    // Помечаем труп как заха рвещенный и очищаем текущего харвестера
+    // Помечаем труп как заха рвещенный, очищаем текущего харвестера
+    // и сразу удаляем из реестра — broadcastCorpseRemoved ниже уберёт
+    // труп у всех клиентов до того, как сработает cleanup-таймер ChunkServer,
+    // который мог бы повторно показать труп через mobDeath-пакет.
     {
         std::unique_lock<std::shared_mutex> corpselock(corpsesMutex_);
         auto corpseIt = harvestableCorpses_.find(harvestProgress.corpseUID);
@@ -472,6 +475,7 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
             corpseIt->second.hasBeenHarvested = true;
             corpseIt->second.harvestedByCharacterId = characterId;
             corpseIt->second.currentHarvesterCharacterId = 0; // Clear current harvester
+            harvestableCorpses_.erase(corpseIt);              // Remove immediately to prevent re-notification
         }
     }
 
@@ -494,6 +498,11 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
 
     // Broadcast harvest completion to all clients
     broadcastHarvestComplete(characterId, harvestProgress.corpseUID, harvestProgress.startPosition);
+
+    // Немедленно уведомляем всех клиентов об удалении трупа.
+    // Это предотвращает повторное появление трупа из-за mobDeath-пакета,
+    // который ChunkServer отправляет при очистке мёртвых мобов (~30 с).
+    broadcastCorpseRemoved(harvestProgress.corpseUID);
 
     logger_.log("[HARVEST] Completed harvest for character " + std::to_string(characterId) +
                 " on corpse " + std::to_string(harvestProgress.corpseUID) +

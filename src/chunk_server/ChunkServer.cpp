@@ -796,7 +796,16 @@ ChunkServer::mainEventLoopCH()
                     }
 
                     deadMobUIDs.push_back(mob.uid);
-                    deadMobsToNotify.emplace_back(mob.uid, zone.second.zoneId);
+
+                    // If the corpse was already cleaned up by the harvest system
+                    // (getCorpseByUID returns empty — corpseRemoved was already broadcast),
+                    // skip the mobDeath notification to prevent the corpse re-appearing on clients.
+                    bool corpseAlreadyRemoved =
+                        (gameServices_.getHarvestManager().getCorpseByUID(mob.uid).mobUID == 0);
+                    if (!corpseAlreadyRemoved)
+                    {
+                        deadMobsToNotify.emplace_back(mob.uid, zone.second.zoneId);
+                    }
                 }
 
                 // Remove dead mobs and trigger respawn logic

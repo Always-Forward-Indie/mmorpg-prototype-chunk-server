@@ -489,7 +489,7 @@ InventoryManager::getEquippedWeapon(int characterId) const
         if (!item.isEquipped)
             continue;
         const auto &itemData = itemManager_.getItemById(item.itemId);
-        if (itemData.equipSlotSlug == "weapon")
+        if (itemData.equipSlotSlug == "main_hand" || itemData.equipSlotSlug == "two_hand")
             return item;
     }
     return std::nullopt;

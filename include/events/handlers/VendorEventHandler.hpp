@@ -88,6 +88,10 @@ class VendorEventHandler : public BaseEventHandler
     RepairOneResult repairOne(
         int characterId, int goldItemId, int npcId, PlayerInventoryItemStruct &invSlot);
 
+    /** Build the list of repairable equipped items for the repair shop window.
+     *  Sets outTotalCost to the sum of all repair costs. */
+    nlohmann::json buildRepairableItemsJson(int characterId, int &outTotalCost) const;
+
     /** Send TRADE_STATE packet to one participant. */
     void sendTradeState(
         int clientId,

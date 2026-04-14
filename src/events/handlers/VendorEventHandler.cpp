@@ -605,17 +605,53 @@ VendorEventHandler::repairOne(
     if (playerGold < cost)
         return {false, 0, "insufficient_gold"};
 
-    if (!inventoryMgr.removeItemFromInventory(characterId, goldItemId, cost))
-        return {false, 0, "gold_deduct_failed"};
-
-    // Restore durability in-memory
+    // Update durability in-memory FIRST so the INVENTORY_UPDATE snapshot
+    // fired by removeItemFromInventory already contains the correct durability.
     inventoryMgr.updateDurability(characterId, invSlot.id, item.durabilityMax);
+
+    if (!inventoryMgr.removeItemFromInventory(characterId, goldItemId, cost))
+    {
+        // Roll back durability on gold-removal failure
+        inventoryMgr.updateDurability(characterId, invSlot.id, current);
+        return {false, 0, "gold_deduct_failed"};
+    }
 
     // Persist
     saveDurabilityChange(characterId, invSlot.id, item.durabilityMax);
     saveCurrencyTransaction(characterId, npcId, invSlot.itemId, 1, cost, "repair");
 
     return {true, cost, ""};
+}
+
+nlohmann::json
+VendorEventHandler::buildRepairableItemsJson(int characterId, int &outTotalCost) const
+{
+    auto &inventoryMgr = gameServices_.getInventoryManager();
+    auto &itemMgr = gameServices_.getItemManager();
+    const auto &equippedItems = inventoryMgr.getEquippedItems(characterId);
+
+    nlohmann::json items = nlohmann::json::array();
+    outTotalCost = 0;
+    for (const auto &invSlot : equippedItems)
+    {
+        const ItemDataStruct item = itemMgr.getItemById(invSlot.itemId);
+        if (!item.isDurable || item.durabilityMax <= 0)
+            continue;
+        int current = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : item.durabilityMax;
+        if (current >= item.durabilityMax)
+            continue;
+        int cost = computeRepairCost(item, current);
+        outTotalCost += cost;
+        nlohmann::json entry;
+        entry["inventoryItemId"] = invSlot.id;
+        entry["itemId"] = item.id;
+        entry["slug"] = item.slug;
+        entry["durabilityMax"] = item.durabilityMax;
+        entry["durabilityCurrent"] = current;
+        entry["repairCost"] = cost;
+        items.push_back(std::move(entry));
+    }
+    return items;
 }
 
 void
@@ -633,42 +669,20 @@ VendorEventHandler::handleOpenRepairShopEvent(const Event &event)
             return;
 
         const auto &npc = gameServices_.getNPCManager().getNPCById(req.npcId);
-        if (npc.id == 0 || npc.npcType != "blacksmith")
+        if (npc.id == 0)
         {
-            sendErrorResponseWithTimestamps(socket, "not_a_blacksmith", "repairShop", req.clientId, req.timestamps);
+            sendErrorResponseWithTimestamps(socket, "npc_not_found", "repairShop", req.clientId, req.timestamps);
             return;
         }
-        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + 2.0f))
+        const auto playerPos = gameServices_.getCharacterManager().getCharacterPosition(req.characterId);
+        if (!isPlayerInRange(playerPos, npc.position, npc.radius + 2.0f))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "repairShop", req.clientId, req.timestamps);
             return;
         }
 
-        auto &inventoryMgr = gameServices_.getInventoryManager();
-        auto &itemMgr = gameServices_.getItemManager();
-        const auto &equippedItems = inventoryMgr.getEquippedItems(req.characterId);
-
-        nlohmann::json repairableItems = nlohmann::json::array();
         int totalRepairCost = 0;
-        for (const auto &invSlot : equippedItems)
-        {
-            const ItemDataStruct item = itemMgr.getItemById(invSlot.itemId);
-            if (!item.isDurable || item.durabilityMax <= 0)
-                continue;
-            int current = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : item.durabilityMax;
-            if (current >= item.durabilityMax)
-                continue;
-            int cost = computeRepairCost(item, current);
-            totalRepairCost += cost;
-            nlohmann::json entry;
-            entry["inventoryItemId"] = invSlot.id;
-            entry["itemId"] = item.id;
-            entry["slug"] = item.slug;
-            entry["durabilityMax"] = item.durabilityMax;
-            entry["durabilityCurrent"] = current;
-            entry["repairCost"] = cost;
-            repairableItems.push_back(entry);
-        }
+        nlohmann::json repairableItems = buildRepairableItemsJson(req.characterId, totalRepairCost);
 
         ResponseBuilder builder;
         std::string msg = builder
@@ -678,6 +692,7 @@ VendorEventHandler::handleOpenRepairShopEvent(const Event &event)
                               .setHeader("hash", "")
                               .setBody("npcId", req.npcId)
                               .setBody("npcSlug", npc.slug)
+                              .setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId))
                               .setBody("items", repairableItems)
                               .setBody("totalRepairCost", totalRepairCost)
                               .build();
@@ -704,12 +719,13 @@ VendorEventHandler::handleRepairItemEvent(const Event &event)
             return;
 
         const auto &npc = gameServices_.getNPCManager().getNPCById(req.npcId);
-        if (npc.id == 0 || npc.npcType != "blacksmith")
+        if (npc.id == 0)
         {
-            sendErrorResponseWithTimestamps(socket, "not_a_blacksmith", "repairItem", req.clientId, req.timestamps);
+            sendErrorResponseWithTimestamps(socket, "npc_not_found", "repairItem", req.clientId, req.timestamps);
             return;
         }
-        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + 2.0f))
+        const auto playerPos = gameServices_.getCharacterManager().getCharacterPosition(req.characterId);
+        if (!isPlayerInRange(playerPos, npc.position, npc.radius + 2.0f))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "repairItem", req.clientId, req.timestamps);
             return;
@@ -757,6 +773,23 @@ VendorEventHandler::handleRepairItemEvent(const Event &event)
                               .setBody("goldSpent", result.goldCost)
                               .build();
         networkManager_.sendResponse(socket, msg);
+
+        // Send refreshed repair shop list so the client window updates
+        int updatedTotalCost = 0;
+        nlohmann::json updatedItems = buildRepairableItemsJson(req.characterId, updatedTotalCost);
+        ResponseBuilder shopBuilder;
+        std::string shopMsg = shopBuilder
+                                  .setHeader("eventType", "repairShop")
+                                  .setHeader("status", "success")
+                                  .setHeader("clientId", req.clientId)
+                                  .setHeader("hash", "")
+                                  .setBody("npcId", req.npcId)
+                                  .setBody("npcSlug", npc.slug)
+                                  .setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId))
+                                  .setBody("items", updatedItems)
+                                  .setBody("totalRepairCost", updatedTotalCost)
+                                  .build();
+        networkManager_.sendResponse(socket, shopMsg);
     }
     catch (const std::exception &ex)
     {
@@ -779,12 +812,13 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
             return;
 
         const auto &npc = gameServices_.getNPCManager().getNPCById(req.npcId);
-        if (npc.id == 0 || npc.npcType != "blacksmith")
+        if (npc.id == 0)
         {
-            sendErrorResponseWithTimestamps(socket, "not_a_blacksmith", "repairAll", req.clientId, req.timestamps);
+            sendErrorResponseWithTimestamps(socket, "npc_not_found", "repairAll", req.clientId, req.timestamps);
             return;
         }
-        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + 2.0f))
+        const auto playerPos = gameServices_.getCharacterManager().getCharacterPosition(req.characterId);
+        if (!isPlayerInRange(playerPos, npc.position, npc.radius + 2.0f))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "repairAll", req.clientId, req.timestamps);
             return;
@@ -832,6 +866,23 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
                               .setBody("totalGoldSpent", totalGoldSpent)
                               .build();
         networkManager_.sendResponse(socket, msg);
+
+        // Send refreshed repair shop list (should be empty after all repairs)
+        int updatedTotalCost = 0;
+        nlohmann::json updatedItems = buildRepairableItemsJson(req.characterId, updatedTotalCost);
+        ResponseBuilder shopBuilder;
+        std::string shopMsg = shopBuilder
+                                  .setHeader("eventType", "repairShop")
+                                  .setHeader("status", "success")
+                                  .setHeader("clientId", req.clientId)
+                                  .setHeader("hash", "")
+                                  .setBody("npcId", req.npcId)
+                                  .setBody("npcSlug", npc.slug)
+                                  .setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId))
+                                  .setBody("items", updatedItems)
+                                  .setBody("totalRepairCost", updatedTotalCost)
+                                  .build();
+        networkManager_.sendResponse(socket, shopMsg);
     }
     catch (const std::exception &ex)
     {

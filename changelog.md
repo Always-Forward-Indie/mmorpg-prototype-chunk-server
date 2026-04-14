@@ -1,3 +1,38 @@
+v0.2.3
+14.04.2026
+================
+Bug Fixes:
+
+Труп после харвеста повторно появлялся у клиентов — `completeHarvestAndGenerateLoot` помечал труп как `hasBeenHarvested=true`, но оставлял его в `harvestableCorpses_`. Через ~30 с cleanup-таймер `ChunkServer` находил мёртвого моба и повторно рассылал `mobDeath`-пакет, из-за чего клиент снова рисовал труп. Фикс: труп немедленно удаляется из `harvestableCorpses_` через `erase()` и сразу рассылается `corpseRemoved`-пакет; cleanup-таймер теперь проверяет `getCorpseByUID(uid).mobUID == 0` и пропускает уже убранные трупы.
+
+Тайтл не отображался при входе в мир — `handlePlayerReadyEvent` вызывал `broadcastTitleChanged(characterId, excludeClientId=clientID)`, которая исключала самого входящего игрока из рассылки. Пакет `SET_PLAYER_TITLES` (и вызываемый им `sendTitleUpdateToClient`) мог приходить ещё на экране загрузки и игнорироваться клиентом. Фикс: в фазе 4 `handlePlayerReadyEvent` добавлен явный вызов `getTitleManager().sendTitleUpdateToClient(characterId)` — игрок гарантированно получает свой тайтл после входа в мир.
+
+`sendTitleUpdateToClient` перемещён из `private` в `public` в `TitleManager.hpp` — необходимо для вызова из `CharacterEventHandler`.
+
+`equippedTitleDisplayName` добавлен в `characterToJson` и `broadcastTitleChanged` — клиент теперь получает отображаемое имя тайтла вместе со слагом, не требуя отдельного лукапа.
+
+Система авторегенерации не учитывала активные эффекты и экипировку — `RegenManager::tickRegen` использовал только `constitution`/`wisdom` для расчёта регена и ограничивал регенерацию базовыми `characterMaxHealth`/`characterMaxMana`. Три бага: (1) атрибуты `hp_regen_per_s`/`mp_regen_per_s` полностью игнорировались; (2) бонусы экипированных предметов (`apply_on == "equip"`) не применялись; (3) кап устанавливался по базовым значениям, не по эффективным (без учёта `max_health`/`max_mana` из эффектов и экипировки). Фикс: полная перереализация блока расчёта атрибутов по образцу `CharacterStatsNotificationService::buildStatsUpdatePacket` — база → активные эффекты → экипировка → эффективный кап.
+
+Слот оружия `"weapon"` переименован в `"main_hand"` / `"two_hand"` — `InventoryManager::getEquippedWeapon` и `CombatSystem::processAIAttack` (износ доспехов при атаке ИИ) обновлены для распознавания обоих новых слагов.
+
+Система ремонта у NPC не работала — `handleOpenRepairShopEvent`, `handleRepairItemEvent`, `handleRepairAllEvent` требовали `npc.npcType == "blacksmith"`, однако ни один NPC в БД не имеет этот тип (доступ к ремонту управляется через диалоговые действия). Фикс: проверка типа удалена; осталась только проверка `npc.id == 0`.
+
+Проверка дистанции при ремонте (`out_of_range`) — клиент не отправлял координаты в `repairItem`/`repairAll`/`openRepairShop`, поэтому `positionData = {0,0,0}` и дистанция до NPC всегда была огромной. Фикс: все три обработника теперь берут позицию из `CharacterManager::getCharacterPosition(characterId)` вместо `req.playerPosition`.
+
+Инвентарный снапшот с устаревшей прочностью — `repairOne` сначала списывал золото (`removeItemFromInventory`), которое немедленно стреляло `INVENTORY_UPDATE` со старой прочностью, и только потом вызывал `updateDurability`. Фикс: порядок изменён — `updateDurability` вызывается первым, при неудаче списания золота прочность откатывается обратно.
+
+Окно ремонта не обновлялось после починки — после `repairItem` и `repairAll` не отправлялся обновлённый список предметов. Фикс: оба обработника теперь после основного ответа (`repairItemResult`/`repairAllResult`) отправляют повторный `repairShop`-пакет с актуальным списком и балансом золота.
+
+New:
+
+`goldBalance` в пакете `repairShop` — все три точки отправки `repairShop` (`openRepairShop`, обновление после `repairItem`, обновление после `repairAll`) теперь включают поле `goldBalance` с текущим количеством золота игрока.
+
+`buildRepairableItemsJson` (новый helper в `VendorEventHandler`) — выделена общая логика построения списка ремонтируемых предметов; устранено дублирование между `handleOpenRepairShopEvent` и новым механизмом обновлений.
+
+Документация `docs/api/06-vendor-trade-repair-protocol.md` обновлена: добавлен `goldBalance` в примеры `repairShop`; задокументирован второй пакет `repairShop` после `repairItem`/`repairAll`; удалён `playerPosition` из запросов (сервер использует серверную позицию); слаг NPC в примерах приведён к реальному (`varan` вместо `blacksmith_jim`).
+
+---
+
 v0.2.2
 13.04.2026
 ================

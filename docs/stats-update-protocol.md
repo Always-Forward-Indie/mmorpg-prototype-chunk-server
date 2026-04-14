@@ -348,7 +348,8 @@ For each activeEffect entry:
 Отдельный lightweight пакет, отправляемый **только владельцу** каждый раз при убийстве моба с экипированным оружием. Клиент использует его для обновления тултипа оружия (счётчик убийств) без полного пересчёта всего HUD.
 
 **Direction:** Server → Client (owner only, `worldNotification` envelope)  
-**eventType:** `worldNotification` с `type: "weapon_kill_count_update"`
+**eventType:** `worldNotification` с `type: "weapon_kill_count_update"`  
+**Отправляется:** на каждом убийстве моба с экипированным оружием (1, 2, 3, …)
 
 ```json
 {

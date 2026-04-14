@@ -256,11 +256,12 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
   "body": {
     "characterId": 101,
     "npcId": 15,
-    "playerPosition": {},
     "timestamps": {}
   }
 }
 ```
+
+> `playerPosition` не требуется — сервер использует хранимую серверную позицию персонажа.
 
 #### Сервер → Unicast (repairShop)
 
@@ -269,7 +270,8 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
   "header": { "eventType": "repairShop", "status": "success", "clientId": 42, "hash": "" },
   "body": {
     "npcId": 15,
-    "npcSlug": "blacksmith_jim",
+    "npcSlug": "varan",
+    "goldBalance": 250,
     "items": [
       {
         "inventoryItemId": 5678,
@@ -278,6 +280,14 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
         "durabilityMax": 100,
         "durabilityCurrent": 45,
         "repairCost": 55
+      },
+      {
+        "inventoryItemId": 5679,
+        "itemId": 51,
+        "slug": "iron_shield",
+        "durabilityMax": 100,
+        "durabilityCurrent": 20,
+        "repairCost": 80
       }
     ],
     "totalRepairCost": 135
@@ -286,6 +296,7 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
 ```
 
 > Показываются только экипированные предметы с `isDurable == true` и `durabilityCurrent < durabilityMax`.
+> `goldBalance` — текущий баланс золота игрока.
 
 ---
 
@@ -300,11 +311,12 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
     "characterId": 101,
     "npcId": 15,
     "inventoryItemId": 5678,
-    "playerPosition": {},
     "timestamps": {}
   }
 }
 ```
+
+> `playerPosition` не требуется — сервер использует хранимую серверную позицию.
 
 #### Сервер → Unicast (repairItemResult)
 
@@ -321,6 +333,34 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
 
 Ремонт **всегда** восстанавливает до `durabilityMax` (не инкрементально).
 
+#### Сервер → Unicast (repairShop) — обновление окна
+
+Сразу после `repairItemResult` сервер присылает обновлённый список доступных для починки предметов:
+
+```json
+{
+  "header": { "eventType": "repairShop", "status": "success", "clientId": 42, "hash": "" },
+  "body": {
+    "npcId": 15,
+    "npcSlug": "varan",
+    "goldBalance": 195,
+    "items": [
+      {
+        "inventoryItemId": 5679,
+        "itemId": 51,
+        "slug": "iron_shield",
+        "durabilityMax": 100,
+        "durabilityCurrent": 20,
+        "repairCost": 80
+      }
+    ],
+    "totalRepairCost": 80
+  }
+}
+```
+
+> Отремонтированный предмет исчезает из списка. Клиент должен перерисовать окно по этому пакету.
+
 ---
 
 ### repairAll — Починить всё
@@ -333,11 +373,12 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
   "body": {
     "characterId": 101,
     "npcId": 15,
-    "playerPosition": {},
     "timestamps": {}
   }
 }
 ```
+
+> `playerPosition` не требуется — сервер использует хранимую серверную позицию.
 
 #### Сервер → Unicast (repairAllResult)
 
@@ -347,7 +388,7 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
   "body": {
     "repairedItems": [
       { "inventoryItemId": 5678, "durabilityCurrent": 100 },
-      { "inventoryItemId": 5679, "durabilityCurrent": 50 }
+      { "inventoryItemId": 5679, "durabilityCurrent": 100 }
     ],
     "totalGoldSpent": 135
   }
@@ -355,6 +396,23 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
 ```
 
 > **Важно**: `repairAll` останавливается на первой неудаче (например, закончилось золото). Уже отремонтированные предметы не откатываются.
+
+#### Сервер → Unicast (repairShop) — обновление окна
+
+Сразу после `repairAllResult` сервер присылает обновлённый список (обычно пустой):
+
+```json
+{
+  "header": { "eventType": "repairShop", "status": "success", "clientId": 42, "hash": "" },
+  "body": {
+    "npcId": 15,
+    "npcSlug": "varan",
+    "goldBalance": 115,
+    "items": [],
+    "totalRepairCost": 0
+  }
+}
+```
 
 ---
 

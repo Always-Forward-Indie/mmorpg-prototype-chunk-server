@@ -1501,7 +1501,7 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
                         for (const auto &invSlot : equipped)
                         {
                             const auto &iData = gameServices_->getItemManager().getItemById(invSlot.itemId);
-                            if (!iData.isDurable || iData.equipSlotSlug == "weapon" || iData.durabilityMax <= 0)
+                            if (!iData.isDurable || iData.equipSlotSlug == "main_hand" || iData.equipSlotSlug == "two_hand" || iData.durabilityMax <= 0)
                                 continue;
                             int cur = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : iData.durabilityMax;
                             int newDur = std::max(0, cur - armorLoss);
