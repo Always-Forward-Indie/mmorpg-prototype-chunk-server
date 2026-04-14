@@ -1,3 +1,14 @@
+v0.2.4
+14.04.2026
+================
+Bug Fixes:
+
+Пассивный скилл не давал бонус до реконнекта — `handleSetLearnedSkillEvent` не парсил поле `"effects"` из `skillData`, которое возвращал game server в `setLearnedSkill`. Из-за этого `SkillStruct.effects` всегда оставался пустым, и после изучения пассивного скила `addActiveEffect` + `sendStatsUpdate` не вызывались. Бонус от пассивного скила начинал работать только после переподключения. Фикс: `handleSetLearnedSkillEvent` теперь полностью парсит `"effects"` массив из `skillData`; для пассивных скилов с непустым `effects` немедленно применяются `ActiveEffectStruct` записи (`sourceType="skill_passive"`, `expiresAt=0`) и отправляется `stats_update` — клиент получает обновлённые `effective`-атрибуты и `activeEffects` без реконнекта.
+
+Документация `docs/skill-learning-system.md` обновлена: диаграмма потока разделена на три части (путь через диалог / путь через UI тренера / общий путь); добавлен `stats_update` в общий путь для пассивных скилов; примеры `skill_learned` исправлены до соответствия реальной структуре `SkillStruct`; добавлен пример для пассивного скила с `effects`.
+
+---
+
 v0.2.3
 14.04.2026
 ================

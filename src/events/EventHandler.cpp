@@ -1425,8 +1425,51 @@ EventHandler::handleSetLearnedSkillEvent(const Event &event)
         skill.animationName = sd.value("animationName", "");
         skill.isPassive = sd.value("isPassive", false);
 
+        // Parse effect definitions so passive bonuses can be applied immediately
+        if (sd.contains("effects") && sd["effects"].is_array())
+        {
+            for (const auto &eff : sd["effects"])
+            {
+                SkillEffectDefinitionStruct ed;
+                if (eff.contains("effectSlug") && eff["effectSlug"].is_string())
+                    ed.effectSlug = eff["effectSlug"].get<std::string>();
+                if (eff.contains("effectTypeSlug") && eff["effectTypeSlug"].is_string())
+                    ed.effectTypeSlug = eff["effectTypeSlug"].get<std::string>();
+                if (eff.contains("attributeSlug") && eff["attributeSlug"].is_string())
+                    ed.attributeSlug = eff["attributeSlug"].get<std::string>();
+                if (eff.contains("value") && eff["value"].is_number())
+                    ed.value = eff["value"].get<float>();
+                if (eff.contains("durationSeconds") && eff["durationSeconds"].is_number_integer())
+                    ed.durationSeconds = eff["durationSeconds"].get<int>();
+                if (eff.contains("tickMs") && eff["tickMs"].is_number_integer())
+                    ed.tickMs = eff["tickMs"].get<int>();
+                skill.effects.push_back(ed);
+            }
+        }
+
         // Persist in-memory
         gameServices_.getCharacterManager().addCharacterSkill(characterId, skill);
+
+        // If this is a passive skill, apply its permanent stat modifiers immediately
+        // (same logic as handleSetPlayerActiveEffectsEvent does on login)
+        if (skill.isPassive)
+        {
+            for (const auto &ed : skill.effects)
+            {
+                ActiveEffectStruct eff;
+                eff.effectSlug = ed.effectSlug;
+                eff.effectTypeSlug = ed.effectTypeSlug;
+                eff.attributeSlug = ed.attributeSlug;
+                eff.value = ed.value;
+                eff.sourceType = "skill_passive";
+                eff.expiresAt = 0; // permanent
+                eff.tickMs = 0;    // passives never tick
+                gameServices_.getCharacterManager().addActiveEffect(characterId, eff);
+            }
+            // Push updated stats (with new passive bonus) to the client
+            if (!skill.effects.empty())
+                gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+        }
 
         // Build and send skill_learned notification to client
         auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);

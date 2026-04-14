@@ -63,15 +63,19 @@ Drop-only books (`vendor_price_buy = 0`) cannot be purchased from vendors — th
 
 ## Packet Flow
 
+Существует два пути изучения скила — через диалог и через UI магазина тренера.
+Оба пути сходятся с шага `saveLearnedSkill` и дальше идентичны.
+
+### Путь 1: через диалог (DialogueActionExecutor)
+
 ```
 Client                Chunk Server              Game Server           Database
   |                        |                        |                     |
   |--- dialogue_choice --->|                        |                     |
-  |   (node with          |                        |                     |
-  |    learn_skill action)|                        |                     |
+  |   (node with           |                        |                     |
+  |    learn_skill action) |                        |                     |
   |                        |                        |                     |
   |                   [DialogueActionExecutor]       |                     |
-  |                   validateLearnSkill():          |                     |
   |                   - already learned?            |                     |
   |                   - enough SP?                  |                     |
   |                   - enough gold?                |                     |
@@ -82,9 +86,48 @@ Client                Chunk Server              Game Server           Database
   |   {reason, skillSlug}  |                        |                     |
   |                        |                        |                     |
   |                   [on success]                  |                     |
-  |                   - remove book from inventory  |                     |
-  |                   - remove gold from inventory  |                     |
+  |                   - removeItemFromInventory(book)|                    |
+  |                   - removeItemFromInventory(gold)|                    |
   |                   - modifyFreeSkillPoints(-n)   |                     |
+  |                        |                        |                     |
+  |                        |-- saveLearnedSkill --->|  ← общий путь ↓    |
+```
+
+### Путь 2: через UI тренера (requestLearnSkill)
+
+```
+Client                Chunk Server              Game Server           Database
+  |                        |                        |                     |
+  |--- requestLearnSkill ->|                        |                     |
+  |   {npcId, skillSlug}   |                        |                     |
+  |                        |                        |                     |
+  |                   [SkillEventHandler]           |                     |
+  |                   - npc_not_found?              |                     |
+  |                   - out_of_range?               |                     |
+  |                   - skill_not_available?        |                     |
+  |                   - already_learned?            |                     |
+  |                   - insufficient_level?         |                     |
+  |                   - missing_prerequisite?       |                     |
+  |                   - insufficient_sp?            |                     |
+  |                   - insufficient_gold?          |                     |
+  |                   - missing_skill_book?         |                     |
+  |                        |                        |                     |
+  |                   [on failure]                  |                     |
+  |<-- learn_skill_failed -|                        |                     |
+  |   {reason, skillSlug}  |                        |                     |
+  |                        |                        |                     |
+  |                   [on success]                  |                     |
+  |                   - removeItemFromInventory(book)|                    |
+  |                   - removeItemFromInventory(gold)|                    |
+  |                   - modifyFreeSkillPoints(-n)   |                     |
+  |                        |                        |                     |
+  |                        |-- saveLearnedSkill --->|  ← общий путь ↓    |
+```
+
+### Общий путь (оба варианта)
+
+```
+Client                Chunk Server              Game Server           Database
   |                        |                        |                     |
   |                        |-- saveLearnedSkill --->|                     |
   |                        |  {characterId,         |                     |
@@ -95,15 +138,24 @@ Client                Chunk Server              Game Server           Database
   |                        |                        |                     |
   |                        |<-- setLearnedSkill ----|                     |
   |                        |   {characterId,        |                     |
-  |                        |    skillData:{...}}    |                     |
+  |                        |    skillData:{...      |                     |
+  |                        |     effects:[...]}}    |                     |
   |                        |                        |                     |
-  |                   [CharacterManager.addSkill]   |                     |
+  |                   [addCharacterSkill()]         |                     |
+  |                   if isPassive && effects:      |                     |
+  |                   - addActiveEffect() per eff   |                     |
   |<-- skill_learned ------|                        |                     |
   |   {skillSlug,          |                        |                     |
   |    skillName,          |                        |                     |
   |    isPassive,          |                        |                     |
   |    newFreeSkillPoints, |                        |                     |
   |    skillData:{...}}    |                        |                     |
+  |                        |                        |                     |
+  | (только если isPassive |                        |                     |
+  |  && effects непустой)  |                        |                     |
+  |<-- stats_update -------|                        |                     |
+  |   {attributes,         |                        |                     |
+  |    activeEffects, ...} |                        |                     |
 ```
 
 ---
@@ -182,17 +234,59 @@ Sent when the skill is successfully learned and saved to the database.
   "isPassive": false,
   "newFreeSkillPoints": 1,
   "skillData": {
-    "skillId": 4,
     "skillSlug": "shield_bash",
     "skillName": "Shield Bash",
-    "description": "Stuns the target briefly with your shield.",
     "isPassive": false,
-    "currentLevel": 1,
-    "skillProperties": [
-      { "propertyName": "stun_duration", "coeff": 0.0, "flatAdd": 1.5 }
+    "scaleStat": "strength",
+    "school": "physical",
+    "skillEffectType": "damage",
+    "skillLevel": 1,
+    "coeff": 0.8,
+    "flatAdd": 0.0,
+    "cooldownMs": 8000,
+    "gcdMs": 1500,
+    "castMs": 0,
+    "costMp": 0,
+    "maxRange": 2.0,
+    "areaRadius": 0.0,
+    "swingMs": 300,
+    "animationName": "ShieldBash",
+    "effects": []
+  }
+}
+```
+
+**Для пассивных скилов** (например `constitution_mastery`) поле `effects` содержит массив модификаторов:
+
+```json
+{
+  "type": "skill_learned",
+  "skillSlug": "constitution_mastery",
+  "skillName": "Constitution Mastery",
+  "isPassive": true,
+  "newFreeSkillPoints": 0,
+  "skillData": {
+    "skillSlug": "constitution_mastery",
+    "skillName": "Constitution Mastery",
+    "isPassive": true,
+    "effects": [
+      {
+        "effectSlug": "constitution_mastery_con_bonus",
+        "effectTypeSlug": "buff",
+        "attributeSlug": "constitution",
+        "value": 5.0,
+        "durationSeconds": 0,
+        "tickMs": 0
+      }
     ]
   }
 }
+```
+
+**Важно:** для пассивных скилов с непустым `effects` сервер немедленно отправляет
+дополнительный `stats_update` пакет — клиент получает обновлённые `effective`-атрибуты
+и актуальный список `activeEffects` (для buff-bar) без необходимости делать что-либо
+дополнительно. Порядок пакетов гарантирован: сначала `skill_learned`, затем `stats_update`.
 ```
 
 ### `learn_skill_failed` (chunk server → client)
