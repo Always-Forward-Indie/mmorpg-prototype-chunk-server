@@ -1,3 +1,14 @@
+v0.2.7
+15.04.2026
+================
+Bug Fixes:
+
+`currentStepEnriched.current` всегда был 0 в пакете `QUEST_UPDATE` — `sendQuestUpdate` проверял `pq.progress.contains("count")`, но прогресс хранится под ключами `"killed"`, `"have"`, `"done"` — ключ `"count"` там никогда не существует. Фикс: явное ветвление по `step.stepType`: `kill` → `progress["killed"]`, `collect` → `progress["have"]`, `talk`/`reach` → `progress["done"] ? 1 : 0`.
+
+`sendAmbientPoolsToClient` передавал неполный `PlayerContextStruct` в `AmbientSpeechManager` — не заполнялись `flagsBool`, `flagsInt`, item-quantities, reputation, mastery и `learnedSkillSlugs`. Условия ambient speech по флагам игрока, предметам инвентаря, репутации и скилам не вычислялись. Фикс: контекст теперь собирается идентично `DialogueEventHandler::buildPlayerContext` — читается `CharacterDataStruct`, заполняются флаги, `QuestManager::fillQuestContext`, inventory `item_<id>` ключи, `ReputationManager::fillReputationContext`, `MasteryManager::fillMasteryContext`, `learnedSkillSlugs`.
+
+---
+
 v0.2.6
 15.04.2026
 ================

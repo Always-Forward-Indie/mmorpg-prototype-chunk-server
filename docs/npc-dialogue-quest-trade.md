@@ -563,10 +563,22 @@ Chunk Server (in-memory)
     "state": "active",
     "currentStep": 0,
     "totalSteps": 2,
+    "clientStepKey": "quest.wolf_hunt.step_0",
     "stepType": "kill",
     "completionMode": "auto",
     "progress": { "killed": 3 },
-    "required": { "mob_id": 2, "count": 5 }
+    "required": { "mob_id": 2, "count": 5 },
+    "currentStepEnriched": {
+      "clientStepKey": "quest.wolf_hunt.step_0",
+      "stepType": "kill",
+      "target_slug": "forest_wolf",
+      "count": 5,
+      "current": 3
+    },
+    "rewards": [
+      { "rewardType": "exp",  "isHidden": false, "amount": 500 },
+      { "rewardType": "item", "isHidden": true }
+    ]
   }
 }
 ```
@@ -578,6 +590,7 @@ Chunk Server (in-memory)
   "body": {
     "questId": 5,
     "questSlug": "wolf_hunt_intro",
+    "clientQuestKey": "quest.wolf_hunt",
     "state": "active",
     "currentStep": 1,
     "totalSteps": 2,
@@ -585,24 +598,68 @@ Chunk Server (in-memory)
     "stepType": "collect",
     "completionMode": "auto",
     "progress": { "have": 0 },
-    "required": { "item_id": 9, "count": 3 }
+    "required": { "item_id": 9, "count": 3 },
+    "currentStepEnriched": {
+      "clientStepKey": "quest.wolf_hunt.step_1",
+      "stepType": "collect",
+      "target_slug": "wolf_pelt",
+      "count": 3,
+      "current": 0
+    },
+    "rewards": [
+      { "rewardType": "exp",  "isHidden": false, "amount": 500 },
+      { "rewardType": "item", "isHidden": true }
+    ]
   }
 }
 ```
 
 **При завершении всех шагов:**
+
+Код отправляет полный пакет — `state`, `progress`, `clientStepKey`, `stepType`, `completionMode`, `required`, `currentStepEnriched` и `rewards` присутствуют (шаг не сбрасывается в коде, `currentStep` остаётся индексом последнего шага):
 ```json
 {
   "header": { "eventType": "QUEST_UPDATE" },
-  "body": { "questId": 5, "questSlug": "wolf_hunt_intro", "state": "completed", "currentStep": 1 }
+  "body": {
+    "questId": 5,
+    "questSlug": "wolf_hunt_intro",
+    "clientQuestKey": "quest.wolf_hunt",
+    "state": "completed",
+    "currentStep": 1,
+    "totalSteps": 2,
+    "clientStepKey": "quest.wolf_hunt.step_1",
+    "stepType": "kill",
+    "completionMode": "auto",
+    "progress": { "killed": 1 },
+    "required": { "mob_id": 3, "count": 1 },
+    "currentStepEnriched": { "clientStepKey": "quest.wolf_hunt.step_1", "stepType": "kill", "target_slug": "wolf_alpha", "count": 1, "current": 1 },
+    "rewards": [
+      { "rewardType": "exp",  "isHidden": false, "amount": 500 },
+      { "rewardType": "item", "isHidden": true }
+    ]
+  }
 }
 ```
 
 **После сдачи:**
+
+Аналогично — полный пакет с последним шагом и `rewards`:
 ```json
 {
   "header": { "eventType": "QUEST_UPDATE" },
-  "body": { "questId": 5, "questSlug": "wolf_hunt_intro", "state": "turned_in" }
+  "body": {
+    "questId": 5,
+    "questSlug": "wolf_hunt_intro",
+    "clientQuestKey": "quest.wolf_hunt",
+    "state": "turned_in",
+    "currentStep": 1,
+    "totalSteps": 2,
+    "progress": { "killed": 1 },
+    "rewards": [
+      { "rewardType": "exp",  "isHidden": false, "amount": 500 },
+      { "rewardType": "item", "isHidden": false, "item_slug": "secret_amulet", "quantity": 1 }
+    ]
+  }
 }
 ```
 

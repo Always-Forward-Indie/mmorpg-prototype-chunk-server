@@ -764,8 +764,12 @@ QuestManager::sendQuestUpdate(int characterId,
         // Enriched step with resolved slugs + current progress count
         nlohmann::json enrichedStep = resolveStepForClient(step);
         int current = 0;
-        if (pq.progress.contains("count"))
-            current = pq.progress.value("count", 0);
+        if (step.stepType == "kill")
+            current = pq.progress.value("killed", 0);
+        else if (step.stepType == "collect")
+            current = pq.progress.value("have", 0);
+        else if (step.stepType == "talk" || step.stepType == "reach")
+            current = pq.progress.value("done", false) ? 1 : 0;
         enrichedStep["current"] = current;
         body["currentStepEnriched"] = std::move(enrichedStep);
     }

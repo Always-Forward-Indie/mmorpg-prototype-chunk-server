@@ -258,10 +258,32 @@ NPCEventHandler::sendAmbientPoolsToClient(int clientId, int characterId, const P
         for (const auto &npc : nearbyNPCs)
             npcIds.push_back(npc.id);
 
-        // Build player context for condition evaluation
+        // Build player context for condition evaluation — mirrors DialogueEventHandler::buildPlayerContext
+        auto charData = gameServices_.getCharacterManager().getCharacterData(characterId);
         PlayerContextStruct ctx;
-        ctx.characterLevel = gameServices_.getCharacterManager().getCharacterData(characterId).characterLevel;
+        ctx.characterId = charData.characterId;
+        ctx.characterLevel = charData.characterLevel;
+        ctx.freeSkillPoints = charData.freeSkillPoints;
+
+        for (const auto &flag : charData.flags)
+        {
+            if (flag.boolValue.has_value())
+                ctx.flagsBool[flag.flagKey] = flag.boolValue.value();
+            if (flag.intValue.has_value())
+                ctx.flagsInt[flag.flagKey] = flag.intValue.value();
+        }
+
         gameServices_.getQuestManager().fillQuestContext(characterId, ctx);
+
+        const auto &inventory = gameServices_.getInventoryManager().getPlayerInventory(characterId);
+        for (const auto &invItem : inventory)
+            ctx.flagsInt["item_" + std::to_string(invItem.itemId)] = invItem.quantity;
+
+        gameServices_.getReputationManager().fillReputationContext(characterId, ctx);
+        gameServices_.getMasteryManager().fillMasteryContext(characterId, ctx);
+
+        for (const auto &skill : charData.skills)
+            ctx.learnedSkillSlugs.insert(skill.skillSlug);
 
         nlohmann::json pools = gameServices_.getAmbientSpeechManager().buildFilteredPoolsForPlayer(npcIds, ctx);
 
