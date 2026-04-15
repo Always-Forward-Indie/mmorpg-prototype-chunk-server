@@ -336,6 +336,19 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
         ResponseBuilder builder;
         std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buyItemResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("itemId", req.itemId).setBody("quantity", req.quantity).setBody("totalPrice", result.totalPrice).build());
         networkManager_.sendResponse(socket, msg);
+
+        // Notify client about received item
+        {
+            ItemDataStruct itemData = gameServices_.getItemManager().getItemById(req.itemId);
+            nlohmann::json notifBody;
+            notifBody["type"] = "item_received";
+            notifBody["itemId"] = req.itemId;
+            notifBody["item_slug"] = itemData.slug;
+            notifBody["quantity"] = req.quantity;
+            nlohmann::json notifResp = ResponseBuilder().setHeader("eventType", "item_received").build();
+            notifResp["body"] = std::move(notifBody);
+            networkManager_.sendResponse(socket, networkManager_.generateResponseMessage("success", notifResp));
+        }
     }
     catch (const std::exception &ex)
     {
@@ -457,6 +470,20 @@ VendorEventHandler::handleBuyItemBatchEvent(const Event &event)
         ResponseBuilder builder;
         std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buyItemBatchResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("totalGoldSpent", result.totalGoldSpent).setBody("items", itemsJson).build());
         networkManager_.sendResponse(socket, msg);
+
+        // Notify client about each received item
+        for (const auto &r : result.items)
+        {
+            ItemDataStruct itemData = gameServices_.getItemManager().getItemById(r.itemId);
+            nlohmann::json notifBody;
+            notifBody["type"] = "item_received";
+            notifBody["itemId"] = r.itemId;
+            notifBody["item_slug"] = itemData.slug;
+            notifBody["quantity"] = r.quantity;
+            nlohmann::json notifResp = ResponseBuilder().setHeader("eventType", "item_received").build();
+            notifResp["body"] = std::move(notifBody);
+            networkManager_.sendResponse(socket, networkManager_.generateResponseMessage("success", notifResp));
+        }
     }
     catch (const std::exception &ex)
     {

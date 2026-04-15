@@ -248,9 +248,11 @@ DialogueActionExecutor::executeGiveItem(const nlohmann::json &action,
     bool ok = services_.getInventoryManager().addItemToInventory(characterId, itemId, quantity);
     if (ok)
     {
+        ItemDataStruct item = services_.getItemManager().getItemById(itemId);
         nlohmann::json notification;
         notification["type"] = "item_received";
         notification["itemId"] = itemId;
+        notification["item_slug"] = item.slug;
         notification["quantity"] = quantity;
         result.clientNotifications.push_back(std::move(notification));
     }

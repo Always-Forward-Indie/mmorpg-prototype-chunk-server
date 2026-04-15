@@ -148,6 +148,9 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                                           ", Player ID (verified): " + std::to_string(pickupRequest.playerId) +
                                           ", Item UID: " + std::to_string(pickupRequest.droppedItemUID));
 
+            // Fetch item info before pickup (item is removed from world on success)
+            DroppedItemStruct droppedInfo = gameServices_.getLootManager().getDroppedItemByUID(pickupRequest.droppedItemUID);
+
             // Try to pickup the item
             bool success = gameServices_.getLootManager().pickupDroppedItem(
                 pickupRequest.droppedItemUID,
@@ -191,6 +194,20 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                                                             .setBody("isOverweight", currentWeight > weightLimit)
                                                             .build();
                         networkManager_.sendResponse(weightSocket, networkManager_.generateResponseMessage("success", weightResponse));
+
+                        // Send item_received notification to the picking player
+                        if (droppedInfo.itemId > 0)
+                        {
+                            ItemDataStruct itemInfo = gameServices_.getItemManager().getItemById(droppedInfo.itemId);
+                            nlohmann::json notifBody;
+                            notifBody["type"] = "item_received";
+                            notifBody["itemId"] = droppedInfo.itemId;
+                            notifBody["item_slug"] = itemInfo.slug;
+                            notifBody["quantity"] = droppedInfo.quantity;
+                            nlohmann::json notifResp = ResponseBuilder().setHeader("eventType", "item_received").build();
+                            notifResp["body"] = std::move(notifBody);
+                            networkManager_.sendResponse(weightSocket, networkManager_.generateResponseMessage("success", notifResp));
+                        }
                     }
                 }
             }

@@ -523,6 +523,20 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                 std::string responseData = networkManager_.generateResponseMessage("success", successResponse);
                 networkManager_.sendResponse(clientSocket, responseData);
 
+                // Send item_received notification for each picked up item
+                for (const auto &[itemId, quantity] : pickedUpItems)
+                {
+                    ItemDataStruct itemInfo = itemManager.getItemById(itemId);
+                    nlohmann::json notifBody;
+                    notifBody["type"] = "item_received";
+                    notifBody["itemId"] = itemId;
+                    notifBody["item_slug"] = itemInfo.slug;
+                    notifBody["quantity"] = quantity;
+                    nlohmann::json notifResp = ResponseBuilder().setHeader("eventType", "item_received").build();
+                    notifResp["body"] = std::move(notifBody);
+                    networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", notifResp));
+                }
+
                 gameServices_.getLogger().log("Player " + std::to_string(pickupRequest.characterId) +
                                               " picked up " + std::to_string(pickedUpItems.size()) +
                                               " items from corpse " + std::to_string(pickupRequest.corpseUID));

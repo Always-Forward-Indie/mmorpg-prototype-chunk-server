@@ -1,3 +1,33 @@
+v0.2.9
+15.04.2026
+================
+New:
+
+`item_received` — унифицированная нотификация о получении предмета. Теперь отправляется во всех флоу:
+- `DialogueActionExecutor::executeGiveItem` — добавлено поле `item_slug` (раньше был только `itemId`).
+- `VendorEventHandler::handleBuyItemEvent` — после `buyItemResult` отправляется отдельный пакет `item_received {itemId, item_slug, quantity}`.
+- `VendorEventHandler::handleBuyItemBatchEvent` — то же самое, по одному пакету на каждый купленный item.
+- `ItemEventHandler` (подбор с земли) — после успешного `itemPickup` отправляется `item_received` на сокет поднявшего. `DroppedItemStruct` запрашивается до вызова `pickupDroppedItem` (после — предмет уже удалён из мира).
+- `HarvestEventHandler::handleCorpseLootPickup` — после `corpseLootPickup` отправляется `item_received` для каждого поднятого предмета.
+
+`ruins_dying_stranger` one-time guard — ребро 137 (accept) защищено от повторного использования:
+- `condition_group`: `flag ruins_dying_stranger.received_gift eq false` — выбор недоступен если уже получали.
+- `action_group`: добавлен `set_flag ruins_dying_stranger.received_gift = true` после `give_item`.
+- `hide_if_locked = true` — вариант «Принять» исчезает из диалога после получения подарка.
+
+---
+
+v0.2.8
+15.04.2026
+================
+New:
+
+`giftPreview` в choices диалога — `buildChoicesJson` теперь обрабатывает действия `give_item`, `give_gold` и `give_exp` на рёбрах. Собирает все такие действия из `edge->actionGroup` и добавляет к choice поле `giftPreview` — массив объектов `{giftType, item_slug?, quantity?, amount?}`. Клиент может отобразить состав дара ещё до подтверждения выбора. Razрешение `item_id` → slug через `ItemManager::getItemById`.
+
+DB: Рефакторинг диалога `ruins_dying_stranger_main` — `give_item` действия перенесены с action-узла 604 на ребро 137 (accept), ребро переориентировано с 603→604 напрямую на 603→605. Node 604 и edge 139 удалены. Паттерн: предметные дары в диалоге должны быть на ребре `actionGroup`, а не на промежуточном action-узле — это единственный способ получить их в `giftPreview`.
+
+---
+
 v0.2.7
 15.04.2026
 ================

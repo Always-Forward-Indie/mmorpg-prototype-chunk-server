@@ -731,7 +731,7 @@ DialogueEventHandler::buildChoicesJson(
         choice["clientChoiceKey"] = edge->clientChoiceKey;
         choice["conditionMet"] = conditionMet;
 
-        // Enrich choice with quest preview / turn-in preview from actionGroup
+        // Enrich choice with quest preview / turn-in preview / gift preview from actionGroup
         if (!edge->actionGroup.is_null() && edge->actionGroup.is_array())
         {
             auto &questManager = gameServices_.getQuestManager();
@@ -739,11 +739,11 @@ DialogueEventHandler::buildChoicesJson(
             {
                 const std::string actionType = action.value("type", "");
                 const std::string questSlug = action.value("slug", "");
-                if (questSlug.empty())
-                    continue;
 
                 if (actionType == "offer_quest")
                 {
+                    if (questSlug.empty())
+                        continue;
                     const QuestStruct *quest = questManager.getQuestBySlug(questSlug);
                     if (quest)
                     {
@@ -763,6 +763,8 @@ DialogueEventHandler::buildChoicesJson(
                 }
                 else if (actionType == "turn_in_quest")
                 {
+                    if (questSlug.empty())
+                        continue;
                     const QuestStruct *quest = questManager.getQuestBySlug(questSlug);
                     if (quest)
                     {
@@ -775,6 +777,51 @@ DialogueEventHandler::buildChoicesJson(
                     break;
                 }
             }
+
+            // Collect all give_item / give_gold / give_exp into giftPreview
+            nlohmann::json giftItems = nlohmann::json::array();
+            for (const auto &action : edge->actionGroup)
+            {
+                const std::string actionType = action.value("type", "");
+                if (actionType == "give_item")
+                {
+                    int itemId = action.value("item_id", -1);
+                    int quantity = action.value("quantity", 1);
+                    if (itemId > 0)
+                    {
+                        ItemDataStruct item = gameServices_.getItemManager().getItemById(itemId);
+                        nlohmann::json g;
+                        g["giftType"] = "item";
+                        g["item_slug"] = item.slug;
+                        g["quantity"] = quantity;
+                        giftItems.push_back(std::move(g));
+                    }
+                }
+                else if (actionType == "give_gold")
+                {
+                    int amount = action.value("amount", 0);
+                    if (amount > 0)
+                    {
+                        nlohmann::json g;
+                        g["giftType"] = "gold";
+                        g["amount"] = amount;
+                        giftItems.push_back(std::move(g));
+                    }
+                }
+                else if (actionType == "give_exp")
+                {
+                    int amount = action.value("amount", 0);
+                    if (amount > 0)
+                    {
+                        nlohmann::json g;
+                        g["giftType"] = "exp";
+                        g["amount"] = amount;
+                        giftItems.push_back(std::move(g));
+                    }
+                }
+            }
+            if (!giftItems.empty())
+                choice["giftPreview"] = std::move(giftItems);
         }
 
         choices.push_back(std::move(choice));
