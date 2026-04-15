@@ -206,3 +206,84 @@ NPCEventHandler::convertNPCToSpawnJson(const NPCDataStruct &npc, int characterId
 
     return npcJson;
 }
+
+void
+NPCEventHandler::handleSetNPCAmbientSpeechEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        if (std::holds_alternative<std::vector<NPCAmbientSpeechConfigStruct>>(data))
+        {
+            const auto &configs = std::get<std::vector<NPCAmbientSpeechConfigStruct>>(data);
+            gameServices_.getAmbientSpeechManager().setAmbientSpeechData(configs);
+            log_->info("[NPCEventHandler] Loaded " + std::to_string(configs.size()) +
+                       " NPC ambient speech configs from game server");
+        }
+        else
+        {
+            log_->error("[NPCEventHandler] Invalid data type in handleSetNPCAmbientSpeechEvent");
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[NPCEventHandler] handleSetNPCAmbientSpeechEvent: " + std::string(ex.what()));
+    }
+}
+
+void
+NPCEventHandler::sendAmbientPoolsToClient(int clientId, int characterId, const PositionStruct &playerPosition, float spawnRadius)
+{
+    try
+    {
+        if (!gameServices_.getAmbientSpeechManager().isLoaded())
+        {
+            log_->debug("[NPCEventHandler] AmbientSpeechManager not loaded — skipping NPC_AMBIENT_POOLS for client " +
+                        std::to_string(clientId));
+            return;
+        }
+
+        // Gather NPC ids visible to this player
+        std::vector<NPCDataStruct> nearbyNPCs = gameServices_.getNPCManager().getNPCsInArea(
+            playerPosition.positionX,
+            playerPosition.positionY,
+            spawnRadius);
+
+        if (nearbyNPCs.empty())
+            return;
+
+        std::vector<int> npcIds;
+        npcIds.reserve(nearbyNPCs.size());
+        for (const auto &npc : nearbyNPCs)
+            npcIds.push_back(npc.id);
+
+        // Build player context for condition evaluation
+        PlayerContextStruct ctx;
+        ctx.characterLevel = gameServices_.getCharacterManager().getCharacterData(characterId).characterLevel;
+        gameServices_.getQuestManager().fillQuestContext(characterId, ctx);
+
+        nlohmann::json pools = gameServices_.getAmbientSpeechManager().buildFilteredPoolsForPlayer(npcIds, ctx);
+
+        if (pools.empty())
+            return;
+
+        nlohmann::json packet = ResponseBuilder()
+                                    .setHeader("eventType", "NPC_AMBIENT_POOLS")
+                                    .setHeader("message", "success")
+                                    .build();
+        packet["body"]["npcs"] = std::move(pools);
+
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (clientSocket)
+        {
+            networkManager_.sendResponse(clientSocket,
+                networkManager_.generateResponseMessage("success", packet));
+            log_->debug("[NPCEventHandler] Sent NPC_AMBIENT_POOLS to client " + std::to_string(clientId));
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[NPCEventHandler] sendAmbientPoolsToClient: " + std::string(ex.what()));
+    }
+}

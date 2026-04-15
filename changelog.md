@@ -1,3 +1,42 @@
+v0.2.6
+15.04.2026
+================
+New:
+
+**NPC Ambient Speech** — новая система фоновых реплик NPC (не связана с диалогами).
+- `NPCAmbientLineStruct`, `NPCAmbientSpeechConfigStruct` — новые структуры данных в `DataStructs.hpp`.
+- `AmbientSpeechManager` — новый менеджер (`include/services/AmbientSpeechManager.hpp`, `src/services/AmbientSpeechManager.cpp`). Хранит конфиги реплик по `npc_id`. Метод `buildFilteredPoolForPlayer()` фильтрует реплики через `DialogueConditionEvaluator` и группирует по `priority` (убывание). Метод `buildFilteredPoolsForPlayer()` — пакетная версия для списка NPC. Thread-safety: `std::shared_mutex`.
+- `GameServices` — добавлен `AmbientSpeechManager` как member + геттер `getAmbientSpeechManager()`.
+- `Event::SET_NPC_AMBIENT_SPEECH`, `Event::UPDATE_NPC_AMBIENT_POOLS` — два новых типа событий в `Event.hpp`.
+- `EventData.hpp` — `std::vector<NPCAmbientSpeechConfigStruct>` добавлен в payload-вариант.
+- `JSONParser::parseNPCAmbientSpeech()` — парсинг пакета `setNPCAmbientSpeech` от game-сервера (массив конфигов с вложенными `lines`).
+- `GameServerWorker` — ветка `setNPCAmbientSpeech` → `Event::SET_NPC_AMBIENT_SPEECH`.
+- `NPCEventHandler::handleSetNPCAmbientSpeechEvent()` — загрузка конфигов в `AmbientSpeechManager`.
+- `NPCEventHandler::sendAmbientPoolsToClient()` — сборка и отправка пакета `NPC_AMBIENT_POOLS` конкретному клиенту. Собирает NPC в радиусе, формирует `PlayerContextStruct` (уровень, флаги, квест-состояния/шаги/прогресс), вызывает `buildFilteredPoolsForPlayer`, отправляет result.
+- `EventHandler::dispatchEvent()` — добавлен `case Event::SET_NPC_AMBIENT_SPEECH`.
+- `CharacterEventHandler` (`playerReady`) — после `sendNPCSpawnDataToClient()` вызывается `sendAmbientPoolsToClient()`.
+- `CMakeLists.txt` — `src/services/AmbientSpeechManager.cpp` добавлен в список исходников.
+
+**Quest / Dialogue enrichment:**
+- `QuestRewardStruct.isHidden` — новое поле в `DataStructs.hpp`. Если `true`, клиент показывает «???» до сдачи квеста.
+- `JSONParser::parseQuestsList()` — читает поле `isHidden` из пакета game-сервера.
+- `QuestManager::resolveStepForClient(const QuestStepStruct&)` — новый публичный метод. Разрешает ID моба/предмета/NPC в slug через соответствующие менеджеры и возвращает обогащённый JSON-объект шага с полями `clientStepKey`, `stepType`, `target_slug`/`zone_slug`/`params`, `count`.
+- `QuestManager::resolveRewardsForClient(const vector<QuestRewardStruct>&, bool revealHidden)` — новый публичный метод. Сериализует награды с учётом `isHidden`: скрытые награды отдаются как `{rewardType, isHidden:true}` без slug/amount; при `revealHidden=true` (сдача квеста) — раскрываются полностью.
+- `QuestManager::sendQuestUpdate()` — дополнен полями `currentStepEnriched` (resolved шаг + поле `current` из прогресса) и `rewards` (массив с `isHidden`).
+- `QuestManager::turnInQuest()` — пакет `quest_turned_in` дополнен `rewardsReceived` — полный раскрытый список награды.
+- `DialogueActionExecutor::executeOfferQuest()` — нотификация `quest_offered` дополнена `currentStep` (resolved первый шаг с `current:0`) и `rewards`.
+- `DialogueEventHandler::buildChoicesJson()` — для рёбер с `offer_quest` добавляет поле `questPreview` (`questId`, `clientQuestKey`, `firstStep`, `rewards`); для рёбер с `turn_in_quest` — `turnInPreview` (`questId`, `clientQuestKey`, `rewards`).
+
+New database migrations:
+- `054_npc_ambient_speech.sql` — таблицы `npc_ambient_speech_configs` и `npc_ambient_speech_lines`.
+- `055_quest_rewards_hidden.sql` — `ALTER TABLE quest_reward ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT FALSE`.
+
+Documentation:
+- `docs/npc-ambient-speech-protocol.md` — новый документ: DB-схема, поток событий (game→chunk при старте, chunk→client при playerReady), описание `AmbientSpeechManager`, формат пакета `NPC_AMBIENT_POOLS`, условия на реплики, pseudo-code для UE5.
+- `docs/npc-dialogue-quest-trade.md` — обновлён до v0.0.5: добавлены `questPreview`/`turnInPreview` в описание `DIALOGUE_NODE`, обновлены `quest_offered`/`quest_turned_in`, `QUEST_UPDATE` (поля `currentStepEnriched`, `rewards`, `isHidden`), таблицы пакетов, статус реализации. Добавлена ссылка на `npc-ambient-speech-protocol.md`.
+
+---
+
 v0.2.5
 14.04.2026
 ================

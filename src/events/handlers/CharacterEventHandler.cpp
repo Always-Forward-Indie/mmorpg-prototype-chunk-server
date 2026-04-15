@@ -870,6 +870,8 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     if (npcEventHandler_)
     {
         npcEventHandler_->sendNPCSpawnDataToClient(clientID, characterData.characterPosition, 50000.0f);
+        // 1b. NPC ambient speech pools (filtered per player context)
+        npcEventHandler_->sendAmbientPoolsToClient(clientID, characterId, characterData.characterPosition, 50000.0f);
     }
     else
     {

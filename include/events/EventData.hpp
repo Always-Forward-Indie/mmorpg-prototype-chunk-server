@@ -180,4 +180,6 @@ using EventData = std::variant<
     SetSkillBarSlotRequestStruct,
     // Emote system payloads
     UseEmoteRequestStruct,
-    std::vector<EmoteDefinitionStruct>>;
+    std::vector<EmoteDefinitionStruct>,
+    // NPC Ambient Speech payloads
+    std::vector<NPCAmbientSpeechConfigStruct>>;

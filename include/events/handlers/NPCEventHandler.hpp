@@ -19,41 +19,36 @@ class NPCEventHandler : public BaseEventHandler
 
     /**
      * @brief Handle SET_ALL_NPCS_LIST event
-     *
-     * Receives and processes NPC data list from game server
-     *
-     * @param event Event containing NPC data list
      */
     void handleSetAllNPCsListEvent(const Event &event);
 
     /**
      * @brief Handle SET_ALL_NPCS_ATTRIBUTES event
-     *
-     * Receives and processes NPC attributes from game server
-     *
-     * @param event Event containing NPC attributes data
      */
     void handleSetAllNPCsAttributesEvent(const Event &event);
 
     /**
+     * @brief Handle SET_NPC_AMBIENT_SPEECH event.
+     *        Stores ambient speech configs in AmbientSpeechManager.
+     */
+    void handleSetNPCAmbientSpeechEvent(const Event &event);
+
+    /**
      * @brief Send NPC spawn data to a specific client
-     *
-     * Sends NPC spawn information to client when they enter a zone
-     *
-     * @param clientId The client ID to send data to
-     * @param playerPosition Player's current position for area filtering
-     * @param spawnRadius Radius around player to spawn NPCs
      */
     void sendNPCSpawnDataToClient(int clientId, const PositionStruct &playerPosition, float spawnRadius = 1000.0f);
 
-  private:
     /**
-     * @brief Convert NPC data to JSON format for client transmission.
-     *  Computes per-player quest status for each quest this NPC is involved in.
+     * @brief Build and send NPC_AMBIENT_POOLS packet to a client.
+     *        Called on playerReady and whenever player context changes.
      *
-     * @param npc The NPC data to convert
-     * @param characterId Character whose quest progress determines quest status icons
-     * @return JSON object ready for client transmission
+     * @param clientId     Target client.
+     * @param characterId  Character whose quest/flag context is used for filtering.
+     * @param playerPosition  Player position used to determine visible NPCs.
+     * @param spawnRadius  Radius matching NPC visibility (same as sendNPCSpawnDataToClient).
      */
+    void sendAmbientPoolsToClient(int clientId, int characterId, const PositionStruct &playerPosition, float spawnRadius = 50000.0f);
+
+  private:
     nlohmann::json convertNPCToSpawnJson(const NPCDataStruct &npc, int characterId);
 };

@@ -58,6 +58,9 @@ class JSONParser
     // Combat system parsers
     nlohmann::json parseCombatActionData(const char *data, size_t length);
 
+    // NPC Ambient Speech parser
+    std::vector<NPCAmbientSpeechConfigStruct> parseNPCAmbientSpeech(const char *data, size_t length);
+
     // Timestamp parsing for lag compensation
     TimestampStruct parseTimestamps(const char *data, size_t length);
     TimestampStruct parseTimestamps(const nlohmann::json &jsonData);

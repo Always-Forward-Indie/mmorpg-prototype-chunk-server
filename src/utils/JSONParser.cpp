@@ -1700,6 +1700,7 @@ JSONParser::parseQuestsList(const char *data, size_t length)
                     reward.itemId = rj.value("itemId", 0);
                     reward.quantity = rj.value("quantity", 1);
                     reward.amount = rj.value("amount", 0);
+                    reward.isHidden = rj.value("isHidden", false);
                     q.rewards.push_back(std::move(reward));
                 }
             }
@@ -2064,4 +2065,55 @@ JSONParser::parseTimedChampionTemplates(const char *data, size_t length)
         templates.clear();
     }
     return templates;
+}
+
+// =============================================================================
+// NPC Ambient Speech parser
+// =============================================================================
+
+std::vector<NPCAmbientSpeechConfigStruct>
+JSONParser::parseNPCAmbientSpeech(const char *data, size_t length)
+{
+    std::vector<NPCAmbientSpeechConfigStruct> result;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].contains("ambientSpeech"))
+            return result;
+
+        for (const auto &cfgJson : j["body"]["ambientSpeech"])
+        {
+            NPCAmbientSpeechConfigStruct cfg;
+            cfg.npcId = cfgJson.value("npcId", 0);
+            cfg.minIntervalSec = cfgJson.value("minIntervalSec", 20);
+            cfg.maxIntervalSec = cfgJson.value("maxIntervalSec", 60);
+
+            if (cfgJson.contains("lines") && cfgJson["lines"].is_array())
+            {
+                for (const auto &lj : cfgJson["lines"])
+                {
+                    NPCAmbientLineStruct line;
+                    line.id = lj.value("id", 0);
+                    line.npcId = cfg.npcId;
+                    line.lineKey = lj.value("lineKey", "");
+                    line.triggerType = lj.value("triggerType", "periodic");
+                    line.triggerRadius = lj.value("triggerRadius", 400);
+                    line.priority = lj.value("priority", 0);
+                    line.weight = lj.value("weight", 10);
+                    line.cooldownSec = lj.value("cooldownSec", 60);
+                    if (lj.contains("conditionGroup"))
+                        line.conditionGroup = lj["conditionGroup"];
+                    cfg.lines.push_back(std::move(line));
+                }
+            }
+
+            if (cfg.npcId > 0)
+                result.push_back(std::move(cfg));
+        }
+    }
+    catch (const std::exception &)
+    {
+        result.clear();
+    }
+    return result;
 }

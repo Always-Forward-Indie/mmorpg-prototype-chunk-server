@@ -345,6 +345,11 @@ GameServerWorker::processGameServerData(std::string_view data)
         nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_PLAYER_EMOTES, clientData.clientId, body);
     }
+    else if (eventType == "setNPCAmbientSpeech")
+    {
+        auto configs = jsonParser_.parseNPCAmbientSpeech(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_NPC_AMBIENT_SPEECH, clientData.clientId, std::move(configs));
+    }
     else
     {
         log_->info("Unknown event type from Game Server: " + eventType);

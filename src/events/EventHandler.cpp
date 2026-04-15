@@ -374,6 +374,11 @@ EventHandler::dispatchEvent(const Event &event)
             handleUseEmoteEvent(event);
             break;
 
+        // ── NPC Ambient Speech system ─────────────────────────────────────────
+        case Event::SET_NPC_AMBIENT_SPEECH:
+            npcEventHandler_->handleSetNPCAmbientSpeechEvent(event);
+            break;
+
         // Skill system
         case Event::SET_LEARNED_SKILL:
             handleSetLearnedSkillEvent(event);

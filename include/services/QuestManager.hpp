@@ -169,6 +169,21 @@ class QuestManager
      */
     void setNetworkManager(NetworkManager *nm);
 
+    // ── Public enrichment helpers (used by DialogueActionExecutor, DialogueEventHandler) ──
+
+    /**
+     * @brief Resolve a quest step to a client-ready JSON object (IDs → slugs).
+     * Must NOT be called while mutex_ is held by the same thread.
+     */
+    nlohmann::json resolveStepForClient(const QuestStepStruct &step) const;
+
+    /**
+     * @brief Resolve quest rewards to a client-ready JSON array respecting isHidden.
+     * @param revealHidden  If true (used in quest_turned_in), all rewards are fully disclosed.
+     * Must NOT be called while mutex_ is held by the same thread.
+     */
+    nlohmann::json resolveRewardsForClient(const std::vector<QuestRewardStruct> &rewards, bool revealHidden = false) const;
+
   private:
     void checkStepCompletion(int characterId, PlayerQuestProgressStruct &pq);
     void advanceStep(int characterId, PlayerQuestProgressStruct &pq);

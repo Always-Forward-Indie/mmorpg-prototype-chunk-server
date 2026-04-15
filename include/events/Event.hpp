@@ -174,7 +174,11 @@ class Event
         // ── Emote system ────────────────────────────────────────────────────
         SET_EMOTE_DEFINITIONS, ///< Game-server sends static emote catalog to chunk-server
         SET_PLAYER_EMOTES,     ///< Load unlocked emotes for a character (on join)
-        USE_EMOTE              ///< Client requests to play an emote animation
+        USE_EMOTE,             ///< Client requests to play an emote animation
+
+        // ── NPC Ambient Speech system ────────────────────────────────────────
+        SET_NPC_AMBIENT_SPEECH,  ///< Game-server sends ambient speech configs+lines to chunk-server
+        UPDATE_NPC_AMBIENT_POOLS ///< Chunk-server re-filters ambient pools and pushes update to a client
     }; // Define more event types as needed
 
     Event() = default; // Default constructor

@@ -730,6 +730,53 @@ DialogueEventHandler::buildChoicesJson(
         choice["edgeId"] = edge->id;
         choice["clientChoiceKey"] = edge->clientChoiceKey;
         choice["conditionMet"] = conditionMet;
+
+        // Enrich choice with quest preview / turn-in preview from actionGroup
+        if (!edge->actionGroup.is_null() && edge->actionGroup.is_array())
+        {
+            auto &questManager = gameServices_.getQuestManager();
+            for (const auto &action : edge->actionGroup)
+            {
+                const std::string actionType = action.value("type", "");
+                const std::string questSlug = action.value("slug", "");
+                if (questSlug.empty())
+                    continue;
+
+                if (actionType == "offer_quest")
+                {
+                    const QuestStruct *quest = questManager.getQuestBySlug(questSlug);
+                    if (quest)
+                    {
+                        nlohmann::json preview;
+                        preview["questId"] = quest->id;
+                        preview["clientQuestKey"] = quest->clientQuestKey;
+                        if (!quest->steps.empty())
+                        {
+                            nlohmann::json firstStep = questManager.resolveStepForClient(quest->steps[0]);
+                            firstStep["current"] = 0;
+                            preview["firstStep"] = std::move(firstStep);
+                        }
+                        preview["rewards"] = questManager.resolveRewardsForClient(quest->rewards);
+                        choice["questPreview"] = std::move(preview);
+                    }
+                    break; // Only one offer_quest action per edge expected
+                }
+                else if (actionType == "turn_in_quest")
+                {
+                    const QuestStruct *quest = questManager.getQuestBySlug(questSlug);
+                    if (quest)
+                    {
+                        nlohmann::json preview;
+                        preview["questId"] = quest->id;
+                        preview["clientQuestKey"] = quest->clientQuestKey;
+                        preview["rewards"] = questManager.resolveRewardsForClient(quest->rewards);
+                        choice["turnInPreview"] = std::move(preview);
+                    }
+                    break;
+                }
+            }
+        }
+
         choices.push_back(std::move(choice));
     }
 

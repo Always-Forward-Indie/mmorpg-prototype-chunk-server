@@ -282,6 +282,8 @@ QuestManager::turnInQuest(int characterId, const std::string &questSlug, int cli
     turnInNotif["type"] = "quest_turned_in";
     turnInNotif["questId"] = questSnapshot.id;
     turnInNotif["clientQuestKey"] = questSnapshot.clientQuestKey;
+    // All rewards fully revealed at turn-in (no hidden secrets remain)
+    turnInNotif["rewardsReceived"] = resolveRewardsForClient(questSnapshot.rewards, /*revealHidden=*/true);
     notifications.push_back(std::move(turnInNotif));
 
     for (const auto &reward : questSnapshot.rewards)
@@ -758,7 +760,16 @@ QuestManager::sendQuestUpdate(int characterId,
         body["stepType"] = step.stepType;
         body["completionMode"] = step.completionMode;
         body["required"] = step.params;
+
+        // Enriched step with resolved slugs + current progress count
+        nlohmann::json enrichedStep = resolveStepForClient(step);
+        int current = 0;
+        if (pq.progress.contains("count"))
+            current = pq.progress.value("count", 0);
+        enrichedStep["current"] = current;
+        body["currentStepEnriched"] = std::move(enrichedStep);
     }
+    body["rewards"] = resolveRewardsForClient(quest.rewards);
 
     nlohmann::json packet = ResponseBuilder()
                                 .setHeader("eventType", "QUEST_UPDATE")
@@ -774,6 +785,83 @@ QuestManager::sendQuestUpdate(int characterId,
     networkManager_->sendResponse(
         clientSocket,
         networkManager_->generateResponseMessage("success", packet));
+}
+
+// =============================================================================
+// Client-facing enrichment helpers
+// =============================================================================
+
+nlohmann::json
+QuestManager::resolveStepForClient(const QuestStepStruct &step) const
+{
+    nlohmann::json j;
+    j["clientStepKey"] = step.clientStepKey;
+    j["stepType"] = step.stepType;
+    j["count"] = step.params.value("count", 1);
+
+    if (step.stepType == "kill")
+    {
+        int mobId = step.params.value("mob_id", -1);
+        MobDataStruct mob = (mobId > 0) ? services_->getMobManager().getMobById(mobId) : MobDataStruct{};
+        j["target_slug"] = mob.slug;
+    }
+    else if (step.stepType == "collect")
+    {
+        int itemId = step.params.value("item_id", -1);
+        ItemDataStruct item = (itemId > 0) ? services_->getItemManager().getItemById(itemId) : ItemDataStruct{};
+        j["target_slug"] = item.slug;
+    }
+    else if (step.stepType == "talk")
+    {
+        int npcId = step.params.value("npc_id", -1);
+        NPCDataStruct npc = (npcId > 0) ? services_->getNPCManager().getNPCById(npcId) : NPCDataStruct{};
+        j["target_slug"] = npc.slug;
+    }
+    else if (step.stepType == "reach")
+    {
+        j["zone_slug"] = step.params.value("zone_slug", "");
+        j["x"] = step.params.value("x", 0.0f);
+        j["y"] = step.params.value("y", 0.0f);
+    }
+    else
+    {
+        // "custom" or unknown — pass params as-is, client handles
+        j["params"] = step.params;
+    }
+    return j;
+}
+
+nlohmann::json
+QuestManager::resolveRewardsForClient(const std::vector<QuestRewardStruct> &rewards, bool revealHidden) const
+{
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto &reward : rewards)
+    {
+        nlohmann::json r;
+        r["rewardType"] = reward.rewardType;
+
+        if (reward.isHidden && !revealHidden)
+        {
+            r["isHidden"] = true;
+            // Only send type indicator so client can render the correct "???" icon
+        }
+        else
+        {
+            r["isHidden"] = false;
+            if (reward.rewardType == "item")
+            {
+                ItemDataStruct item = services_->getItemManager().getItemById(reward.itemId);
+                r["item_slug"] = item.slug;
+                r["quantity"] = reward.quantity;
+            }
+            else if (reward.rewardType == "exp" || reward.rewardType == "gold")
+            {
+                r["amount"] = reward.amount;
+            }
+        }
+        arr.push_back(std::move(r));
+    }
+    return arr;
 }
 
 // =============================================================================

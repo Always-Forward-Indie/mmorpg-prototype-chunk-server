@@ -1114,6 +1114,7 @@ struct QuestRewardStruct
     int itemId = 0;
     int quantity = 1;
     int64_t amount = 0;
+    bool isHidden = false; ///< TRUE = client shows "???" until quest_turned_in reveals it
 };
 
 /// Single step of a quest
@@ -1718,4 +1719,29 @@ struct UseEmoteRequestStruct
     int clientId = 0;
     std::string emoteSlug; ///< slug of the emote to play
     TimestampStruct timestamps;
+};
+
+// ── NPC Ambient Speech system ────────────────────────────────────────────────
+
+/// Single ambient speech line definition loaded from game-server
+struct NPCAmbientLineStruct
+{
+    int id = 0;
+    int npcId = 0;
+    std::string lineKey = "";             ///< Localisation key sent to client, e.g. "npc.blacksmith.idle_1"
+    std::string triggerType = "periodic"; ///< "periodic" | "proximity"
+    int triggerRadius = 400;
+    int priority = 0;              ///< Higher = more important pool; highest non-empty pool wins
+    int weight = 10;               ///< Relative weight for weighted-random within same priority group
+    int cooldownSec = 60;          ///< Per-client minimum seconds between shows of this line
+    nlohmann::json conditionGroup; ///< null = always valid, otherwise DialogueConditionEvaluator tree
+};
+
+/// Per-NPC ambient speech config: timing + lines
+struct NPCAmbientSpeechConfigStruct
+{
+    int npcId = 0;
+    int minIntervalSec = 20;
+    int maxIntervalSec = 60;
+    std::vector<NPCAmbientLineStruct> lines;
 };

@@ -64,6 +64,7 @@ set(SOURCE_FILES
     src/services/MasteryManager.cpp
     src/services/TitleManager.cpp
     src/services/EmoteManager.cpp
+    src/services/AmbientSpeechManager.cpp
     src/services/ZoneEventManager.cpp
     src/network/GameServerWorker.cpp
     src/network/NetworkManager.cpp

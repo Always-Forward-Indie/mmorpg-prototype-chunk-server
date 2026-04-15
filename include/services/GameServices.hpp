@@ -1,4 +1,5 @@
 #pragma once
+#include "services/AmbientSpeechManager.hpp"
 #include "services/BestiaryManager.hpp"
 #include "services/ChampionManager.hpp"
 #include "services/CharacterManager.hpp"
@@ -80,7 +81,8 @@ class GameServices
           masteryManager_(this),
           titleManager_(this),
           zoneEventManager_(this),
-          emoteManager_(this)
+          emoteManager_(this),
+          ambientSpeechManager_()
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
@@ -247,6 +249,10 @@ class GameServices
     {
         return emoteManager_;
     }
+    AmbientSpeechManager &getAmbientSpeechManager()
+    {
+        return ambientSpeechManager_;
+    }
 
   private:
     Logger &logger_;
@@ -286,4 +292,5 @@ class GameServices
     TitleManager titleManager_;
     ZoneEventManager zoneEventManager_;
     EmoteManager emoteManager_;
+    AmbientSpeechManager ambientSpeechManager_;
 };

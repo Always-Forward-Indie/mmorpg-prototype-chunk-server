@@ -158,6 +158,16 @@ DialogueActionExecutor::executeOfferQuest(const nlohmann::json &action,
             notification["type"] = "quest_offered";
             notification["questId"] = quest->id;
             notification["clientQuestKey"] = quest->clientQuestKey;
+
+            // Enrich: first step with resolved slugs + rewards
+            if (!quest->steps.empty())
+            {
+                nlohmann::json firstStep = questManager.resolveStepForClient(quest->steps[0]);
+                firstStep["current"] = 0;
+                notification["currentStep"] = std::move(firstStep);
+            }
+            notification["rewards"] = questManager.resolveRewardsForClient(quest->rewards);
+
             result.clientNotifications.push_back(std::move(notification));
         }
 
