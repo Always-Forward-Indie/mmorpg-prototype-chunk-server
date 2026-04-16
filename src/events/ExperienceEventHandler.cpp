@@ -145,7 +145,7 @@ ExperienceEventHandler::handleExperienceUpdateEvent(const Event &event)
                 }
 
                 log_->info("Sent experience update packet to all clients for character " +
-                                                  std::to_string(expEvent.characterId));
+                           std::to_string(expEvent.characterId));
             }
             catch (const std::exception &e)
             {
@@ -209,6 +209,12 @@ ExperienceEventHandler::handleLevelUpEvent(const Event &event)
                                                   " (level " + std::to_string(expEvent.oldLevel) +
                                                   " -> " + std::to_string(expEvent.newLevel) + ")",
                     CYAN);
+
+                // Title auto-grant: check level conditions
+                nlohmann::json titleEvent;
+                titleEvent["level"] = expEvent.newLevel;
+                gameServices_.getTitleManager().checkAndGrantTitles(
+                    expEvent.characterId, "level", titleEvent);
             }
             catch (const std::exception &e)
             {
@@ -249,7 +255,7 @@ ExperienceEventHandler::handleLevelUpEvent(const Event &event)
 
                 log_->info(
                     "[LEVEL_UP] Requested attribute refresh for character " +
-                        std::to_string(expEvent.characterId));
+                    std::to_string(expEvent.characterId));
             }
             catch (const std::exception &e)
             {

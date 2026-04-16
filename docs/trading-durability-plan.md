@@ -31,15 +31,24 @@
 | Валюта Gold Coin | item_id = 16, item_type = 8 (currency) |
 | Персистентность | Квесты, флаги, позиция — каждые 5с + при отключении |
 
-### Схемы в БД есть, код не написан ⚠️
+### Реализовано дополнительно ✅
 
-| Таблица | Что есть | Чего не хватает |
-|---------|----------|-----------------|
-| `vendor_npc` | `npc_id`, `markup_pct` | Серверная логика |
-| `vendor_inventory` | `item_id`, `stock_count`, `price_override` | Серверная логика |
-| `currency_transactions` | Ledger со всеми `reason_type` | Серверная запись транзакций |
-| `items.is_durable`, `items.durability_max` | Читается, шлётся клиенту | Логика убыли и починки |
-| `player_inventory.durability_current` | Читается, шлётся клиенту | Обновление в игре |
+| Таблица / Система | Статус | Примечание |
+|-------------------|--------|------------|
+| `vendor_npc` + `vendor_inventory` | ✅ | `openVendorShop`, `buyItem`, `sellItem`, `buyItemBatch`, `sellItemBatch` — реализованы в `VendorEventHandler.cpp` |
+| `currency_transactions` | ✅ | Запись транзакций при покупке/продаже/trade — `Database.cpp:737` |
+| `items.is_durable` / `durabilityMax` | ✅ | Логика убыли в `CombatSystem.cpp` (оружие ~458, броня ~1496, смерть ~1031), flush через `saveDurabilityChange` |
+| `player_inventory.durability_current` | ✅ | Обновляется в игре; штраф атрибутов через SQL CTE в `get_character_attributes` (migration 041) |
+| Repair shop | ✅ | `openRepairShop`, `repairItem`, `repairAll` — реализованы в `VendorEventHandler.cpp` |
+| P2P Trade | ✅ | `TradeSessionManager.cpp` + все 6 trade-пакетов реализованы |
+
+### Не реализовано ❌
+
+| Задача | Статус |
+|--------|--------|
+| Vendor restock scheduler (Game Server) | ❌ — колонки в БД есть, но нет `scheduleTask` в `GameServer.cpp` |
+| `DURABILITY_UPDATE` пакет клиенту | ❌ — клиент получает обновление атрибутов только при пересечении порога через `getCharacterAttributes` (не per-hit батч) |
+| `ITEM_BROKEN` пакет клиенту | ❌ — при `durability = 0` отправляется `world_notification` с `severity=broken`, но не отдельный `ITEM_BROKEN` пакет |
 
 ### Структуры C++ заполнены ✅
 
@@ -51,13 +60,14 @@
 
 ## 2. Исправления перед началом
 
-### 2.1 `isTradable: false` у Gold Coin — исправить обязательно
+### 2.1 `isTradable: false` у Gold Coin — ✅ исправлено
 
 **Проблема:** Золото, которое нельзя передать другому игроку, уничтожает игровую экономику. P2P-торговля без передачи золота невозможна.
 
-**Действие:** В БД для `item_id = 16` (Gold Coin) установить `is_tradable = true`.
+**Статус:** Исправлено — `is_tradable = true` для `item_id = 16` (Gold Coin) установлено в БД.
 
 ```sql
+-- Уже выполнено:
 UPDATE items SET is_tradable = true WHERE id = 16;
 ```
 
@@ -680,7 +690,20 @@ Chunk → Client: SELL_RESULT
 - C++: `ItemDataStruct.isDurable/durabilityMax`, `PlayerInventoryItemStruct.durabilityCurrent`
 - Чтение из БД и отправка клиенту уже реализованы
 
-**Не реализовано:** логика изменения `durabilityCurrent` и починка.
+**Реализовано (CombatSystem.cpp):** Вся логика убыли прочности:
+- Оружие: `durabilityCurrent -= durability.weapon_loss_per_hit` при каждом успешном ударе (строка ~458)
+- Броня: `durabilityCurrent -= durability.armor_loss_per_hit` при каждом полученном ударе (строка ~1496), weapon-слоты пропускаются
+- Смерть: `ceil(durabilityMax * durability.death_penalty_pct)` от всех надетых `isDurable` предметов (строка ~1031)
+- Persist: `saveDurabilityChange` → flush через `saveDurabilityCallback_` на game-server
+- Предупреждения: `checkAndTriggerDurabilityWarning` → 3-tier `world_notification` (migration 041)
+
+**Реализовано (migration 041):** Прогрессивный 3-уровневый штраф атрибутов при износе:
+- `get_character_attributes` (game-server SQL): CTE `equip_bonus` учитывает 3 порога (`t1`=0.75/−5%, `t2`=0.50/−15%, `t3`=0.25/−30%) — клиент получает атрибуты уже с применённым штрафом
+- `CombatSystem::checkAndTriggerDurabilityWarning`: при пересечении каждого порога вниз → `world_notification` типа `durability_warning` с полями `severity`(1–4), `severityLabel`(`low`/`medium`/`high`/`broken`), `durabilityCurrent`, `durabilityMax` + вызов `refreshAttributesCallback`
+
+**Не реализовано:** клиентский пакет `DURABILITY_UPDATE` (батч изменений за тик) и `ITEM_BROKEN` пакет (отдельное уведомление о сломанном предмете). При `durability = 0` сервер отправляет `world_notification` с `severity=broken`, но не обновляет клиент реальными значениями прочности per-hit.
+
+**Реализовано:** починка (`openRepairShop`/`repairItem`/`repairAll`) — `VendorEventHandler.cpp`.
 
 ---
 
@@ -904,7 +927,15 @@ INSERT INTO game_config (key, value, value_type, description) VALUES
  'Потеря прочности оружия за каждый успешный нанесённый удар. По умолчанию 1.'),
 
 ('durability.armor_loss_per_hit',  '1',   'int',
- 'Потеря прочности каждого надетого元素 брони за каждый успешный полученный удар. По умолчанию 1.');
+ 'Потеря прочности каждого надетого брони за каждый успешный полученный удар. По умолчанию 1.'),
+
+-- ✅ migration 041: 3-уровневый прогрессивный штраф атрибутов (добавлены, старые warning_threshold/warning_penalty удалены)
+('durability.tier1_threshold_pct', '0.75', 'float', 'Порог tier1 штрафа прочности (75%). При ratio < порога — tier1 penalty.'),
+('durability.tier1_penalty_pct',   '0.05', 'float', 'Штраф атрибутов предмета при прочности ниже tier1 (−5%).'),
+('durability.tier2_threshold_pct', '0.50', 'float', 'Порог tier2 штрафа прочности (50%). При ratio < порога — tier2 penalty.'),
+('durability.tier2_penalty_pct',   '0.15', 'float', 'Штраф атрибутов предмета при прочности ниже tier2 (−15%).'),
+('durability.tier3_threshold_pct', '0.25', 'float', 'Порог tier3 штрафа прочности (25%). При ratio < порога — tier3 penalty.'),
+('durability.tier3_penalty_pct',   '0.30', 'float', 'Штраф атрибутов предмета при прочности ниже tier3 (−30%).');
 ```
 
 > Ключи формата `namespace.param_name` соответствуют соглашению проекта (combat.*, aggro.*).
@@ -986,45 +1017,45 @@ line:  "Что нужно починить, странник?"
 
 #### Этап 1 — Торговля с NPC (Layer 1)
 
-- [ ] SQL: `isTradable = true` у Gold Coin
-- [ ] SQL: добавить ключи `economy.*` и `durability.*` в `game_config` (без `vendor_restock_interval_sec` — интервал per-item)
-- [ ] SQL: добавить поля `restock_amount`, `stock_max`, `restock_interval_sec`, `last_restock_at` в `vendor_inventory`
-- [ ] Game Server: загрузка `vendor_npc` + `vendor_inventory` в память
-- [ ] Game Server: передача `game_config` ключей `economy.*` и `durability.*` в Chunk Server
-- [ ] Game Server: scheduler (раз в 60с) → SQL UPDATE по `restock_interval_sec` + `last_restock_at` → RETURNING → `vendorStockUpdate` в Chunk Server
-- [ ] Chunk Server: принять данные вендоров от Game Server (`VendorDataStruct`)
-- [ ] Chunk Server: хендлер `openVendorShop` → проверки → `VENDOR_SHOP`
-- [ ] Chunk Server: хендлер `buyItem` → проверки → atomic update → `BUY_RESULT` + `item_received`
-- [ ] Chunk Server: хендлер `sellItem` → проверки → atomic update → `SELL_RESULT`
-- [ ] Chunk Server: запись в `currency_transactions` через Game Server
-- [ ] Chunk Server: `vendorError` с кодами ошибок
+- [x] SQL: `isTradable = true` у Gold Coin ✅
+- [x] SQL: добавить ключи `economy.*` и `durability.*` в `game_config` ✅ (migration 041)
+- [x] SQL: добавить поля `restock_amount`, `stock_max`, `restock_interval_sec`, `last_restock_at` в `vendor_inventory` ✅
+- [x] Game Server: загрузка `vendor_npc` + `vendor_inventory` в память ✅
+- [x] Game Server: передача `game_config` ключей `economy.*` и `durability.*` в Chunk Server ✅
+- [ ] Game Server: scheduler (раз в 60с) → SQL UPDATE по `restock_interval_sec` + `last_restock_at` → RETURNING → `vendorStockUpdate` в Chunk Server ❌
+- [x] Chunk Server: принять данные вендоров от Game Server (`VendorDataStruct`) ✅
+- [x] Chunk Server: хендлер `openVendorShop` → проверки → `vendorShopData` ✅
+- [x] Chunk Server: хендлер `buyItem` / `buyItemBatch` → `buyItemResult` / `buyItemBatchResult` ✅
+- [x] Chunk Server: хендлер `sellItem` / `sellItemBatch` → `sellItemResult` / `sellItemBatchResult` ✅
+- [x] Chunk Server: запись в `currency_transactions` через Game Server ✅
+- [x] Chunk Server: `vendorError` с кодами ошибок ✅
 
 #### Этап 2 — Износ снаряжения
 
-- [ ] Chunk Server: в `CombatSystem` — хук на нанесение урона (оружие `-1 durability`)
-- [ ] Chunk Server: в `CombatSystem` — хук на получение урона (броня `-1 durability`)
-- [ ] Chunk Server: в обработчике смерти — штраф из `game_config[durability.death_penalty_pct]` от `durabilityMax` на все `isDurable` предметы
-- [ ] Chunk Server: батчинг изменений + отправка `DURABILITY_UPDATE` (не чаще раза в тик)
-- [ ] Chunk Server: проверка `durabilityCurrent == 0` → отправка `ITEM_BROKEN` + отключение статов
-- [ ] Game Server: добавить `durability_current` в flush-поток инвентаря
+- [x] Chunk Server: в `CombatSystem` — хук на нанесение урона (оружие `-1 durability`) ✅ (~строка 458)
+- [x] Chunk Server: в `CombatSystem` — хук на получение урона (броня `-1 durability`) ✅ (~строка 1496)
+- [x] Chunk Server: в обработчике смерти — штраф из `game_config[durability.death_penalty_pct]` ✅ (~строка 1031)
+- [ ] Chunk Server: батчинг изменений + отправка `DURABILITY_UPDATE` (не чаще раза в тик) ❌ — сейчас клиент получает полный `getCharacterAttributes` только при пересечении каждого порога
+- [ ] Chunk Server: проверка `durabilityCurrent == 0` → отправка `ITEM_BROKEN` + отключение статов ❌ — `world_notification` с `severity=broken` отправляется, но пакет `ITEM_BROKEN` и явное отключение статов на клиенте не реализованы
+- [x] Game Server: добавить `durability_current` в flush-поток инвентаря ✅ (`saveDurabilityChange`)
 
 #### Этап 3 — Починка у кузнеца
 
-- [ ] DB: добавить `npcType = "blacksmith"` для нужных NPC
-- [ ] Chunk Server: хендлер `openRepairShop` → расчёт стоимости починки → `REPAIR_SHOP`
-- [ ] Chunk Server: хендлер `repairItem` → проверки → update durability → `REPAIR_RESULT`
-- [ ] Chunk Server: хендлер `repairAll` → bulk repair → `REPAIR_RESULT`
-- [ ] Chunk Server: диалоговые действия `open_vendor_shop` и `open_repair_shop` в `DialogueActionExecutor`
+- [x] DB: `npcType = "blacksmith"` поддерживается ✅
+- [x] Chunk Server: хендлер `openRepairShop` → `repairShopData` ✅
+- [x] Chunk Server: хендлер `repairItem` → `repairItemResult` ✅
+- [x] Chunk Server: хендлер `repairAll` → `repairAllResult` ✅
+- [x] Chunk Server: диалоговые действия `open_vendor_shop` и `open_repair_shop` в `DialogueActionExecutor` ✅ (строки 75–77)
 
 #### Этап 4 — P2P Trade
 
-- [ ] Chunk Server: `TradeSessionManager` (аналогично `DialogueSessionManager`)
-- [ ] Chunk Server: хендлер `tradeRequest` → проверки → `TRADE_INVITE` (второму игроку)
-- [ ] Chunk Server: хендлеры `tradeAccept` / `tradeDecline`
-- [ ] Chunk Server: хендлер `tradeOfferUpdate` → `TRADE_STATE` (обоим), сброс `confirmed`
-- [ ] Chunk Server: хендлер `tradeConfirm` → check both confirmed → финальная валидация → `TRADE_COMPLETE` или `TRADE_CANCELLED`
-- [ ] Chunk Server: хендлер `tradeCancel` + auto-cancel при таймауте / дисконнекте / выходе из радиуса
-- [ ] Chunk Server: запись в `currency_transactions` (`reason_type = "trade"`) — только предметы, без налога
+- [x] Chunk Server: `TradeSessionManager` ✅ (`TradeSessionManager.cpp`)
+- [x] Chunk Server: хендлер `tradeRequest` → `TRADE_INVITE` ✅
+- [x] Chunk Server: хендлеры `tradeAccept` / `tradeDecline` ✅
+- [x] Chunk Server: хендлер `tradeOfferUpdate` → `tradeState` (обоим), сброс `confirmed` ✅
+- [x] Chunk Server: хендлер `tradeConfirm` → `TRADE_COMPLETE` / `TRADE_CANCELLED` ✅
+- [x] Chunk Server: хендлер `tradeCancel` + auto-cancel ✅
+- [x] Chunk Server: запись в `currency_transactions` (`reason_type = "trade"`) ✅
 
 ---
 

@@ -75,4 +75,10 @@ class DialogueConditionEvaluator
         const PlayerContextStruct &ctx);
     static bool evaluateSkillNotLearned(const nlohmann::json &rule,
         const PlayerContextStruct &ctx);
+
+    // Class condition
+    // {"type":"class", "class_id": 1}        — exact class id
+    // {"type":"class", "class_ids": [1, 3]}  — one of listed ids
+    static bool evaluateClass(const nlohmann::json &rule,
+        const PlayerContextStruct &ctx);
 };

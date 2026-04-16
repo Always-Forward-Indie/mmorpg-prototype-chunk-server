@@ -11,11 +11,11 @@
 | Тир | categorySlug | Требуется убийств | Раскрываемые данные |
 |:---:|:-------------|-------------------:|---------------------|
 | 1 | `basic_info` | 1 | Уровень, ранг, диапазон HP, тип, биом |
-| 2 | `lore` | 10 | Ключ локализации лора |
-| 3 | `combat_info` | 25 | Слабости, сопротивления, способности |
-| 4 | `loot_table` | 50 | Список предметов (без шансов) |
-| 5 | `drop_rates` | 100 | Полная таблица лута с процентами |
-| 6 | `hunter_mastery` | 300 | Титул и достижение |
+| 2 | `lore` | 5 | Ключ локализации лора |
+| 3 | `combat_info` | 15 | Слабости, сопротивления, способности |
+| 4 | `loot_table` | 30 | Список предметов (без шансов) |
+| 5 | `drop_rates` | 75 | Полная таблица лута с процентами |
+| 6 | `hunter_mastery` | 150 | Титул и достижение |
 
 Пороги настраиваются: `bestiary.tier1_kills` ... `bestiary.tier6_kills`
 
@@ -250,8 +250,8 @@
     "channel": "silent",
     "text": "",
     "data": {
-      "mobTemplateId": 15,
-      "newKillCount": 47
+      "mobSlug": "forest_wolf",
+      "killCount": 47
     }
   }
 }
@@ -277,9 +277,9 @@
     "channel": "toast",
     "text": "",
     "data": {
-      "mobTemplateId": 15,
-      "tier": 3,
-      "newKillCount": 25,
+      "mobSlug": "forest_wolf",
+      "unlockedTier": 3,
+      "killCount": 15,
       "categorySlug": "combat_info"
     }
   }
@@ -295,8 +295,8 @@
 | Параметр | Default | Описание |
 |----------|---------|----------|
 | `bestiary.tier1_kills` | 1 | Порог T1 (basic_info) |
-| `bestiary.tier2_kills` | 10 | Порог T2 (lore) |
-| `bestiary.tier3_kills` | 25 | Порог T3 (combat_info) |
-| `bestiary.tier4_kills` | 50 | Порог T4 (loot_table) |
-| `bestiary.tier5_kills` | 100 | Порог T5 (drop_rates) |
-| `bestiary.tier6_kills` | 300 | Порог T6 (hunter_mastery) |
+| `bestiary.tier2_kills` | 5 | Порог T2 (lore) |
+| `bestiary.tier3_kills` | 15 | Порог T3 (combat_info) |
+| `bestiary.tier4_kills` | 30 | Порог T4 (loot_table) |
+| `bestiary.tier5_kills` | 75 | Порог T5 (drop_rates) |
+| `bestiary.tier6_kills` | 150 | Порог T6 (hunter_mastery) |

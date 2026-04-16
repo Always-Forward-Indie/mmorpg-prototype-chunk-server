@@ -178,23 +178,26 @@
   │  combatState: CHASING → PREPARING_ATTACK
   │  selectAttackSkill() → "mob_claw_attack"
   │
+  │  Урон применяется НЕМЕДЛЕННО при входе в PREPARING_ATTACK
+  │
   │──► combatInitiation ─────────────────────────────────► broadcast
   │    { casterId: 1001, targetId: 7,
   │      castTime: 0.5, skillSlug: "mob_claw_attack" }
+  │
+  │──► combatResult ─────────────────────────────────────► broadcast
+  │    { casterId: 1001, targetId: 7, damage: 22,
+  │      finalTargetHealth: 228, targetDied: false }
+  │    (оба пакета отправлены одновременно, до истечения castTime)
+  │
+  │──► stats_update ─────────────────────────────────────► только targetId=7
+  │    { currentHealth: 228 }
   │
   │──► mobMoveUpdate ────────────────────────────────────► clientId
   │    { combatState: 2, velocity: { dirX:0, dirY:0, speed:0 } }
   │    (моб заморожен, клиент запускает кастбар 0.5 сек)
   │
   │  castTime (0.5 с) истёк → combatState: PREPARING_ATTACK → ATTACKING
-  │  Урон применяется и отправляется СЕЙЧАС (по окончании каста)
-  │
-  │──► combatResult ─────────────────────────────────────► broadcast
-  │    { casterId: 1001, targetId: 7, damage: 22,
-  │      finalTargetHealth: 228, targetDied: false }
-  │
-  │──► stats_update ─────────────────────────────────────► только targetId=7
-  │    { currentHealth: 228 }
+  │  (урон уже был применён при входе в PREPARING_ATTACK)
   │
   │──► mobMoveUpdate: { combatState: 3 }  ───────────────► clientId
   │
@@ -242,7 +245,7 @@
   │──► combatResult ─────────────────────────────────────► broadcast
   │──► mobDeath ─────────────────────────────────────────► broadcast
   │    { mobUID: 1001, zoneId: 3 }
-  │──► experience_update ────────────────────────────────► только убийце
+  │──► experienceUpdate ────────────────────────────────► только убийце
   │──► itemDrop (если есть) ─────────────────────────────► broadcast
 ```
 

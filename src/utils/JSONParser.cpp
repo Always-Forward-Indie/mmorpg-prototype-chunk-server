@@ -1659,6 +1659,9 @@ JSONParser::parseQuestsList(const char *data, size_t length)
             q.giverNpcId = qj.value("giverNpcId", 0);
             q.turninNpcId = qj.value("turninNpcId", 0);
             q.clientQuestKey = qj.value("clientQuestKey", "");
+            q.reputationFactionSlug = qj.value("reputationFactionSlug", "");
+            q.reputationOnComplete = qj.value("reputationOnComplete", 0);
+            q.reputationOnFail = qj.value("reputationOnFail", 0);
 
             if (qj.contains("steps") && qj["steps"].is_array())
             {
@@ -1701,6 +1704,12 @@ JSONParser::parseQuestsList(const char *data, size_t length)
                     reward.quantity = rj.value("quantity", 1);
                     reward.amount = rj.value("amount", 0);
                     reward.isHidden = rj.value("isHidden", false);
+                    if (rj.contains("allowedClassIds") && rj["allowedClassIds"].is_array())
+                    {
+                        for (const auto &cid : rj["allowedClassIds"])
+                            if (cid.is_number_integer())
+                                reward.allowedClassIds.push_back(cid.get<int>());
+                    }
                     q.rewards.push_back(std::move(reward));
                 }
             }

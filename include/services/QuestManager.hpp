@@ -112,6 +112,12 @@ class QuestManager
      */
     void setFlagBool(int characterId, const std::string &key, bool value);
 
+    /**
+     * @brief Set an integer player flag: updates in-memory cache and queues
+     *        persistence to the game-server.
+     */
+    void setFlagInt(int characterId, const std::string &key, int value);
+
     // === Persistence ===
 
     /**
@@ -182,7 +188,7 @@ class QuestManager
      * @param revealHidden  If true (used in quest_turned_in), all rewards are fully disclosed.
      * Must NOT be called while mutex_ is held by the same thread.
      */
-    nlohmann::json resolveRewardsForClient(const std::vector<QuestRewardStruct> &rewards, bool revealHidden = false) const;
+    nlohmann::json resolveRewardsForClient(const std::vector<QuestRewardStruct> &rewards, bool revealHidden = false, int classId = 0) const;
 
   private:
     void checkStepCompletion(int characterId, PlayerQuestProgressStruct &pq);

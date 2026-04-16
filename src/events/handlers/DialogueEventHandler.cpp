@@ -573,6 +573,7 @@ DialogueEventHandler::buildPlayerContext(const CharacterDataStruct &charData) co
     PlayerContextStruct ctx;
     ctx.characterId = charData.characterId;
     ctx.characterLevel = charData.characterLevel;
+    ctx.classId = charData.classId;
 
     for (const auto &flag : charData.flags)
     {

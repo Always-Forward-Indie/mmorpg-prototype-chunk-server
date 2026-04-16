@@ -1588,11 +1588,61 @@ CombatSystem::checkAndTriggerDurabilityWarning(int characterId, int oldDur, int 
 {
     if (!refreshAttributesCallback_ || maxDur <= 0)
         return;
-    float threshold = gameServices_->getGameConfigService().getFloat("durability.warning_threshold_pct", 0.30f);
-    bool wasAbove = (static_cast<float>(oldDur) / maxDur) >= threshold;
-    bool nowBelow = (static_cast<float>(newDur) / maxDur) < threshold;
-    // Also trigger when item becomes fully broken (or repaired back to full in future)
-    if ((wasAbove && nowBelow) || (oldDur > 0 && newDur == 0))
+
+    const auto &cfg = gameServices_->getGameConfigService();
+    const float t1 = cfg.getFloat("durability.tier1_threshold_pct", 0.75f);
+    const float t2 = cfg.getFloat("durability.tier2_threshold_pct", 0.50f);
+    const float t3 = cfg.getFloat("durability.tier3_threshold_pct", 0.25f);
+
+    const float oldRatio = static_cast<float>(oldDur) / maxDur;
+    const float newRatio = static_cast<float>(newDur) / maxDur;
+
+    // Check tier crossings from highest to lowest
+    struct Tier
+    {
+        float threshold;
+        int severity;
+        const char *label;
+    };
+    const Tier tiers[] = {
+        {t1, 1, "low"},
+        {t2, 2, "medium"},
+        {t3, 3, "high"},
+    };
+
+    bool attributesInvalidated = false;
+    for (const auto &tier : tiers)
+    {
+        if (oldRatio >= tier.threshold && newRatio < tier.threshold)
+        {
+            // Crossing downward — emit world notification
+            nlohmann::json payload;
+            payload["severity"] = tier.severity;
+            payload["severityLabel"] = tier.label;
+            payload["durabilityCurrent"] = newDur;
+            payload["durabilityMax"] = maxDur;
+            gameServices_->getStatsNotificationService().sendWorldNotification(
+                characterId, "durability_warning", payload, tier.label, "hud");
+
+            attributesInvalidated = true;
+        }
+    }
+
+    // Broken (hits 0)
+    if (oldDur > 0 && newDur == 0)
+    {
+        nlohmann::json payload;
+        payload["severity"] = 4;
+        payload["severityLabel"] = "broken";
+        payload["durabilityCurrent"] = 0;
+        payload["durabilityMax"] = maxDur;
+        gameServices_->getStatsNotificationService().sendWorldNotification(
+            characterId, "durability_warning", payload, "high", "hud");
+
+        attributesInvalidated = true;
+    }
+
+    if (attributesInvalidated)
         refreshAttributesCallback_(characterId);
 }
 

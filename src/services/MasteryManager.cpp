@@ -160,7 +160,8 @@ MasteryManager::checkAndApplyMilestone(int characterId,
 
     auto applyEffect = [&](const std::string &effectSlug,
                            const std::string &attrSlug,
-                           float value)
+                           float value,
+                           int tierIndex)
     {
         ActiveEffectStruct eff;
         eff.effectSlug = effectSlug;
@@ -175,6 +176,12 @@ MasteryManager::checkAndApplyMilestone(int characterId,
             gs_->getStatsNotificationService().sendStatsUpdate(characterId);
             gs_->getStatsNotificationService().sendWorldNotification(
                 characterId, "mastery_tier_up", nlohmann::json{{"masterySlug", masterySlug}, {"tier", effectSlug}});
+
+            // Title auto-grant: check mastery conditions
+            nlohmann::json titleEvent;
+            titleEvent["masterySlug"] = masterySlug;
+            titleEvent["tierIndex"] = tierIndex;
+            gs_->getTitleManager().checkAndGrantTitles(characterId, "mastery", titleEvent);
         }
         catch (...)
         {
@@ -182,13 +189,13 @@ MasteryManager::checkAndApplyMilestone(int characterId,
     };
 
     if (oldValue < t1 && newValue >= t1)
-        applyEffect(masterySlug + "_t1_damage", "physical_attack", 0.01f);
+        applyEffect(masterySlug + "_t1_damage", "physical_attack", 0.01f, 1);
     if (oldValue < t2 && newValue >= t2)
-        applyEffect(masterySlug + "_t2_damage", "physical_attack", 0.04f); // additive +4% (total 5%)
+        applyEffect(masterySlug + "_t2_damage", "physical_attack", 0.04f, 2); // additive +4% (total 5%)
     if (oldValue < t3 && newValue >= t3)
-        applyEffect(masterySlug + "_t3_crit", "crit_chance", 0.03f);
+        applyEffect(masterySlug + "_t3_crit", "crit_chance", 0.03f, 3);
     if (oldValue < t4 && newValue >= t4)
-        applyEffect(masterySlug + "_t4_parry", "parry_chance", 0.02f);
+        applyEffect(masterySlug + "_t4_parry", "parry_chance", 0.02f, 4);
 }
 
 // ── Persistence ────────────────────────────────────────────────────────────

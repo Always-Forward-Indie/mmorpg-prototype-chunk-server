@@ -1534,6 +1534,8 @@ EventHandler::handleSetTitleDefinitionsEvent(const Event &event)
                 td.displayName = t.value("displayName", "");
                 td.description = t.value("description", "");
                 td.earnCondition = t.value("earnCondition", "");
+                if (t.contains("conditionParams") && t["conditionParams"].is_object())
+                    td.conditionParams = t["conditionParams"];
                 if (t.contains("bonuses") && t["bonuses"].is_array())
                 {
                     for (const auto &b : t["bonuses"])

@@ -80,14 +80,14 @@
 
 ---
 
-### experience_update — Получение опыта
+### experienceUpdate — Получение опыта
 
-**Сервер → Unicast** (при каждом получении XP)
+**Сервер → Broadcast** (при каждом получении XP)
 
 ```json
 {
   "header": {
-    "eventType": "experience_update",
+    "eventType": "experienceUpdate",
     "status": "success",
     "requestId": "exp_update_7",
     "timestamp": 1711709400100,
@@ -122,22 +122,40 @@
 
 ### Сигнал повышения уровня
 
-**Отдельного пакета `levelUp` нет.** Level-up сигнализируется через поле `levelUp: true` в `experience_update` + немедленный `stats_update` с новыми значениями HP/MP и атрибутов.
+При левел-апе клиент получает **три пакета** в следующем порядке:
+1. `experienceUpdate` (с `levelUp: true`)
+2. `levelUp` — отдельный пакет
+3. `stats_update` — после пересчёта атрибутов на Game Server
+
+**Пакет `levelUp` (eventType: `levelUp`):**
+
+```json
+{
+  "header": { "eventType": "levelUp", "message": "Level up achieved!" },
+  "body": {
+    "characterId": 7,
+    "oldLevel": 15,
+    "newLevel": 16,
+    "newExperience": 52000,
+    "expForNextLevel": 65000,
+    "newAbilities": []
+  }
+}
+```
 
 Клиент должен:
-1. При получении `experience_update` с `levelUp == true` — показать level-up анимацию/UI
-2. Дождаться следующего `stats_update` — в нём будут обновлённые HP/MP/атрибуты
+1. При получении `levelUp` — показать level-up анимацию/UI
+2. Дождаться `stats_update` — в нём будут обновлённые HP/MP/атрибуты
 
-> Обработчик `eventType: "levelUp"` существует в коде сервера, но событие `LEVEL_UP`
-> никогда не попадает в EventQueue — это зарезервированный механизм. Клиент **не должен**
-> зависеть от пакета `levelUp`. Используйте `experience_update.levelUp` как единственный сигнал.
+> `experienceUpdate.levelUp == true` — альтернативный сигнал для совместимости.
 
 ### Серверные действия при level up
 
 1. **+10 HP** и **+5 MP** к максимуму за каждый уровень
 2. Сохранение: `saveCharacterProgress` → game-server
-3. Отправка: `experience_update` (unicast + broadcast) с `levelUp: true`
-4. Отправка: `stats_update` (unicast, только повысившему уровень) с новыми статами
+3. Отправка: `experienceUpdate` (broadcast) с `levelUp: true`
+4. Отправка: `levelUp` (broadcast)
+5. Отправка: `stats_update` (unicast, только повысившему уровень) с новыми статами
 
 ---
 

@@ -163,6 +163,12 @@ ChunkServer::ChunkServer(GameServices &gameServices,
                 notifData["killCount"] = newKillCount;
                 gameServices_.getStatsNotificationService()
                     .sendWorldNotification(charId, "bestiary_tier_unlocked", notifData, "medium", "toast");
+
+                // Title auto-grant: check bestiary conditions
+                nlohmann::json titleEvent;
+                titleEvent["mobSlug"] = mobSlug;
+                titleEvent["tier"] = tierNum;
+                gameServices_.getTitleManager().checkAndGrantTitles(charId, "bestiary", titleEvent);
             }
             catch (const std::exception &ex)
             {
@@ -250,6 +256,12 @@ ChunkServer::ChunkServer(GameServices &gameServices,
                     nlohmann::json{{"factionSlug", factionSlug}, {"newTier", newTier}, {"value", value}},
                     "high",
                     "toast");
+
+                // Title auto-grant: check reputation conditions
+                nlohmann::json titleEvent;
+                titleEvent["factionSlug"] = factionSlug;
+                titleEvent["tierName"] = newTier;
+                gameServices_.getTitleManager().checkAndGrantTitles(characterId, "reputation", titleEvent);
             }
             catch (...)
             {

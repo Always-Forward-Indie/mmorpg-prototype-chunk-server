@@ -1090,6 +1090,7 @@ struct PlayerContextStruct
 {
     int characterId = 0;
     int characterLevel = 0;
+    int classId = 0;                                          ///< character class id (0 = unknown)
     std::unordered_map<std::string, bool> flagsBool;          ///< flag_key → bool_value
     std::unordered_map<std::string, int> flagsInt;            ///< flag_key → int_value
     std::unordered_map<std::string, std::string> questStates; ///< quest_slug → state string
@@ -1114,7 +1115,8 @@ struct QuestRewardStruct
     int itemId = 0;
     int quantity = 1;
     int64_t amount = 0;
-    bool isHidden = false; ///< TRUE = client shows "???" until quest_turned_in reveals it
+    bool isHidden = false;            ///< TRUE = client shows "???" until quest_turned_in reveals it
+    std::vector<int> allowedClassIds; ///< empty = all classes; non-empty = only these class ids receive this reward
 };
 
 /// Single step of a quest
@@ -1140,6 +1142,9 @@ struct QuestStruct
     int giverNpcId = 0;
     int turninNpcId = 0;
     std::string clientQuestKey = "";
+    std::string reputationFactionSlug = ""; ///< faction slug for auto rep change; empty = none
+    int reputationOnComplete = 0;           ///< reputation delta when quest is turned in
+    int reputationOnFail = 0;               ///< reputation delta when quest fails (negative = penalty)
     std::vector<QuestStepStruct> steps;
     std::vector<QuestRewardStruct> rewards;
 };
@@ -1664,8 +1669,16 @@ struct TitleDefinitionStruct
     std::string displayName;               ///< e.g. "Wolf Slayer"
     std::string description;               ///< flavour text / unlock condition hint
     std::vector<TitleBonusStruct> bonuses; ///< stat bonuses while this title is equipped
-    /// How the title may be earned: "quest" | "reputation" | "mastery" | "bestiary" | "admin_grant"
+    /// How the title may be earned: "quest" | "reputation" | "mastery" | "bestiary" | "level" | "admin_grant"
     std::string earnCondition;
+    /// Data-driven condition parameters (JSONB from DB).
+    /// Examples:
+    ///   earnCondition="bestiary"   → {"mobSlug":"forest_wolf","minTier":6}
+    ///   earnCondition="mastery"    → {"masterySlug":"sword_mastery","minTier":3}
+    ///   earnCondition="reputation" → {"factionSlug":"bandits","minTierName":"ally"}
+    ///   earnCondition="level"      → {"level":10}
+    ///   earnCondition="quest"      → {"questSlug":"main_story_finale"}
+    nlohmann::json conditionParams = nlohmann::json::object();
 };
 
 /// Runtime state of a character's title collection

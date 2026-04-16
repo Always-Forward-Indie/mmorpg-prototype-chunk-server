@@ -218,7 +218,8 @@
 | `nearbyCorpsesResponse` | Unicast | Список трупов рядом |
 | `corpseLootInspect` | Unicast | Превью лута трупа |
 | `corpseLootPickup` | Unicast | Результат подбора лута |
-| `experience_update` | Broadcast | Обновление опыта (содержит `levelUp: true` при повышении уровня) |
+| `experienceUpdate` | Broadcast | Обновление опыта (содержит `levelUp: true` при повышении уровня) |
+| `levelUp` | Broadcast | Отдельный пакет левел-апа (отправляется сразу после `experienceUpdate`) |
 | `characterExperience` | Unicast | Данные опыта (ответ на `getCharacterExperience`) |
 | `stats_update` | Unicast | Полное обновление статов (включая тик регенерации) |
 | `initializePlayerSkills` | Unicast | Инициализация скиллов |

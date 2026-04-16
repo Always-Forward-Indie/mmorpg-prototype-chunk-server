@@ -169,8 +169,8 @@
   "priority": "low",
   "channel": "silent",
   "data": {
-    "mobTemplateId": 15,
-    "newKillCount": 47
+    "mobSlug": "forest_wolf",
+    "killCount": 47
   }
 }
 ```
@@ -183,9 +183,9 @@
   "priority": "medium",
   "channel": "toast",
   "data": {
-    "mobTemplateId": 15,
-    "tier": 3,
-    "newKillCount": 25,
+    "mobSlug": "forest_wolf",
+    "unlockedTier": 3,
+    "killCount": 15,
     "categorySlug": "combat_info"
   }
 }
@@ -376,8 +376,8 @@ on world_notification(notif):
         "banner": showBanner(notif.notificationType, notif.data)
 
     switch notif.notificationType:
-        "bestiary_kill_update": updateBestiaryCounter(data.mobTemplateId, data.newKillCount)
-        "bestiary_tier_unlocked": unlockBestiaryTier(data.mobTemplateId, data.tier)
+        "bestiary_kill_update": updateBestiaryCounter(data.mobSlug, data.killCount)
+        "bestiary_tier_unlocked": unlockBestiaryTier(data.mobSlug, data.unlockedTier)
         "mastery_tier_up": showMasteryAchievement(data.masterySlug, data.tier)
 ```
 

@@ -101,35 +101,20 @@ DialogueActionExecutor::executeSetFlag(const nlohmann::json &action,
     {
         bool val = action["bool_value"].get<bool>();
         ctx.flagsBool[key] = val;
-
-        // Persist to game-server
-        UpdatePlayerFlagStruct flagUpdate;
-        flagUpdate.characterId = characterId;
-        flagUpdate.flagKey = key;
-        flagUpdate.boolValue = val;
-        services_.getQuestManager().queueFlagUpdate(flagUpdate);
+        services_.getQuestManager().setFlagBool(characterId, key, val);
     }
     else if (action.contains("int_value"))
     {
         int val = action["int_value"].get<int>();
         ctx.flagsInt[key] = val;
-
-        UpdatePlayerFlagStruct flagUpdate;
-        flagUpdate.characterId = characterId;
-        flagUpdate.flagKey = key;
-        flagUpdate.intValue = val;
-        services_.getQuestManager().queueFlagUpdate(flagUpdate);
+        services_.getQuestManager().setFlagInt(characterId, key, val);
     }
     else if (action.contains("inc"))
     {
         int delta = action["inc"].get<int>();
-        ctx.flagsInt[key] = ctx.flagsInt[key] + delta;
-
-        UpdatePlayerFlagStruct flagUpdate;
-        flagUpdate.characterId = characterId;
-        flagUpdate.flagKey = key;
-        flagUpdate.intValue = ctx.flagsInt[key];
-        services_.getQuestManager().queueFlagUpdate(flagUpdate);
+        int newVal = ctx.flagsInt[key] + delta;
+        ctx.flagsInt[key] = newVal;
+        services_.getQuestManager().setFlagInt(characterId, key, newVal);
     }
 }
 
@@ -226,6 +211,17 @@ DialogueActionExecutor::executeFailQuest(const nlohmann::json &action,
             notification["questId"] = quest->id;
             notification["clientQuestKey"] = quest->clientQuestKey;
             result.clientNotifications.push_back(std::move(notification));
+
+            // Notify client of reputation change if the quest has auto-rep on fail
+            // (the actual rep change was already applied inside QuestManager::failQuest)
+            if (!quest->reputationFactionSlug.empty() && quest->reputationOnFail != 0)
+            {
+                nlohmann::json repNotif;
+                repNotif["type"] = "reputationChanged";
+                repNotif["faction"] = quest->reputationFactionSlug;
+                repNotif["delta"] = quest->reputationOnFail;
+                result.clientNotifications.push_back(std::move(repNotif));
+            }
         }
 
         log_->info("[DialogueAction] Failed quest '" + slug + "' for character " +

@@ -263,6 +263,7 @@ NPCEventHandler::sendAmbientPoolsToClient(int clientId, int characterId, const P
         PlayerContextStruct ctx;
         ctx.characterId = charData.characterId;
         ctx.characterLevel = charData.characterLevel;
+        ctx.classId = charData.classId;
         ctx.freeSkillPoints = charData.freeSkillPoints;
 
         for (const auto &flag : charData.flags)

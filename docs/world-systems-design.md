@@ -2128,9 +2128,10 @@ ON CONFLICT (slug) DO NOTHING;
 | Survival Champion | ✅ Реализовано | `ChampionManager::tickSurvivalEvolution` (300s), `evolveSurvivalMob`, `getAllLivingInstances()` |
 | Timed Champion | ✅ Реализовано | `ChampionManager::tickTimedChampions` (30s), preannounce, `sendTimedChampionKilledToGameServer`, migration 038 |
 | Rare Spawn | ⏳ Groundwork | DB columns в migration 038 заложены. Логика — после day/night cycle |
-| Reputation System | ✅ Реализовано | §5.1 migration 039, ReputationManager, dialogue + combat integration, guard block (BLOCKED_BY_REPUTATION, rep < −500), vendor discount (−5% buy / +5% sell при rep ≥ 200) |
-| Skill Mastery | ✅ Реализовано | §5.2 migration 039, MasteryManager, crit_chance/parry_chance milestones |
+| Reputation System | ✅ Реализовано | §5.1 migration 039, ReputationManager, dialogue + combat integration, guard block (BLOCKED_BY_REPUTATION, rep < −500), vendor discount (−5% buy / +5% sell при rep ≥ 200). **migration 041:** авто-изменение репутации при сдаче/провале квеста (`QuestStruct.reputationFactionSlug/OnComplete/OnFail`), уведомление клиента `reputationChanged` в `executeFailQuest` |
+| Skill Mastery | ✅ Реализовано | §5.2 migration 039, MasteryManager, crit_chance/parry_chance milestones. **migration 041:** исправлены `items.mastery_slug` для `iron_sworld` (sword_mastery) и `wooden_staff` (staff_mastery) — система теперь реально начисляет опыт |
 | Zone Events | ✅ Реализовано | §5.3 migration 039, ZoneEventManager, loot + speed multipliers |
+| Durability Stat Penalty | ✅ Реализовано | **migration 041:** 3-уровневый прогрессивный штраф к атрибутам экипировки: 75% → −5%, 50% → −15%, 25% → −30%. SQL CTE `equip_bonus` в `get_character_attributes`. При пересечении каждого порога — `world_notification` типа `durability_warning` с полями `severity` (1–4), `severityLabel`, `durabilityCurrent`, `durabilityMax`. Клиент получает атрибуты уже с учётом штрафа |
 
 ---
 

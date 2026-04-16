@@ -69,11 +69,13 @@ struct HarvestProgressStruct {
 };
 
 struct HarvestableCorpseStruct {
-    int corpseUID;
-    int mobTemplateId;
+    int mobUID;             // Unique mob instance UID (used as corpse identifier)
+    int mobId;              // Template mob ID
     PositionStruct position;
     bool hasBeenHarvested;
+    int harvestedByCharacterId;
     int currentHarvesterCharacterId;  // 0 = никто не канализирует
+    float interactionRadius;  // 250.0 units
     // Таймер жизни трупа
 };
 
@@ -132,14 +134,34 @@ struct CorpseLootStruct {
 }
 ```
 
+#### Сервер → Unicast (harvestStarted)
+
+```json
+{
+  "header": { "eventType": "harvestStarted", "message": "Harvest started successfully", "status": "success" },
+  "body": {
+    "type": "HARVEST_STARTED",
+    "clientId": 42,
+    "playerId": 1,
+    "corpseId": 1234,
+    "duration": 3000,
+    "startTime": 1711709400000
+  }
+}
+```
+
 #### Ошибки
 
 ```json
 {
   "header": { "eventType": "harvestError" },
   "body": {
+    "type": "HARVEST_ERROR",
+    "clientId": 42,
+    "playerId": 1,
+    "corpseId": 1234,
     "errorCode": "OUT_OF_RANGE",
-    "corpseUID": 1234
+    "message": "Corpse not available for harvest"
   }
 }
 ```
@@ -307,12 +329,17 @@ struct CorpseLootStruct {
   "body": {
     "corpses": [
       {
-        "corpseUID": 1234,
-        "mobTemplateId": 15,
-        "position": { "x": 200.0, "y": 150.0, "z": 0.0 },
-        "hasBeenHarvested": false
+        "id": 1234,
+        "mobId": 15,
+        "positionX": 200.0,
+        "positionY": 150.0,
+        "hasBeenHarvested": false,
+        "harvestedByCharacterId": 0,
+        "currentHarvesterCharacterId": 0,
+        "isBeingHarvested": false
       }
-    ]
+    ],
+    "count": 1
   }
 }
 ```

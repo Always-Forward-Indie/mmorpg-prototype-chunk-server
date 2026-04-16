@@ -162,6 +162,66 @@ TitleManager::grantTitle(int characterId, const std::string &titleSlug)
     log_->info("[Title] Granted '{}' to char={}", titleSlug, characterId);
 }
 
+void
+TitleManager::checkAndGrantTitles(int characterId,
+    const std::string &condition,
+    const nlohmann::json &eventData)
+{
+    // Collect matching definitions under lock, then grant outside the lock
+    std::vector<std::string> candidates;
+    {
+        std::shared_lock lk(mutex_);
+        for (const auto &[slug, def] : definitions_)
+        {
+            if (def.earnCondition != condition)
+                continue;
+            const auto &p = def.conditionParams;
+
+            bool matches = false;
+            if (condition == "bestiary")
+            {
+                // conditionParams: {"mobSlug":"…", "minTier":N}
+                matches = p.contains("mobSlug") && p.contains("minTier") &&
+                          eventData.value("mobSlug", "") == p["mobSlug"].get<std::string>() &&
+                          eventData.value("tier", 0) >= p["minTier"].get<int>();
+            }
+            else if (condition == "mastery")
+            {
+                // conditionParams: {"masterySlug":"…", "minTier":N}
+                // tier here is a tier index 1-4 encoded in eventData["tierIndex"]
+                matches = p.contains("masterySlug") && p.contains("minTier") &&
+                          eventData.value("masterySlug", "") == p["masterySlug"].get<std::string>() &&
+                          eventData.value("tierIndex", 0) >= p["minTier"].get<int>();
+            }
+            else if (condition == "reputation")
+            {
+                // conditionParams: {"factionSlug":"…", "minTierName":"ally"}
+                matches = p.contains("factionSlug") && p.contains("minTierName") &&
+                          eventData.value("factionSlug", "") == p["factionSlug"].get<std::string>() &&
+                          eventData.value("tierName", "") == p["minTierName"].get<std::string>();
+            }
+            else if (condition == "level")
+            {
+                // conditionParams: {"level":N}
+                matches = p.contains("level") &&
+                          eventData.value("level", 0) == p["level"].get<int>();
+            }
+            else if (condition == "quest")
+            {
+                // conditionParams: {"questSlug":"…"}
+                matches = p.contains("questSlug") &&
+                          eventData.value("questSlug", "") == p["questSlug"].get<std::string>();
+            }
+
+            if (matches)
+                candidates.push_back(slug);
+        }
+    }
+
+    for (const auto &slug : candidates)
+        grantTitle(characterId, slug);
+}
+
 bool
 TitleManager::equipTitle(int characterId, const std::string &titleSlug)
 {

@@ -672,11 +672,22 @@ weightLimit = carry_weight.base + strength * carry_weight.per_strength
 
 Значения по умолчанию: `weapon_loss_per_hit = 1`, `armor_loss_per_hit = 1`, `death_penalty_pct = 0.05`.
 
-### Порог предупреждения
+### Пороги предупреждений (3-тировая модель)
 
-Когда прочность пересекает порог `durability.warning_threshold_pct` (по умолчанию 30%) — сервер переотправляет `EQUIPMENT_STATE`, где `isDurabilityWarning = true` для затронутого слота. Все атрибуты пересчитываются с учётом штрафа `durability.warning_penalty_pct` (по умолчанию 15%).
+Когда прочность пересекает один из трёх нисходящих порогов, сервер:
+1. Отправляет `world_notification` типа `durability_warning` с полями `severity` и `severityLabel`.
+2. Запрашивает у Game Server пересчёт атрибутов — клиент получает `charAttributesUpdate` с уже учтённым штрафом.
 
-Клиент получает свежий `EQUIPMENT_STATE` и `charAttributesUpdate` автоматически.
+| Порог (`durabilityCurrent / durabilityMax`) | `severity` | `severityLabel` | Штраф к атаке/защите |
+|------|------|------------|----------|
+| ≥ 75% → < 75% | 1 | `"low"` | −5% |
+| ≥ 50% → < 50% | 2 | `"medium"` | −15% |
+| ≥ 25% → < 25% | 3 | `"high"` | −30% |
+| > 0 → 0 (сломан) | 4 | `"broken"` | −30% (полный штраф) |
+
+Поле `isDurabilityWarning` в `EQUIPMENT_STATE` (и при ответах `repairShop`) становится `true` при `durabilityCurrent / durabilityMax < durability.warning_threshold_pct` (по умолчанию 30%) — используется только для визуального выделения слота.
+
+Клиент получает `charAttributesUpdate` автоматически после пересечения порога — `EQUIPMENT_STATE` не переотправляется.
 
 ---
 

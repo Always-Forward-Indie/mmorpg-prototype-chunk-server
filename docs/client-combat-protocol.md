@@ -34,7 +34,7 @@
   │◄── {effectType}Initiation ────┤──────────────────────────────►│
   │◄── {effectType}Result ────────┤──────────────────────────────►│
   │◄── stats_update ──────────────│  (только инициатору: трата маны)
-  │◄── experience_update ─────────│  (если моб умер)
+  │◄── experienceUpdate ─────────│  (если моб умер)
   │◄── itemDrop ──────────────────┤──────────────────────────────►│  (если моб умер)
 ```
 
@@ -513,7 +513,7 @@
 ```
 
 После `targetDied: true`:
-- Цель — моб: придут `mobDeath` (broadcast) и `experience_update` (только атакующему)
+- Цель — моб: придут `mobDeath` (broadcast) и `experienceUpdate` (только атакующему)
 - Цель — игрок: придёт `stats_update` с `health.current = 0`
 
 ### Пример: лечение — `healingResult`
@@ -784,6 +784,10 @@ SyncCooldownFromServer(serverTimestamp, skill.gcdMs, skill.cooldownMs)
 
 ## 9. Прерывание каста — `interruptCombatAction`
 
+> **⚠️ НЕ РЕАЛИЗОВАНО.** Пакет `interruptCombatAction` не зарегистрирован в `EventDispatcher` и хендлер отсутствует. Если по дизайну движение должно прерывать каст — клиент должен самостоятельно остановить анимацию и убрать кастбар, не отправляя пакет на сервер.
+
+**Планируемый пакет (eщё не введён):**
+
 **Направление:** Клиент → Сервер
 
 ```json
@@ -812,6 +816,139 @@ SyncCooldownFromServer(serverTimestamp, skill.gcdMs, skill.cooldownMs)
 > `combatInitiation` приходит в момент перехода CHASING → PREPARING_ATTACK (начало каста). `combatResult` — в момент перехода PREPARING_ATTACK → ATTACKING (конец каста, `castMs` позже). Клиент применяет данные из `combatResult` в момент срабатывания хит-триггера анимации ATTACKING.
 
 ### combatInitiation (моб атакует игрока)
+
+```json
+{
+  "header": {
+    "eventType": "combatInitiation",
+    "message": "Skill Claw Attack initiated",
+    "status": "success"
+  },
+  "body": {
+    "skillInitiation": {
+      "success": true,
+      "casterId": 1000002,
+      "targetId": 7,
+      "targetType": 2,
+      "targetTypeString": "PLAYER",
+      "skillName": "Claw Attack",
+      "skillSlug": "mob_claw_attack",
+      "skillEffectType": "damage",
+      "skillSchool": "physical",
+      "castTime": 0.5,
+      "animationName": "skill_mob_claw_attack",
+      "animationDuration": 1.1,
+      "serverTimestamp": 1773764827131,
+      "castStartedAt": 1773764827131,
+      "casterType": 2,
+      "casterTypeString": "MOB"
+    }
+  }
+}
+```
+
+### combatResult (моб атакует игрока)
+
+```json
+{
+  "header": {
+    "eventType": "combatResult",
+    "message": "Skill Claw Attack executed successfully",
+    "status": "success"
+  },
+  "body": {
+    "skillResult": {
+      "success": true,
+      "casterId": 1000002,
+      "targetId": 7,
+      "targetType": 2,
+      "targetTypeString": "PLAYER",
+      "skillName": "Claw Attack",
+      "skillSlug": "mob_claw_attack",
+      "skillEffectType": "damage",
+      "skillSchool": "physical",
+      "serverTimestamp": 1773764827131,
+      "damage": 22,
+      "isCritical": false,
+      "isBlocked": false,
+      "isMissed": false,
+      "targetDied": false,
+      "finalTargetHealth": 228,
+      "finalTargetMana": 80,
+      "casterType": 2,
+      "casterTypeString": "MOB"
+    }
+  }
+}
+```
+
+После AI-атаки по игроку сервер отправляет `stats_update` игроку с обновлённым HP.
+
+### combatAoeResult — результат AoE-атаки
+
+**Направление:** Chunk Server → Broadcast (все клиенты)  
+Отправляется вместо `combatResult` при `targetType: 4` (AREA). Содержит массив всех целей, попавших в AoE.
+
+```json
+{
+  "header": {
+    "eventType": "combatAoeResult",
+    "message": "AoE skill executed"
+  },
+  "body": {
+    "aoeResult": {
+      "casterId": 7,
+      "skillSlug": "thunder_clap",
+      "skillName": "Thunder Clap",
+      "skillEffectType": "damage",
+      "skillSchool": "lightning",
+      "serverTimestamp": 1773764827131,
+      "finalCasterMana": 60,
+      "casterType": 1,
+      "casterTypeString": "PLAYER",
+      "targets": [
+        {
+          "targetId": 1001,
+          "targetType": 3,
+          "targetTypeString": "MOB",
+          "damage": 38,
+          "isCritical": false,
+          "isBlocked": false,
+          "isMissed": false,
+          "targetDied": false,
+          "finalTargetHealth": 112
+        },
+        {
+          "targetId": 1002,
+          "targetType": 3,
+          "targetTypeString": "MOB",
+          "damage": 38,
+          "isCritical": true,
+          "isBlocked": false,
+          "isMissed": false,
+          "targetDied": true,
+          "finalTargetHealth": 0
+        }
+      ]
+    }
+  }
+}
+```
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `casterId` | int | ID кастера |
+| `skillSlug` | string | Slug скилла |
+| `finalCasterMana` | int | Мана кастера после использования |
+| `casterType` / `casterTypeString` | int/string | 1/"PLAYER" или 2/"MOB" |
+| `targets[]` | array | Список целей с результатами |
+| `targets[].targetId` | int | ID цели |
+| `targets[].damage` | int | Урон цели |
+| `targets[].isCritical` | bool | Критический удар |
+| `targets[].targetDied` | bool | Цель погибла |
+| `targets[].finalTargetHealth` | int | HP цели после |
+
+При `targetDied: true` в одном из элементов `targets[]` последуют `mobDeath` вroadcast и `experienceUpdate` кастеру.
 
 ```json
 {
@@ -945,7 +1082,7 @@ SyncCooldownFromServer(serverTimestamp, skill.gcdMs, skill.cooldownMs)
   │◄── stats_update (мана потрачена) ──│
   │                                    │ (async after result)
   │◄── mobDeath ───────────────────────┤─────────────────────────────►│
-  │◄── experience_update ──────────────│
+  │◄── experienceUpdate ──────────────│
   │◄── itemDrop ───────────────────────┤─────────────────────────────►│
 
   [клиент воспроизводит анимацию атаки; хит-триггер показывает урон и смерть моба]

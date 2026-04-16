@@ -14,7 +14,7 @@
 4. [Валидация при экипировке](#4-валидация-при-экипировке)
 5. [Двуручное оружие](#5-двуручное-оружие)
 6. [Ограничения по классу — полная логика](#6-ограничения-по-классу--полная-логика)
-7. [Система износа — двухзонная модель](#7-система-износа--двухзонная-модель)
+7. [Система износа — трёхтировая модель](#7-система-износа--трёхтировая-модель)
 8. [Set Bonuses](#8-set-bonuses)
 9. [Вес — решение](#9-вес--решение)
 10. [Изменения в DB схеме](#10-изменения-в-db-схеме)
@@ -372,35 +372,42 @@ if (!item.allowedClassIds.empty()) {
 
 ---
 
-## 7. Система износа — двухзонная модель
+## 7. Система износа — трёхтировая модель
+
+> **Примечание:** Изначально был запланирован простой двухзонный подход (порог 30%, штраф −15%). В migration 041 модель расширена до прогрессивного трёхтирового штрафа. Документ обновлён.
 
 ### Концепция
 
 ```
-100% ──────────────────── 30% [WARNING] ──── 1% │ 0% [BROKEN]
-     Полные статы предмета  │  Штраф -N%        │  Нет бонусов
+100% ── 75% [tier1] ── 50% [tier2] ── 25% [tier3] ── 1% │ 0% [BROKEN]
+         −5%            −15%            −30%               │  Нет бонусов
 ```
 
-- **Зона нормы (100% → 31%)**: предмет даёт полные статы. Нет тревожности, нет менеджмента.
-- **Зона предупреждения (30% → 1%)**: заметный штраф к бонусам предмета. Яркий визуальный сигнал в UI. Игрок должен принять решение: продолжать или идти к кузнецу.
+- **Зона нормы (100% → 76%)**: предмет даёт полные статы.
+- **Tier 1 (75% → 51%)**: штраф −5% к бонусам атрибутов предмета.
+- **Tier 2 (50% → 26%)**: штраф −15% к бонусам атрибутов предмета.
+- **Tier 3 (25% → 1%)**: штраф −30% к бонусам атрибутов предмета.
 - **Сломан (0%)**: предмет не даёт никаких бонусов.
 
-Пороговые значения и штраф **не хардкодятся** — все в `game_config`.
+При пересечении каждого порога сервер:
+1. Отправляет `world_notification` типа `durability_warning` с полями `severity` и `severityLabel`.
+2. Запрашивает у Game Server пересчёт атрибутов — клиент получает `charAttributesUpdate`.
 
-### Новые ключи в game_config
+Все пороги и штрафы в `game_config` (не хардкод):
 
 ```sql
-INSERT INTO game_config (key, value, value_type, description) VALUES
-    ('durability.warning_threshold_pct', '0.30', 'float',
-     'Порог зоны предупреждения. Если durabilityCurrent / durabilityMax < этого значения — применяется штраф. По умолчанию 30%.'),
-    ('durability.warning_penalty_pct',   '0.15', 'float',
-     'Штраф к бонусам предмета в зоне предупреждения (0–1). 0.15 = -15% от всех item attribute бонусов. По умолчанию 15%.')
-ON CONFLICT (key) DO NOTHING;
+-- migration 041
+('durability.tier1_threshold_pct', '0.75', 'float', 'Порог tier1 (75%)'),
+('durability.tier1_penalty_pct',   '0.05', 'float', 'Штраф tier1 (−5%)'),
+('durability.tier2_threshold_pct', '0.50', 'float', 'Порог tier2 (50%)'),
+('durability.tier2_penalty_pct',   '0.15', 'float', 'Штраф tier2 (−15%)'),
+('durability.tier3_threshold_pct', '0.25', 'float', 'Порог tier3 (25%)'),
+('durability.tier3_penalty_pct',   '0.30', 'float', 'Штраф tier3 (−30%)')
 ```
 
-### Модификация SQL запроса `get_character_attributes`
+### SQL в `get_character_attributes`
 
-CTE `equip_bonus` расширяется для применения двухзонной логики:
+CTE `equip_bonus` применяет прогрессивный штраф:
 
 ```sql
 equip_bonus AS (
@@ -408,13 +415,16 @@ equip_bonus AS (
         iam.attribute_id,
         SUM(
             CASE
-                -- Сломан (durability = 0): бонус не считается
                 WHEN pi.durability_current = 0 AND i.is_durable = true THEN 0
-                -- Зона предупреждения: применяем штраф
                 WHEN i.is_durable = true
-                    AND pi.durability_current::float / NULLIF(i.durability_max, 0) < $warning_threshold
-                THEN ROUND(iam.value * (1.0 - $warning_penalty))
-                -- Норма или не дюрабл: полный бонус
+                    AND pi.durability_current::float / NULLIF(i.durability_max, 0) < $tier3_threshold
+                THEN ROUND(iam.value * (1.0 - $tier3_penalty))
+                WHEN i.is_durable = true
+                    AND pi.durability_current::float / NULLIF(i.durability_max, 0) < $tier2_threshold
+                THEN ROUND(iam.value * (1.0 - $tier2_penalty))
+                WHEN i.is_durable = true
+                    AND pi.durability_current::float / NULLIF(i.durability_max, 0) < $tier1_threshold
+                THEN ROUND(iam.value * (1.0 - $tier1_penalty))
                 ELSE iam.value
             END
         )::int AS bonus
@@ -428,13 +438,9 @@ equip_bonus AS (
 )
 ```
 
-`$warning_threshold` и `$warning_penalty` подставляются из `GameConfigService` при построении запроса (не хардкод).
-
-**Примечание:** Этот пересчёт происходит при `GET_CHARACTER_ATTRIBUTES_REFRESH`. Значит при ударе (убыль durability) нужно тригерить refresh если новое значение пересекло порог — не при каждом ударе (дорого), а только при пересечении границы 30%.
-
 ### Визуальный индикатор в EQUIPMENT_STATE
 
-`isDurabilityWarning: bool` уже включён в пакет `EQUIPMENT_STATE` (раздел 3.4). Клиент рисует:
+`isDurabilityWarning: bool` включён в пакет `EQUIPMENT_STATE`. Флаг `true` при `ratio < durability.warning_threshold_pct` (30%). Клиент рисует:
 - `> 30%` → зелёный / нейтральный
 - `≤ 30% и > 0%` → жёлтый/красный + цифра текущего durability
 - `= 0%` → серый значок с иконкой "сломан"
@@ -619,20 +625,20 @@ struct CharacterEquipmentStruct {
 
 ## 12. Роадмап реализации
 
-| Приоритет | Задача | Зависимости |
-|-----------|--------|-------------|
-| **P0** | Enum `EquipSlot` в C++ | — |
-| **P0** | Структура `CharacterEquipmentStruct` + `EquipmentManager` | EquipSlot enum |
-| **P0** | Загрузка текущей экипировки при `joinGameCharacter` | EquipmentManager |
-| **P0** | Пакет `EQUIPMENT_STATE` + отправка при join | EquipmentManager |
-| **P0** | `equipItem` / `unequipItem` пакеты + валидация + DB мутация | EquipmentManager |
-| **P0** | Enforcement `levelRequirement` в equip flow | — |
-| **P0** | Добавить `classId` в CharacterDataStruct + загрузку | DB query change |
-| **P1** | `isTwoHanded` поле + логика блокировки `off_hand` | EquipmentManager |
-| **P1** | Class restrictions: DB таблица + `allowedClassIds` в ItemDataStruct | — |
-| **P1** | Двухзонная durability в `get_character_attributes` SQL | game_config ключи |
-| **P1** | Триггер `GET_CHARACTER_ATTRIBUTES_REFRESH` при пересечении порога | Durability logic |
-| **P1** | `isDurabilityWarning` в `EQUIPMENT_STATE` | Двухзонная модель |
-| **P2** | Set bonuses: DB схема + CTE в `get_character_attributes` | — |
-| **P2** | Вес: расчёт + OVERWEIGHT debuff | game_config ключи |
-| **P2** | `getEquipment` пакет (on-demand запрос экипировки) | EquipmentManager |
+| Приоритет | Статус | Задача | Зависимости |
+|-----------|:------:|--------|-------------|
+| **P0** | ✅ | Enum `EquipSlot` в C++ | — |
+| **P0** | ✅ | Структура `CharacterEquipmentStruct` + `EquipmentManager` | EquipSlot enum |
+| **P0** | ✅ | Загрузка текущей экипировки при `joinGameCharacter` | EquipmentManager |
+| **P0** | ✅ | Пакет `EQUIPMENT_STATE` + отправка при join | EquipmentManager |
+| **P0** | ✅ | `equipItem` / `unequipItem` пакеты + валидация + DB мутация | EquipmentManager |
+| **P0** | ✅ | Enforcement `levelRequirement` в equip flow | — |
+| **P0** | ✅ | Добавить `classId` в CharacterDataStruct + загрузку | DB query change |
+| **P1** | ✅ | `isTwoHanded` поле + логика блокировки `off_hand` | EquipmentManager |
+| **P1** | ✅ | Class restrictions: DB таблица + `allowedClassIds` в ItemDataStruct | — |
+| **P1** | ✅ | Двухзонная durability в `get_character_attributes` SQL | game_config ключи |
+| **P1** | ✅ | Триггер `GET_CHARACTER_ATTRIBUTES_REFRESH` при пересечении порога | Durability logic |
+| **P1** | ✅ | `isDurabilityWarning` в `EQUIPMENT_STATE` | Двухзонная модель |
+| **P2** | ✅ | Set bonuses: DB схема (`item_sets`, `item_set_members`, `item_set_bonuses`) + CTE `set_bonus` в `get_character_attributes` SQL | — |
+| **P2** | ⚠️ | Вес: расчёт + OVERWEIGHT debuff — расчёт ✅ (`WEIGHT_STATUS` пакет с `isOverweight`), stat-штраф ❌ (не применяется) | game_config ключи |
+| **P2** | ✅ | `getEquipment` пакет (on-demand запрос экипировки) | EquipmentManager |

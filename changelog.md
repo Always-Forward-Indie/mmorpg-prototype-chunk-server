@@ -1,3 +1,69 @@
+v0.2.12
+17.04.2026
+================
+New:
+
+**Система автоматической выдачи титулов через БД (data-driven titles).**
+- `TitleDefinitionStruct` — добавлено поле `nlohmann::json conditionParams`: параметры условия выдачи (JSONB), читаются из колонки `condition_params` таблицы `title_definitions`.
+- `TitleManager::checkAndGrantTitles(characterId, condition, eventData)` — новый публичный метод. Перебирает все загруженные определения титулов, фильтрует по `earnCondition`, сравнивает `conditionParams` с данными события и вызывает `grantTitle()` для каждого совпадения. Поддерживаемые условия:
+  - `bestiary`: `eventData["mobSlug"] == p["mobSlug"] && eventData["tier"] >= p["minTier"]`
+  - `mastery`: `eventData["masterySlug"] == p["masterySlug"] && eventData["tierIndex"] >= p["minTier"]`
+  - `reputation`: `eventData["factionSlug"] == p["factionSlug"] && eventData["tierName"] == p["minTierName"]`
+  - `level`: `eventData["level"] == p["level"]` (точное совпадение)
+  - `quest`: `eventData["questSlug"] == p["questSlug"]`
+- `EventHandler::handleSetTitleDefinitionsEvent` — парсит поле `conditionParams` из пакета game-сервера.
+- `ChunkServer` — `checkAndGrantTitles("bestiary", ...)` вызывается в колбэке `setNotifyCallback` (unlock тира бестиария); `checkAndGrantTitles("reputation", ...)` вызывается в колбэке смены тира репутации.
+- `MasteryManager::applyEffect` — лямбда расширена параметром `int tierIndex` (1–4); добавлен вызов `checkAndGrantTitles("mastery", ...)` при повышении тира мастерства.
+- `ExperienceEventHandler` — после броадкаста `levelUp` добавлен вызов `checkAndGrantTitles("level", {"level": newLevel})`.
+- `QuestManager::turnInQuest` — после отправки уведомления `quest_turned_in` добавлен вызов `checkAndGrantTitles("quest", {"questSlug": questSlug})`.
+
+---
+
+v0.2.11
+16.04.2026
+================
+New:
+
+**Weapon Mastery — исправление: оружие теперь фактически начисляет мастерство.**
+- В БД поле `items.mastery_slug` было NULL для `iron_sworld` (sword_mastery) и `wooden_staff` (staff_mastery). `MasteryManager::onPlayerAttack` при пустом slug сразу выходил — система не работала. Migration 041 устанавливает корректные значения.
+- `QuestStruct` — добавлены три поля: `reputationFactionSlug`, `reputationOnComplete`, `reputationOnFail`.
+- `JSONParser::parseQuestsList` — парсит три новых поля из квест JSON.
+- `QuestManager::turnInQuest` — после выдачи наград автоматически вызывает `ReputationManager::changeReputation` если `reputationFactionSlug` непустой и `reputationOnComplete != 0`.
+- `QuestManager::failQuest` — аналогично вызывает `changeReputation` с `reputationOnFail`.
+- `DialogueActionExecutor::executeFailQuest` — теперь отправляет клиенту уведомление `reputationChanged` если у квеста задан `reputationOnFail`. Существующий dialogue action `change_reputation` сохранён без изменений.
+- `CombatSystem::checkAndTriggerDurabilityWarning` — заменена бинарная проверка (один порог 30%) на трёхуровневую прогрессивную:
+  - Tier 1 (75%): лёгкий штраф −5%, severity=1/"low"
+  - Tier 2 (50%): средний штраф −15%, severity=2/"medium"
+  - Tier 3 (25%): тяжёлый штраф −30%, severity=3/"high"
+  - Broken (0): severity=4/"broken"
+  - При пересечении каждого порога вниз отправляется `world_notification` типа `durability_warning` с полями `severity`, `severityLabel`, `durabilityCurrent`, `durabilityMax`. Атрибуты персонажа обновляются на клиенте через `refreshAttributesCallback`.
+
+---
+
+v0.2.10
+15.04.2026
+================
+New:
+
+**Выдача предметов/наград по классу персонажа.**
+
+*Механизм 1 — условие `class` в `condition_group` диалога:*
+- `PlayerContextStruct` — добавлено поле `int classId = 0`.
+- `DialogueEventHandler::buildPlayerContext` и `NPCEventHandler::sendAmbientPoolsToClient` — заполняют `ctx.classId` из `charData.classId`.
+- `DialogueConditionEvaluator` — добавлен тип условия `"class"`:
+  - `{"type":"class","class_id":1}` — только指定 класс.
+  - `{"type":"class","class_ids":[1,3]}` — любой из перечисленных классов.
+  - Метод `evaluateClass` объявлен в `.hpp`, реализован в `.cpp` по аналогии с `evaluateLevel`.
+- Применение: два ребра из узла-развилки с одинаковым `choice_text`, у каждого свой `condition_group class_id` + свой `give_item`. Воин получает меч, маг — посох.
+
+*Механизм 2 — `allowedClassIds` в наградах квеста:*
+- `QuestRewardStruct` — добавлено поле `std::vector<int> allowedClassIds`. Пустой вектор = все классы.
+- `JSONParser` — парсит `"allowedClassIds": [1, 2]` при загрузке квестов.
+- `QuestManager::turnInQuest` — фильтрует награды через `rewardAppliesToClass` (classId берётся из `CharacterManager`). Не вошедшие в список награды не выдаются и не добавляются в `rewardsReceived`. `item_received` также не отправляется для пропущенных наград. Добавлено поле `item_slug` в `item_received` при выдаче квестовых предметов.
+- `QuestManager::resolveRewardsForClient` — добавлен третий параметр `int classId = 0`. При `classId != 0` из массива исключаются награды с `allowedClassIds`, не содержащими этот id. Используется в `sendQuestUpdate` (предпросмотр в трекере квеста) — клиент видит только релевантные своему классу награды.
+
+---
+
 v0.2.9
 15.04.2026
 ================

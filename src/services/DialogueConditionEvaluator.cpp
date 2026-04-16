@@ -8,6 +8,17 @@ DialogueConditionEvaluator::evaluate(const nlohmann::json &conditionGroup,
     if (conditionGroup.is_null() || conditionGroup.empty())
         return true;
 
+    // --- Flat array: [{rule1}, {rule2}] → implicit AND (same as "all") ---
+    if (conditionGroup.is_array())
+    {
+        for (const auto &sub : conditionGroup)
+        {
+            if (!evaluate(sub, ctx))
+                return false;
+        }
+        return true;
+    }
+
     // --- Logical groups ---
     if (conditionGroup.contains("all") && conditionGroup["all"].is_array())
     {
@@ -67,6 +78,8 @@ DialogueConditionEvaluator::evaluateRule(const nlohmann::json &rule,
         return evaluateSkillLearned(rule, ctx);
     if (type == "skill_not_learned")
         return evaluateSkillNotLearned(rule, ctx);
+    if (type == "class")
+        return evaluateClass(rule, ctx);
 
     // Unknown rule type → permissive
     return true;
@@ -330,4 +343,26 @@ DialogueConditionEvaluator::evaluateSkillNotLearned(const nlohmann::json &rule,
         return true;
     const std::string slug = rule["slug"].get<std::string>();
     return ctx.learnedSkillSlugs.count(slug) == 0;
+}
+
+bool
+DialogueConditionEvaluator::evaluateClass(const nlohmann::json &rule,
+    const PlayerContextStruct &ctx)
+{
+    // Single id: {"type":"class","class_id":1}
+    if (rule.contains("class_id"))
+        return ctx.classId == rule["class_id"].get<int>();
+
+    // Multiple ids: {"type":"class","class_ids":[1,3]}
+    if (rule.contains("class_ids") && rule["class_ids"].is_array())
+    {
+        for (const auto &elem : rule["class_ids"])
+        {
+            if (elem.is_number_integer() && elem.get<int>() == ctx.classId)
+                return true;
+        }
+        return false;
+    }
+
+    return true; // no id specified → permissive
 }

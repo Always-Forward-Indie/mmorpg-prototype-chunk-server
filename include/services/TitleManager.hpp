@@ -63,6 +63,22 @@ class TitleManager
     void grantTitle(int characterId, const std::string &titleSlug);
 
     /**
+     * @brief Check all title definitions with the given earnCondition and grant
+     *        any whose conditionParams are satisfied.
+     * @param characterId   Target character.
+     * @param condition     e.g. "bestiary", "mastery", "reputation", "level", "quest"
+     * @param eventData     Runtime values to match against conditionParams.
+     *                      bestiary:   {"mobSlug":…, "tier":N}
+     *                      mastery:    {"masterySlug":…, "tier":N}
+     *                      reputation: {"factionSlug":…, "tierName":…}
+     *                      level:      {"level":N}
+     *                      quest:      {"questSlug":…}
+     */
+    void checkAndGrantTitles(int characterId,
+        const std::string &condition,
+        const nlohmann::json &eventData);
+
+    /**
      * @brief Equip a title (or unequip by passing an empty slug).
      *        Removes old title bonuses, applies new ones as ActiveEffects.
      *        Triggers stats_update via StatsNotificationService.
