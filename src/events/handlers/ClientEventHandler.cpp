@@ -278,6 +278,30 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 CharacterDataStruct existingChar = gameServices_.getCharacterManager().getCharacterData(passedClientData.characterId);
                 if (existingChar.characterId > 0)
                 {
+                    // Analytics: session_end
+                    if (!existingChar.sessionId.empty())
+                    {
+                        try
+                        {
+                            int zoneId = 0;
+                            auto zoneOpt = gameServices_.getGameZoneManager().getZoneForPosition(existingChar.characterPosition);
+                            if (zoneOpt.has_value())
+                                zoneId = zoneOpt->id;
+                            nlohmann::json ap;
+                            ap["header"]["eventType"] = "analyticsEvent";
+                            ap["body"]["analyticsType"] = "session_end";
+                            ap["body"]["characterId"] = existingChar.characterId;
+                            ap["body"]["sessionId"] = existingChar.sessionId;
+                            ap["body"]["level"] = existingChar.characterLevel;
+                            ap["body"]["zoneId"] = zoneId;
+                            ap["body"]["payload"] = nlohmann::json::object();
+                            gameServerWorker_.sendDataToGameServer(ap.dump() + "\n");
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
+
                     gameServices_.getCharacterManager().removeCharacter(passedClientData.characterId);
                 }
 

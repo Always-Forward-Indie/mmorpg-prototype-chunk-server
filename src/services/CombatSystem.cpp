@@ -1063,6 +1063,31 @@ CombatSystem::handleTargetDeath(int targetId, CombatTargetType targetType)
         {
             log_->warn("[COMBAT] Death stats update error: " + std::string(e.what()));
         }
+
+        // Analytics: player_death
+        try
+        {
+            auto deadData = gameServices_->getCharacterManager().getCharacterData(targetId);
+            if (deadData.characterId != 0 && !deadData.sessionId.empty())
+            {
+                int zoneId = 0;
+                auto zoneOpt = gameServices_->getGameZoneManager().getZoneForPosition(deadData.characterPosition);
+                if (zoneOpt.has_value())
+                    zoneId = zoneOpt->id;
+                nlohmann::json ap;
+                ap["header"]["eventType"] = "analyticsEvent";
+                ap["body"]["analyticsType"] = "player_death";
+                ap["body"]["characterId"] = targetId;
+                ap["body"]["sessionId"] = deadData.sessionId;
+                ap["body"]["level"] = deadData.characterLevel;
+                ap["body"]["zoneId"] = zoneId;
+                ap["body"]["payload"] = nlohmann::json::object();
+                gameServices_->sendAnalytics(ap.dump() + "\n");
+            }
+        }
+        catch (...)
+        {
+        }
     }
     else if (targetType == CombatTargetType::MOB)
     {
@@ -1110,6 +1135,31 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
                         gameServices_->getLogger().log("Character " + std::to_string(killerId) +
                                                            " leveled up to level " + std::to_string(result.experienceEvent.newLevel),
                             CYAN);
+
+                        // Analytics: level_up
+                        try
+                        {
+                            auto levelData = gameServices_->getCharacterManager().getCharacterData(killerId);
+                            if (!levelData.sessionId.empty())
+                            {
+                                int zoneId = 0;
+                                auto zoneOpt = gameServices_->getGameZoneManager().getZoneForPosition(levelData.characterPosition);
+                                if (zoneOpt.has_value())
+                                    zoneId = zoneOpt->id;
+                                nlohmann::json ap;
+                                ap["header"]["eventType"] = "analyticsEvent";
+                                ap["body"]["analyticsType"] = "level_up";
+                                ap["body"]["characterId"] = killerId;
+                                ap["body"]["sessionId"] = levelData.sessionId;
+                                ap["body"]["level"] = result.experienceEvent.newLevel;
+                                ap["body"]["zoneId"] = zoneId;
+                                ap["body"]["payload"] = {{"oldLevel", result.experienceEvent.newLevel - 1}};
+                                gameServices_->sendAnalytics(ap.dump() + "\n");
+                            }
+                        }
+                        catch (...)
+                        {
+                        }
                     }
                 }
                 else
@@ -1311,6 +1361,31 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
         catch (const std::exception &e)
         {
             log_->warn("[Reputation] Error on mob kill: " + std::string(e.what()));
+        }
+
+        // Analytics: mob_killed
+        try
+        {
+            auto killerData = gameServices_->getCharacterManager().getCharacterData(killerId);
+            if (killerData.characterId != 0 && !killerData.sessionId.empty())
+            {
+                int zoneId = 0;
+                auto zoneOpt = gameServices_->getGameZoneManager().getZoneForPosition(killerData.characterPosition);
+                if (zoneOpt.has_value())
+                    zoneId = zoneOpt->id;
+                nlohmann::json ap;
+                ap["header"]["eventType"] = "analyticsEvent";
+                ap["body"]["analyticsType"] = "mob_killed";
+                ap["body"]["characterId"] = killerId;
+                ap["body"]["sessionId"] = killerData.sessionId;
+                ap["body"]["level"] = killerData.characterLevel;
+                ap["body"]["zoneId"] = zoneId;
+                ap["body"]["payload"] = {{"mobId", mobData.id}, {"mobSlug", mobData.slug}, {"mobLevel", mobData.level}};
+                gameServices_->sendAnalytics(ap.dump() + "\n");
+            }
+        }
+        catch (...)
+        {
         }
 
         // Вызываем общую логику смерти цели (для совместимости)

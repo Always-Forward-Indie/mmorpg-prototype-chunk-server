@@ -137,6 +137,27 @@ DialogueActionExecutor::executeOfferQuest(const nlohmann::json &action,
     {
         ctx.questStates[slug] = "active";
 
+        // Analytics: quest_accept
+        try
+        {
+            auto charData = services_.getCharacterManager().getCharacterData(characterId);
+            if (!charData.sessionId.empty())
+            {
+                nlohmann::json ap;
+                ap["header"]["eventType"] = "analyticsEvent";
+                ap["body"]["analyticsType"] = "quest_accept";
+                ap["body"]["characterId"] = characterId;
+                ap["body"]["sessionId"] = charData.sessionId;
+                ap["body"]["level"] = charData.characterLevel;
+                ap["body"]["zoneId"] = 0;
+                ap["body"]["payload"] = {{"questSlug", slug}};
+                services_.sendAnalytics(ap.dump() + "\n");
+            }
+        }
+        catch (...)
+        {
+        }
+
         // Build client notification
         const QuestStruct *quest = questManager.getQuestBySlug(slug);
         if (quest)
@@ -178,6 +199,27 @@ DialogueActionExecutor::executeTurnInQuest(const nlohmann::json &action,
     auto notifications = questManager.turnInQuest(characterId, slug, clientId);
     for (auto &n : notifications)
         result.clientNotifications.push_back(std::move(n));
+
+    // Analytics: quest_complete
+    try
+    {
+        auto charData = services_.getCharacterManager().getCharacterData(characterId);
+        if (!charData.sessionId.empty())
+        {
+            nlohmann::json ap;
+            ap["header"]["eventType"] = "analyticsEvent";
+            ap["body"]["analyticsType"] = "quest_complete";
+            ap["body"]["characterId"] = characterId;
+            ap["body"]["sessionId"] = charData.sessionId;
+            ap["body"]["level"] = charData.characterLevel;
+            ap["body"]["zoneId"] = 0;
+            ap["body"]["payload"] = {{"questSlug", slug}};
+            services_.sendAnalytics(ap.dump() + "\n");
+        }
+    }
+    catch (...)
+    {
+    }
 }
 
 void
@@ -228,6 +270,27 @@ DialogueActionExecutor::executeFailQuest(const nlohmann::json &action,
 
         log_->info("[DialogueAction] Failed quest '" + slug + "' for character " +
                    std::to_string(characterId));
+
+        // Analytics: quest_abandon
+        try
+        {
+            auto charData = services_.getCharacterManager().getCharacterData(characterId);
+            if (!charData.sessionId.empty())
+            {
+                nlohmann::json ap;
+                ap["header"]["eventType"] = "analyticsEvent";
+                ap["body"]["analyticsType"] = "quest_abandon";
+                ap["body"]["characterId"] = characterId;
+                ap["body"]["sessionId"] = charData.sessionId;
+                ap["body"]["level"] = charData.characterLevel;
+                ap["body"]["zoneId"] = 0;
+                ap["body"]["payload"] = {{"questSlug", slug}};
+                services_.sendAnalytics(ap.dump() + "\n");
+            }
+        }
+        catch (...)
+        {
+        }
     }
 }
 
@@ -253,6 +316,27 @@ DialogueActionExecutor::executeGiveItem(const nlohmann::json &action,
         notification["item_slug"] = item.slug;
         notification["quantity"] = quantity;
         result.clientNotifications.push_back(std::move(notification));
+
+        // Analytics: item_acquired
+        try
+        {
+            auto charData = services_.getCharacterManager().getCharacterData(characterId);
+            if (!charData.sessionId.empty())
+            {
+                nlohmann::json ap;
+                ap["header"]["eventType"] = "analyticsEvent";
+                ap["body"]["analyticsType"] = "item_acquired";
+                ap["body"]["characterId"] = characterId;
+                ap["body"]["sessionId"] = charData.sessionId;
+                ap["body"]["level"] = charData.characterLevel;
+                ap["body"]["zoneId"] = 0;
+                ap["body"]["payload"] = {{"source", "dialogue"}, {"itemSlug", item.slug}, {"quantity", quantity}};
+                services_.sendAnalytics(ap.dump() + "\n");
+            }
+        }
+        catch (...)
+        {
+        }
     }
 }
 
@@ -308,6 +392,27 @@ DialogueActionExecutor::executeGiveGold(const nlohmann::json &action,
         notification["type"] = "gold_received";
         notification["amount"] = amount;
         result.clientNotifications.push_back(std::move(notification));
+
+        // Analytics: gold_change
+        try
+        {
+            auto charData = services_.getCharacterManager().getCharacterData(characterId);
+            if (!charData.sessionId.empty())
+            {
+                nlohmann::json ap;
+                ap["header"]["eventType"] = "analyticsEvent";
+                ap["body"]["analyticsType"] = "gold_change";
+                ap["body"]["characterId"] = characterId;
+                ap["body"]["sessionId"] = charData.sessionId;
+                ap["body"]["level"] = charData.characterLevel;
+                ap["body"]["zoneId"] = 0;
+                ap["body"]["payload"] = {{"source", "dialogue_give_gold"}, {"delta", static_cast<int>(amount)}};
+                services_.sendAnalytics(ap.dump() + "\n");
+            }
+        }
+        catch (...)
+        {
+        }
     }
 }
 

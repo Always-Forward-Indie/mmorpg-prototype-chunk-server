@@ -186,4 +186,6 @@ using EventData = std::variant<
     // World Interactive Objects payloads (migration 043)
     std::vector<WorldObjectDataStruct>,
     WorldObjectInteractRequestStruct,
-    WorldObjectChannelCancelStruct>;
+    WorldObjectChannelCancelStruct,
+    // Analytics system (migration 058)
+    AnalyticsEventStruct>;

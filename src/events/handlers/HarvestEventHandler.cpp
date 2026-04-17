@@ -537,6 +537,35 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                     networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", notifResp));
                 }
 
+                // Analytics: item_acquired (corpse loot)
+                try
+                {
+                    CharacterDataStruct pickerData = gameServices_.getCharacterManager().getCharacterData(pickupRequest.characterId);
+                    if (!pickerData.sessionId.empty())
+                    {
+                        int zoneId = 0;
+                        auto zoneOpt = gameServices_.getGameZoneManager().getZoneForPosition(pickerData.characterPosition);
+                        if (zoneOpt.has_value())
+                            zoneId = zoneOpt->id;
+                        for (const auto &[itemId, quantity] : pickedUpItems)
+                        {
+                            ItemDataStruct itemInfo = itemManager.getItemById(itemId);
+                            nlohmann::json ap;
+                            ap["header"]["eventType"] = "analyticsEvent";
+                            ap["body"]["analyticsType"] = "item_acquired";
+                            ap["body"]["characterId"] = pickupRequest.characterId;
+                            ap["body"]["sessionId"] = pickerData.sessionId;
+                            ap["body"]["level"] = pickerData.characterLevel;
+                            ap["body"]["zoneId"] = zoneId;
+                            ap["body"]["payload"] = {{"source", "corpse_loot"}, {"itemSlug", itemInfo.slug}, {"quantity", quantity}};
+                            gameServerWorker_.sendDataToGameServer(ap.dump() + "\n");
+                        }
+                    }
+                }
+                catch (...)
+                {
+                }
+
                 gameServices_.getLogger().log("Player " + std::to_string(pickupRequest.characterId) +
                                               " picked up " + std::to_string(pickedUpItems.size()) +
                                               " items from corpse " + std::to_string(pickupRequest.corpseUID));

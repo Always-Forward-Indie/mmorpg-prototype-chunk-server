@@ -39,6 +39,8 @@
 #include "services/WorldObjectManager.hpp"
 #include "services/ZoneEventManager.hpp"
 #include "utils/Logger.hpp"
+#include <functional>
+#include <string>
 
 class GameServices
 {
@@ -260,6 +262,19 @@ class GameServices
         return worldObjectManager_;
     }
 
+    // Analytics sender: set by the EventHandler layer so that inner services can
+    // fire analytics events to the game server without a direct dependency on
+    // GameServerWorker.
+    void setAnalyticsSender(std::function<void(const std::string &)> fn)
+    {
+        analyticsSender_ = std::move(fn);
+    }
+    void sendAnalytics(const std::string &data)
+    {
+        if (analyticsSender_)
+            analyticsSender_(data);
+    }
+
   private:
     Logger &logger_;
     GameConfigService gameConfigService_; // FIRST: initialized before all managers
@@ -300,4 +315,5 @@ class GameServices
     EmoteManager emoteManager_;
     AmbientSpeechManager ambientSpeechManager_;
     WorldObjectManager worldObjectManager_;
+    std::function<void(const std::string &)> analyticsSender_ = [](const std::string &) {};
 };

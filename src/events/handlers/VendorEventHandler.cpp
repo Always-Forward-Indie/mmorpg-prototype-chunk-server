@@ -348,6 +348,42 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
             nlohmann::json notifResp = ResponseBuilder().setHeader("eventType", "item_received").build();
             notifResp["body"] = std::move(notifBody);
             networkManager_.sendResponse(socket, networkManager_.generateResponseMessage("success", notifResp));
+
+            // Analytics: item_acquired + gold_change (vendor purchase)
+            try
+            {
+                CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(req.characterId);
+                if (!charData.sessionId.empty())
+                {
+                    int zoneId = 0;
+                    auto zoneOpt = gameServices_.getGameZoneManager().getZoneForPosition(charData.characterPosition);
+                    if (zoneOpt.has_value())
+                        zoneId = zoneOpt->id;
+
+                    nlohmann::json apItem;
+                    apItem["header"]["eventType"] = "analyticsEvent";
+                    apItem["body"]["analyticsType"] = "item_acquired";
+                    apItem["body"]["characterId"] = req.characterId;
+                    apItem["body"]["sessionId"] = charData.sessionId;
+                    apItem["body"]["level"] = charData.characterLevel;
+                    apItem["body"]["zoneId"] = zoneId;
+                    apItem["body"]["payload"] = {{"source", "vendor_buy"}, {"itemSlug", itemData.slug}, {"quantity", req.quantity}};
+                    gameServerWorker_.sendDataToGameServer(apItem.dump() + "\n");
+
+                    nlohmann::json apGold;
+                    apGold["header"]["eventType"] = "analyticsEvent";
+                    apGold["body"]["analyticsType"] = "gold_change";
+                    apGold["body"]["characterId"] = req.characterId;
+                    apGold["body"]["sessionId"] = charData.sessionId;
+                    apGold["body"]["level"] = charData.characterLevel;
+                    apGold["body"]["zoneId"] = zoneId;
+                    apGold["body"]["payload"] = {{"source", "vendor_buy"}, {"delta", -result.totalPrice}};
+                    gameServerWorker_.sendDataToGameServer(apGold.dump() + "\n");
+                }
+            }
+            catch (...)
+            {
+            }
         }
     }
     catch (const std::exception &ex)

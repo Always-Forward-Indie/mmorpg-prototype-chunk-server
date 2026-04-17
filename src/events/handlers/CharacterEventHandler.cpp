@@ -7,6 +7,7 @@
 #include "events/handlers/WorldObjectEventHandler.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <spdlog/logger.h>
 
@@ -22,6 +23,10 @@ CharacterEventHandler::CharacterEventHandler(
       equipmentEventHandler_(nullptr)
 {
     log_ = gameServices_.getLogger().getSystem("character");
+
+    // Wire analytics: any packet built here is forwarded to game server which persists it.
+    gameServices_.setAnalyticsSender([this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
 }
 
 void
@@ -339,6 +344,16 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 return;
             }
 
+            // Generate session ID and store it on the character so disconnect can find it.
+            {
+                auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch())
+                                 .count();
+                characterData.sessionId = "sess_" + std::to_string(characterData.characterId) +
+                                          "_" + std::to_string(nowMs);
+                gameServices_.getCharacterManager().loadCharacterData(characterData);
+            }
+
             // Prepare and broadcast success response to all clients (including sender)
             nlohmann::json broadcastResponse = ResponseBuilder()
                                                    .setHeader("message", "Authentication success for character!")
@@ -407,6 +422,30 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             // directly (safe even during loading screen — client buffers them).
             {
                 int cid = characterData.characterId;
+
+                // Analytics: session_start
+                {
+                    int zoneId = 0;
+                    try
+                    {
+                        auto zoneOpt = gameServices_.getGameZoneManager().getZoneForPosition(characterData.characterPosition);
+                        if (zoneOpt.has_value())
+                            zoneId = zoneOpt->id;
+                    }
+                    catch (...)
+                    {
+                    }
+                    nlohmann::json ap;
+                    ap["header"]["eventType"] = "analyticsEvent";
+                    ap["body"]["analyticsType"] = "session_start";
+                    ap["body"]["characterId"] = cid;
+                    ap["body"]["sessionId"] = characterData.sessionId;
+                    ap["body"]["level"] = characterData.characterLevel;
+                    ap["body"]["zoneId"] = zoneId;
+                    ap["body"]["payload"] = nlohmann::json::object();
+                    gameServerWorker_.sendDataToGameServer(ap.dump() + "\n");
+                }
+
                 nlohmann::json questsReq;
                 questsReq["header"]["eventType"] = "getPlayerQuests";
                 questsReq["body"]["characterId"] = cid;
@@ -1046,6 +1085,17 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
         return;
     }
 
+    // Generate session ID once for all pending requests of this character (idempotent — only
+    // set if not already set, so we never overwrite a session created by the direct path).
+    if (characterData.sessionId.empty())
+    {
+        auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+        characterData.sessionId = "sess_" + std::to_string(characterId) + "_" + std::to_string(nowMs);
+        gameServices_.getCharacterManager().loadCharacterData(characterData);
+    }
+
     // Process all pending requests for this character
     for (const auto &request : requests)
     {
@@ -1129,6 +1179,29 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
 
     // Request player quests and flags from game server (once per character)
     {
+        // Analytics: session_start (pending path — fires once after all pending requests processed)
+        {
+            int zoneId = 0;
+            try
+            {
+                auto zoneOpt = gameServices_.getGameZoneManager().getZoneForPosition(characterData.characterPosition);
+                if (zoneOpt.has_value())
+                    zoneId = zoneOpt->id;
+            }
+            catch (...)
+            {
+            }
+            nlohmann::json ap;
+            ap["header"]["eventType"] = "analyticsEvent";
+            ap["body"]["analyticsType"] = "session_start";
+            ap["body"]["characterId"] = characterId;
+            ap["body"]["sessionId"] = characterData.sessionId;
+            ap["body"]["level"] = characterData.characterLevel;
+            ap["body"]["zoneId"] = zoneId;
+            ap["body"]["payload"] = nlohmann::json::object();
+            gameServerWorker_.sendDataToGameServer(ap.dump() + "\n");
+        }
+
         nlohmann::json questsReq;
         questsReq["header"]["eventType"] = "getPlayerQuests";
         questsReq["body"]["characterId"] = characterId;

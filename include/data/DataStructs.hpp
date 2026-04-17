@@ -406,6 +406,11 @@ struct CharacterDataStruct
 
     // Hotbar slot assignments (loaded on join from character_skill_bar, updated on setSkillBarSlot)
     std::vector<SkillBarSlotStruct> skillBarSlots;
+
+    // Analytics: session token generated once on joinGameCharacter.
+    // Format: "sess_{characterId}_{unix_timestamp_ms}".
+    // Passed in every AnalyticsEventStruct so all events of one session are groupable.
+    std::string sessionId = "";
 };
 
 struct ClientDataStruct
@@ -1811,4 +1816,19 @@ struct WorldObjectChannelCancelStruct
 {
     int characterId = 0;
     int objectId = 0;
+};
+
+// ── Analytics system (migration 058) ─────────────────────────────────────────
+
+/// Chunk Server → Game Server: fire-and-forget analytics event.
+/// Built at the point of a game event and forwarded via GameServerWorker.sendDataToGameServer().
+/// Game Server performs an INSERT INTO game_analytics without replying.
+struct AnalyticsEventStruct
+{
+    std::string analyticsType = ""; ///< event_type value: "player_death", "level_up", "quest_accept", etc.
+    int characterId = 0;
+    std::string sessionId = ""; ///< copied from CharacterDataStruct::sessionId
+    int level = 0;              ///< characterLevel at the time of the event
+    int zoneId = 0;
+    nlohmann::json payload = {}; ///< event-specific fields matching the spec in analytics-system-plan.md
 };

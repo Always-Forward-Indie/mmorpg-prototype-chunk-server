@@ -1,3 +1,31 @@
+v0.2.14
+17.04.2026
+================
+New:
+
+**Игровая аналитика — сбор событий для анализа плейтеста.**
+- `CharacterDataStruct` — добавлено поле `std::string sessionId = ""`: уникальный идентификатор сессии персонажа вида `sess_{characterId}_{unix_ms}`. Генерируется при входе в игру, хранится в памяти на протяжении всей сессии.
+- `AnalyticsEventStruct` — новая структура данных: `analyticsType`, `characterId`, `sessionId`, `level`, `zoneId`, `payload` (nlohmann::json).
+- `EventData` variant — добавлен `AnalyticsEventStruct`.
+- `Event::SEND_ANALYTICS_EVENT` — новый тип события.
+- `GameServices::setAnalyticsSender()` / `sendAnalytics()` — callback-механизм для отправки аналитических пакетов из сервисов (CombatSystem, DialogueActionExecutor), у которых нет прямого доступа к `GameServerWorker`. Callback устанавливается в конструкторе `CharacterEventHandler`.
+- **Точки сбора событий** (каждая кидает пакет `analyticsEvent` на game-сервер fire-and-forget внутри `try/catch`):
+  - `CharacterEventHandler::handleJoinCharacterEvent` — `session_start` (оба пути: immediate + pending); генерация `sessionId` через `loadCharacterData`.
+  - `ClientEventHandler::handleDisconnectClientEvent` — `session_end`.
+  - `CombatSystem::handleTargetDeath` (PLAYER branch) — `player_death`.
+  - `CombatSystem::handleMobDeath` — `mob_killed`; `level_up` при `result.levelUp == true`.
+  - `DialogueActionExecutor::executeOfferQuest` — `quest_accept`.
+  - `DialogueActionExecutor::executeTurnInQuest` — `quest_complete`.
+  - `DialogueActionExecutor::executeFailQuest` — `quest_abandon`.
+  - `DialogueActionExecutor::executeGiveItem` — `item_acquired` (source: dialogue).
+  - `DialogueActionExecutor::executeGiveGold` — `gold_change` (source: dialogue_give_gold).
+  - `ItemEventHandler::handleItemPickupEvent` — `item_acquired` (source: loot_pickup).
+  - `HarvestEventHandler::handleCorpseLootPickup` — `item_acquired` per item (source: corpse_loot).
+  - `VendorEventHandler::handleBuyItemEvent` — `item_acquired` + `gold_change` (source: vendor_buy).
+- Структура пакета: `{"header":{"eventType":"analyticsEvent"},"body":{"analyticsType":"...","characterId":N,"sessionId":"sess_...","level":N,"zoneId":N,"payload":{...}}}`.
+
+---
+
 v0.2.13
 16.04.2026
 ================

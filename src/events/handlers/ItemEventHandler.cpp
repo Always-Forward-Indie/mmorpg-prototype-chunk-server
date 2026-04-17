@@ -207,6 +207,31 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                             nlohmann::json notifResp = ResponseBuilder().setHeader("eventType", "item_received").build();
                             notifResp["body"] = std::move(notifBody);
                             networkManager_.sendResponse(weightSocket, networkManager_.generateResponseMessage("success", notifResp));
+
+                            // Analytics: item_acquired (loot pickup)
+                            try
+                            {
+                                CharacterDataStruct pickerData = gameServices_.getCharacterManager().getCharacterData(pickupRequest.characterId);
+                                if (!pickerData.sessionId.empty())
+                                {
+                                    int zoneId = 0;
+                                    auto zoneOpt = gameServices_.getGameZoneManager().getZoneForPosition(pickerData.characterPosition);
+                                    if (zoneOpt.has_value())
+                                        zoneId = zoneOpt->id;
+                                    nlohmann::json ap;
+                                    ap["header"]["eventType"] = "analyticsEvent";
+                                    ap["body"]["analyticsType"] = "item_acquired";
+                                    ap["body"]["characterId"] = pickupRequest.characterId;
+                                    ap["body"]["sessionId"] = pickerData.sessionId;
+                                    ap["body"]["level"] = pickerData.characterLevel;
+                                    ap["body"]["zoneId"] = zoneId;
+                                    ap["body"]["payload"] = {{"source", "loot_pickup"}, {"itemSlug", itemInfo.slug}, {"quantity", droppedInfo.quantity}};
+                                    gameServerWorker_.sendDataToGameServer(ap.dump() + "\n");
+                                }
+                            }
+                            catch (...)
+                            {
+                            }
                         }
                     }
                 }

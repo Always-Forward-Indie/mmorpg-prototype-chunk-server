@@ -181,9 +181,12 @@ class Event
         UPDATE_NPC_AMBIENT_POOLS, ///< Chunk-server re-filters ambient pools and pushes update to a client
 
         // ── World Interactive Objects (migration 043) ────────────────────────
-        SET_ALL_WORLD_OBJECTS,      ///< Game-server pushes all world object definitions to chunk-server
-        WORLD_OBJECT_INTERACT,      ///< Client requests interaction with a world object
-        WORLD_OBJECT_CHANNEL_CANCEL ///< Client cancels an in-progress channeled interaction
+        SET_ALL_WORLD_OBJECTS,       ///< Game-server pushes all world object definitions to chunk-server
+        WORLD_OBJECT_INTERACT,       ///< Client requests interaction with a world object
+        WORLD_OBJECT_CHANNEL_CANCEL, ///< Client cancels an in-progress channeled interaction
+
+        // ── Analytics system (migration 058) ──────────────────────────────
+        SEND_ANALYTICS_EVENT ///< Chunk-server forwards a game analytics event to game-server for DB persistence
     }; // Define more event types as needed
 
     Event() = default; // Default constructor
