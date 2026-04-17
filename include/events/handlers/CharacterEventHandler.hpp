@@ -12,6 +12,7 @@ class NPCEventHandler;
 class ItemEventHandler;
 class MobEventHandler;
 class EquipmentEventHandler;
+class WorldObjectEventHandler;
 
 /**
  * @brief Structure to hold pending join requests
@@ -66,6 +67,11 @@ class CharacterEventHandler : public BaseEventHandler
      * @brief Set equipment event handler for broadcasting equipment updates on join
      */
     void setEquipmentEventHandler(EquipmentEventHandler *equipmentEventHandler);
+
+    /**
+     * @brief Set world-object event handler for sending WIO data on join
+     */
+    void setWorldObjectEventHandler(WorldObjectEventHandler *worldObjectEventHandler);
 
     /**
      * @brief Handle character join event
@@ -252,6 +258,9 @@ class CharacterEventHandler : public BaseEventHandler
 
     // Reference to equipment event handler for broadcasting equipment on player join
     EquipmentEventHandler *equipmentEventHandler_;
+
+    // Reference to world-object event handler for sending WIO data on player join
+    WorldObjectEventHandler *worldObjectEventHandler_{nullptr};
 
     // Last known GameZone id per characterId — used to detect zone transitions
     std::unordered_map<int, int> lastZoneByCharacter_;

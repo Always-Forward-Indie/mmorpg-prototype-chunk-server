@@ -215,6 +215,14 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handleUseEmote(context, socket);
     }
+    else if (context.eventType == "worldObjectInteract")
+    {
+        handleWorldObjectInteract(context, socket);
+    }
+    else if (context.eventType == "worldObjectChannelCancel")
+    {
+        handleWorldObjectChannelCancel(context, socket);
+    }
     else
     {
         log_->error("Unknown event type: " + context.eventType);
@@ -2033,4 +2041,71 @@ EventDispatcher::handleUseEmote(const EventContext &context,
         context.clientData.clientId,
         req,
         context.timestamps));
+}
+
+// ── worldObjectInteract ───────────────────────────────────────────────────────
+void
+EventDispatcher::handleWorldObjectInteract(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+    {
+        log_->warn("[EventDispatcher] worldObjectInteract: invalid character");
+        return;
+    }
+
+    try
+    {
+        const auto &json = nlohmann::json::parse(context.fullMessage);
+        const int objectId = json.value("body", nlohmann::json::object()).value("objectId", 0);
+        if (objectId <= 0)
+        {
+            log_->warn("[EventDispatcher] worldObjectInteract: missing objectId");
+            return;
+        }
+
+        WorldObjectInteractRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.objectId = objectId;
+        req.playerPosition = context.characterData.characterPosition;
+        req.timestamps = context.timestamps;
+
+        eventsBatch_.push_back(Event(Event::WORLD_OBJECT_INTERACT,
+            context.clientData.clientId,
+            req,
+            context.timestamps));
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[EventDispatcher] worldObjectInteract parse error: {}", ex.what());
+    }
+}
+
+// ── worldObjectChannelCancel ──────────────────────────────────────────────────
+void
+EventDispatcher::handleWorldObjectChannelCancel(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+    {
+        log_->warn("[EventDispatcher] worldObjectChannelCancel: invalid character");
+        return;
+    }
+
+    try
+    {
+        const auto &json = nlohmann::json::parse(context.fullMessage);
+        const int objectId = json.value("body", nlohmann::json::object()).value("objectId", 0);
+
+        WorldObjectChannelCancelStruct req;
+        req.characterId = context.characterData.characterId;
+        req.objectId = objectId;
+
+        eventsBatch_.push_back(Event(Event::WORLD_OBJECT_CHANNEL_CANCEL,
+            context.clientData.clientId,
+            req,
+            context.timestamps));
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[EventDispatcher] worldObjectChannelCancel parse error: {}", ex.what());
+    }
 }

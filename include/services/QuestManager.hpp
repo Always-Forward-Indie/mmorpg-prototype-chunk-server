@@ -97,6 +97,7 @@ class QuestManager
     void onItemObtained(int characterId, int itemId, int quantity);
     void onNPCTalked(int characterId, int npcId);
     void onPositionReached(int characterId, float x, float y);
+    void onWorldObjectInteracted(int characterId, int objectId);
 
     // === Flag helpers ===
 

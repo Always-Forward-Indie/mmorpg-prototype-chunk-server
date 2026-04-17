@@ -80,6 +80,29 @@ DialogueConditionEvaluator::evaluateRule(const nlohmann::json &rule,
         return evaluateSkillNotLearned(rule, ctx);
     if (type == "class")
         return evaluateClass(rule, ctx);
+    if (type == "object_state")
+    {
+        // {"type":"object_state","object_id":N,"state":"depleted"}
+        // Checks the runtime state of a WIO global-scope object against the expected value.
+        // Per-player state is not accessible here; use flag["wio_interacted_<id>"] instead.
+        int objId = rule.value("object_id", 0);
+        std::string expectedState = rule.value("state", "active");
+        if (objId <= 0)
+            return true;
+        // GameServices pointer not available from a static method — we use the flag approach:
+        // The EventHandler sets flag "wio_state_<id>" if a broadcast was received.
+        // Fallback: always pass if no runtime data is available.
+        const std::string flagKey = "wio_state_" + std::to_string(objId);
+        auto it = ctx.flagsInt.find(flagKey);
+        if (it == ctx.flagsInt.end())
+            return true; // no data → permissive
+        // Encode: 0=active, 1=depleted, 2=disabled
+        static const std::unordered_map<std::string, int> stateCode = {
+            {"active", 0}, {"depleted", 1}, {"disabled", 2}};
+        auto ec = stateCode.find(expectedState);
+        int expected = (ec != stateCode.end()) ? ec->second : 0;
+        return it->second == expected;
+    }
 
     // Unknown rule type → permissive
     return true;

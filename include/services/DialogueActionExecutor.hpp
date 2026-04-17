@@ -34,12 +34,21 @@ class DialogueActionExecutor
   public:
     DialogueActionExecutor(GameServices &services, Logger &logger);
 
+    struct ObjectStateBroadcast
+    {
+        int objectId;
+        std::string state;
+        int respawnSec{0};
+    };
+
     struct ActionResult
     {
         /// JSON notifications to forward to the client (DIALOGUE_ACTION_RESULT body)
         std::vector<nlohmann::json> clientNotifications;
         /// JSON packet strings to send to the game server (e.g. saveLearnedSkill)
         std::vector<std::string> pendingGameServerPackets;
+        /// World-object state broadcasts to dispatch after dialogue processing
+        std::vector<ObjectStateBroadcast> pendingObjectStateBroadcasts;
     };
 
     /**
@@ -129,6 +138,13 @@ class DialogueActionExecutor
     // {"type":"learn_skill","skill_slug":"shield_bash","sp_cost":1,"gold_cost":500,
     //  "requires_book":true,"book_item_id":18}
     void executeLearnSkill(const nlohmann::json &action,
+        int characterId,
+        int clientId,
+        PlayerContextStruct &ctx,
+        ActionResult &result);
+
+    /// set_object_state: {"type":"set_object_state","object_id":N,"state":"depleted|active|disabled"}
+    void executeSetObjectState(const nlohmann::json &action,
         int characterId,
         int clientId,
         PlayerContextStruct &ctx,

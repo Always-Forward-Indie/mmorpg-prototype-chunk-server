@@ -28,6 +28,7 @@ EventHandler::EventHandler(
     equipmentEventHandler_ = std::make_unique<EquipmentEventHandler>(networkManager, gameServerWorker, gameServices);
     chatEventHandler_ = std::make_unique<ChatEventHandler>(networkManager, gameServerWorker, gameServices);
     emoteEventHandler_ = std::make_unique<EmoteEventHandler>(networkManager, gameServerWorker, gameServices);
+    worldObjectEventHandler_ = std::make_unique<WorldObjectEventHandler>(networkManager, gameServerWorker, gameServices);
 
     // Set skill event handler reference in character event handler
     characterEventHandler_->setSkillEventHandler(skillEventHandler_.get());
@@ -45,6 +46,7 @@ EventHandler::EventHandler(
     // equipment to all existing clients (covers the race where inventory arrives
     // before playerReady and the EventHandler guard skips the broadcast).
     characterEventHandler_->setEquipmentEventHandler(equipmentEventHandler_.get());
+    characterEventHandler_->setWorldObjectEventHandler(worldObjectEventHandler_.get());
 }
 
 void
@@ -379,6 +381,20 @@ EventHandler::dispatchEvent(const Event &event)
             npcEventHandler_->handleSetNPCAmbientSpeechEvent(event);
             break;
 
+        // ── World Interactive Objects (migration 043) ─────────────────────────
+        case Event::SET_ALL_WORLD_OBJECTS:
+            if (worldObjectEventHandler_)
+                worldObjectEventHandler_->handleSetAllWorldObjectsEvent(event);
+            break;
+        case Event::WORLD_OBJECT_INTERACT:
+            if (worldObjectEventHandler_)
+                worldObjectEventHandler_->handleInteractEvent(event);
+            break;
+        case Event::WORLD_OBJECT_CHANNEL_CANCEL:
+            if (worldObjectEventHandler_)
+                worldObjectEventHandler_->handleChannelCancelEvent(event);
+            break;
+
         // Skill system
         case Event::SET_LEARNED_SKILL:
             handleSetLearnedSkillEvent(event);
@@ -533,6 +549,12 @@ ChatEventHandler &
 EventHandler::getChatEventHandler()
 {
     return *chatEventHandler_;
+}
+
+WorldObjectEventHandler &
+EventHandler::getWorldObjectEventHandler()
+{
+    return *worldObjectEventHandler_;
 }
 
 void

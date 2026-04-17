@@ -36,6 +36,7 @@
 #include "services/TradeSessionManager.hpp"
 #include "services/TrainerManager.hpp"
 #include "services/VendorManager.hpp"
+#include "services/WorldObjectManager.hpp"
 #include "services/ZoneEventManager.hpp"
 #include "utils/Logger.hpp"
 
@@ -82,7 +83,8 @@ class GameServices
           titleManager_(this),
           zoneEventManager_(this),
           emoteManager_(this),
-          ambientSpeechManager_()
+          ambientSpeechManager_(),
+          worldObjectManager_(logger_)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
@@ -253,6 +255,10 @@ class GameServices
     {
         return ambientSpeechManager_;
     }
+    WorldObjectManager &getWorldObjectManager()
+    {
+        return worldObjectManager_;
+    }
 
   private:
     Logger &logger_;
@@ -293,4 +299,5 @@ class GameServices
     ZoneEventManager zoneEventManager_;
     EmoteManager emoteManager_;
     AmbientSpeechManager ambientSpeechManager_;
+    WorldObjectManager worldObjectManager_;
 };

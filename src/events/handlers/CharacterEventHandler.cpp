@@ -4,6 +4,7 @@
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/handlers/MobEventHandler.hpp"
 #include "events/handlers/NPCEventHandler.hpp"
+#include "events/handlers/WorldObjectEventHandler.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <algorithm>
 #include <cmath>
@@ -51,6 +52,12 @@ void
 CharacterEventHandler::setEquipmentEventHandler(EquipmentEventHandler *equipmentEventHandler)
 {
     equipmentEventHandler_ = equipmentEventHandler;
+}
+
+void
+CharacterEventHandler::setWorldObjectEventHandler(WorldObjectEventHandler *worldObjectEventHandler)
+{
+    worldObjectEventHandler_ = worldObjectEventHandler;
 }
 
 bool
@@ -923,6 +930,15 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     // screen is dismissed) and the client may ignore/miss it.  Sending again here
     // guarantees the player sees their equipped title as soon as they enter the world.
     gameServices_.getTitleManager().sendTitleUpdateToClient(characterId);
+
+    // 7. Send all world-interactive objects in this zone to the newly joined client.
+    if (worldObjectEventHandler_)
+    {
+        const auto charData = gameServices_.getCharacterManager().getCharacterById(characterId);
+        const auto zone = gameServices_.getGameZoneManager().getZoneForPosition(charData.characterPosition);
+        const int zoneId = zone.has_value() ? zone->id : 0;
+        worldObjectEventHandler_->sendWorldObjectsToClient(clientID, zoneId);
+    }
 
     // Acknowledge receipt so client can hide the loading screen / enable input
     nlohmann::json ack = ResponseBuilder()

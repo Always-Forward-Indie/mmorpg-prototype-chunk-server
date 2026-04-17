@@ -1,3 +1,33 @@
+v0.2.13
+16.04.2026
+================
+New:
+
+**WIO — World Interactive Objects (полная система).**
+- `WorldObjectDataStruct` — новая структура данных: `id`, `slug`, `nameKey`, `objectType`, `scope`, `position`, `rotZ`, `zoneId`, `dialogueId`, `lootTableId`, `requiredItemId`, `interactionRadius`, `channelTimeSec`, `respawnSec`, `isActiveByDefault`, `minLevel`, `conditionGroup`. Mesh binding выполняется на клиенте по `slug` — поле `meshId` в протоколе отсутствует.
+- `WorldObjectInstanceStruct` — runtime-состояние глобального объекта (`objectId`, `state`, `respawnSec`, `depletedAt`). Хранится в памяти chunk-сервера.
+- `WorldObjectManager` — новый сервис (shared_mutex): `setWorldObjects()`, `getObjectById()`, `getObjectsInZone()`, `getAllObjects()`. Глобальное состояние: `getGlobalState()`, `depleteGlobalObject()`, `setGlobalState()`. Respawn-тик: `tickRespawns()` — возвращает id объектов, вернувшихся в `active`. Канальные сессии: `startChannelSession()`, `getChannelProgress()`, `pollCompletedChannels()`, `removeChannelSession()`.
+- `WorldObjectEventHandler` — новый обработчик событий:
+  - `handleSetAllWorldObjectsEvent` — принимает от game-сервера вектор `WorldObjectDataStruct`, передаёт в `WorldObjectManager::setWorldObjects()`.
+  - `handleInteractEvent` (`WORLD_OBJECT_INTERACT`) — полная цепочка валидации: range check (радиус × 1.25), level check, condition_group через `DialogueConditionEvaluator`, проверка глобального состояния (`depleted`/`disabled`), проверка per-player флага `wio_interacted_<id>`. Роутинг по `objectType` на пять type-хендлеров.
+  - `handleChannelCancelEvent` — отменяет текущую канальную сессию персонажа.
+  - `sendWorldObjectsToClient` — отправляет клиенту пакет `spawnWorldObjects` с массивом объектов зоны (или всех).
+  - `broadcastStateUpdate` — рассылает всем клиентам пакет `worldObjectStateUpdate`.
+  - `tick()` — вызывается из игрового цикла: завершение канальных сессий + respawn depleted-объектов со сменой состояния и броадкастом.
+- Пять type-handler функций:
+  - `processExamine` — открывает диалоговое дерево через `DialogueSessionManager` (npcId = `-objectId`).
+  - `processSearch` — роллит лут через `ItemManager::getLootForMob(lootTableId)`, добавляет в инвентарь, истощает объект.
+  - `processActivate` — переключает состояние объекта без диалога/лута.
+  - `processUseWithItem` — проверяет наличие `requiredItemId` в инвентаре перед активацией.
+  - `processChanneledStart` / `completeChannel` — запускает/завершает канальную сессию; при завершении выполняет логику `search`-типа.
+- Квест-интеграция: `QuestManager::onWorldObjectInteracted(characterId, objectId)` вызывается после каждого успешного взаимодействия — продвигает шаги квеста типа `interact_object`.
+- Все взаимодействия нотифицируют клиента через `worldObjectInteractResult` с полями `objectId`, `success`, `errorCode`, `interactionType`, `channelTimeSec`.
+
+Improvements:
+- `CMakeLists.txt` — добавлены `WorldObjectEventHandler.cpp` и `WorldObjectManager.cpp` в список исходников.
+
+---
+
 v0.2.12
 17.04.2026
 ================

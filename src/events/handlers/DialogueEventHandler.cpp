@@ -506,6 +506,23 @@ DialogueEventHandler::handleDialogueChoiceEvent(const Event &event)
             // Forward any pending game-server packets (e.g. saveLearnedSkill)
             for (const auto &pkt : result.pendingGameServerPackets)
                 gameServerWorker_.sendDataToGameServer(pkt);
+
+            // Broadcast any world-object state changes triggered by dialogue actions
+            for (const auto &b : result.pendingObjectStateBroadcasts)
+            {
+                ResponseBuilder br;
+                auto bResp = br.setHeader("eventType", "worldObjectStateUpdate")
+                                 .setHeader("clientId", 0)
+                                 .setBody("objectId", b.objectId)
+                                 .setBody("state", b.state)
+                                 .setBody("respawnSec", b.respawnSec)
+                                 .build();
+                const std::string bMsg = networkManager_.generateResponseMessage("success", bResp);
+                const auto sockets = gameServices_.getClientManager().getActiveSockets(-1);
+                for (const auto &s : sockets)
+                    if (s)
+                        networkManager_.sendResponse(s, bMsg);
+            }
         }
 
         // Move to next node
@@ -670,6 +687,23 @@ DialogueEventHandler::traverseToInteractiveNode(
             // Forward any pending game-server packets (e.g. saveLearnedSkill)
             for (const auto &pkt : result.pendingGameServerPackets)
                 gameServerWorker_.sendDataToGameServer(pkt);
+
+            // Broadcast any world-object state changes triggered by dialogue actions
+            for (const auto &b : result.pendingObjectStateBroadcasts)
+            {
+                ResponseBuilder br;
+                auto bResp = br.setHeader("eventType", "worldObjectStateUpdate")
+                                 .setHeader("clientId", 0)
+                                 .setBody("objectId", b.objectId)
+                                 .setBody("state", b.state)
+                                 .setBody("respawnSec", b.respawnSec)
+                                 .build();
+                const std::string bMsg = networkManager_.generateResponseMessage("success", bResp);
+                const auto sockets = gameServices_.getClientManager().getActiveSockets(-1);
+                for (const auto &s : sockets)
+                    if (s)
+                        networkManager_.sendResponse(s, bMsg);
+            }
         }
 
         // Jump node: move to target

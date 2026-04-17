@@ -1758,3 +1758,57 @@ struct NPCAmbientSpeechConfigStruct
     int maxIntervalSec = 60;
     std::vector<NPCAmbientLineStruct> lines;
 };
+
+// ============= WORLD INTERACTIVE OBJECTS (migration 043) =================
+
+/// Static definition received from game-server via setWorldObjects packet.
+struct WorldObjectDataStruct
+{
+    int id = 0;
+    std::string slug = "";
+    std::string nameKey = "";         ///< Localisation key forwarded to client
+    std::string objectType = "";      ///< "examine" | "search" | "activate" | "use_with_item" | "channeled"
+    std::string scope = "per_player"; ///< "per_player" | "global"
+    PositionStruct position;
+    int zoneId = 0;
+    int dialogueId = 0;     ///< 0 = no dialogue
+    int lootTableId = 0;    ///< 0 = no loot
+    int requiredItemId = 0; ///< 0 = no required item
+    float interactionRadius = 250.0f;
+    int channelTimeSec = 0; ///< 0 = instant
+    int respawnSec = 0;     ///< 0 = never respawns
+    bool isActiveByDefault = true;
+    int minLevel = 0;
+    nlohmann::json conditionGroup;       ///< null = no conditions
+    std::string initialState = "active"; ///< state read from DB at startup
+
+    bool operator==(const WorldObjectDataStruct &other) const
+    {
+        return id == other.id;
+    }
+};
+
+/// Runtime global instance state (only for scope="global" objects).
+struct WorldObjectInstanceStruct
+{
+    int objectId = 0;
+    std::string state = "active"; ///< "active" | "depleted" | "disabled"
+    std::chrono::steady_clock::time_point depletedAt{};
+    int respawnSec = 0;
+};
+
+/// Sent by client to request interaction with a world object.
+struct WorldObjectInteractRequestStruct
+{
+    int characterId = 0;
+    int objectId = 0;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
+/// Sent by client to cancel an in-progress channeled interaction.
+struct WorldObjectChannelCancelStruct
+{
+    int characterId = 0;
+    int objectId = 0;
+};

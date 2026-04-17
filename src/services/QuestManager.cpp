@@ -665,6 +665,50 @@ QuestManager::onPositionReached(int characterId, float x, float y)
     }
 }
 
+void
+QuestManager::onWorldObjectInteracted(int characterId, int objectId)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto pit = playerProgress_.find(characterId);
+    if (pit == playerProgress_.end())
+        return;
+
+    for (auto &[questId, pq] : pit->second)
+    {
+        if (pq.state != "active")
+            continue;
+
+        auto qit = questsById_.find(questId);
+        if (qit == questsById_.end())
+            continue;
+        const QuestStruct &quest = *qit->second;
+
+        if (static_cast<int>(quest.steps.size()) <= pq.currentStep)
+            continue;
+        const QuestStepStruct &step = quest.steps[pq.currentStep];
+
+        if (step.stepType != "interact")
+            continue;
+
+        int requiredObjectId = step.params.value("object_id", -1);
+        if (requiredObjectId != objectId)
+            continue;
+
+        int required = step.params.value("count", 1);
+        int current = pq.progress.value("interacted", 0);
+        if (current < required)
+        {
+            pq.progress["interacted"] = current + 1;
+            pq.isDirty = true;
+            pq.updatedAt = std::chrono::steady_clock::now();
+
+            sendQuestUpdate(characterId, pq, quest);
+            checkStepCompletion(characterId, pq);
+        }
+    }
+}
+
 // =============================================================================
 // Internal helpers
 // =============================================================================

@@ -182,4 +182,8 @@ using EventData = std::variant<
     UseEmoteRequestStruct,
     std::vector<EmoteDefinitionStruct>,
     // NPC Ambient Speech payloads
-    std::vector<NPCAmbientSpeechConfigStruct>>;
+    std::vector<NPCAmbientSpeechConfigStruct>,
+    // World Interactive Objects payloads (migration 043)
+    std::vector<WorldObjectDataStruct>,
+    WorldObjectInteractRequestStruct,
+    WorldObjectChannelCancelStruct>;

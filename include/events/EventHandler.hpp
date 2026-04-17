@@ -17,6 +17,7 @@
 #include "events/handlers/NPCEventHandler.hpp"
 #include "events/handlers/SkillEventHandler.hpp"
 #include "events/handlers/VendorEventHandler.hpp"
+#include "events/handlers/WorldObjectEventHandler.hpp"
 #include "events/handlers/ZoneEventHandler.hpp"
 #include "network/GameServerWorker.hpp"
 #include "network/NetworkManager.hpp"
@@ -88,6 +89,7 @@ class EventHandler
     VendorEventHandler &getVendorEventHandler();
     EquipmentEventHandler &getEquipmentEventHandler();
     ChatEventHandler &getChatEventHandler();
+    WorldObjectEventHandler &getWorldObjectEventHandler();
 
   private:
     /**
@@ -143,6 +145,7 @@ class EventHandler
     std::unique_ptr<EquipmentEventHandler> equipmentEventHandler_;
     std::unique_ptr<ChatEventHandler> chatEventHandler_;
     std::unique_ptr<EmoteEventHandler> emoteEventHandler_;
+    std::unique_ptr<WorldObjectEventHandler> worldObjectEventHandler_;
 
     // References for logging and error handling
     NetworkManager &networkManager_;

@@ -66,6 +66,7 @@ set(SOURCE_FILES
     src/services/EmoteManager.cpp
     src/services/AmbientSpeechManager.cpp
     src/services/ZoneEventManager.cpp
+    src/services/WorldObjectManager.cpp
     src/network/GameServerWorker.cpp
     src/network/NetworkManager.cpp
     src/network/ClientSession.cpp
@@ -89,6 +90,7 @@ set(SOURCE_FILES
     src/events/handlers/EquipmentEventHandler.cpp
     src/events/handlers/ChatEventHandler.cpp
     src/events/handlers/EmoteEventHandler.cpp
+    src/events/handlers/WorldObjectEventHandler.cpp
     src/events/ExperienceEventHandler.cpp
     src/data/AttackSystem.cpp
     src/utils/Scheduler.cpp

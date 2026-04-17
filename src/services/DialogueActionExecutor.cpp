@@ -82,6 +82,8 @@ DialogueActionExecutor::executeDispatch(const nlohmann::json &action, const std:
         executeChangeReputation(action, characterId, ctx, result);
     else if (type == "learn_skill")
         executeLearnSkill(action, characterId, clientId, ctx, result);
+    else if (type == "set_object_state")
+        executeSetObjectState(action, characterId, clientId, ctx, result);
     else
         log_->info("[DialogueAction] Unknown action type: " + type);
 }
@@ -601,4 +603,37 @@ DialogueActionExecutor::executeLearnSkill(const nlohmann::json &action,
         skillSlug,
         spCost,
         goldCost);
+}
+
+void
+DialogueActionExecutor::executeSetObjectState(const nlohmann::json &action,
+    int /*characterId*/,
+    int /*clientId*/,
+    PlayerContextStruct &ctx,
+    ActionResult &result)
+{
+    int objectId = action.value("object_id", 0);
+    if (objectId <= 0)
+    {
+        log_->warn("[DialogueAction] set_object_state: missing object_id");
+        return;
+    }
+
+    const std::string newState = action.value("state", "active");
+
+    // Update WorldObjectManager global state
+    services_.getWorldObjectManager().setGlobalState(objectId, newState);
+
+    // Encode state into the player context flagsInt so that subsequent
+    // object_state conditions within the same dialogue can see the change.
+    static const std::unordered_map<std::string, int> stateCode = {
+        {"active", 0}, {"depleted", 1}, {"disabled", 2}};
+    auto it = stateCode.find(newState);
+    ctx.flagsInt["wio_state_" + std::to_string(objectId)] = (it != stateCode.end()) ? it->second : 0;
+
+    log_->info("[DialogueAction] set_object_state: objectId={} → {}", objectId, newState);
+
+    // Queue a broadcast so the calling DialogueEventHandler can push
+    // worldObjectStateUpdate to all connected clients.
+    result.pendingObjectStateBroadcasts.push_back({objectId, newState, 0});
 }

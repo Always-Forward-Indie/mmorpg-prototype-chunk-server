@@ -68,6 +68,9 @@ class EventDispatcher
     void handleSetSkillBarSlot(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     // Emote system (client → chunk)
     void handleUseEmote(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // World Interactive Objects (client → chunk, migration 043)
+    void handleWorldObjectInteract(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleWorldObjectChannelCancel(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;
