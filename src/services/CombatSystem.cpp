@@ -258,7 +258,45 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         action->casterId = casterId;
         action->targetId = targetId;
         action->skillSlug = skillSlug; // Сохраняем оригинальный slug для выполнения
-        action->castTime = static_cast<float>(skill.castMs) / 1000.0f;
+
+        // ── Apply attack_speed / cast_speed modifier ─────────────────────────
+        // Formula: effectiveMs = baseMs / (1 + speed_stat / divisor)
+        // For castMs > 0 (spells): use cast_speed
+        // For castMs == 0 (melee/instant): use attack_speed on swingMs
+        float speedFactor = 1.0f;
+        {
+            auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
+            if (casterData.characterId != 0)
+            {
+                auto &gameCfg = gameServices_->getGameConfigService();
+                if (skill.castMs > 0)
+                {
+                    int castSpd = 0;
+                    for (const auto &a : casterData.attributes)
+                        if (a.slug == "cast_speed")
+                        {
+                            castSpd = a.value;
+                            break;
+                        }
+                    float divisor = gameCfg.getFloat("combat.cast_speed_base_divisor", 100.0f);
+                    speedFactor = 1.0f / (1.0f + static_cast<float>(castSpd) / divisor);
+                }
+                else
+                {
+                    int atkSpd = 0;
+                    for (const auto &a : casterData.attributes)
+                        if (a.slug == "attack_speed")
+                        {
+                            atkSpd = a.value;
+                            break;
+                        }
+                    float divisor = gameCfg.getFloat("combat.attack_speed_base_divisor", 100.0f);
+                    speedFactor = 1.0f / (1.0f + static_cast<float>(atkSpd) / divisor);
+                }
+            }
+        }
+
+        action->castTime = static_cast<float>(skill.castMs) / 1000.0f * speedFactor;
         // Skills with castMs > 0 are deferred (CASTING); castMs == 0 are instant.
         action->state = (skill.castMs > 0) ? CombatActionState::CASTING : CombatActionState::EXECUTING;
         action->startTime = std::chrono::steady_clock::now();
@@ -266,7 +304,7 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         // executeSkillUsage (called later by updateOngoingActions) skips the
         // duplicate cooldown check inside useSkill.
         action->cooldownPreset = true;
-        float kSwing = static_cast<float>(skill.swingMs) / 1000.0f;
+        float kSwing = static_cast<float>(skill.swingMs) / 1000.0f * speedFactor;
 
         action->animationName = skill.animationName.empty() ? "skill_" + skillSlug : skill.animationName;
         {
@@ -275,8 +313,10 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
             action->animationDuration = action->castTime + kSwing;
         }
 
-        // Fire the result at the exact end of castMs. castMs == 0 fires immediately.
-        action->endTime = action->startTime + std::chrono::milliseconds(skill.castMs - skill.swingMs);
+        // Fire the result at the exact end of effective cast time.
+        int effectiveCastMs = static_cast<int>(skill.castMs * speedFactor);
+        int effectiveSwingMs = static_cast<int>(skill.swingMs * speedFactor);
+        action->endTime = action->startTime + std::chrono::milliseconds(effectiveCastMs - effectiveSwingMs);
 
         // Сохраняем ongoing action
         {

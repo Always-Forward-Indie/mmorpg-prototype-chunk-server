@@ -733,8 +733,20 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                         {
                             const SkillStruct &chosen = *chosenOpt;
                             movementData.pendingSkillSlug = chosen.skillSlug;
-                            movementData.attackPrepareTime = static_cast<float>(chosen.castMs) / 1000.0f;
-                            movementData.attackDuration = static_cast<float>(chosen.swingMs) / 1000.0f;
+
+                            // Apply mob attack_speed / cast_speed modifier
+                            float mobSpeedFactor = 1.0f;
+                            {
+                                const char *speedSlug = (chosen.castMs > 0) ? "cast_speed" : "attack_speed";
+                                for (const auto &a : mob.attributes)
+                                    if (a.slug == speedSlug)
+                                    {
+                                        mobSpeedFactor = 1.0f / (1.0f + static_cast<float>(a.value) / 100.0f);
+                                        break;
+                                    }
+                            }
+                            movementData.attackPrepareTime = static_cast<float>(chosen.castMs) / 1000.0f * mobSpeedFactor;
+                            movementData.attackDuration = static_cast<float>(chosen.swingMs) / 1000.0f * mobSpeedFactor;
                             movementData.postAttackCooldown =
                                 static_cast<float>(std::max(chosen.cooldownMs, chosen.gcdMs)) / 1000.0f;
 

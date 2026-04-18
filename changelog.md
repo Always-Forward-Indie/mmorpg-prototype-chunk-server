@@ -1,3 +1,37 @@
+v0.2.15
+18.04.2026
+================
+New:
+
+**Stats System Overhaul — поддержка новых атрибутов и скоростного масштабирования.**
+- `docs/stats-system-design.md` — добавлен design document v3.0 системы статов: полный список 28 атрибутов (4 категории: Primary Stats, Derived Combat, Utility, Elemental Resistances), формула роста по уровню `stat = base_value + multiplier × level^exponent`, справочник удалённых атрибутов, таблицы балансировки для Mage/Warrior и мобов SmallFox/GreyWolf.
+- `docs/migrations/` — добавлены зеркала SQL-миграций для документации: `059_stats_system_overhaul.sql`, `060_clean_modifiers_prune_mobs.sql`.
+
+**CombatSystem — скоростной множитель для скилов (игроки).**
+- `CombatSystem::initiateSkillUsage` — добавлен расчёт `speedFactor` на основе атрибутов кастера перед установкой `castTime`/`swingMs`.
+  - Для скилов с `castMs > 0` (заклинания): читается атрибут `cast_speed`, делитель берётся из `combat.cast_speed_base_divisor` (default `100.0`).
+  - Для скилов с `castMs == 0` (мгновенные/мили): читается атрибут `attack_speed`, делитель из `combat.attack_speed_base_divisor` (default `100.0`).
+  - Формула: `speedFactor = 1.0 / (1.0 + speed / divisor)`. Значение `attack_speed=50` даёт `speedFactor≈0.667` → скилы на 33% быстрее.
+- `action->castTime`, `kSwing (swingMs)`, `effectiveCastMs`, `effectiveSwingMs` теперь умножаются на `speedFactor`.
+- `action->endTime` пересчитывается через `effectiveCastMs - effectiveSwingMs` (ранее использовались сырые значения из DB).
+
+**MobAIController — скоростной множитель для атак мобов.**
+- `updateMobCombatState` — при выборе скила для моба теперь вычисляется `mobSpeedFactor` аналогично логике игрока: читается `cast_speed` или `attack_speed` из `mob.attributes`, делитель 100.0 (хардкодирован — у мобов нет `GameConfigService`).
+- `movementData.attackPrepareTime` и `movementData.attackDuration` умножаются на `mobSpeedFactor`.
+
+Fixes:
+
+**CombatCalculator — унификация crit_multiplier как % и введение caps.**
+- `crit_multiplier` теперь хранится как проценты (`200 = x2.0`), а не как множитель (`2.0`). Формула: `scaledDamage = baseDamage * (critMultiplierPct / 100.0f)`. Применено к `calculateSkillDamage` (игроки) и `calculateMobSkillDamage` (мобы).
+- `cfg("combat.default_crit_multiplier")` изменён с `2.0` на `200.0` в соответствии с новой % семантикой.
+- `rollCriticalHit` (обе перегрузки: `CharacterAttributeStruct` / `MobAttributeStruct`) — добавлен cap: `effective = min(critChance, combat.crit_chance_cap)` (default `75.0f`). Предотвращает 100%-крит билды.
+- `rollBlock` — добавлен аналогичный cap: `effective = min(blockChance, combat.block_chance_cap)` (default `75.0f`). Предотвращает непробиваемые танк-билды.
+
+Other:
+- `TODO.md` — добавлено 2 задачи: запрет изучения/передачи скилов не своего класса у тренеров; учёт атрибутов персонажа (primary stats, weapon) в формулах урона и времени каста скилов.
+
+---
+
 v0.2.14
 17.04.2026
 ================

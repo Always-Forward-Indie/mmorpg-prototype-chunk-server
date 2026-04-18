@@ -94,10 +94,10 @@ CombatCalculator::calculateSkillDamage(
     result.isCritical = rollCriticalHit(effAtk);
     if (result.isCritical)
     {
-        float critMultiplier = static_cast<float>(getAttributeValue(effAtk, "crit_multiplier"));
-        if (critMultiplier <= 0.0f)
-            critMultiplier = cfg("combat.default_crit_multiplier", 2.0f);
-        result.scaledDamage = static_cast<int>(result.baseDamage * critMultiplier);
+        float critMultiplierPct = static_cast<float>(getAttributeValue(effAtk, "crit_multiplier"));
+        if (critMultiplierPct <= 0.0f)
+            critMultiplierPct = cfg("combat.default_crit_multiplier", 200.0f);
+        result.scaledDamage = static_cast<int>(result.baseDamage * (critMultiplierPct / 100.0f));
     }
     else
     {
@@ -172,10 +172,10 @@ CombatCalculator::calculateMobSkillDamage(
     result.isCritical = rollCriticalHit(attacker.attributes);
     if (result.isCritical)
     {
-        float critMultiplier = static_cast<float>(getAttributeValue(attacker.attributes, "crit_multiplier"));
-        if (critMultiplier <= 0.0f)
-            critMultiplier = cfg("combat.default_crit_multiplier", 2.0f);
-        result.scaledDamage = static_cast<int>(result.baseDamage * critMultiplier);
+        float critMultiplierPct = static_cast<float>(getAttributeValue(attacker.attributes, "crit_multiplier"));
+        if (critMultiplierPct <= 0.0f)
+            critMultiplierPct = cfg("combat.default_crit_multiplier", 200.0f);
+        result.scaledDamage = static_cast<int>(result.baseDamage * (critMultiplierPct / 100.0f));
     }
     else
     {
@@ -268,21 +268,27 @@ bool
 CombatCalculator::rollCriticalHit(const std::vector<CharacterAttributeStruct> &attackerAttributes)
 {
     int critChance = getAttributeValue(attackerAttributes, "crit_chance");
-    return dis_(gen_) < (critChance / 100.0f);
+    const float cap = cfg("combat.crit_chance_cap", 75.0f);
+    float effective = std::min(static_cast<float>(critChance), cap);
+    return dis_(gen_) < (effective / 100.0f);
 }
 
 bool
 CombatCalculator::rollCriticalHit(const std::vector<MobAttributeStruct> &attackerAttributes)
 {
     int critChance = getAttributeValue(attackerAttributes, "crit_chance");
-    return dis_(gen_) < (critChance / 100.0f);
+    const float cap = cfg("combat.crit_chance_cap", 75.0f);
+    float effective = std::min(static_cast<float>(critChance), cap);
+    return dis_(gen_) < (effective / 100.0f);
 }
 
 bool
 CombatCalculator::rollBlock(const std::vector<CharacterAttributeStruct> &targetAttributes)
 {
     int blockChance = getAttributeValue(targetAttributes, "block_chance");
-    return dis_(gen_) < (blockChance / 100.0f);
+    const float cap = cfg("combat.block_chance_cap", 75.0f);
+    float effective = std::min(static_cast<float>(blockChance), cap);
+    return dis_(gen_) < (effective / 100.0f);
 }
 
 bool
