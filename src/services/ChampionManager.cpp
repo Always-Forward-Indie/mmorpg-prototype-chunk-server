@@ -268,23 +268,22 @@ ChampionManager::spawnChampion(int mobTemplateId,
             base.zoneId = sz.zoneId;
         break;
     }
-}
-if (base.zoneId == 0)
-    base.zoneId = -1; // Fallback: not tracked by SpawnZoneManager
+    if (base.zoneId == 0)
+        base.zoneId = -1; // Fallback: not tracked by SpawnZoneManager
 
-gs_->getMobInstanceManager().registerMobInstance(base);
+    gs_->getMobInstanceManager().registerMobInstance(base);
 
-const int despawnMin = cfg.getInt("champion.despawn_minutes", 30);
-const auto now = std::chrono::steady_clock::now();
-{
-    std::lock_guard<std::mutex> lk(activeMutex_);
-    active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, now + std::chrono::minutes(despawnMin)});
-}
+    const int despawnMin = cfg.getInt("champion.despawn_minutes", 30);
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lk(activeMutex_);
+        active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, now + std::chrono::minutes(despawnMin)});
+    }
 
-broadcastToGameZone(gameZoneId, "champion_spawned", nlohmann::json{{"mobSlug", base.slug}, {"uid", base.uid}});
+    broadcastToGameZone(gameZoneId, "champion_spawned", nlohmann::json{{"mobSlug", base.slug}, {"uid", base.uid}});
 
-log_->info("[Champion] Spawned uid={} '{}' in gameZone={}", base.uid, base.name, gameZoneId);
-return base.uid;
+    log_->info("[Champion] Spawned uid={} '{}' in gameZone={}", base.uid, base.name, gameZoneId);
+    return base.uid;
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────

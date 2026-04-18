@@ -394,12 +394,31 @@ MobMovementManager::calculateNewPosition(
         maxY = zone.centerY + zone.outerRadius;
     }
 
-    // Check if mob is at border
+    // Check if mob is at border (shape-aware)
     float borderThreshold = std::max(maxX - minX, maxY - minY) * params.borderThresholdPercent;
-    bool atBorder = (mob.position.positionX <= minX + borderThreshold ||
-                     mob.position.positionX >= maxX - borderThreshold ||
-                     mob.position.positionY <= minY + borderThreshold ||
-                     mob.position.positionY >= maxY - borderThreshold);
+    bool atBorder;
+    if (zone.shape == ZoneShape::RECT)
+    {
+        atBorder = (mob.position.positionX <= minX + borderThreshold ||
+                    mob.position.positionX >= maxX - borderThreshold ||
+                    mob.position.positionY <= minY + borderThreshold ||
+                    mob.position.positionY >= maxY - borderThreshold);
+    }
+    else if (zone.shape == ZoneShape::CIRCLE)
+    {
+        float dx = mob.position.positionX - zone.centerX;
+        float dy = mob.position.positionY - zone.centerY;
+        float d = std::sqrt(dx * dx + dy * dy);
+        atBorder = (d >= zone.outerRadius - borderThreshold);
+    }
+    else // ANNULUS
+    {
+        float dx = mob.position.positionX - zone.centerX;
+        float dy = mob.position.positionY - zone.centerY;
+        float d = std::sqrt(dx * dx + dy * dy);
+        atBorder = (d >= zone.outerRadius - borderThreshold ||
+                    d <= zone.innerRadius + borderThreshold);
+    }
 
     // Initialize step multiplier if needed
     if (movementData.stepMultiplier == 0.0f)
@@ -455,20 +474,57 @@ MobMovementManager::calculateNewPosition(
             bool needNewWaypoint = !movementData.hasPatrolTarget || wpDist < 2.0f;
             if (needNewWaypoint)
             {
-                float innerMinX = minX + borderThreshold + 1.0f;
-                float innerMaxX = maxX - borderThreshold - 1.0f;
-                float innerMinY = minY + borderThreshold + 1.0f;
-                float innerMaxY = maxY - borderThreshold - 1.0f;
-
-                if (innerMaxX > innerMinX && innerMaxY > innerMinY)
+                bool waypointSet = false;
+                if (zone.shape == ZoneShape::CIRCLE)
                 {
-                    std::uniform_real_distribution<float> ptX(innerMinX, innerMaxX);
-                    std::uniform_real_distribution<float> ptY(innerMinY, innerMaxY);
-                    movementData.patrolTargetPoint.positionX = ptX(rng_);
-                    movementData.patrolTargetPoint.positionY = ptY(rng_);
+                    float safeRadius = zone.outerRadius - borderThreshold - 1.0f;
+                    if (safeRadius > 0.0f)
+                    {
+                        std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * static_cast<float>(M_PI));
+                        std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
+                        float angle = angleDist(rng_);
+                        float r = safeRadius * std::sqrt(unitDist(rng_));
+                        movementData.patrolTargetPoint.positionX = zone.centerX + r * std::cos(angle);
+                        movementData.patrolTargetPoint.positionY = zone.centerY + r * std::sin(angle);
+                        waypointSet = true;
+                    }
+                }
+                else if (zone.shape == ZoneShape::ANNULUS)
+                {
+                    float safeOuter = zone.outerRadius - borderThreshold - 1.0f;
+                    float safeInner = zone.innerRadius + borderThreshold + 1.0f;
+                    if (safeOuter > safeInner)
+                    {
+                        std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * static_cast<float>(M_PI));
+                        std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
+                        float angle = angleDist(rng_);
+                        float r2in = safeInner * safeInner;
+                        float r2out = safeOuter * safeOuter;
+                        float r = std::sqrt(r2in + unitDist(rng_) * (r2out - r2in));
+                        movementData.patrolTargetPoint.positionX = zone.centerX + r * std::cos(angle);
+                        movementData.patrolTargetPoint.positionY = zone.centerY + r * std::sin(angle);
+                        waypointSet = true;
+                    }
+                }
+                else // RECT
+                {
+                    float innerMinX = minX + borderThreshold + 1.0f;
+                    float innerMaxX = maxX - borderThreshold - 1.0f;
+                    float innerMinY = minY + borderThreshold + 1.0f;
+                    float innerMaxY = maxY - borderThreshold - 1.0f;
+                    if (innerMaxX > innerMinX && innerMaxY > innerMinY)
+                    {
+                        std::uniform_real_distribution<float> ptX(innerMinX, innerMaxX);
+                        std::uniform_real_distribution<float> ptY(innerMinY, innerMaxY);
+                        movementData.patrolTargetPoint.positionX = ptX(rng_);
+                        movementData.patrolTargetPoint.positionY = ptY(rng_);
+                        waypointSet = true;
+                    }
+                }
+                if (waypointSet)
+                {
                     movementData.hasPatrolTarget = true;
                     updateMobMovementData(mob.uid, movementData);
-                    // Recalculate direction vector to new waypoint
                     wpDX = movementData.patrolTargetPoint.positionX - mob.position.positionX;
                     wpDY = movementData.patrolTargetPoint.positionY - mob.position.positionY;
                 }

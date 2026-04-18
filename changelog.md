@@ -1,3 +1,14 @@
+v0.2.17
+18.04.2026
+================
+Fixes:
+
+**MobMovementManager — исправлено движение мобов в зонах CIRCLE и ANNULUS.**
+- `atBorder` — заменена RECT-based проверка на shape-aware: для `CIRCLE` вычисляется расстояние от центра `d = sqrt(dx²+dy²)`, граница при `d >= outerRadius - borderThreshold`; для `ANNULUS` — две границы: внешняя и внутренняя (`d <= innerRadius + borderThreshold`). Устраняет ситуацию, когда моб у диагональных точек окружности не распознавался как «у границы» и аварийный уход к центру не срабатывал.
+- Генерация patrol waypoint — заменена с inner-AABB на корректную shape-aware выборку: для `CIRCLE` — равномерно по диску радиуса `outerRadius - borderThreshold - 1`; для `ANNULUS` — равномерно по кольцу между `safeInner` и `safeOuter` через equal-area формулу `r = sqrt(r²_in + u*(r²_out - r²_in))`; для `RECT` — без изменений. Устраняет корневую причину зависания: waypoint-ы за пределами зоны вызывали отказ всех 8 ретраев `isValidPosition`, моб замирал.
+
+---
+
 v0.2.16
 18.04.2026
 ================
