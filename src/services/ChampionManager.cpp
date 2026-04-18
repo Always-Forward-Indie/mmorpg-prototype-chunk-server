@@ -258,34 +258,33 @@ ChampionManager::spawnChampion(int mobTemplateId,
     const auto spawnZones = gs_->getSpawnZoneManager().getMobSpawnZones();
     for (const auto &[szId, sz] : spawnZones)
     {
-        float cx = (sz.posX + sz.sizeX) * 0.5f;
-        float cy = (sz.posY + sz.sizeY) * 0.5f;
+        float cx = sz.centerX;
+        float cy = sz.centerY;
         PositionStruct c;
         c.positionX = cx;
         c.positionY = cy;
         auto gz = gs_->getGameZoneManager().getZoneForPosition(c);
         if (gz.has_value() && gz->id == gameZoneId)
-        {
             base.zoneId = sz.zoneId;
-            break;
-        }
+        break;
     }
-    if (base.zoneId == 0)
-        base.zoneId = -1; // Fallback: not tracked by SpawnZoneManager
+}
+if (base.zoneId == 0)
+    base.zoneId = -1; // Fallback: not tracked by SpawnZoneManager
 
-    gs_->getMobInstanceManager().registerMobInstance(base);
+gs_->getMobInstanceManager().registerMobInstance(base);
 
-    const int despawnMin = cfg.getInt("champion.despawn_minutes", 30);
-    const auto now = std::chrono::steady_clock::now();
-    {
-        std::lock_guard<std::mutex> lk(activeMutex_);
-        active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, now + std::chrono::minutes(despawnMin)});
-    }
+const int despawnMin = cfg.getInt("champion.despawn_minutes", 30);
+const auto now = std::chrono::steady_clock::now();
+{
+    std::lock_guard<std::mutex> lk(activeMutex_);
+    active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, now + std::chrono::minutes(despawnMin)});
+}
 
-    broadcastToGameZone(gameZoneId, "champion_spawned", nlohmann::json{{"mobSlug", base.slug}, {"uid", base.uid}});
+broadcastToGameZone(gameZoneId, "champion_spawned", nlohmann::json{{"mobSlug", base.slug}, {"uid", base.uid}});
 
-    log_->info("[Champion] Spawned uid={} '{}' in gameZone={}", base.uid, base.name, gameZoneId);
-    return base.uid;
+log_->info("[Champion] Spawned uid={} '{}' in gameZone={}", base.uid, base.name, gameZoneId);
+return base.uid;
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -399,8 +398,8 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
     std::vector<const SpawnZoneStruct *> candidates;
     for (const auto &[szId, sz] : spawnZones)
     {
-        float cx = (sz.posX + sz.sizeX) * 0.5f;
-        float cy = (sz.posY + sz.sizeY) * 0.5f;
+        float cx = sz.centerX;
+        float cy = sz.centerY;
         if (cx >= gz.minX && cx <= gz.maxX && cy >= gz.minY && cy <= gz.maxY)
             candidates.push_back(&sz);
     }
@@ -412,13 +411,37 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
         std::uniform_int_distribution<int> pick(0, static_cast<int>(candidates.size()) - 1);
         const SpawnZoneStruct &chosen = *candidates[pick(rng)];
 
-        std::uniform_real_distribution<float> distX(chosen.posX, chosen.sizeX);
-        std::uniform_real_distribution<float> distY(chosen.posY, chosen.sizeY);
-
         PositionStruct p;
-        p.positionX = distX(rng);
-        p.positionY = distY(rng);
         p.positionZ = 200.0f;
+
+        if (chosen.shape == ZoneShape::ANNULUS)
+        {
+            // Equal-area annulus sampling
+            std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
+            std::uniform_real_distribution<float> angleDist(0.0f, static_cast<float>(2.0 * M_PI));
+            float r2in = chosen.innerRadius * chosen.innerRadius;
+            float r2out = chosen.outerRadius * chosen.outerRadius;
+            float r = std::sqrt(r2in + unitDist(rng) * (r2out - r2in));
+            float angle = angleDist(rng);
+            p.positionX = chosen.centerX + r * std::cos(angle);
+            p.positionY = chosen.centerY + r * std::sin(angle);
+        }
+        else if (chosen.shape == ZoneShape::CIRCLE)
+        {
+            std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
+            std::uniform_real_distribution<float> angleDist(0.0f, static_cast<float>(2.0 * M_PI));
+            float r = chosen.outerRadius * std::sqrt(unitDist(rng));
+            float angle = angleDist(rng);
+            p.positionX = chosen.centerX + r * std::cos(angle);
+            p.positionY = chosen.centerY + r * std::sin(angle);
+        }
+        else
+        {
+            std::uniform_real_distribution<float> distX(chosen.minX, chosen.maxX);
+            std::uniform_real_distribution<float> distY(chosen.minY, chosen.maxY);
+            p.positionX = distX(rng);
+            p.positionY = distY(rng);
+        }
         return p;
     }
 

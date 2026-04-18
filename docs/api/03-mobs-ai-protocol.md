@@ -27,6 +27,7 @@
     "spawnZone": {
       "id": 1,
       "name": "Forest Clearing",
+      "shape": "RECT",
       "bounds": {
         "minX": 0.0,
         "maxX": 2000.0,
@@ -35,10 +36,15 @@
         "minZ": 0.0,
         "maxZ": 100.0
       },
-      "spawnMobId": 5,
-      "maxSpawnCount": 10,
+      "center": { "x": 1000.0, "y": 1000.0 },
+      "innerRadius": 0.0,
+      "outerRadius": 0.0,
+      "mobEntries": [
+        { "mobId": 5, "maxCount": 10 }
+      ],
+      "totalSpawnCount": 10,
       "spawnedMobsCount": 8,
-      "respawnTime": 30,
+      "respawnTimeSec": 30,
       "spawnEnabled": true
     },
     "mobs": [
@@ -106,12 +112,26 @@
 |------|-----|----------|
 | `id` | int | ID зоны |
 | `name` | string | Имя зоны |
-| `bounds` | object | AABB границы (minX, maxX, minY, maxY, minZ, maxZ) |
-| `spawnMobId` | int | Шаблон моба для спавна |
-| `maxSpawnCount` | int | Макс. число мобов |
-| `spawnedMobsCount` | int | Текущее число живых |
-| `respawnTime` | int | Интервал респавна (сек) |
+| `shape` | string | Форма зоны: `"RECT"` / `"CIRCLE"` / `"ANNULUS"` |
+| `bounds` | object | AABB границы (minX, maxX, minY, maxY, minZ, maxZ). Для RECT — фактические границы; для CIRCLE/ANNULUS — описывающий прямоугольник |
+| `center` | object | Центр зоны `{x, y}`. Для CIRCLE/ANNULUS — реальный центр; для RECT — геометрический центр AABB |
+| `innerRadius` | float | Внутренний радиус (только ANNULUS). Спавн запрещён ближе этого радиуса к центру |
+| `outerRadius` | float | Внешний радиус (CIRCLE и ANNULUS) |
+| `mobEntries` | array | Конфигурация мобов зоны (один элемент = одна строка spawn_zone_mobs) |
+| `mobEntries[].mobId` | int | Шаблонный ID моба |
+| `mobEntries[].maxCount` | int | Макс. число мобов этого типа в зоне |
+| `totalSpawnCount` | int | Суммарный лимит мобов (сумма `mobEntries[].maxCount`) |
+| `spawnedMobsCount` | int | Текущее число живых мобов всех типов |
+| `respawnTimeSec` | int | Минимальный интервал респавна среди всех типов (сек) |
 | `spawnEnabled` | bool | Спавн активен |
+
+#### Формы зон (shape)
+
+| shape | Границы | Алгоритм выбора позиции |
+|-------|---------|------------------------|
+| `RECT` | `bounds.minX/maxX/minY/maxY` | Равномерный случайный в прямоугольнике |
+| `CIRCLE` | `center` + `outerRadius` | `r = R·√u`, `θ = uniform [0, 2π)` |
+| `ANNULUS` | `center` + `innerRadius` + `outerRadius` | `r = √(r_in² + u·(r_out² - r_in²))`, `θ = uniform [0, 2π)` — кольцевая зона вокруг деревни/ориентира |
 
 ---
 

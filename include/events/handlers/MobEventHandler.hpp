@@ -137,12 +137,4 @@ class MobEventHandler : public BaseEventHandler
      * @return nlohmann::json Mob data in JSON format
      */
     nlohmann::json mobToJson(const MobDataStruct &mobData);
-
-    /**
-     * @brief Convert spawn zone data to JSON format
-     *
-     * @param spawnZoneData Spawn zone data structure
-     * @return nlohmann::json Spawn zone data in JSON format
-     */
-    nlohmann::json spawnZoneToJson(const SpawnZoneStruct &spawnZoneData);
 };

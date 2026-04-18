@@ -374,9 +374,9 @@ ChunkServer::mainEventLoopCH()
             {
                 gameServices_.getLogger().log("[DEBUG] Checking zone " + std::to_string(zone.second.zoneId) +
                                               " - spawnEnabled: " + (zone.second.spawnEnabled ? "true" : "false") +
-                                              ", spawnMobId: " + std::to_string(zone.second.spawnMobId));
+                                              ", hasSpawnConfig: " + (zone.second.hasSpawnConfig() ? "true" : "false"));
 
-                if (zone.second.spawnEnabled && zone.second.spawnMobId > 0)
+                if (zone.second.spawnEnabled && zone.second.hasSpawnConfig())
                 {
                     auto spawnedMobs = gameServices_.getSpawnZoneManager().spawnMobsInZone(zone.second.zoneId);
                     if (!spawnedMobs.empty())
@@ -423,12 +423,12 @@ ChunkServer::mainEventLoopCH()
             // go through all spawn zones and spawn mobs
             for (const auto &zone : spawnZones)
             {
-                if (zone.second.spawnEnabled && zone.second.spawnMobId > 0)
+                if (zone.second.spawnEnabled && zone.second.hasSpawnConfig())
                 {
                     // Check if zone needs mobs before attempting spawn
                     int currentMobCount = gameServices_.getMobInstanceManager().getAliveMobCountInZone(zone.second.zoneId);
 
-                    if (currentMobCount < zone.second.spawnCount)
+                    if (currentMobCount < zone.second.totalSpawnCount())
                     {
                         // Spawn mobs in this zone - only if needed
                         auto spawnedMobs = gameServices_.getSpawnZoneManager().spawnMobsInZone(zone.second.zoneId);
@@ -440,8 +440,7 @@ ChunkServer::mainEventLoopCH()
                             gameServices_.getLogger().log("[INFO] Spawned " + std::to_string(spawnedMobs.size()) +
                                                           " mobs in zone: " + std::to_string(zone.second.zoneId) +
                                                           " (total alive: " + std::to_string(currentMobCount + spawnedMobs.size()) + "/" +
-                                                          std::to_string(zone.second.spawnCount) + ")");
-
+                                                          std::to_string(zone.second.totalSpawnCount()) + ")");
                             // Send spawn zone updates to all connected clients - only when mobs actually spawned
                             sendSpawnEventsToClients(zone.second);
                         }
@@ -455,7 +454,7 @@ ChunkServer::mainEventLoopCH()
                         {
                             gameServices_.getLogger().log("[DEBUG] Zone " + std::to_string(zone.second.zoneId) +
                                                           " is full (" + std::to_string(currentMobCount) + "/" +
-                                                          std::to_string(zone.second.spawnCount) + ")");
+                                                          std::to_string(zone.second.totalSpawnCount()) + ")");
                             lastFullZoneLog = now;
                         }
                     }
@@ -463,7 +462,7 @@ ChunkServer::mainEventLoopCH()
                 else
                 {
                     log_->info("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
-                               " - spawn disabled or no mob ID set");
+                               " - spawn disabled or no mob entries");
                 }
             }
 
@@ -490,13 +489,13 @@ ChunkServer::mainEventLoopCH()
 
             for (const auto &zone : spawnZones)
             {
-                if (!zone.second.spawnEnabled || zone.second.spawnMobId <= 0)
+                if (!zone.second.spawnEnabled || !zone.second.hasSpawnConfig())
                     continue;
 
                 int currentMobCount = gameServices_.getMobInstanceManager().getAliveMobCountInZone(zone.second.zoneId);
 
                 // Only spawn if zone is not full
-                if (currentMobCount < zone.second.spawnCount)
+                if (currentMobCount < zone.second.totalSpawnCount())
                 {
                     auto spawnedMobs = gameServices_.getSpawnZoneManager().spawnMobsInZone(zone.second.zoneId);
 

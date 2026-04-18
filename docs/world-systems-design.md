@@ -160,7 +160,7 @@
 > **Заметка об архитектуре зон:**  
 > В БД существует три понятия:
 > - `zones` (id, slug, name, min_level, max_level, is_pvp, is_safe_zone, min_x, max_x, min_y, max_y, exploration_xp_reward) — ✅ смысловые игровые зоны. **С v036: AABB bounds добавлены, загружаются и отправляются на chunk server.**
-> - `spawn_zones` (posX/sizeX/posY/sizeY AABB) — зоны спавна мобов. Загружаются, используются.
+> - `spawn_zones` (RECT/CIRCLE/ANNULUS shapes, minX/maxX geometry + centerX/Y + radii) — зоны спавна мобов. Поддерживают несколько типов мобов через `spawn_zone_mobs`. Загружаются, используются.
 > - `respawn_zones` (x/y/z точка, zone_id → zones.id) — точки воскрешения.
 >
 > Для Exploration Rewards нужно: добавить bounds к таблице `zones` (миграция), загрузить их на game server и отправить на chunk server при старте. Chunk server уже имеет `ZoneBounds` helper struct для point-in-zone check.
@@ -482,7 +482,7 @@ if (mobData.isChampion)
 Для нахождения точки спавна в нужной game zone используется:
 
 1. Получить все spawn zones из `SpawnZoneManager::getMobSpawnZones()`
-2. Для каждой проверить: центр `((posX+sizeX)/2, (posY+sizeY)/2)` попадает в bounds `GameZoneStruct`
+2. Для каждой проверить: `SpawnZoneStruct::centerX/Y` попадает в bounds `GameZoneStruct`
 3. Из найденных — выбрать random spawn zone, взять случайную точку внутри её AABB
 4. Fallback: центр game zone bounds `((minX+maxX)/2, (minY+maxY)/2, 0.0f)`
 
@@ -846,7 +846,7 @@ ALTER TABLE mob_templates ADD COLUMN rare_spawn_condition VARCHAR(30) DEFAULT NU
 **Архитектурная заготовка для RareSpawnManager:**
 - `tickRareSpawns(bool isNight)` — вызывается ChunkServer при смене дня/ночи
   или периодически с передачей текущего `isNight` флага
-- Для каждого `SpawnZoneStruct::spawnMobId` с флагом `is_rare`:
+- Для каждого моба в `SpawnZoneStruct::mobEntries` с флагом `is_rare`:
   roll `rare_spawn_chance`, проверить `rare_spawn_condition`, если подходит → спавн
 - Инстанс редкого моба регистрируется через ChampionManager (если is_champion_type)
   или напрямую через `MobInstanceManager`

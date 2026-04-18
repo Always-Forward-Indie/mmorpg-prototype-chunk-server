@@ -634,15 +634,21 @@ Client: кастбар           HP бар↓  удар    cooldown   бег
     "spawnZone": {
       "id": 1,
       "name": "Forest Zone",
+      "shape": "RECT",
       "bounds": {
         "minX": 0.0, "maxX": 1000.0,
         "minY": 0.0, "maxY": 1000.0,
         "minZ": 0.0, "maxZ": 0.0
       },
-      "spawnMobId": 2,
-      "maxSpawnCount": 5,
+      "center": { "x": 500.0, "y": 500.0 },
+      "innerRadius": 0.0,
+      "outerRadius": 0.0,
+      "mobEntries": [
+        { "mobId": 2, "maxCount": 5 }
+      ],
+      "totalSpawnCount": 5,
       "spawnedMobsCount": 2,
-      "respawnTime": 30000,
+      "respawnTimeSec": 30,
       "spawnEnabled": true
     },
     "mobs": [

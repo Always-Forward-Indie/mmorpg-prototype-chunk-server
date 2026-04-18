@@ -512,23 +512,81 @@ struct MobDataStruct
     }
 };
 
+/// Shape of a spawn zone boundary.
+enum class ZoneShape : uint8_t
+{
+    RECT = 0,   ///< Axis-aligned bounding box (minX/maxX/minY/maxY)
+    CIRCLE = 1, ///< Filled disc   (centerX/Y + outerRadius)
+    ANNULUS = 2 ///< Ring / donut  (centerX/Y + innerRadius + outerRadius)
+};
+
+/// One mob-type entry inside a spawn zone (maps 1:1 to spawn_zone_mobs rows).
+struct SpawnZoneMobEntry
+{
+    int szmId = 0;    ///< spawn_zone_mobs.id
+    int mobId = 0;    ///< mob template id
+    int maxCount = 0; ///< max simultaneous mobs of this type
+    std::chrono::seconds respawnTime{60};
+};
+
 struct SpawnZoneStruct
 {
     int zoneId = 0;
-    std::string zoneName = "";
-    float posX = 0;
-    float sizeX = 0;
-    float posY = 0;
-    float sizeY = 0;
-    float posZ = 0;
-    float sizeZ = 0;
-    int spawnMobId = 0;
-    int spawnCount = 0;
-    int spawnedMobsCount = 0;
-    bool spawnEnabled = true; // Indicates if the spawn zone is enabled for spawning mobs
+    std::string zoneName;
+
+    // --- Geometry -------------------------------------------------
+    ZoneShape shape = ZoneShape::RECT;
+
+    // RECT: axis-aligned bounding box (renamed from posX/sizeX)
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    float minZ = 0.0f;
+    float maxZ = 0.0f;
+
+    // CIRCLE + ANNULUS: centre and radii
+    float centerX = 0.0f;
+    float centerY = 0.0f;
+    float innerRadius = 0.0f; ///< ANNULUS inner boundary (0 = CIRCLE)
+    float outerRadius = 0.0f; ///< CIRCLE / ANNULUS outer boundary
+
+    /// Optional: reject spawn candidates inside this game zone (e.g. safe village).
+    int exclusionGameZoneId = 0;
+
+    // --- Mob quota config (multi-mob support) ---------------------
+    std::vector<SpawnZoneMobEntry> mobEntries;
+
+    // --- Runtime state --------------------------------------------
+    bool spawnEnabled = true;
+    int spawnedMobsCount = 0; ///< running counter for logging/client display
     std::vector<int> spawnedMobsUIDList;
     std::vector<MobDataStruct> spawnedMobsList;
-    std::chrono::seconds respawnTime; // Represents respawn time in seconds
+
+    // --- Computed helpers -----------------------------------------
+    /// Total maximum mob population across all mob types.
+    int totalSpawnCount() const
+    {
+        int total = 0;
+        for (const auto &e : mobEntries)
+            total += e.maxCount;
+        return total;
+    }
+
+    /// True if at least one mob type is configured.
+    bool hasSpawnConfig() const
+    {
+        return !mobEntries.empty();
+    }
+
+    /// Shortest respawn time across all mob entries (used for scheduler display).
+    std::chrono::seconds minRespawnTime() const
+    {
+        std::chrono::seconds best{3600};
+        for (const auto &e : mobEntries)
+            best = std::min(best, e.respawnTime);
+        return best;
+    }
 };
 
 struct EventContext
@@ -799,88 +857,135 @@ struct MobMoveUpdateStruct
 };
 
 /**
- * @brief Zone boundary utilities for AABB calculations
+ * @brief Zone boundary utilities — shape-aware (RECT / CIRCLE / ANNULUS).
+ *
+ * Primary interface is the static helper `contains(zone, x, y)`.
+ * For RECT zones the legacy AABB members (minX/maxX/minY/maxY) are also available.
  */
 struct ZoneBounds
 {
-    float minX, maxX, minY, maxY;
+    // AABB extents (populated for RECT zones and as the enclosing box for CIRCLE/ANNULUS)
+    float minX = 0.0f, maxX = 0.0f;
+    float minY = 0.0f, maxY = 0.0f;
 
-    // Constructor from SpawnZoneStruct
-    // posX/posY = min_spawn_x/y  (AABB min corner)
-    // sizeX/sizeY = max_spawn_x/y (AABB max corner)
-    ZoneBounds(const SpawnZoneStruct &zone)
+    // Construct the AABB envelope from any zone shape.
+    explicit ZoneBounds(const SpawnZoneStruct &zone)
     {
-        minX = zone.posX;
-        maxX = zone.sizeX;
-        minY = zone.posY;
-        maxY = zone.sizeY;
+        if (zone.shape == ZoneShape::RECT)
+        {
+            minX = zone.minX;
+            maxX = zone.maxX;
+            minY = zone.minY;
+            maxY = zone.maxY;
+        }
+        else
+        {
+            // Enclosing box for CIRCLE / ANNULUS
+            minX = zone.centerX - zone.outerRadius;
+            maxX = zone.centerX + zone.outerRadius;
+            minY = zone.centerY - zone.outerRadius;
+            maxY = zone.centerY + zone.outerRadius;
+        }
     }
 
-    // Check if point is inside zone
+    // ----------------------------------------------------------------
+    // Shape-aware containment (primary API)
+    // ----------------------------------------------------------------
+
+    /// Returns true if (x, y) lies inside the spawn zone's geometric boundary.
+    static bool contains(const SpawnZoneStruct &zone, float x, float y)
+    {
+        switch (zone.shape)
+        {
+        case ZoneShape::CIRCLE:
+        {
+            float dx = x - zone.centerX;
+            float dy = y - zone.centerY;
+            float d2 = dx * dx + dy * dy;
+            return d2 <= zone.outerRadius * zone.outerRadius;
+        }
+        case ZoneShape::ANNULUS:
+        {
+            float dx = x - zone.centerX;
+            float dy = y - zone.centerY;
+            float d2 = dx * dx + dy * dy;
+            return d2 >= zone.innerRadius * zone.innerRadius &&
+                   d2 <= zone.outerRadius * zone.outerRadius;
+        }
+        default: // RECT
+            return (x >= zone.minX && x <= zone.maxX &&
+                    y >= zone.minY && y <= zone.maxY);
+        }
+    }
+
+    /// Overload for PositionStruct.
+    static bool contains(const SpawnZoneStruct &zone, const PositionStruct &pos)
+    {
+        return contains(zone, pos.positionX, pos.positionY);
+    }
+
+    /// Returns the geometric centre of the zone.
+    static PositionStruct getCenter(const SpawnZoneStruct &zone)
+    {
+        PositionStruct p;
+        p.positionX = zone.centerX;
+        p.positionY = zone.centerY;
+        p.positionZ = 200.0f;
+        return p;
+    }
+
+    /// Returns a representative "radius" for step-size / border-threshold calculations.
+    /// For RECT this is half the larger dimension; for circular shapes it is outerRadius.
+    static float getEffectiveRadius(const SpawnZoneStruct &zone)
+    {
+        if (zone.shape == ZoneShape::RECT)
+            return std::max(zone.maxX - zone.minX, zone.maxY - zone.minY) * 0.5f;
+        return zone.outerRadius;
+    }
+
+    // ----------------------------------------------------------------
+    // Legacy AABB helpers (RECT zones only — kept for compat)
+    // ----------------------------------------------------------------
+
     bool isPointInside(const PositionStruct &pos) const
     {
         return (pos.positionX >= minX && pos.positionX <= maxX &&
                 pos.positionY >= minY && pos.positionY <= maxY);
     }
 
-    // Calculate minimum distance from point to zone boundary
-    // Returns 0 if point is inside zone
     float distanceToZone(const PositionStruct &pos) const
     {
         if (isPointInside(pos))
-        {
-            return 0.0f; // Point is inside zone
-        }
-
-        // Calculate distance to closest boundary
-        float dx = 0.0f;
-        float dy = 0.0f;
-
+            return 0.0f;
+        float dx = 0.0f, dy = 0.0f;
         if (pos.positionX < minX)
-        {
             dx = minX - pos.positionX;
-        }
         else if (pos.positionX > maxX)
-        {
             dx = pos.positionX - maxX;
-        }
-
         if (pos.positionY < minY)
-        {
             dy = minY - pos.positionY;
-        }
         else if (pos.positionY > maxY)
-        {
             dy = pos.positionY - maxY;
-        }
-
         return std::sqrt(dx * dx + dy * dy);
     }
 
-    // Calculate distance from zone boundary outward (for range calculations)
-    // Returns distance from zone edge + additional range
     float distanceFromZoneEdge(const PositionStruct &pos, float additionalRange) const
     {
-        float distToZone = distanceToZone(pos);
-        return distToZone > additionalRange ? (distToZone - additionalRange) : 0.0f;
+        float d = distanceToZone(pos);
+        return d > additionalRange ? (d - additionalRange) : 0.0f;
     }
 
-    // Get closest point on zone boundary to given position
     PositionStruct getClosestPointOnBoundary(const PositionStruct &pos) const
     {
         PositionStruct closest = pos;
-
-        // Clamp to zone boundaries
         if (closest.positionX < minX)
             closest.positionX = minX;
         else if (closest.positionX > maxX)
             closest.positionX = maxX;
-
         if (closest.positionY < minY)
             closest.positionY = minY;
         else if (closest.positionY > maxY)
             closest.positionY = maxY;
-
         return closest;
     }
 };
@@ -1530,12 +1635,40 @@ struct GameZoneStruct
     int maxLevel = 0;
     bool isPvp = false;
     bool isSafeZone = false;
+    // AABB (always present; for CIRCLE/ANNULUS this is the enclosing box)
     float minX = 0.0f;
     float maxX = 0.0f;
     float minY = 0.0f;
     float maxY = 0.0f;
+    // Shape-aware geometry (migration 062)
+    ZoneShape shape = ZoneShape::RECT;
+    float centerX = 0.0f;
+    float centerY = 0.0f;
+    float innerRadius = 0.0f; ///< ANNULUS inner exclusion radius; 0 for RECT/CIRCLE
+    float outerRadius = 0.0f; ///< CIRCLE/ANNULUS boundary radius; 0 for RECT
     int explorationXpReward = 100;
     int championThresholdKills = 100; ///< Kills of a mob type in this zone before champion spawns
+
+    /// Returns true if (x,y) lies inside this zone, respecting shape.
+    [[nodiscard]] bool contains(float x, float y) const noexcept
+    {
+        switch (shape)
+        {
+        case ZoneShape::CIRCLE:
+        {
+            float dx = x - centerX, dy = y - centerY;
+            return (dx * dx + dy * dy) <= (outerRadius * outerRadius);
+        }
+        case ZoneShape::ANNULUS:
+        {
+            float dx = x - centerX, dy = y - centerY;
+            float d2 = dx * dx + dy * dy;
+            return d2 >= (innerRadius * innerRadius) && d2 <= (outerRadius * outerRadius);
+        }
+        default: // RECT
+            return x >= minX && x <= maxX && y >= minY && y <= maxY;
+        }
+    }
 };
 
 // ============= TIMED CHAMPION TEMPLATES =============

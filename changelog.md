@@ -1,3 +1,27 @@
+v0.2.16
+18.04.2026
+================
+New:
+
+**Zone Shape System — поддержка форм RECT/CIRCLE/ANNULUS для спавн-зон и игровых зон.**
+- `ZoneShape` (enum, uint8_t) — новый тип: `RECT=0`, `CIRCLE=1`, `ANNULUS=2`. Объявлен в `DataStructs.hpp`, используется в `SpawnZoneStruct` и `GameZoneStruct`.
+- `SpawnZoneStruct` — переработан: поля формы `shape`, `centerX/Y`, `innerRadius`, `outerRadius`; заменяют устаревшую логику только-AABB. AABB-поля (`minX/maxX/minY/maxY`) сохранены как охватывающий прямоугольник. `ZoneBounds::contains(x, y)` — inline shape-dispatch: RECT → AABB, CIRCLE → `d²≤R²`, ANNULUS → `r_in²≤d²≤r_out²`.
+- `SpawnZoneMobEntry` — новая структура: `mobId`, `maxCount`, `respawnTimeSec` (заменяет плоские поля `mobId`/`maxCount` в `SpawnZoneStruct`).
+- `GameZoneStruct` — добавлены `shape`, `centerX`, `centerY`, `innerRadius`, `outerRadius`; inline `contains(x, y)` с той же shape-dispatch логикой.
+- `GameZoneManager::getZoneForPosition()` — заменён ручной AABB-чек на `zone.contains(pos.positionX, pos.positionY)`.
+- `SpawnZoneManager`, `MobMovementManager`, `ChampionManager`, `ZoneEventHandler` — обновлены под новые поля `SpawnZoneStruct` и `ZoneBounds::contains()`.
+- `JSONParser::parseSpawnZones()` — парсит `shape`, `centerX/Y`, `innerRadius`, `outerRadius`, `mobEntries[]` (массив объектов `{mobId, maxCount, respawnTimeSec}`).
+- `JSONParser::parseGameZonesList()` — переписан на `z.value()` с дефолтами; добавлен парсинг `shape`, `centerX`, `centerY`, `innerRadius`, `outerRadius`.
+
+Fixes:
+
+**spawnMobsInZone — удалена отправка данных спавн-зоны клиенту.**
+- `MobEventHandler::handleSpawnMobsInZoneEvent` — убран вызов `spawnZoneToJson()`, ключ `"spawnZone"` удалён из тела ответа. Вместо него добавлен `"zoneId"` для идентификации зоны клиентом.
+- `MobEventHandler::sendSpawnZonesToClient` — аналогично: убран `spawnZoneToJson()`, `"spawnZone"` заменён на `"zoneId"`. Зоны без мобов теперь пропускаются (early continue).
+- `MobEventHandler::spawnZoneToJson()` — метод удалён полностью (определение + объявление в хэдере).
+
+---
+
 v0.2.15
 18.04.2026
 ================

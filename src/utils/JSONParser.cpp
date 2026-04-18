@@ -484,58 +484,51 @@ JSONParser::parseSpawnZonesList(const char *data, size_t length)
     nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
     std::vector<SpawnZoneStruct> spawnZonesList;
 
-    if (jsonData.contains("body") && jsonData["body"].is_object() &&
-        jsonData["body"].contains("spawnZonesData") && jsonData["body"]["spawnZonesData"].is_array())
+    if (!jsonData.contains("body") || !jsonData["body"].is_object() ||
+        !jsonData["body"].contains("spawnZonesData") || !jsonData["body"]["spawnZonesData"].is_array())
+        return spawnZonesList;
+
+    auto shapeFromStr = [](const std::string &s) -> ZoneShape
     {
-        for (const auto &zone : jsonData["body"]["spawnZonesData"])
+        if (s == "CIRCLE")
+            return ZoneShape::CIRCLE;
+        if (s == "ANNULUS")
+            return ZoneShape::ANNULUS;
+        return ZoneShape::RECT;
+    };
+
+    for (const auto &zone : jsonData["body"]["spawnZonesData"])
+    {
+        SpawnZoneStruct zoneData;
+        zoneData.zoneId = zone.value("id", 0);
+        zoneData.zoneName = zone.value("name", std::string{});
+        zoneData.shape = shapeFromStr(zone.value("shape", std::string{"RECT"}));
+        zoneData.minX = zone.value("minX", 0.0f);
+        zoneData.maxX = zone.value("maxX", 0.0f);
+        zoneData.minY = zone.value("minY", 0.0f);
+        zoneData.maxY = zone.value("maxY", 0.0f);
+        zoneData.minZ = zone.value("minZ", 0.0f);
+        zoneData.maxZ = zone.value("maxZ", 0.0f);
+        zoneData.centerX = zone.value("centerX", 0.0f);
+        zoneData.centerY = zone.value("centerY", 0.0f);
+        zoneData.innerRadius = zone.value("innerRadius", 0.0f);
+        zoneData.outerRadius = zone.value("outerRadius", 0.0f);
+        zoneData.exclusionGameZoneId = zone.value("exclusionGameZoneId", 0);
+
+        if (zone.contains("mobEntries") && zone["mobEntries"].is_array())
         {
-            SpawnZoneStruct zoneData;
-            if (zone.contains("id") && zone["id"].is_number_integer())
+            for (const auto &me : zone["mobEntries"])
             {
-                zoneData.zoneId = zone["id"].get<int>();
+                SpawnZoneMobEntry entry;
+                entry.szmId = me.value("szmId", 0);
+                entry.mobId = me.value("mobId", 0);
+                entry.maxCount = me.value("maxCount", 0);
+                entry.respawnTime = std::chrono::seconds(me.value("respawnTimeSec", 60));
+                zoneData.mobEntries.push_back(entry);
             }
-            if (zone.contains("name") && zone["name"].is_string())
-            {
-                zoneData.zoneName = zone["name"].get<std::string>();
-            }
-            if (zone.contains("posX") && (zone["posX"].is_number_float() || zone["posX"].is_number_integer()))
-            {
-                zoneData.posX = zone["posX"].get<float>();
-            }
-            if (zone.contains("sizeX") && (zone["sizeX"].is_number_float() || zone["sizeX"].is_number_integer()))
-            {
-                zoneData.sizeX = zone["sizeX"].get<float>();
-            }
-            if (zone.contains("posY") && (zone["posY"].is_number_float() || zone["posY"].is_number_integer()))
-            {
-                zoneData.posY = zone["posY"].get<float>();
-            }
-            if (zone.contains("sizeY") && (zone["sizeY"].is_number_float() || zone["sizeY"].is_number_integer()))
-            {
-                zoneData.sizeY = zone["sizeY"].get<float>();
-            }
-            if (zone.contains("posZ") && (zone["posZ"].is_number_float() || zone["posZ"].is_number_integer()))
-            {
-                zoneData.posZ = zone["posZ"].get<float>();
-            }
-            if (zone.contains("sizeZ") && (zone["sizeZ"].is_number_float() || zone["sizeZ"].is_number_integer()))
-            {
-                zoneData.sizeZ = zone["sizeZ"].get<float>();
-            }
-            if (zone.contains("spawnMobId") && zone["spawnMobId"].is_number_integer())
-            {
-                zoneData.spawnMobId = zone["spawnMobId"].get<int>();
-            }
-            if (zone.contains("maxMobSpawnCount") && zone["maxMobSpawnCount"].is_number_integer())
-            {
-                zoneData.spawnCount = zone["maxMobSpawnCount"].get<int>();
-            }
-            if (zone.contains("respawnTime") && zone["respawnTime"].is_number_integer())
-            {
-                zoneData.respawnTime = std::chrono::seconds(zone["respawnTime"].get<int>());
-            }
-            spawnZonesList.push_back(zoneData);
         }
+
+        spawnZonesList.push_back(std::move(zoneData));
     }
 
     return spawnZonesList;
@@ -1959,170 +1952,165 @@ JSONParser::parseGameZonesList(const char *data, size_t length)
         for (const auto &z : jsonData["body"]["gameZonesData"])
         {
             GameZoneStruct zone;
-            if (z.contains("id") && z["id"].is_number_integer())
-                zone.id = z["id"].get<int>();
-            if (z.contains("slug") && z["slug"].is_string())
-                zone.slug = z["slug"].get<std::string>();
-            if (z.contains("name") && z["name"].is_string())
-                zone.name = z["name"].get<std::string>();
-            if (z.contains("minLevel") && z["minLevel"].is_number_integer())
-                zone.minLevel = z["minLevel"].get<int>();
-            if (z.contains("maxLevel") && z["maxLevel"].is_number_integer())
-                zone.maxLevel = z["maxLevel"].get<int>();
-            if (z.contains("isPvp") && z["isPvp"].is_boolean())
-                zone.isPvp = z["isPvp"].get<bool>();
-            if (z.contains("isSafeZone") && z["isSafeZone"].is_boolean())
-                zone.isSafeZone = z["isSafeZone"].get<bool>();
-            if (z.contains("minX") && z["minX"].is_number())
-                zone.minX = z["minX"].get<float>();
-            if (z.contains("maxX") && z["maxX"].is_number())
-                zone.maxX = z["maxX"].get<float>();
-            if (z.contains("minY") && z["minY"].is_number())
-                zone.minY = z["minY"].get<float>();
-            if (z.contains("maxY") && z["maxY"].is_number())
-                zone.maxY = z["maxY"].get<float>();
-            if (z.contains("explorationXpReward") && z["explorationXpReward"].is_number_integer())
-                zone.explorationXpReward = z["explorationXpReward"].get<int>();
-            if (z.contains("championThresholdKills") && z["championThresholdKills"].is_number_integer())
-                zone.championThresholdKills = z["championThresholdKills"].get<int>();
-            zones.push_back(std::move(zone));
-        }
-    }
-    catch (const std::exception &)
+            zone.id = z.value("id", 0);
+            zone.slug = z.value("slug", std::string{});
+            zone.name = z.value("name", std::string{});
+            zone.minLevel = z.value("minLevel", 0);
+            zone.maxLevel = z.value("maxLevel", 999);
+            zone.isPvp = z.value("isPvp", false);
+            zone.isSafeZone = z.value("isSafeZone", false);
+            zone.minX = z.value("minX", 0.0f);
+            zone.maxX = z.value("maxX", 0.0f);
+            zone.minY = z.value("minY", 0.0f);
+            zone.maxY = z.value("maxY", 0.0f);
+            // Shape fields (migration 062)
+            std::string shapeStr = z.value("shape", std::string{"RECT"});
+            if (shapeStr == "CIRCLE")
+                zone.shape = ZoneShape::CIRCLE;
+            else if (shapeStr == "ANNULUS")
+                zone.shape = ZoneShape::ANNULUS;
+            else
+                zone.shape = ZoneShape::RECT;
+            zone.centerX = z.value("centerX", 0.0f);
+            zone.centerY = z.value("centerY", 0.0f);
+            zone.innerRadius = z.value("innerRadius", 0.0f);
+            zone.outerRadius = z.value("outerRadius", 0.0f);
+            zone.explorationXpReward = z.value("explorationXpReward", 100);
+            zone.championThresholdKills = z.value("championThresholdKills", 100
     {
-        zones.clear();
+                zones.clear();
     }
     return zones;
-}
+        }
 
-std::vector<StatusEffectTemplate>
-JSONParser::parseStatusEffectTemplates(const char *data, size_t length)
-{
-    std::vector<StatusEffectTemplate> templates;
-    try
-    {
-        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
-        if (!jsonData.contains("body") || !jsonData["body"].contains("templates") ||
-            !jsonData["body"]["templates"].is_array())
-            return templates;
-
-        for (const auto &t : jsonData["body"]["templates"])
+        std::vector<StatusEffectTemplate>
+        JSONParser::parseStatusEffectTemplates(const char *data, size_t length)
         {
-            StatusEffectTemplate tmpl;
-            if (t.contains("effectSlug") && t["effectSlug"].is_string())
-                tmpl.slug = t["effectSlug"].get<std::string>();
-            if (t.contains("category") && t["category"].is_string())
-                tmpl.category = t["category"].get<std::string>();
-            if (t.contains("durationSec") && t["durationSec"].is_number_integer())
-                tmpl.durationSec = t["durationSec"].get<int>();
-
-            if (t.contains("modifiers") && t["modifiers"].is_array())
+            std::vector<StatusEffectTemplate> templates;
+            try
             {
-                for (const auto &m : t["modifiers"])
+                nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+                if (!jsonData.contains("body") || !jsonData["body"].contains("templates") ||
+                    !jsonData["body"]["templates"].is_array())
+                    return templates;
+
+                for (const auto &t : jsonData["body"]["templates"])
                 {
-                    StatusEffectModifierDef mod;
-                    if (m.contains("modifierType") && m["modifierType"].is_string())
-                        mod.modifierType = m["modifierType"].get<std::string>();
-                    if (m.contains("attributeSlug") && m["attributeSlug"].is_string())
-                        mod.attributeSlug = m["attributeSlug"].get<std::string>();
-                    if (m.contains("value") && m["value"].is_number())
-                        mod.value = m["value"].get<double>();
-                    tmpl.modifiers.push_back(std::move(mod));
+                    StatusEffectTemplate tmpl;
+                    if (t.contains("effectSlug") && t["effectSlug"].is_string())
+                        tmpl.slug = t["effectSlug"].get<std::string>();
+                    if (t.contains("category") && t["category"].is_string())
+                        tmpl.category = t["category"].get<std::string>();
+                    if (t.contains("durationSec") && t["durationSec"].is_number_integer())
+                        tmpl.durationSec = t["durationSec"].get<int>();
+
+                    if (t.contains("modifiers") && t["modifiers"].is_array())
+                    {
+                        for (const auto &m : t["modifiers"])
+                        {
+                            StatusEffectModifierDef mod;
+                            if (m.contains("modifierType") && m["modifierType"].is_string())
+                                mod.modifierType = m["modifierType"].get<std::string>();
+                            if (m.contains("attributeSlug") && m["attributeSlug"].is_string())
+                                mod.attributeSlug = m["attributeSlug"].get<std::string>();
+                            if (m.contains("value") && m["value"].is_number())
+                                mod.value = m["value"].get<double>();
+                            tmpl.modifiers.push_back(std::move(mod));
+                        }
+                    }
+
+                    if (!tmpl.slug.empty())
+                        templates.push_back(std::move(tmpl));
                 }
             }
-
-            if (!tmpl.slug.empty())
-                templates.push_back(std::move(tmpl));
-        }
-    }
-    catch (const std::exception &)
-    {
-        templates.clear();
-    }
-    return templates;
-}
-
-std::vector<TimedChampionTemplate>
-JSONParser::parseTimedChampionTemplates(const char *data, size_t length)
-{
-    std::vector<TimedChampionTemplate> templates;
-    try
-    {
-        nlohmann::json j = nlohmann::json::parse(data, data + length);
-        const auto &arr = j.at("body").at("timedChampionTemplates");
-        if (!arr.is_array())
+            catch (const std::exception &)
+            {
+                templates.clear();
+            }
             return templates;
-
-        for (const auto &t : arr)
-        {
-            TimedChampionTemplate tmpl;
-            tmpl.id = t.value("id", 0);
-            tmpl.slug = t.value("slug", std::string{});
-            tmpl.gameZoneId = t.value("gameZoneId", 0);
-            tmpl.mobTemplateId = t.value("mobTemplateId", 0);
-            tmpl.intervalHours = t.value("intervalHours", 6);
-            tmpl.windowMinutes = t.value("windowMinutes", 15);
-            tmpl.nextSpawnAt = t.value("nextSpawnAt", int64_t{0});
-            tmpl.announceKey = t.value("announceKey", std::string{});
-
-            if (!tmpl.slug.empty() && tmpl.mobTemplateId > 0)
-                templates.push_back(std::move(tmpl));
         }
-    }
-    catch (const std::exception &)
-    {
-        templates.clear();
-    }
-    return templates;
-}
 
-// =============================================================================
-// NPC Ambient Speech parser
-// =============================================================================
+        std::vector<TimedChampionTemplate>
+        JSONParser::parseTimedChampionTemplates(const char *data, size_t length)
+        {
+            std::vector<TimedChampionTemplate> templates;
+            try
+            {
+                nlohmann::json j = nlohmann::json::parse(data, data + length);
+                const auto &arr = j.at("body").at("timedChampionTemplates");
+                if (!arr.is_array())
+                    return templates;
 
-std::vector<NPCAmbientSpeechConfigStruct>
-JSONParser::parseNPCAmbientSpeech(const char *data, size_t length)
-{
-    std::vector<NPCAmbientSpeechConfigStruct> result;
-    try
-    {
-        nlohmann::json j = nlohmann::json::parse(data, data + length);
-        if (!j.contains("body") || !j["body"].contains("ambientSpeech"))
+                for (const auto &t : arr)
+                {
+                    TimedChampionTemplate tmpl;
+                    tmpl.id = t.value("id", 0);
+                    tmpl.slug = t.value("slug", std::string{});
+                    tmpl.gameZoneId = t.value("gameZoneId", 0);
+                    tmpl.mobTemplateId = t.value("mobTemplateId", 0);
+                    tmpl.intervalHours = t.value("intervalHours", 6);
+                    tmpl.windowMinutes = t.value("windowMinutes", 15);
+                    tmpl.nextSpawnAt = t.value("nextSpawnAt", int64_t{0});
+                    tmpl.announceKey = t.value("announceKey", std::string{});
+
+                    if (!tmpl.slug.empty() && tmpl.mobTemplateId > 0)
+                        templates.push_back(std::move(tmpl));
+                }
+            }
+            catch (const std::exception &)
+            {
+                templates.clear();
+            }
+            return templates;
+        }
+
+        // =============================================================================
+        // NPC Ambient Speech parser
+        // =============================================================================
+
+        std::vector<NPCAmbientSpeechConfigStruct>
+        JSONParser::parseNPCAmbientSpeech(const char *data, size_t length)
+        {
+            std::vector<NPCAmbientSpeechConfigStruct> result;
+            try
+            {
+                nlohmann::json j = nlohmann::json::parse(data, data + length);
+                if (!j.contains("body") || !j["body"].contains("ambientSpeech"))
+                    return result;
+
+                for (const auto &cfgJson : j["body"]["ambientSpeech"])
+                {
+                    NPCAmbientSpeechConfigStruct cfg;
+                    cfg.npcId = cfgJson.value("npcId", 0);
+                    cfg.minIntervalSec = cfgJson.value("minIntervalSec", 20);
+                    cfg.maxIntervalSec = cfgJson.value("maxIntervalSec", 60);
+
+                    if (cfgJson.contains("lines") && cfgJson["lines"].is_array())
+                    {
+                        for (const auto &lj : cfgJson["lines"])
+                        {
+                            NPCAmbientLineStruct line;
+                            line.id = lj.value("id", 0);
+                            line.npcId = cfg.npcId;
+                            line.lineKey = lj.value("lineKey", "");
+                            line.triggerType = lj.value("triggerType", "periodic");
+                            line.triggerRadius = lj.value("triggerRadius", 400);
+                            line.priority = lj.value("priority", 0);
+                            line.weight = lj.value("weight", 10);
+                            line.cooldownSec = lj.value("cooldownSec", 60);
+                            if (lj.contains("conditionGroup"))
+                                line.conditionGroup = lj["conditionGroup"];
+                            cfg.lines.push_back(std::move(line));
+                        }
+                    }
+
+                    if (cfg.npcId > 0)
+                        result.push_back(std::move(cfg));
+                }
+            }
+            catch (const std::exception &)
+            {
+                result.clear();
+            }
             return result;
-
-        for (const auto &cfgJson : j["body"]["ambientSpeech"])
-        {
-            NPCAmbientSpeechConfigStruct cfg;
-            cfg.npcId = cfgJson.value("npcId", 0);
-            cfg.minIntervalSec = cfgJson.value("minIntervalSec", 20);
-            cfg.maxIntervalSec = cfgJson.value("maxIntervalSec", 60);
-
-            if (cfgJson.contains("lines") && cfgJson["lines"].is_array())
-            {
-                for (const auto &lj : cfgJson["lines"])
-                {
-                    NPCAmbientLineStruct line;
-                    line.id = lj.value("id", 0);
-                    line.npcId = cfg.npcId;
-                    line.lineKey = lj.value("lineKey", "");
-                    line.triggerType = lj.value("triggerType", "periodic");
-                    line.triggerRadius = lj.value("triggerRadius", 400);
-                    line.priority = lj.value("priority", 0);
-                    line.weight = lj.value("weight", 10);
-                    line.cooldownSec = lj.value("cooldownSec", 60);
-                    if (lj.contains("conditionGroup"))
-                        line.conditionGroup = lj["conditionGroup"];
-                    cfg.lines.push_back(std::move(line));
-                }
-            }
-
-            if (cfg.npcId > 0)
-                result.push_back(std::move(cfg));
         }
-    }
-    catch (const std::exception &)
-    {
-        result.clear();
-    }
-    return result;
-}

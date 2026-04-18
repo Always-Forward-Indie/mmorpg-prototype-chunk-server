@@ -39,21 +39,26 @@ SpawnZoneManager::loadMobSpawnZones(
             SpawnZoneStruct spawnZone;
             spawnZone.zoneId = row.zoneId;
             spawnZone.zoneName = row.zoneName;
-            spawnZone.posX = row.posX;
-            spawnZone.sizeX = row.sizeX;
-            spawnZone.posY = row.posY;
-            spawnZone.sizeY = row.sizeY;
-            spawnZone.posZ = row.posZ;
-            spawnZone.sizeZ = row.sizeZ;
-            spawnZone.spawnMobId = row.spawnMobId;
-            spawnZone.spawnCount = row.spawnCount;
-            spawnZone.respawnTime = row.respawnTime;
-            spawnZone.spawnEnabled = true;  // Enable spawning by default
-            spawnZone.spawnedMobsCount = 0; // Start with 0 spawned mobs
+            spawnZone.shape = row.shape;
+            spawnZone.minX = row.minX;
+            spawnZone.maxX = row.maxX;
+            spawnZone.minY = row.minY;
+            spawnZone.maxY = row.maxY;
+            spawnZone.minZ = row.minZ;
+            spawnZone.maxZ = row.maxZ;
+            spawnZone.centerX = row.centerX;
+            spawnZone.centerY = row.centerY;
+            spawnZone.innerRadius = row.innerRadius;
+            spawnZone.outerRadius = row.outerRadius;
+            spawnZone.exclusionGameZoneId = row.exclusionGameZoneId;
+            spawnZone.mobEntries = row.mobEntries;
+            spawnZone.spawnEnabled = true;
+            spawnZone.spawnedMobsCount = 0;
 
             logger_.log("[LOAD_ZONE] Loaded zone " + std::to_string(spawnZone.zoneId) +
-                        " '" + spawnZone.zoneName + "' - spawnMobId: " + std::to_string(spawnZone.spawnMobId) +
-                        ", spawnCount: " + std::to_string(spawnZone.spawnCount) +
+                        " '" + spawnZone.zoneName + "' - mobEntries: " + std::to_string(spawnZone.mobEntries.size()) +
+                        ", totalSpawnCount: " + std::to_string(spawnZone.totalSpawnCount()) +
+                        ", shape: " + std::to_string(static_cast<int>(spawnZone.shape)) +
                         ", spawnEnabled: " + (spawnZone.spawnEnabled ? "true" : "false"));
 
             mobSpawnZones_[spawnZone.zoneId] = spawnZone;
@@ -174,20 +179,21 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     {
         std::shared_lock<std::shared_mutex> readLock(mutex_);
         auto zone = mobSpawnZones_.find(zoneId);
-        if (zone == mobSpawnZones_.end()) // Проверяем, есть ли зона
+        if (zone == mobSpawnZones_.end())
         {
             log_->error("Spawn zone " + std::to_string(zoneId) + " not found in GS");
             return mobs;
         }
 
         logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " found - spawnedMobsCount: " +
-                    std::to_string(zone->second.spawnedMobsCount) + ", spawnCount: " +
-                    std::to_string(zone->second.spawnCount));
+                    std::to_string(zone->second.spawnedMobsCount) + ", totalSpawnCount: " +
+                    std::to_string(zone->second.totalSpawnCount()));
     }
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> dist(0.0f, std::nextafter(1.0f, 0.0f));
+    std::uniform_real_distribution<float> unitDist(0.0f, std::nextafter(1.0f, 0.0f));
+    std::uniform_real_distribution<float> angleDist(0.0f, static_cast<float>(2.0 * M_PI));
     std::uniform_real_distribution<float> rotDist(0.0f, 360.0f);
 
     std::unique_lock<std::shared_mutex> writeLock(mutex_);
@@ -197,99 +203,125 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
 
     log_->info("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " - checking spawn conditions");
 
-    // Get current alive mob count from MobInstanceManager (more accurate than spawnedMobsCount)
-    int currentAliveMobs = 0;
+    // Count alive mobs per template type so each entry can independently top up its quota.
+    std::map<int, int> aliveByType;
     if (mobInstanceManager_)
     {
-        currentAliveMobs = mobInstanceManager_->getAliveMobCountInZone(zoneId);
+        auto liveMobs = mobInstanceManager_->getMobInstancesInZone(zoneId);
+        for (const auto &m : liveMobs)
+            if (!m.isDead && m.currentHealth > 0)
+                aliveByType[m.id]++;
     }
     else
     {
-        // Fallback to counting alive mobs manually
-        for (const auto &mob : zone->second.spawnedMobsList)
-        {
-            if (!mob.isDead && mob.currentHealth > 0)
-            {
-                currentAliveMobs++;
-            }
-        }
+        for (const auto &m : zone->second.spawnedMobsList)
+            if (!m.isDead && m.currentHealth > 0)
+                aliveByType[m.id]++;
     }
 
-    logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " - currentAliveMobs=" +
-                std::to_string(currentAliveMobs) + ", spawnCount=" + std::to_string(zone->second.spawnCount) +
-                ", spawnedMobsCount=" + std::to_string(zone->second.spawnedMobsCount) + " (legacy)");
-
-    if (currentAliveMobs < zone->second.spawnCount)
+    // Collect existing positions for separation checks.
+    std::vector<PositionStruct> occupiedPositions;
+    if (mobInstanceManager_)
     {
-        int mobsToSpawn = zone->second.spawnCount - currentAliveMobs;
-        logger_.log("[SPAWN_DEBUG] Need to spawn " + std::to_string(mobsToSpawn) + " mobs in zone " + std::to_string(zoneId));
+        auto existing = mobInstanceManager_->getMobPositionsInZone(zoneId);
+        occupiedPositions.reserve(existing.size());
+        for (const auto &ep : existing)
+            occupiedPositions.push_back(ep.second);
+    }
 
-        // Collect current mob positions so newly spawned mobs don't overlap
-        // with existing ones or with each other within the same batch.
-        std::vector<PositionStruct> occupiedPositions;
-        if (mobInstanceManager_)
+    // Lambdas for shape-aware random point generation.
+    auto sampleRect = [&]() -> std::pair<float, float>
+    {
+        float x = zone->second.minX + unitDist(gen) * (zone->second.maxX - zone->second.minX);
+        float y = zone->second.minY + unitDist(gen) * (zone->second.maxY - zone->second.minY);
+        return {x, y};
+    };
+
+    auto sampleCircle = [&]() -> std::pair<float, float>
+    {
+        // Uniform distribution over disc: r = R * sqrt(u)
+        float angle = angleDist(gen);
+        float r = zone->second.outerRadius * std::sqrt(unitDist(gen));
+        return {zone->second.centerX + r * std::cos(angle),
+            zone->second.centerY + r * std::sin(angle)};
+    };
+
+    auto sampleAnnulus = [&]() -> std::pair<float, float>
+    {
+        // Equal-area sampling in annulus: r = sqrt(r_in^2 + u*(r_out^2 - r_in^2))
+        float angle = angleDist(gen);
+        float r2in = zone->second.innerRadius * zone->second.innerRadius;
+        float r2out = zone->second.outerRadius * zone->second.outerRadius;
+        float r = std::sqrt(r2in + unitDist(gen) * (r2out - r2in));
+        return {zone->second.centerX + r * std::cos(angle),
+            zone->second.centerY + r * std::sin(angle)};
+    };
+
+    // Process each mob-type entry independently.
+    for (const auto &entry : zone->second.mobEntries)
+    {
+        int alive = aliveByType[entry.mobId];
+        int needed = entry.maxCount - alive;
+        if (needed <= 0)
+            continue;
+
+        logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) +
+                    " mob_id=" + std::to_string(entry.mobId) +
+                    " alive=" + std::to_string(alive) +
+                    " needed=" + std::to_string(needed));
+
+        for (int i = 0; i < needed; i++)
         {
-            auto existingPositions = mobInstanceManager_->getMobPositionsInZone(zoneId);
-            occupiedPositions.reserve(existingPositions.size());
-            for (const auto &ep : existingPositions)
-                occupiedPositions.push_back(ep.second);
-        }
+            MobDataStruct mob = mobManager_.getMobById(entry.mobId);
 
-        // Minimum distance between mob centres = sum of radii + a small gap.
-        // If radius is not set in the template we fall back to a safe default.
-        // All mobs in a zone share the same template (one spawnMobId per zone)
-        // so we can derive the template radius once from the first-fetched mob.
-        // The actual value is filled in below after getMobById() succeeds.
-
-        for (int i = 0; i < mobsToSpawn; i++)
-        {
-            MobDataStruct mob = mobManager_.getMobById(zone->second.spawnMobId);
-
-            // Debug: Log what we got from MobManager
             logger_.log("[DEBUG] Template mob from MobManager - ID: " + std::to_string(mob.id) +
                         ", isDead: " + (mob.isDead ? "true" : "false") +
                         ", currentHealth: " + std::to_string(mob.currentHealth) +
                         ", maxHealth: " + std::to_string(mob.maxHealth) +
                         ", name: " + mob.name);
 
-            // CRITICAL CHECK: Don't spawn if mob template is invalid (not loaded yet)
             if (mob.id == 0 || mob.name.empty())
             {
-                log_->info("[SPAWN_DELAY] Mob template ID " + std::to_string(zone->second.spawnMobId) +
+                log_->info("[SPAWN_DELAY] Mob template ID " + std::to_string(entry.mobId) +
                            " not loaded yet, delaying spawn");
-                return mobs; // Exit early, try again later
+                return mobs;
             }
 
             mob.zoneId = zoneId;
 
-            // Границы зоны: posX/Y/Z = min_spawn, sizeX/Y/Z = max_spawn (два угла AABB из БД)
-            float minX = zone->second.posX;
-            float maxX = zone->second.sizeX;
-            float minY = zone->second.posY;
-            float maxY = zone->second.sizeY;
-            float minZ = zone->second.posZ;
-            float maxZ = zone->second.sizeZ;
-
-            // Minimum separation = radiusA + radiusB + gap between edges.
-            // For a homogeneous zone all mobs share the same template radius.
-            constexpr float SPAWN_EDGE_GAP = 50.0f;       // extra clearance between surfaces
-            constexpr float FALLBACK_SEPARATION = 140.0f; // used when radius is not set
+            constexpr float SPAWN_EDGE_GAP = 50.0f;
+            constexpr float FALLBACK_SEP = 140.0f;
             const float minSpawnSeparation = (mob.radius > 0)
                                                  ? (mob.radius * 2.0f + SPAWN_EDGE_GAP)
-                                                 : FALLBACK_SEPARATION;
-            constexpr int MAX_SPAWN_ATTEMPTS = 15;
+                                                 : FALLBACK_SEP;
+            constexpr int MAX_SPAWN_ATTEMPTS = 20;
             bool positionFound = false;
 
             for (int attempt = 0; attempt < MAX_SPAWN_ATTEMPTS; ++attempt)
             {
-                float candidateX = minX + (dist(gen) * (maxX - minX));
-                float candidateY = minY + (dist(gen) * (maxY - minY));
+                float candidateX, candidateY;
+                switch (zone->second.shape)
+                {
+                case ZoneShape::CIRCLE:
+                    std::tie(candidateX, candidateY) = sampleCircle();
+                    break;
+                case ZoneShape::ANNULUS:
+                    std::tie(candidateX, candidateY) = sampleAnnulus();
+                    break;
+                default:
+                    std::tie(candidateX, candidateY) = sampleRect();
+                    break;
+                }
+
+                // Reject if inside the optional exclusion game zone.
+                // (Full exclusion-zone lookup would require GameZoneManager access;
+                //  for now skip if exclusionGameZoneId != 0 — implement later via callback.)
 
                 bool tooClose = false;
-                for (const auto &occupied : occupiedPositions)
+                for (const auto &occ : occupiedPositions)
                 {
-                    float ddx = candidateX - occupied.positionX;
-                    float ddy = candidateY - occupied.positionY;
+                    float ddx = candidateX - occ.positionX;
+                    float ddy = candidateY - occ.positionY;
                     if (ddx * ddx + ddy * ddy < minSpawnSeparation * minSpawnSeparation)
                     {
                         tooClose = true;
@@ -318,41 +350,25 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             }
 
             mob.position.positionZ = 200;
-
-            // Поворот случайный от 0 до 360 градусов
             mob.position.rotationZ = rotDist(gen);
-
-            // Генерация уникального ID
             mob.uid = Generators::generateUniqueMobUID();
             mob.spawnEpochSec = static_cast<int64_t>(std::time(nullptr));
 
-            // Добавляем моба в список
             mobSpawnZones_[zoneId].spawnedMobsUIDList.push_back(mob.uid);
             mobSpawnZones_[zoneId].spawnedMobsList.push_back(mob);
 
-            // Register mob instance in MobInstanceManager
             if (mobInstanceManager_)
-            {
                 mobInstanceManager_->registerMobInstance(mob);
-            }
 
-            // Debug logging to verify mob is alive
             logger_.log("[SPAWN_FIX] Spawned mob UID " + std::to_string(mob.uid) +
                         " - isDead: " + (mob.isDead ? "true" : "false") +
                         ", currentHealth: " + std::to_string(mob.currentHealth) +
                         ", maxHealth: " + std::to_string(mob.maxHealth));
 
-            // Track this position so the next mob in the same batch won't overlap.
             occupiedPositions.push_back(mob.position);
-
             mobs.push_back(mob);
             zone->second.spawnedMobsCount++;
         }
-    }
-    else
-    {
-        logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) + " has enough alive mobs (" +
-                    std::to_string(currentAliveMobs) + "/" + std::to_string(zone->second.spawnCount) + ") - no spawning needed");
     }
 
     return mobs;
@@ -375,7 +391,7 @@ SpawnZoneManager::mobDied(int zoneId, int mobUID)
 
             logger_.log("[MOB_DEATH] Mob UID " + std::to_string(mobUID) + " died in zone " +
                         std::to_string(zoneId) + ". Alive count: " + std::to_string(zone->second.spawnedMobsCount) +
-                        "/" + std::to_string(zone->second.spawnCount));
+                        "/" + std::to_string(zone->second.totalSpawnCount()));
 
             // Note: New mobs will be spawned by the periodic respawn task
             // based on the actual alive mob count, not this legacy counter

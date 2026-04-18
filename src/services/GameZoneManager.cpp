@@ -20,11 +20,8 @@ GameZoneManager::getZoneForPosition(const PositionStruct &pos) const
     std::shared_lock lock(mutex_);
     for (const auto &zone : zones_)
     {
-        if (pos.positionX >= zone.minX && pos.positionX <= zone.maxX &&
-            pos.positionY >= zone.minY && pos.positionY <= zone.maxY)
-        {
+        if (zone.contains(pos.positionX, pos.positionY))
             return zone;
-        }
     }
     return std::nullopt;
 }

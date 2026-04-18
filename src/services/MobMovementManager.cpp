@@ -376,11 +376,23 @@ MobMovementManager::calculateNewPosition(
     // Get movement data for this mob
     auto movementData = getMobMovementDataInternal(mob.uid);
 
-    // Calculate zone boundaries (posX/Y = min_spawn, sizeX/Y = max_spawn — два угла AABB из БД)
-    float minX = zone.posX;
-    float maxX = zone.sizeX;
-    float minY = zone.posY;
-    float maxY = zone.sizeY;
+    // Derive AABB-like extents for border-detection and step-size calculations.
+    // For non-RECT shapes we use the enclosing box of the circle/annulus.
+    float minX, maxX, minY, maxY;
+    if (zone.shape == ZoneShape::RECT)
+    {
+        minX = zone.minX;
+        maxX = zone.maxX;
+        minY = zone.minY;
+        maxY = zone.maxY;
+    }
+    else
+    {
+        minX = zone.centerX - zone.outerRadius;
+        maxX = zone.centerX + zone.outerRadius;
+        minY = zone.centerY - zone.outerRadius;
+        maxY = zone.centerY + zone.outerRadius;
+    }
 
     // Check if mob is at border
     float borderThreshold = std::max(maxX - minX, maxY - minY) * params.borderThresholdPercent;
@@ -605,22 +617,11 @@ bool
 MobMovementManager::isValidPosition(
     float x, float y, const SpawnZoneStruct &zone, const std::vector<std::pair<int, PositionStruct>> &otherMobs, const MobDataStruct &currentMob, const MobMovementParams &params)
 {
-    // Check zone boundaries (posX/Y = min_spawn, sizeX/Y = max_spawn — два угла AABB из БД)
-    float minX = zone.posX;
-    float maxX = zone.sizeX;
-    float minY = zone.posY;
-    float maxY = zone.sizeY;
-
-    if (x < minX || x > maxX || y < minY || y > maxY)
-    {
+    // Shape-aware containment check (RECT / CIRCLE / ANNULUS)
+    if (!ZoneBounds::contains(zone, x, y))
         return false;
-    }
 
     // Derive minimum separation from mob's own collision radius.
-    // Two mobs must be at least (radiusA + radiusB) apart to avoid overlap.
-    // Since otherMobs is a lightweight {uid,pos} list without radius data,
-    // we conservatively assume the neighbours share the same radius.
-    // Falls back to params.minSeparationDistance when radius is not set.
     const float mobRadius = (currentMob.radius > 0) ? static_cast<float>(currentMob.radius) : 0.0f;
     const float minSep = (mobRadius > 0.0f) ? (mobRadius * 2.0f) : params.minSeparationDistance;
 
@@ -632,9 +633,7 @@ MobMovementManager::isValidPosition(
         float dx = x - otherMob.second.positionX;
         float dy = y - otherMob.second.positionY;
         if (dx * dx + dy * dy < minSep * minSep)
-        {
             return false;
-        }
     }
 
     return true;

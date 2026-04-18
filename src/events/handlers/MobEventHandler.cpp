@@ -48,20 +48,6 @@ MobEventHandler::mobToJson(const MobDataStruct &mobData)
     return mobJson;
 }
 
-nlohmann::json
-MobEventHandler::spawnZoneToJson(const SpawnZoneStruct &spawnZoneData)
-{
-    return nlohmann::json{
-        {"id", spawnZoneData.zoneId},
-        {"name", spawnZoneData.zoneName},
-        {"bounds", {{"minX", spawnZoneData.posX}, {"maxX", spawnZoneData.sizeX}, {"minY", spawnZoneData.posY}, {"maxY", spawnZoneData.sizeY}, {"minZ", spawnZoneData.posZ}, {"maxZ", spawnZoneData.sizeZ}}},
-        {"spawnMobId", spawnZoneData.spawnMobId},
-        {"maxSpawnCount", spawnZoneData.spawnCount},
-        {"spawnedMobsCount", spawnZoneData.spawnedMobsList.size()},
-        {"respawnTime", spawnZoneData.respawnTime.count()},
-        {"spawnEnabled", spawnZoneData.spawnEnabled}};
-}
-
 void
 MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
 {
@@ -76,13 +62,9 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
         {
             SpawnZoneStruct spawnZoneData = std::get<SpawnZoneStruct>(data);
 
-            // Build JSON for spawn zone
-            nlohmann::json zoneJson = spawnZoneToJson(spawnZoneData);
-
-            // Get current mobs data from MobInstanceManager instead of outdated spawnZoneData
+            // Get current mobs data from MobInstanceManager
             std::vector<MobDataStruct> mobsList = gameServices_.getMobInstanceManager().getMobInstancesInZone(spawnZoneData.zoneId);
 
-            // Add mobs
             nlohmann::json mobsArray = nlohmann::json::array();
             for (const auto &mob : mobsList)
             {
@@ -97,14 +79,13 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
                 return;
             }
 
-            // Build success response with timestamps
             nlohmann::json response = ResponseBuilder()
                                           .setHeader("message", "Spawning mobs success!")
                                           .setHeader("hash", "")
                                           .setHeader("clientId", clientID)
                                           .setHeader("eventType", "spawnMobsInZone")
                                           .setTimestamps(timestamps)
-                                          .setBody("spawnZone", zoneJson)
+                                          .setBody("zoneId", spawnZoneData.zoneId)
                                           .setBody("mobs", mobsArray)
                                           .build();
 
@@ -133,9 +114,10 @@ MobEventHandler::sendSpawnZonesToClient(int clientID, std::shared_ptr<boost::asi
 
     for (const auto &[zoneId, spawnZone] : allSpawnZones)
     {
-        nlohmann::json zoneJson = spawnZoneToJson(spawnZone);
-
         std::vector<MobDataStruct> mobsList = gameServices_.getMobInstanceManager().getMobInstancesInZone(spawnZone.zoneId);
+        if (mobsList.empty())
+            continue;
+
         nlohmann::json mobsArray = nlohmann::json::array();
         for (const auto &mob : mobsList)
         {
@@ -149,7 +131,7 @@ MobEventHandler::sendSpawnZonesToClient(int clientID, std::shared_ptr<boost::asi
                                       .setHeader("hash", "")
                                       .setHeader("clientId", clientID)
                                       .setHeader("eventType", "spawnMobsInZone")
-                                      .setBody("spawnZone", zoneJson)
+                                      .setBody("zoneId", spawnZone.zoneId)
                                       .setBody("mobs", mobsArray)
                                       .build();
 

@@ -14,18 +14,34 @@ ZoneEventHandler::ZoneEventHandler(
 void
 ZoneEventHandler::logSpawnZoneInfo(const SpawnZoneStruct &spawnZone)
 {
+    auto shapeStr = [](ZoneShape s) -> std::string
+    {
+        switch (s)
+        {
+        case ZoneShape::CIRCLE:
+            return "CIRCLE";
+        case ZoneShape::ANNULUS:
+            return "ANNULUS";
+        default:
+            return "RECT";
+        }
+    };
     gameServices_.getLogger().log("Spawn Zone ID: " + std::to_string(spawnZone.zoneId) +
                                   ", Name: " + spawnZone.zoneName +
-                                  ", MinX: " + std::to_string(spawnZone.posX) +
-                                  ", MaxX: " + std::to_string(spawnZone.sizeX) +
-                                  ", MinY: " + std::to_string(spawnZone.posY) +
-                                  ", MaxY: " + std::to_string(spawnZone.sizeY) +
-                                  ", MinZ: " + std::to_string(spawnZone.posZ) +
-                                  ", MaxZ: " + std::to_string(spawnZone.sizeZ) +
-                                  ", Spawn Mob ID: " + std::to_string(spawnZone.spawnMobId) +
-                                  ", Max Spawn Count: " + std::to_string(spawnZone.spawnCount) +
-                                  ", Respawn Time: " + std::to_string(spawnZone.respawnTime.count()) +
-                                  ", Spawn Enabled: " + std::to_string(spawnZone.spawnEnabled));
+                                  ", Shape: " + shapeStr(spawnZone.shape) +
+                                  ", MinX: " + std::to_string(spawnZone.minX) +
+                                  ", MaxX: " + std::to_string(spawnZone.maxX) +
+                                  ", MinY: " + std::to_string(spawnZone.minY) +
+                                  ", MaxY: " + std::to_string(spawnZone.maxY) +
+                                  ", MinZ: " + std::to_string(spawnZone.minZ) +
+                                  ", MaxZ: " + std::to_string(spawnZone.maxZ) +
+                                  ", CenterX: " + std::to_string(spawnZone.centerX) +
+                                  ", CenterY: " + std::to_string(spawnZone.centerY) +
+                                  ", InnerR: " + std::to_string(spawnZone.innerRadius) +
+                                  ", OuterR: " + std::to_string(spawnZone.outerRadius) +
+                                  ", MobEntries: " + std::to_string(spawnZone.mobEntries.size()) +
+                                  ", TotalSpawnCount: " + std::to_string(spawnZone.totalSpawnCount()) +
+                                  ", SpawnEnabled: " + std::to_string(spawnZone.spawnEnabled));
 }
 
 void
