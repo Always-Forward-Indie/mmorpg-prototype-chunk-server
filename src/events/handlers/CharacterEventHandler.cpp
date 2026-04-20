@@ -27,6 +27,10 @@ CharacterEventHandler::CharacterEventHandler(
     // Wire analytics: any packet built here is forwarded to game server which persists it.
     gameServices_.setAnalyticsSender([this](const std::string &data)
         { gameServerWorker_.sendDataToGameServer(data); });
+
+    // Wire skill cooldown persistence: CombatSystem calls this after a player uses a skill.
+    gameServices_.setSkillCooldownSender([this](const std::string &data)
+        { gameServerWorker_.sendDataToGameServer(data); });
 }
 
 void
@@ -460,6 +464,11 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 effectsReq["header"]["eventType"] = "getPlayerActiveEffects";
                 effectsReq["body"]["characterId"] = cid;
                 gameServerWorker_.sendDataToGameServer(effectsReq.dump() + "\n");
+
+                nlohmann::json cooldownsReq;
+                cooldownsReq["header"]["eventType"] = "getPlayerSkillCooldowns";
+                cooldownsReq["body"]["characterId"] = cid;
+                gameServerWorker_.sendDataToGameServer(cooldownsReq.dump() + "\n");
 
                 nlohmann::json inventoryReq;
                 inventoryReq["header"]["eventType"] = "getPlayerInventory";
@@ -1216,6 +1225,11 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
         effectsReq["header"]["eventType"] = "getPlayerActiveEffects";
         effectsReq["body"]["characterId"] = characterId;
         gameServerWorker_.sendDataToGameServer(effectsReq.dump() + "\n");
+
+        nlohmann::json cooldownsReq;
+        cooldownsReq["header"]["eventType"] = "getPlayerSkillCooldowns";
+        cooldownsReq["body"]["characterId"] = characterId;
+        gameServerWorker_.sendDataToGameServer(cooldownsReq.dump() + "\n");
 
         nlohmann::json inventoryReq;
         inventoryReq["header"]["eventType"] = "getPlayerInventory";

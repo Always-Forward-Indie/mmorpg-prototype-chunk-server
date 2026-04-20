@@ -1736,6 +1736,9 @@ struct ClassSkillTreeEntryStruct
 struct TrainerNPCDataStruct
 {
     int npcId = 0;
+    /// Class restriction: if classId > 0, this trainer only serves characters of that class.
+    /// 0 = no restriction (any class may use this trainer).
+    int classId = 0;
     std::vector<ClassSkillTreeEntryStruct> skills;
 };
 

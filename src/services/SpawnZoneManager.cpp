@@ -257,6 +257,22 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             zone->second.centerY + r * std::sin(angle)};
     };
 
+    // Stratified angular sampling: divides the ring into totalSlots equal sectors
+    // and places mob within slotIdx-th sector. Guarantees even angular spread
+    // and prevents visual clumping that pure random produces in narrow rings.
+    auto sampleAnnulusStratified = [&](int slotIdx, int totalSlots) -> std::pair<float, float>
+    {
+        float sectorSize = 2.0f * static_cast<float>(M_PI) / static_cast<float>(totalSlots);
+        float sectorStart = static_cast<float>(slotIdx) * sectorSize;
+        std::uniform_real_distribution<float> inSectorAngle(0.0f, sectorSize);
+        float angle = sectorStart + inSectorAngle(gen);
+        float r2in = zone->second.innerRadius * zone->second.innerRadius;
+        float r2out = zone->second.outerRadius * zone->second.outerRadius;
+        float r = std::sqrt(r2in + unitDist(gen) * (r2out - r2in));
+        return {zone->second.centerX + r * std::cos(angle),
+            zone->second.centerY + r * std::sin(angle)};
+    };
+
     // Process each mob-type entry independently.
     for (const auto &entry : zone->second.mobEntries)
     {
@@ -306,7 +322,12 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
                     std::tie(candidateX, candidateY) = sampleCircle();
                     break;
                 case ZoneShape::ANNULUS:
-                    std::tie(candidateX, candidateY) = sampleAnnulus();
+                    // First attempt uses stratified sector for even angular distribution.
+                    // Retries fall back to fully random to escape separation failures.
+                    if (needed > 1 && attempt == 0)
+                        std::tie(candidateX, candidateY) = sampleAnnulusStratified(i, needed);
+                    else
+                        std::tie(candidateX, candidateY) = sampleAnnulus();
                     break;
                 default:
                     std::tie(candidateX, candidateY) = sampleRect();

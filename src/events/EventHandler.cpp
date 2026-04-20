@@ -315,6 +315,9 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::SET_PLAYER_ACTIVE_EFFECTS:
             handleSetPlayerActiveEffectsEvent(event);
             break;
+        case Event::SET_PLAYER_SKILL_COOLDOWNS:
+            handleSetPlayerSkillCooldownsEvent(event);
+            break;
         case Event::SET_PLAYER_INVENTORY:
             handleSetPlayerInventoryEvent(event);
             break;
@@ -701,6 +704,88 @@ EventHandler::handleSetPlayerActiveEffectsEvent(const Event &event)
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("Error processing SET_PLAYER_ACTIVE_EFFECTS event: " + std::string(e.what()));
+    }
+}
+
+void
+EventHandler::handleSetPlayerSkillCooldownsEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_PLAYER_SKILL_COOLDOWNS: unexpected data type");
+            return;
+        }
+
+        const auto &body = std::get<nlohmann::json>(data);
+        int characterId = body.value("characterId", 0);
+        if (characterId <= 0)
+        {
+            log_->error("[EH] SET_PLAYER_SKILL_COOLDOWNS: invalid characterId " + std::to_string(characterId));
+            return;
+        }
+
+        const auto &cooldownsArr = body["cooldowns"];
+        if (!cooldownsArr.is_array() || cooldownsArr.empty())
+        {
+            // No active cooldowns — nothing to restore.
+            return;
+        }
+
+        // Restore each cooldown into SkillSystem so the server correctly rejects
+        // skill-use attempts while the cooldown is still active.
+        auto *combatSystem = combatEventHandler_->getCombatSystem();
+        if (!combatSystem)
+        {
+            log_->error("[EH] SET_PLAYER_SKILL_COOLDOWNS: CombatSystem not available");
+            return;
+        }
+
+        nlohmann::json cdJson = nlohmann::json::array();
+        for (const auto &cd : cooldownsArr)
+        {
+            std::string skillSlug = cd.value("skillSlug", std::string(""));
+            int64_t remainingMs = cd.value("remainingMs", int64_t(0));
+            if (skillSlug.empty() || remainingMs <= 0)
+                continue;
+
+            combatSystem->restoreSkillCooldown(characterId, skillSlug, remainingMs);
+
+            nlohmann::json entry;
+            entry["skillSlug"] = skillSlug;
+            entry["remainingMs"] = remainingMs;
+            cdJson.push_back(std::move(entry));
+        }
+
+        // Notify the game client about active cooldowns so it can grey out skill buttons.
+        if (!cdJson.empty())
+        {
+            auto clientData = gameServices_.getClientManager().getClientDataByCharacterId(characterId);
+            if (clientData.clientId > 0)
+            {
+                auto clientSocket = gameServices_.getClientManager().getClientSocket(clientData.clientId);
+                if (clientSocket)
+                {
+                    nlohmann::json packet;
+                    packet["header"]["eventType"] = "setSkillCooldowns";
+                    packet["header"]["clientId"] = clientData.clientId;
+                    packet["header"]["message"] = "active skill cooldowns";
+                    packet["body"]["characterId"] = characterId;
+                    packet["body"]["cooldowns"] = cdJson;
+                    std::string responseData = networkManager_.generateResponseMessage("success", packet);
+                    networkManager_.sendResponse(clientSocket, responseData);
+                }
+            }
+        }
+
+        log_->info("[EH] SET_PLAYER_SKILL_COOLDOWNS: restored " + std::to_string(cdJson.size()) +
+                   " cooldowns for character " + std::to_string(characterId));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_PLAYER_SKILL_COOLDOWNS event: " + std::string(e.what()));
     }
 }
 

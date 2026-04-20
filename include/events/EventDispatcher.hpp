@@ -20,6 +20,7 @@ class EventDispatcher
     void handlePing(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleGetConnectedClients(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handlePlayerAttack(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleSkillUsage(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handlePickupDroppedItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleGetPlayerInventory(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleHarvestStart(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);

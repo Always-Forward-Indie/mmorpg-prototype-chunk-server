@@ -57,6 +57,15 @@ struct SkillExecutionResult
     std::string skillSchool;     // physical, fire, ice, etc.
     int finalCasterMana = 0;     ///< caster's remaining mana after skill use
     int64_t serverTimestamp = 0; ///< unix ms when packet was generated
+
+    /// Set to true when a teleport_respawn skill has resolved a destination.
+    /// CombatEventHandler must then send the teleport packet and broadcast the position.
+    bool hasTeleport = false;
+    PositionStruct teleportPosition; ///< destination position (valid only if hasTeleport==true)
+
+    /// Effects that were applied in-memory by applySkillEffects.
+    /// CombatEventHandler persists each one via "saveActiveEffect" to the game server.
+    std::vector<ActiveEffectStruct> appliedEffects;
 };
 
 /**

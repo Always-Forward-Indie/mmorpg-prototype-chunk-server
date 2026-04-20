@@ -105,6 +105,7 @@ class EventHandler
      */
     void handleSetGameConfigEvent(const Event &event);
     void handleSetPlayerActiveEffectsEvent(const Event &event);
+    void handleSetPlayerSkillCooldownsEvent(const Event &event);
     void handleSetPlayerInventoryEvent(const Event &event);
     void handleInventoryItemIdSyncEvent(const Event &event);
     void handleSetCharacterAttributesRefreshEvent(const Event &event);

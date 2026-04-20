@@ -328,6 +328,16 @@ SkillSystem::isOnCooldown(int casterId, const std::string &skillSlug)
     return std::chrono::steady_clock::now() < skillIt->second;
 }
 
+void
+SkillSystem::restoreCooldown(int casterId, const std::string &skillSlug, int64_t remainingMs)
+{
+    if (remainingMs <= 0)
+        return;
+    auto endTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(remainingMs);
+    std::unique_lock<std::shared_mutex> lock(cooldownsMutex_);
+    cooldowns_[casterId][skillSlug] = endTime;
+}
+
 bool
 SkillSystem::isGCDActive(int casterId)
 {

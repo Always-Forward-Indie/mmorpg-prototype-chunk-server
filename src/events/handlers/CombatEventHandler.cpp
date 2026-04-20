@@ -81,6 +81,19 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
 
     log_->info("handlePlayerAttack called for client ID: " + std::to_string(clientID));
 
+    // Route skillUsage events BEFORE the rate limit check so they don't consume
+    // the playerAttack token and then fail the second check inside handleSkillUsage.
+    if (std::holds_alternative<nlohmann::json>(data))
+    {
+        const auto &json = std::get<nlohmann::json>(data);
+        if (json.contains("header") && json["header"].contains("eventType") &&
+            json["header"]["eventType"].get<std::string>() == "skillUsage")
+        {
+            handleSkillUsage(event);
+            return;
+        }
+    }
+
     // ARCH-2: server-side combat rate limiting
     if (!checkRateLimit(clientID))
     {
@@ -224,8 +237,94 @@ CombatEventHandler::updateOngoingActions()
 {
     try
     {
-        combatSystem_->updateOngoingActions();
+        auto results = combatSystem_->updateOngoingActions();
         combatSystem_->tickEffects();
+
+        // Handle deferred skill results that require server-side follow-up
+        // (e.g. teleport_respawn cast-time skills whose hasTeleport flag is set).
+        for (const auto &executionResult : results)
+        {
+            if (executionResult.hasTeleport)
+            {
+                const PositionStruct &dest = executionResult.teleportPosition;
+                int characterId = executionResult.casterId;
+
+                ClientDataStruct clientData =
+                    gameServices_.getClientManager().getClientDataByCharacterId(characterId);
+                int casterClientId = clientData.clientId;
+                auto clientSocket = gameServices_.getClientManager().getClientSocket(casterClientId);
+
+                // 1. Send teleport response to the caster
+                {
+                    nlohmann::json teleportResp;
+                    teleportResp["header"]["eventType"] = "respawnResult";
+                    teleportResp["header"]["status"] = "success";
+                    teleportResp["header"]["clientId"] = casterClientId;
+                    teleportResp["body"]["characterId"] = characterId;
+                    teleportResp["body"]["position"] = {
+                        {"x", dest.positionX}, {"y", dest.positionY}, {"z", dest.positionZ}, {"rotationZ", dest.rotationZ}};
+                    std::string msg = networkManager_.generateResponseMessage("success", teleportResp);
+                    if (clientSocket && clientSocket->is_open())
+                        networkManager_.sendResponse(clientSocket, msg);
+                }
+
+                // 2. Persist position
+                {
+                    nlohmann::json savePos;
+                    savePos["header"]["eventType"] = "savePositions";
+                    savePos["header"]["clientId"] = 0;
+                    savePos["header"]["hash"] = "";
+                    savePos["body"]["characters"] = nlohmann::json::array();
+                    nlohmann::json posEntry;
+                    posEntry["characterId"] = characterId;
+                    posEntry["posX"] = dest.positionX;
+                    posEntry["posY"] = dest.positionY;
+                    posEntry["posZ"] = dest.positionZ;
+                    posEntry["rotZ"] = dest.rotationZ;
+                    savePos["body"]["characters"].push_back(posEntry);
+                    gameServerWorker_.sendDataToGameServer(savePos.dump() + "\n");
+                }
+
+                // 3. Broadcast position update to other players
+                {
+                    nlohmann::json posBroadcast;
+                    posBroadcast["header"]["eventType"] = "characterMoved";
+                    posBroadcast["body"]["characterId"] = characterId;
+                    posBroadcast["body"]["posX"] = dest.positionX;
+                    posBroadcast["body"]["posY"] = dest.positionY;
+                    posBroadcast["body"]["posZ"] = dest.positionZ;
+                    posBroadcast["body"]["rotZ"] = dest.rotationZ;
+                    broadcastToAllClients(posBroadcast.dump() + "\n", casterClientId);
+                }
+
+                // Reset server-side movement validation state so the next
+                // moveCharacter packet is not rejected as a speed violation.
+                gameServices_.getCharacterManager().setLastValidatedMovement(characterId, dest, 0);
+
+                log_->info("[CombatEventHandler] Deferred teleport for char={}: ({},{},{})",
+                    characterId,
+                    dest.positionX,
+                    dest.positionY,
+                    dest.positionZ);
+            }
+
+            // Persist applied timed effects
+            for (const auto &eff : executionResult.appliedEffects)
+            {
+                nlohmann::json effectPacket;
+                effectPacket["header"]["eventType"] = "saveActiveEffect";
+                effectPacket["header"]["clientId"] = 0;
+                effectPacket["header"]["hash"] = "";
+                effectPacket["body"]["characterId"] = executionResult.casterId;
+                effectPacket["body"]["effectSlug"] = eff.effectSlug;
+                effectPacket["body"]["attributeSlug"] = eff.attributeSlug;
+                effectPacket["body"]["sourceType"] = "skill";
+                effectPacket["body"]["value"] = static_cast<double>(eff.value);
+                effectPacket["body"]["expiresAt"] = eff.expiresAt;
+                effectPacket["body"]["tickMs"] = eff.tickMs;
+                gameServerWorker_.sendDataToGameServer(effectPacket.dump() + "\n");
+            }
+        }
     }
     catch (const std::exception &ex)
     {
@@ -431,6 +530,93 @@ CombatEventHandler::dispatchSkillAction(int characterId,
                    " damage=" + std::to_string(executionResult.skillResult.damageResult.totalDamage));
     }
     broadcastSkillExecution(executionResult);
+
+    // Handle teleport_respawn result: send teleport packet to the caster and
+    // broadcast the new position to all nearby players.
+    if (executionResult.hasTeleport)
+    {
+        const PositionStruct &dest = executionResult.teleportPosition;
+
+        // Retrieve client data for the caster so we can address the response correctly
+        ClientDataStruct clientData =
+            gameServices_.getClientManager().getClientDataByCharacterId(characterId);
+        int casterClientId = clientData.clientId;
+
+        // 1. Send teleport response to the casting client
+        {
+            nlohmann::json teleportResp;
+            teleportResp["header"]["eventType"] = "respawnResult";
+            teleportResp["header"]["status"] = "success";
+            teleportResp["header"]["clientId"] = casterClientId;
+            teleportResp["body"]["characterId"] = characterId;
+            teleportResp["body"]["position"] = {
+                {"x", dest.positionX},
+                {"y", dest.positionY},
+                {"z", dest.positionZ},
+                {"rotationZ", dest.rotationZ}};
+            std::string msg = networkManager_.generateResponseMessage(
+                "success", teleportResp);
+            if (clientSocket)
+                networkManager_.sendResponse(clientSocket, msg);
+        }
+
+        // 2. Persist the new position to the game server
+        {
+            nlohmann::json savePos;
+            savePos["header"]["eventType"] = "savePositions";
+            savePos["header"]["clientId"] = 0;
+            savePos["header"]["hash"] = "";
+            savePos["body"]["characters"] = nlohmann::json::array();
+            nlohmann::json posEntry;
+            posEntry["characterId"] = characterId;
+            posEntry["posX"] = dest.positionX;
+            posEntry["posY"] = dest.positionY;
+            posEntry["posZ"] = dest.positionZ;
+            posEntry["rotZ"] = dest.rotationZ;
+            savePos["body"]["characters"].push_back(posEntry);
+            gameServerWorker_.sendDataToGameServer(savePos.dump() + "\n");
+        }
+
+        // 3. Broadcast position update to all other players in the chunk
+        {
+            nlohmann::json posBroadcast;
+            posBroadcast["header"]["eventType"] = "characterMoved";
+            posBroadcast["body"]["characterId"] = characterId;
+            posBroadcast["body"]["posX"] = dest.positionX;
+            posBroadcast["body"]["posY"] = dest.positionY;
+            posBroadcast["body"]["posZ"] = dest.positionZ;
+            posBroadcast["body"]["rotZ"] = dest.rotationZ;
+            broadcastToAllClients(posBroadcast.dump() + "\n", casterClientId);
+        }
+
+        // Reset server-side movement validation state so the next
+        // moveCharacter packet is not rejected as a speed violation.
+        gameServices_.getCharacterManager().setLastValidatedMovement(characterId, dest, 0);
+
+        log_->info("[CombatEventHandler] Teleport skill for char={}: ({},{},{}) via skill={}",
+            characterId,
+            dest.positionX,
+            dest.positionY,
+            dest.positionZ,
+            skillSlug);
+    }
+
+    // Persist any skill-applied timed effects to the game server so they survive logout.
+    for (const auto &eff : executionResult.appliedEffects)
+    {
+        nlohmann::json effectPacket;
+        effectPacket["header"]["eventType"] = "saveActiveEffect";
+        effectPacket["header"]["clientId"] = 0;
+        effectPacket["header"]["hash"] = "";
+        effectPacket["body"]["characterId"] = characterId;
+        effectPacket["body"]["effectSlug"] = eff.effectSlug;
+        effectPacket["body"]["attributeSlug"] = eff.attributeSlug;
+        effectPacket["body"]["sourceType"] = "skill";
+        effectPacket["body"]["value"] = static_cast<double>(eff.value);
+        effectPacket["body"]["expiresAt"] = eff.expiresAt;
+        effectPacket["body"]["tickMs"] = eff.tickMs;
+        gameServerWorker_.sendDataToGameServer(effectPacket.dump() + "\n");
+    }
 }
 
 void

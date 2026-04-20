@@ -54,6 +54,12 @@ TrainerManager::buildSkillShopJson(
         return nlohmann::json(); // null
 
     const auto &trainer = it->second;
+
+    // Class restriction: if the trainer is tied to a specific class, only
+    // characters of that class may see the skill shop.
+    if (trainer.classId > 0 && ctx.classId > 0 && trainer.classId != ctx.classId)
+        return nlohmann::json::array(); // empty shop — wrong class
+
     const int charLevel = ctx.characterLevel;
     const int freeSp = ctx.freeSkillPoints;
 

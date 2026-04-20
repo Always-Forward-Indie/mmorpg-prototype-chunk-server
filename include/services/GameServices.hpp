@@ -40,6 +40,7 @@
 #include "services/ZoneEventManager.hpp"
 #include "utils/Logger.hpp"
 #include <functional>
+#include <nlohmann/json.hpp>
 #include <string>
 
 class GameServices
@@ -275,6 +276,29 @@ class GameServices
             analyticsSender_(data);
     }
 
+    // Skill cooldown persistence: called from CombatSystem when a player uses a skill.
+    // Sends a fire-and-forget saveSkillCooldown message to the game server.
+    void setSkillCooldownSender(std::function<void(const std::string &)> fn)
+    {
+        skillCooldownSender_ = std::move(fn);
+    }
+    void sendSkillCooldownPersist(int characterId, const std::string &skillSlug, int64_t cooldownEndsAtMs)
+    {
+        logger_.log("[GameServices] sendSkillCooldownPersist char=" + std::to_string(characterId) +
+                        " skill=" + skillSlug + " senderSet=" + (skillCooldownSender_ ? "yes" : "no"),
+            YELLOW);
+        if (skillCooldownSender_)
+        {
+            nlohmann::json msg;
+            msg["header"]["eventType"] = "saveSkillCooldown";
+            msg["body"]["characterId"] = characterId;
+            msg["body"]["skillSlug"] = skillSlug;
+            msg["body"]["cooldownEndsAtMs"] = cooldownEndsAtMs;
+            logger_.log("[GameServices] dispatching saveSkillCooldown: " + msg.dump(), YELLOW);
+            skillCooldownSender_(msg.dump() + "\n");
+        }
+    }
+
   private:
     Logger &logger_;
     GameConfigService gameConfigService_; // FIRST: initialized before all managers
@@ -316,4 +340,5 @@ class GameServices
     AmbientSpeechManager ambientSpeechManager_;
     WorldObjectManager worldObjectManager_;
     std::function<void(const std::string &)> analyticsSender_ = [](const std::string &) {};
+    std::function<void(const std::string &)> skillCooldownSender_ = [](const std::string &) {};
 };

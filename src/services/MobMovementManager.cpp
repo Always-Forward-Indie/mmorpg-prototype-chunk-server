@@ -395,7 +395,15 @@ MobMovementManager::calculateNewPosition(
     }
 
     // Check if mob is at border (shape-aware)
-    float borderThreshold = std::max(maxX - minX, maxY - minY) * params.borderThresholdPercent;
+    // For ANNULUS use ring width so threshold is proportional to usable space,
+    // not the enclosing AABB (which would make thin rings perpetually "at border").
+    float borderThreshold;
+    if (zone.shape == ZoneShape::ANNULUS)
+        borderThreshold = (zone.outerRadius - zone.innerRadius) * params.borderThresholdPercent;
+    else if (zone.shape == ZoneShape::CIRCLE)
+        borderThreshold = zone.outerRadius * params.borderThresholdPercent;
+    else
+        borderThreshold = std::max(maxX - minX, maxY - minY) * params.borderThresholdPercent;
     bool atBorder;
     if (zone.shape == ZoneShape::RECT)
     {
@@ -456,13 +464,34 @@ MobMovementManager::calculateNewPosition(
 
         if (atBorder)
         {
-            // Move towards center when at border
-            float centerX = (minX + maxX) * 0.5f;
-            float centerY = (minY + maxY) * 0.5f;
-            float angleToCenter = atan2(centerY - mob.position.positionY,
-                centerX - mob.position.positionX);
+            // Move towards zone interior when at border (shape-aware).
+            // ANNULUS: escape direction depends on which boundary we hit:
+            //   - outer border → aim inward (toward midRadius along radial)
+            //   - inner border → aim outward (away from center toward midRadius)
+            // CIRCLE/RECT: aim at geometric center as before.
+            float angleToEscape;
+            if (zone.shape == ZoneShape::ANNULUS)
+            {
+                float dx = mob.position.positionX - zone.centerX;
+                float dy = mob.position.positionY - zone.centerY;
+                float d = std::sqrt(dx * dx + dy * dy);
+                float midR = (zone.innerRadius + zone.outerRadius) * 0.5f;
+                float radialAngle = std::atan2(dy, dx);
+                // at inner border d < midR → aim outward; at outer border → aim inward
+                if (d < midR)
+                    angleToEscape = radialAngle; // outward
+                else
+                    angleToEscape = radialAngle + static_cast<float>(M_PI); // inward
+            }
+            else
+            {
+                float centerX = (minX + maxX) * 0.5f;
+                float centerY = (minY + maxY) * 0.5f;
+                angleToEscape = std::atan2(centerY - mob.position.positionY,
+                    centerX - mob.position.positionX);
+            }
             std::uniform_real_distribution<float> borderAngle(params.borderAngleMin, params.borderAngleMax);
-            newAngle = angleToCenter + (borderAngle(rng_) * (M_PI / 180.0f));
+            newAngle = angleToEscape + (borderAngle(rng_) * (M_PI / 180.0f));
         }
         else
         {
@@ -495,9 +524,16 @@ MobMovementManager::calculateNewPosition(
                     float safeInner = zone.innerRadius + borderThreshold + 1.0f;
                     if (safeOuter > safeInner)
                     {
-                        std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * static_cast<float>(M_PI));
+                        // Limit waypoint to ±90° arc from mob's current angular position.
+                        // A waypoint on the opposite side of the ring forces a straight-line
+                        // path through the inner hole → all retries fail → orbit via inertia.
+                        float mobAngle = std::atan2(mob.position.positionY - zone.centerY,
+                            mob.position.positionX - zone.centerX);
+                        std::uniform_real_distribution<float> arcDist(
+                            -static_cast<float>(M_PI) * 0.5f,
+                            static_cast<float>(M_PI) * 0.5f);
                         std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
-                        float angle = angleDist(rng_);
+                        float angle = mobAngle + arcDist(rng_);
                         float r2in = safeInner * safeInner;
                         float r2out = safeOuter * safeOuter;
                         float r = std::sqrt(r2in + unitDist(rng_) * (r2out - r2in));
@@ -534,10 +570,14 @@ MobMovementManager::calculateNewPosition(
 
             // Direction inertia (plan §5.2): 70% chance of continuing ±30° from
             // previous heading, 30% chance of re-aligning straight toward waypoint.
+            // For ANNULUS reduce to 40%: high inertia in a ring naturally produces
+            // orbit behavior as the tangential heading is always "valid" and gets
+            // reinforced every step.
             bool hasPrevDir = (movementData.movementDirectionX != 0.0f ||
                                movementData.movementDirectionY != 0.0f);
             std::uniform_real_distribution<float> coinFlip(0.0f, 1.0f);
-            if (hasPrevDir && coinFlip(rng_) < 0.70f)
+            const float inertiaProbability = (zone.shape == ZoneShape::ANNULUS) ? 0.40f : 0.70f;
+            if (hasPrevDir && coinFlip(rng_) < inertiaProbability)
             {
                 float prevAngle = std::atan2(movementData.movementDirectionY,
                     movementData.movementDirectionX);
@@ -572,13 +612,38 @@ MobMovementManager::calculateNewPosition(
     {
         if (atBorder)
         {
-            // Emergency escape: aim straight at zone centre with no angle jitter.
-            // Regular retries already tried centre±scatter and all failed (border corner);
-            // a pure centre vector is the only direction guaranteed to clear the wall.
-            float cx = (minX + maxX) * 0.5f;
-            float cy = (minY + maxY) * 0.5f;
-            float ex = cx - mob.position.positionX;
-            float ey = cy - mob.position.positionY;
+            // Emergency escape: pure radial direction toward zone interior, no jitter.
+            // For ANNULUS: aim toward midRadius along current radial direction
+            //   (center would cross the inner hole → invalid).
+            // For CIRCLE/RECT: aim at geometric center as before.
+            float ex, ey;
+            if (zone.shape == ZoneShape::ANNULUS)
+            {
+                float dx = mob.position.positionX - zone.centerX;
+                float dy = mob.position.positionY - zone.centerY;
+                float d = std::sqrt(dx * dx + dy * dy);
+                float midR = (zone.innerRadius + zone.outerRadius) * 0.5f;
+                if (d > 0.0f)
+                {
+                    // Target = point at midRadius along current radial direction
+                    float targetX = zone.centerX + (dx / d) * midR;
+                    float targetY = zone.centerY + (dy / d) * midR;
+                    ex = targetX - mob.position.positionX;
+                    ey = targetY - mob.position.positionY;
+                }
+                else
+                {
+                    ex = 1.0f;
+                    ey = 0.0f;
+                }
+            }
+            else
+            {
+                float cx = (minX + maxX) * 0.5f;
+                float cy = (minY + maxY) * 0.5f;
+                ex = cx - mob.position.positionX;
+                ey = cy - mob.position.positionY;
+            }
             float ed = std::sqrt(ex * ex + ey * ey);
             if (ed > 0.0f)
             {

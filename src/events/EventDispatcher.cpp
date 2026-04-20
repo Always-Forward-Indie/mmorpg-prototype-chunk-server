@@ -51,6 +51,10 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     {
         handlePlayerAttack(context, socket);
     }
+    else if (context.eventType == "skillUsage")
+    {
+        handleSkillUsage(context, socket);
+    }
     else if (context.eventType == "itemPickup")
     {
         handlePickupDroppedItem(context, socket);
@@ -656,6 +660,32 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
     {
         // Log that we're skipping the event for a disconnected client
         log_->info("Skipping player attack event for disconnected client ID: " + std::to_string(context.clientData.clientId));
+    }
+}
+
+void
+EventDispatcher::handleSkillUsage(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (!socket || !socket->is_open())
+    {
+        log_->info("Skipping skillUsage event for disconnected client ID: " + std::to_string(context.clientData.clientId));
+        return;
+    }
+    try
+    {
+        JSONParser jsonParser;
+        nlohmann::json fullData = nlohmann::json::parse(context.fullMessage);
+        Event skillUsageEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, fullData}, context.timestamps);
+        eventsBatch_.push_back(skillUsageEvent);
+        if (eventsBatch_.size() >= BATCH_SIZE)
+        {
+            eventQueue_.pushBatch(eventsBatch_);
+            eventsBatch_.clear();
+        }
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error creating skillUsage event: " + std::string(e.what()), RED);
     }
 }
 

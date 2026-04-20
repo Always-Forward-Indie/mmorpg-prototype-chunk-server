@@ -87,6 +87,13 @@ class SkillSystem
     bool trySetCooldown(int casterId, const std::string &skillSlug, int cooldownMs, int gcdMs = 0, bool *outOnGCD = nullptr);
 
     /**
+     * @brief Restore a cooldown from a persisted remaining duration (e.g. on login).
+     *        Always sets the entry, regardless of whether one exists already.
+     *        No-op when remainingMs <= 0.
+     */
+    void restoreCooldown(int casterId, const std::string &skillSlug, int64_t remainingMs);
+
+    /**
      * @brief Получить лучший скил для моба (AI). Возвращает nullopt если подходящего скила нет.
      */
     std::optional<std::reference_wrapper<const SkillStruct>> getBestSkillForMob(const MobDataStruct &mobData,

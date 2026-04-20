@@ -130,6 +130,34 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
                 }
                 return result;
             }
+
+            // Persist cooldown for player characters so it survives reconnects.
+            if (skill.cooldownMs > 0)
+            {
+                auto charCheck = gameServices_->getCharacterManager().getCharacterData(casterId);
+                log_->info("[CooldownPersist] char={} skill={} cooldownMs={} charCheck.characterId={}",
+                    casterId,
+                    skillSlug,
+                    skill.cooldownMs,
+                    charCheck.characterId);
+                if (charCheck.characterId != 0)
+                {
+                    int64_t cooldownEndsAtMs =
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count() +
+                        skill.cooldownMs;
+                    log_->info("[CooldownPersist] sending persist for char={} skill={} endsAtMs={}",
+                        casterId,
+                        skillSlug,
+                        cooldownEndsAtMs);
+                    gameServices_->sendSkillCooldownPersist(casterId, skillSlug, cooldownEndsAtMs);
+                }
+            }
+            else
+            {
+                log_->info("[CooldownPersist] skipped — cooldownMs=0 for char={} skill={}", casterId, skillSlug);
+            }
         }
 
         // Проверяем, что у кастера нет активного каста — во время каста нельзя использовать
@@ -404,6 +432,16 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             return result;
         }
 
+        // Teleport skills are self-only — reject any attempt to cast on another entity
+        if (skillOpt.has_value() && skillOpt->skillEffectType == "teleport_respawn")
+        {
+            if (targetType != CombatTargetType::SELF || targetId != casterId)
+            {
+                result.errorMessage = "Teleport skills can only target yourself";
+                return result;
+            }
+        }
+
         // Re-validate target is still alive before spending resources (HIGH-8 style)
         if (targetType == CombatTargetType::MOB)
         {
@@ -416,6 +454,13 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         }
         else if (targetType == CombatTargetType::PLAYER)
         {
+            // Block self-damage via PLAYER target type
+            if (targetId == casterId)
+            {
+                result.errorMessage = "Cannot target yourself with this skill";
+                return result;
+            }
+
             auto charData = gameServices_->getCharacterManager().getCharacterData(targetId);
             if (charData.characterId == 0 || charData.characterCurrentHealth <= 0)
             {
@@ -438,11 +483,21 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         }
 
         // Применяем эффекты
-        applySkillEffects(skillResult, casterId, skillSlug, targetId, targetType);
+        applySkillEffects(skillResult, casterId, skillSlug, targetId, targetType, &result);
 
         // Проверяем смерть цели
         if (skillResult.damageResult.totalDamage > 0)
         {
+            // PvP guard: damage-dealing skills cannot target other players until a
+            // PvP consent system (zone flags, duel, etc.) is implemented.
+            if (targetType == CombatTargetType::PLAYER && targetId != casterId)
+            {
+                log_->warn("[COMBAT] PvP damage blocked: caster {} -> player {}", casterId, targetId);
+                result.errorMessage = "PvP is not available";
+                result.success = true; // skill was used (mana spent, CD set) — just no damage
+                return result;
+            }
+
             try
             {
                 if (targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF)
@@ -647,6 +702,42 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
         result.success = true;
         // serverTimestamp already set at the top of this function.
 
+        // Handle teleport_respawn skill: resolve nearest respawn zone and update in-memory position.
+        // The actual network packets are sent by CombatEventHandler after execution returns.
+        if (skillOpt.has_value() && skillOpt->skillEffectType == "teleport_respawn")
+        {
+            try
+            {
+                PositionStruct casterPos =
+                    gameServices_->getCharacterManager().getCharacterPosition(casterId);
+                RespawnZoneStruct zone =
+                    gameServices_->getRespawnZoneManager().findNearest(casterPos);
+
+                if (zone.id > 0)
+                {
+                    PositionStruct dest;
+                    dest.positionX = zone.position.positionX;
+                    dest.positionY = zone.position.positionY;
+                    dest.positionZ = zone.position.positionZ;
+                    dest.rotationZ = casterPos.rotationZ;
+
+                    // Update in-memory position so the server state is immediately consistent.
+                    gameServices_->getCharacterManager().setCharacterPosition(casterId, dest);
+
+                    result.hasTeleport = true;
+                    result.teleportPosition = dest;
+                }
+                else
+                {
+                    log_->warn("[COMBAT] teleport_respawn: no respawn zone found for caster {}", casterId);
+                }
+            }
+            catch (const std::exception &te)
+            {
+                log_->warn("[COMBAT] teleport_respawn error for caster {}: {}", casterId, te.what());
+            }
+        }
+
         // Отправляем обновление статов для кастера (потратил ману)
         try
         {
@@ -682,7 +773,7 @@ CombatSystem::clearOngoingAction(int casterId)
     ongoingActions_.erase(casterId);
 }
 
-void
+std::vector<SkillExecutionResult>
 CombatSystem::updateOngoingActions()
 {
     auto now = std::chrono::steady_clock::now();
@@ -714,6 +805,7 @@ CombatSystem::updateOngoingActions()
         }
     }
 
+    std::vector<SkillExecutionResult> results;
     for (auto &[casterId, skillSlug, targetId, targetType, actionName, cooldownPreset] : toExecute)
     {
         auto result = executeSkillUsage(casterId, skillSlug, targetId, targetType, cooldownPreset);
@@ -724,7 +816,9 @@ CombatSystem::updateOngoingActions()
             broadcastCallback_(broadcast);
             log_->info("Skill execution broadcast sent for: " + actionName);
         }
+        results.push_back(std::move(result));
     }
+    return results;
 }
 
 void
@@ -908,8 +1002,8 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug, b
             }
             else
             {
-                // Apply DoT/debuff effects on surviving player targets
-                applySkillEffects(skillResult, casterId, skillSlug, target.characterId, CombatTargetType::PLAYER);
+                // Apply DoT/debuff effects on surviving player targets (AoE — no persistence handle needed)
+                applySkillEffects(skillResult, casterId, skillSlug, target.characterId, CombatTargetType::PLAYER, nullptr);
             }
 
             ++hitCount;
@@ -947,7 +1041,7 @@ CombatSystem::getAvailableTargets(int attackerId, const SkillStruct &skill)
 }
 
 void
-CombatSystem::applySkillEffects(const SkillUsageResult &result, int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType)
+CombatSystem::applySkillEffects(const SkillUsageResult &result, int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, SkillExecutionResult *execResult)
 {
     // Retrieve the skill definition to access its effect list.
     std::optional<SkillStruct> skillOpt = skillSystem_->getCharacterSkill(casterId, skillSlug);
@@ -1017,6 +1111,10 @@ CombatSystem::applySkillEffects(const SkillUsageResult &result, int casterId, co
         }
 
         gameServices_->getCharacterManager().addActiveEffect(recipientId, eff);
+
+        // Record for persistence: CombatEventHandler will send saveActiveEffect to game server
+        if (execResult)
+            execResult->appliedEffects.push_back(eff);
 
         // Notify client: buff bar and effective stats need refreshing
         gameServices_->getStatsNotificationService().sendStatsUpdate(recipientId);
@@ -1795,4 +1893,10 @@ CombatSystem::saveDurabilityChange(int characterId, int inventoryItemId, int dur
     packet["body"]["inventoryItemId"] = inventoryItemId;
     packet["body"]["durabilityCurrent"] = durabilityCurrent;
     saveDurabilityCallback_(packet.dump() + "\n");
+}
+
+void
+CombatSystem::restoreSkillCooldown(int characterId, const std::string &skillSlug, int64_t remainingMs)
+{
+    skillSystem_->restoreCooldown(characterId, skillSlug, remainingMs);
 }

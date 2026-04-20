@@ -109,7 +109,7 @@ HarvestEventHandler::handleHarvestStartRequest(const Event &event)
             try
             {
                 log_->info("HarvestEventHandler: Calling harvestManager.startHarvest()");
-                success = harvestManager.startHarvest(clientId, request.corpseUID, playerPosition);
+                success = harvestManager.startHarvest(request.characterId, request.corpseUID, playerPosition);
                 log_->info("HarvestEventHandler: startHarvest returned: " + std::string(success ? "true" : "false"));
             }
             catch (const std::exception &e)
@@ -263,21 +263,23 @@ HarvestEventHandler::handleHarvestCancel(const Event &event)
     {
         int clientId = event.getClientID();
 
-        // Получаем игрока
-        auto player = gameServices_.getCharacterManager().getCharacterById(clientId);
-        if (player.characterId == 0)
+        // Resolve characterId from clientId
+        auto clientData = gameServices_.getClientManager().getClientData(clientId);
+        int characterId = clientData.characterId;
+
+        if (characterId <= 0)
         {
-            log_->error("Player not found for harvest cancel request: " + std::to_string(clientId));
+            log_->error("No character mapped for client in harvest cancel: " + std::to_string(clientId));
             return;
         }
 
         auto &harvestManager = gameServices_.getHarvestManager();
 
         // Получаем информацию о текущем харвестинге для корректного ответа
-        auto harvestProgress = harvestManager.getHarvestProgress(clientId);
+        auto harvestProgress = harvestManager.getHarvestProgress(characterId);
         int corpseId = harvestProgress.corpseUID;
 
-        harvestManager.cancelHarvest(clientId);
+        harvestManager.cancelHarvest(characterId);
 
         // Отправляем ответ клиенту
         auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
@@ -328,11 +330,11 @@ HarvestEventHandler::handleHarvestComplete(int playerId, int corpseId)
         }
 
         // Отправляем результат клиенту с информацией о доступном луте
-        auto clientSocket = gameServices_.getClientManager().getClientSocket(playerId);
+        // playerId here is characterId — resolve to clientId for socket lookup
+        auto clientData = gameServices_.getClientManager().getClientDataByCharacterId(playerId);
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientData.clientId);
         if (clientSocket)
         {
-            auto clientData = gameServices_.getClientManager().getClientData(playerId);
-
             nlohmann::json itemsArray = nlohmann::json::array();
 
             for (const auto &[itemId, quantity] : harvestLoot)
@@ -356,10 +358,10 @@ HarvestEventHandler::handleHarvestComplete(int playerId, int corpseId)
             nlohmann::json response = ResponseBuilder()
                                           .setHeader("message", "Harvest completed - loot available for pickup")
                                           .setHeader("hash", clientData.hash)
-                                          .setHeader("clientId", std::to_string(playerId))
+                                          .setHeader("clientId", std::to_string(clientData.clientId))
                                           .setHeader("eventType", "harvestComplete")
                                           .setBody("type", "HARVEST_COMPLETE")
-                                          .setBody("clientId", playerId)
+                                          .setBody("clientId", clientData.clientId)
                                           .setBody("playerId", playerId)
                                           .setBody("corpseId", corpseId)
                                           .setBody("success", true)
@@ -391,19 +393,22 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
         auto &harvestManager = gameServices_.getHarvestManager();
         auto &itemManager = gameServices_.getItemManager();
 
+        // Resolve clientId from characterId for socket operations
+        auto resolvedClientData = gameServices_.getClientManager().getClientDataByCharacterId(pickupRequest.characterId);
+        int clientId = resolvedClientData.clientId;
+
         // Валидация playerId (сверяем с characterId из сессии)
         if (pickupRequest.playerId != pickupRequest.characterId)
         {
             log_->error("Security violation: playerId mismatch in corpse loot pickup");
 
-            auto clientSocket = gameServices_.getClientManager().getClientSocket(pickupRequest.characterId);
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
             if (clientSocket)
             {
-                auto clientData = gameServices_.getClientManager().getClientData(pickupRequest.characterId);
                 nlohmann::json errorResponse = ResponseBuilder()
                                                    .setHeader("message", "Security violation: player ID mismatch")
-                                                   .setHeader("hash", clientData.hash)
-                                                   .setHeader("clientId", std::to_string(pickupRequest.characterId))
+                                                   .setHeader("hash", resolvedClientData.hash)
+                                                   .setHeader("clientId", std::to_string(clientId))
                                                    .setHeader("eventType", "corpseLootPickup")
                                                    .setBody("success", false)
                                                    .setBody("errorCode", "SECURITY_VIOLATION")
@@ -437,14 +442,13 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
         {
             log_->error("Corpse not found for loot pickup: " + std::to_string(pickupRequest.corpseUID));
 
-            auto clientSocket = gameServices_.getClientManager().getClientSocket(pickupRequest.characterId);
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
             if (clientSocket)
             {
-                auto clientData = gameServices_.getClientManager().getClientData(pickupRequest.characterId);
                 nlohmann::json errorResponse = ResponseBuilder()
                                                    .setHeader("message", "Corpse not found")
-                                                   .setHeader("hash", clientData.hash)
-                                                   .setHeader("clientId", std::to_string(pickupRequest.characterId))
+                                                   .setHeader("hash", resolvedClientData.hash)
+                                                   .setHeader("clientId", std::to_string(clientId))
                                                    .setHeader("eventType", "corpseLootPickup")
                                                    .setBody("success", false)
                                                    .setBody("errorCode", "CORPSE_NOT_FOUND")
@@ -464,11 +468,9 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
             playerPosition);
 
         // Отправляем ответ клиенту
-        auto clientSocket = gameServices_.getClientManager().getClientSocket(pickupRequest.characterId);
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
         if (clientSocket)
         {
-            auto clientData = gameServices_.getClientManager().getClientData(pickupRequest.characterId);
-
             if (success && !pickedUpItems.empty())
             {
                 // Успешный подбор
@@ -510,8 +512,8 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
 
                 nlohmann::json successResponse = ResponseBuilder()
                                                      .setHeader("message", "Items picked up successfully")
-                                                     .setHeader("hash", clientData.hash)
-                                                     .setHeader("clientId", std::to_string(pickupRequest.characterId))
+                                                     .setHeader("hash", resolvedClientData.hash)
+                                                     .setHeader("clientId", std::to_string(clientId))
                                                      .setHeader("eventType", "corpseLootPickup")
                                                      .setBody("success", true)
                                                      .setBody("corpseUID", pickupRequest.corpseUID)
@@ -575,8 +577,8 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                 // Неудачный подбор
                 nlohmann::json errorResponse = ResponseBuilder()
                                                    .setHeader("message", "Failed to pickup items")
-                                                   .setHeader("hash", clientData.hash)
-                                                   .setHeader("clientId", std::to_string(pickupRequest.characterId))
+                                                   .setHeader("hash", resolvedClientData.hash)
+                                                   .setHeader("clientId", std::to_string(clientId))
                                                    .setHeader("eventType", "corpseLootPickup")
                                                    .setBody("success", false)
                                                    .setBody("errorCode", "PICKUP_FAILED")
@@ -606,19 +608,22 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
         auto &harvestManager = gameServices_.getHarvestManager();
         auto &itemManager = gameServices_.getItemManager();
 
+        // Resolve clientId from characterId for socket operations
+        auto resolvedClient = gameServices_.getClientManager().getClientDataByCharacterId(inspectRequest.characterId);
+        int clientId = resolvedClient.clientId;
+
         // Валидация playerId (сверяем с characterId из сессии)
         if (inspectRequest.playerId != inspectRequest.characterId)
         {
             log_->error("Security violation: playerId mismatch in corpse loot inspect");
 
-            auto clientSocket = gameServices_.getClientManager().getClientSocket(inspectRequest.characterId);
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
             if (clientSocket)
             {
-                auto clientData = gameServices_.getClientManager().getClientData(inspectRequest.characterId);
                 nlohmann::json errorResponse = ResponseBuilder()
                                                    .setHeader("message", "Security violation: player ID mismatch")
-                                                   .setHeader("hash", clientData.hash)
-                                                   .setHeader("clientId", std::to_string(inspectRequest.characterId))
+                                                   .setHeader("hash", resolvedClient.hash)
+                                                   .setHeader("clientId", std::to_string(clientId))
                                                    .setHeader("eventType", "corpseLootInspect")
                                                    .setBody("success", false)
                                                    .setBody("errorCode", "SECURITY_VIOLATION")
@@ -636,14 +641,13 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
         {
             log_->error("Corpse not found for loot inspect: " + std::to_string(inspectRequest.corpseUID));
 
-            auto clientSocket = gameServices_.getClientManager().getClientSocket(inspectRequest.characterId);
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
             if (clientSocket)
             {
-                auto clientData = gameServices_.getClientManager().getClientData(inspectRequest.characterId);
                 nlohmann::json errorResponse = ResponseBuilder()
                                                    .setHeader("message", "Corpse not found")
-                                                   .setHeader("hash", clientData.hash)
-                                                   .setHeader("clientId", std::to_string(inspectRequest.characterId))
+                                                   .setHeader("hash", resolvedClient.hash)
+                                                   .setHeader("clientId", std::to_string(clientId))
                                                    .setHeader("eventType", "corpseLootInspect")
                                                    .setBody("success", false)
                                                    .setBody("errorCode", "CORPSE_NOT_FOUND")
@@ -660,14 +664,13 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
         {
             log_->error("Cannot inspect loot from non-harvested corpse: " + std::to_string(inspectRequest.corpseUID));
 
-            auto clientSocket = gameServices_.getClientManager().getClientSocket(inspectRequest.characterId);
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
             if (clientSocket)
             {
-                auto clientData = gameServices_.getClientManager().getClientData(inspectRequest.characterId);
                 nlohmann::json errorResponse = ResponseBuilder()
                                                    .setHeader("message", "Corpse has not been harvested yet")
-                                                   .setHeader("hash", clientData.hash)
-                                                   .setHeader("clientId", std::to_string(inspectRequest.characterId))
+                                                   .setHeader("hash", resolvedClient.hash)
+                                                   .setHeader("clientId", std::to_string(clientId))
                                                    .setHeader("eventType", "corpseLootInspect")
                                                    .setBody("success", false)
                                                    .setBody("errorCode", "CORPSE_NOT_HARVESTED")
@@ -686,14 +689,13 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
                                                " tried to inspect loot from corpse " + std::to_string(inspectRequest.corpseUID) +
                                                " harvested by player " + std::to_string(corpse.harvestedByCharacterId));
 
-            auto clientSocket = gameServices_.getClientManager().getClientSocket(inspectRequest.characterId);
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
             if (clientSocket)
             {
-                auto clientData = gameServices_.getClientManager().getClientData(inspectRequest.characterId);
                 nlohmann::json errorResponse = ResponseBuilder()
                                                    .setHeader("message", "You can only inspect loot from corpses you harvested")
-                                                   .setHeader("hash", clientData.hash)
-                                                   .setHeader("clientId", std::to_string(inspectRequest.characterId))
+                                                   .setHeader("hash", resolvedClient.hash)
+                                                   .setHeader("clientId", std::to_string(clientId))
                                                    .setHeader("eventType", "corpseLootInspect")
                                                    .setBody("success", false)
                                                    .setBody("errorCode", "NOT_YOUR_HARVEST")
@@ -709,11 +711,9 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
         auto availableLoot = harvestManager.getCorpseLoot(inspectRequest.corpseUID);
 
         // Отправляем ответ клиенту
-        auto clientSocket = gameServices_.getClientManager().getClientSocket(inspectRequest.characterId);
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
         if (clientSocket)
         {
-            auto clientData = gameServices_.getClientManager().getClientData(inspectRequest.characterId);
-
             // Формируем список лута
             nlohmann::json lootArray = nlohmann::json::array();
             for (const auto &[itemId, quantity] : availableLoot)
@@ -735,8 +735,8 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
 
             nlohmann::json successResponse = ResponseBuilder()
                                                  .setHeader("message", "Corpse loot retrieved successfully")
-                                                 .setHeader("hash", clientData.hash)
-                                                 .setHeader("clientId", std::to_string(inspectRequest.characterId))
+                                                 .setHeader("hash", resolvedClient.hash)
+                                                 .setHeader("clientId", std::to_string(clientId))
                                                  .setHeader("eventType", "corpseLootInspect")
                                                  .setBody("success", true)
                                                  .setBody("corpseUID", inspectRequest.corpseUID)

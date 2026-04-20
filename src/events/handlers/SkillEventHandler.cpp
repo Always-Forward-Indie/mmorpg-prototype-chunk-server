@@ -199,7 +199,8 @@ SkillEventHandler::handleSetTrainerDataEvent(const Event &event)
         for (const auto &tj : body["trainers"])
         {
             TrainerNPCDataStruct trainer;
-            trainer.npcId = tj.value("npcId", 0);
+            trainer.npcId   = tj.value("npcId",   0);
+            trainer.classId = tj.value("classId", 0); // 0 = no class restriction
             if (trainer.npcId <= 0)
                 continue;
 
@@ -281,6 +282,7 @@ SkillEventHandler::handleOpenSkillShopEvent(const Event &event)
         ctx.characterId = req.characterId;
         ctx.characterLevel = charData.characterLevel;
         ctx.freeSkillPoints = charData.freeSkillPoints;
+        ctx.classId = charData.classId;
         for (const auto &s : charData.skills)
             ctx.learnedSkillSlugs.insert(s.skillSlug);
 
@@ -391,6 +393,17 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
 
         const CharacterDataStruct &charData =
             gameServices_.getCharacterManager().getCharacterData(req.characterId);
+
+        // Class restriction: trainer only teaches characters of matching class
+        {
+            const auto *trainer = gameServices_.getTrainerManager().getTrainerByNpcId(effectiveNpcId);
+            if (trainer && trainer->classId > 0 && charData.classId > 0 &&
+                trainer->classId != charData.classId)
+            {
+                sendFailed("wrong_class");
+                return;
+            }
+        }
 
         // Build learned-set for validation
         std::unordered_set<std::string> learnedSlugs;

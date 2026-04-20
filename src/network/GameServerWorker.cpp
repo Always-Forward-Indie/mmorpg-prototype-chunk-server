@@ -260,6 +260,11 @@ GameServerWorker::processGameServerData(std::string_view data)
         auto effects = jsonParser_.parsePlayerActiveEffects(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_PLAYER_ACTIVE_EFFECTS, clientData.clientId, effects);
     }
+    else if (eventType == "setPlayerSkillCooldowns")
+    {
+        nlohmann::json bodyJson = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_PLAYER_SKILL_COOLDOWNS, clientData.clientId, bodyJson);
+    }
     else if (eventType == "setPlayerInventoryData")
     {
         auto items = jsonParser_.parsePlayerInventory(data.data(), data.size());

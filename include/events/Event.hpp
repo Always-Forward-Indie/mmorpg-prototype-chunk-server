@@ -89,6 +89,7 @@ class Event
         SET_PLAYER_FLAGS,                 // Load player flags for a specific character (on join)
         SET_PLAYER_ACTIVE_EFFECTS,        // Load non-expired active effects for a character (on join)
         SET_PLAYER_INVENTORY,             // Load player inventory items from DB (on join)
+        SET_PLAYER_SKILL_COOLDOWNS,       // Load active skill cooldowns for a character (on join)
         SET_CHARACTER_ATTRIBUTES_REFRESH, // Updated attributes after level-up or equip change
         INVENTORY_ITEM_ID_SYNC,           // Game server sends back assigned player_inventory.id after upsert
         // Dialogue events (client → chunk-server)

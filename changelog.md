@@ -1,3 +1,27 @@
+v0.2.18
+19.04.2026
+================
+New:
+
+**Skill System — три новых скила: Battle Cry, Healing Surge, Blink Home.**
+- `Battle Cry` (Warrior, lvl 5): мгновенный баф, +25 `physical_attack` на 30 с, cd=60 с, 30 MP. Эффект сохраняется в `skill_active_effects` и пересылается чанк-серверу при логине/изучении.
+- `Healing Surge` (Mage, lvl 8): лечение = MagAtk × 1.5 + 80 HP, время каста 2 с, cd=15 с, 60 MP. `skillEffectType = "heal"`, использует новые формулы `heal_coeff` / `heal_flat`.
+- `Blink Home` (оба класса, lvl 5): телепорт к ближайшей точке респавна, время каста 3 с, cd=120 с, 20 MP. `skillEffectType = "teleport_respawn"`.
+
+**Teleport skill flow.**
+- `CombatSystem::executeSkillUsage` — при `skillEffectType == "teleport_respawn"` находит ближайшую зону через `RespawnZoneManager::findNearest()`, обновляет позицию персонажа в памяти (`CharacterManager::setCharacterPosition`), выставляет `SkillExecutionResult::hasTeleport = true` + `teleportPosition`.
+- `CombatEventHandler::dispatchSkillAction` — после выполнения: если `hasTeleport`, отправляет `respawnResult` клиенту, `savePositions` игровому серверу и `characterMoved` всем остальным.
+- `CombatResponseBuilder.hpp` — в `SkillExecutionResult` добавлены поля `bool hasTeleport` и `PositionStruct teleportPosition`.
+
+**Class restriction at NPC trainers.**
+- `TrainerNPCDataStruct` (DataStructs.hpp) — добавлено поле `int classId = 0`; 0 = без ограничений.
+- `SkillEventHandler::handleSetTrainerDataEvent` — читает `classId` из JSON тренера.
+- `SkillEventHandler::handleOpenSkillShopEvent` — заполняет `ctx.classId = charData.classId`.
+- `TrainerManager::buildSkillShopJson` — ранний return пустого массива если `trainer.classId > 0 && ctx.classId != trainer.classId`.
+- `SkillEventHandler::handleRequestLearnSkillEvent` — проверяет `trainer->classId` до всех проверок стоимости; при несовпадении класса возвращает `"wrong_class"`.
+
+---
+
 v0.2.17
 18.04.2026
 ================

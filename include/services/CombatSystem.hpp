@@ -46,7 +46,7 @@ class CombatSystem
     /**
      * @brief Обновить ongoing actions
      */
-    void updateOngoingActions();
+    std::vector<SkillExecutionResult> updateOngoingActions();
 
     /**
      * @brief Обработать тики всех активных DoT/HoT эффектов.
@@ -102,6 +102,12 @@ class CombatSystem
      */
     void setSaveItemKillCountCallback(std::function<void(const std::string &)> callback);
 
+    /**
+     * @brief Restore a persisted skill cooldown for a player (called on character join).
+     *        Passes through to the internal SkillSystem::restoreCooldown().
+     */
+    void restoreSkillCooldown(int characterId, const std::string &skillSlug, int64_t remainingMs);
+
   private:
     GameServices *gameServices_;
     std::shared_ptr<spdlog::logger> log_;
@@ -128,9 +134,10 @@ class CombatSystem
     void checkAndTriggerDurabilityWarning(int characterId, int oldDur, int newDur, int maxDur);
 
     /**
-     * @brief Применить эффекты скила
+     * @brief Применить эффекты скила.
+     * @param execResult SkillExecutionResult to append applied effects to (for persistence).
      */
-    void applySkillEffects(const SkillUsageResult &result, int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType);
+    void applySkillEffects(const SkillUsageResult &result, int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, SkillExecutionResult *execResult = nullptr);
 
     /**
      * @brief Обработать смерть цели
