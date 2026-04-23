@@ -1,3 +1,20 @@
+v0.2.19
+23.04.2026
+================
+Fixes:
+
+**Respawn — HP/MP теперь вычисляются от эффективного максимума после штрафа смерти.**
+- `CharacterEventHandler::handlePlayerRespawnEvent` — порядок операций изменён: `resurrection_sickness` применяется до расчёта HP/MP. После построения списка активных эффектов вычисляется `effectiveMaxHealth`/`effectiveMaxMp` с учётом всех непросроченных не-DoT/HoT эффектов атрибутов `max_health` и `max_mana`. HP и MP восстанавливаются как `effectiveMax × respawn.hp_pct/mp_pct` (default 30%). Ранее HP/MP брались от base max до применения дебаффа → `characterCurrentHealth > effectiveMaxHealth` → HUD показывал HP выше максимума.
+- Config keys: `respawn.hp_pct` (float, default `0.30`), `respawn.mp_pct` (float, default `0.30`).
+
+**ExperienceManager — level-up restore учитывает активные дебаффы.**
+- `ExperienceManager::grantExperience` (level-up path) — при повышении уровня полное восстановление HP/MP теперь вычисляется относительно `effectiveMaxHealth`/`effectiveMaxMana` (base + active non-expired stat modifiers), а не голого `characterMaxHealth`/`characterMaxMana`. Предотвращает ситуацию когда `characterCurrentHealth > effectiveMax` после level-up при наличии `resurrection_sickness`.
+
+**RegenManager — effectiveMax не переопределяет дебаффы.**
+- `RegenManager::tickRegen` — `effectiveMaxHp`/`effectiveMaxMp` больше не вычисляются как `std::max(maxHpEff, ch.characterMaxHealth)`. Ранее это приводило к тому что regen мог восстановить HP до base max, игнорируя дебаффы снижающие максимум (например `resurrection_sickness`). Теперь используется только полностью вычисленное effective max (атрибуты + активные эффекты + экипировка).
+
+---
+
 v0.2.18
 19.04.2026
 ================

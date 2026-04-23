@@ -1324,24 +1324,13 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
             log_->error("[RESPAWN] No respawn zones available for character {}", characterId);
         }
 
-        // ── Restore HP and Mana to 30% ───────────────────────────────────────
-        int newHp = std::max(1, static_cast<int>(charData.characterMaxHealth * 0.30f));
-        int newMana = std::max(0, static_cast<int>(charData.characterMaxMana * 0.30f));
-
-        charMgr.updateCharacterHealth(characterId, newHp);
-        charMgr.updateCharacterMana(characterId, newMana);
-
-        // ── Teleport to respawn zone ──────────────────────────────────────────
-        charMgr.setCharacterPosition(characterId, respawnPos);
-        charMgr.setLastValidatedMovement(characterId, respawnPos, 0); // reset: player teleported
-
-        // ── Apply Resurrection Sickness (data-driven stat debuff from DB template) ──
+        // ── Apply Resurrection Sickness FIRST so effective max is known before HP is set ──
         const int64_t nowSec = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch())
                                    .count();
 
         // Remove any pre-existing resurrection_sickness rows (e.g. died again)
-        auto currentEffects = charMgr.getCharacterData(characterId).activeEffects;
+        auto currentEffects = charData.activeEffects;
         currentEffects.erase(
             std::remove_if(currentEffects.begin(), currentEffects.end(), [](const ActiveEffectStruct &e)
                 { return e.effectSlug == "resurrection_sickness"; }),
@@ -1415,6 +1404,39 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
         {
             log_->warn("[RESPAWN] resurrection_sickness template not found or has no modifiers; skipping debuff.");
         }
+
+        // ── Compute effective max HP/MP after resurrection_sickness debuffs ──
+        // This must happen AFTER building currentEffects so the debuff values are known.
+        // newHp/newMana are derived from effective max (not base max) so that
+        // current HP never exceeds effectiveMaxHealth on the client HUD.
+        int effectiveMaxHealth = charData.characterMaxHealth;
+        int effectiveMaxMana = charData.characterMaxMana;
+        for (const auto &eff : currentEffects)
+        {
+            if (eff.expiresAt != 0 && eff.expiresAt <= nowSec)
+                continue;
+            if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
+                continue;
+            if (eff.attributeSlug == "max_health")
+                effectiveMaxHealth += static_cast<int>(eff.value);
+            else if (eff.attributeSlug == "max_mana")
+                effectiveMaxMana += static_cast<int>(eff.value);
+        }
+        effectiveMaxHealth = std::max(1, effectiveMaxHealth);
+        effectiveMaxMana = std::max(0, effectiveMaxMana);
+
+        // ── Restore HP/Mana to a configurable % of the (penalized) effective max ──
+        const float respawnHpPct = gameServices_.getGameConfigService().getFloat("respawn.hp_pct", 0.30f);
+        const float respawnMpPct = gameServices_.getGameConfigService().getFloat("respawn.mp_pct", 0.30f);
+        const int newHp = std::max(1, static_cast<int>(effectiveMaxHealth * respawnHpPct));
+        const int newMana = std::max(0, static_cast<int>(effectiveMaxMana * respawnMpPct));
+
+        charMgr.updateCharacterHealth(characterId, newHp);
+        charMgr.updateCharacterMana(characterId, newMana);
+
+        // ── Teleport to respawn zone ──────────────────────────────────────────
+        charMgr.setCharacterPosition(characterId, respawnPos);
+        charMgr.setLastValidatedMovement(characterId, respawnPos, 0); // reset: player teleported
 
         charMgr.setCharacterActiveEffects(characterId, currentEffects);
 

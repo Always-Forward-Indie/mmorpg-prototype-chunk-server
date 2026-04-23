@@ -124,8 +124,31 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
 
             characterData.characterMaxHealth += healthIncrease;
             characterData.characterMaxMana += manaIncrease;
-            characterData.characterCurrentHealth = characterData.characterMaxHealth; // Полное восстановление при уровне
-            characterData.characterCurrentMana = characterData.characterMaxMana;
+
+            // Compute effective max: base + active non-expired stat modifiers (e.g. resurrection_sickness debuff).
+            // Full restore must not exceed effective max, otherwise current > max on the client HUD.
+            const int64_t nowSecLvl = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                                          .count();
+            int effectiveMaxHealthLvl = characterData.characterMaxHealth;
+            int effectiveMaxManaLvl = characterData.characterMaxMana;
+            for (const auto &eff : characterData.activeEffects)
+            {
+                if (eff.expiresAt != 0 && eff.expiresAt <= nowSecLvl)
+                    continue;
+                if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
+                    continue;
+                if (eff.attributeSlug == "max_health")
+                    effectiveMaxHealthLvl += static_cast<int>(eff.value);
+                else if (eff.attributeSlug == "max_mana")
+                    effectiveMaxManaLvl += static_cast<int>(eff.value);
+            }
+            effectiveMaxHealthLvl = std::max(1, effectiveMaxHealthLvl);
+            effectiveMaxManaLvl = std::max(0, effectiveMaxManaLvl);
+
+            // Full restore on level-up, but capped to effective max so current never exceeds max.
+            characterData.characterCurrentHealth = effectiveMaxHealthLvl;
+            characterData.characterCurrentMana = effectiveMaxManaLvl;
         }
 
         // Сохраняем обновленные данные персонажа

@@ -146,8 +146,12 @@ RegenManager::tickRegen()
         const int mpGain = std::max(mpFromStats,
             static_cast<int>(std::max(0, mpRegenBase) * tickSec));
 
-        const int effectiveMaxHp = std::max(maxHpEff, ch.characterMaxHealth);
-        const int effectiveMaxMp = std::max(maxMpEff, ch.characterMaxMana);
+        // Use the fully computed effective max (base attrs + active effects + equipment).
+        // Do NOT clamp up with ch.characterMaxHealth — that is the base stored value and
+        // would override debuffs that legitimately reduce the maximum (e.g. death sickness).
+        // The zero-fallback is already handled above.
+        const int effectiveMaxHp = maxHpEff;
+        const int effectiveMaxMp = maxMpEff;
 
         bool changed = false;
 
