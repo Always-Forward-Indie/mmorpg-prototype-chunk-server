@@ -20,6 +20,7 @@ class JSONParser
     ChunkInfoStruct parseChunkInfo(const char *data, size_t length);
     std::vector<SpawnZoneStruct> parseSpawnZonesList(const char *data, size_t length);
     std::vector<RespawnZoneStruct> parseRespawnZonesList(const char *data, size_t length);
+    std::vector<ClassSpawnZoneStruct> parseClassSpawnZonesList(const char *data, size_t length);
     std::vector<GameZoneStruct> parseGameZonesList(const char *data, size_t length);
     std::vector<StatusEffectTemplate> parseStatusEffectTemplates(const char *data, size_t length);
     std::vector<MobDataStruct> parseMobsList(const char *data, size_t length);

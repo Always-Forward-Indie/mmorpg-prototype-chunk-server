@@ -35,6 +35,17 @@ class ZoneEventHandler : public BaseEventHandler
     void handleSetRespawnZonesEvent(const Event &event);
 
     /**
+     * @brief Handle set class spawn zones list event (game-server → chunk-server).
+     *
+     * Loads class-specific starting spawn zones.
+     * The game server uses these for new character first-spawn position;
+     * the chunk server stores them for future direct use.
+     *
+     * @param event Event containing std::vector<ClassSpawnZoneStruct>
+     */
+    void handleSetClassSpawnZonesEvent(const Event &event);
+
+    /**
      * @brief Handle set game zones list event (game-server → chunk-server).
      *
      * Loads AABB zone data into GameZoneManager for zone detection and

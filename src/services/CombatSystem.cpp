@@ -104,61 +104,10 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         result.skillEffectType = skill.skillEffectType;
         result.skillSchool = skill.school;
 
-        // Проверяем базовые требования (без потребления ресурсов)
-        // Use trySetCooldown here to atomically check + start the cooldown at cast
-        // initiation time.  This means:
-        //   • The cooldown ticks from the moment the player presses the button, not
-        //     when the fireball lands — matching standard MMO behaviour.
-        //   • The TOCTOU race between isOnCooldown and setCooldown is eliminated.
-        // executeSkillUsage will pass cooldownAlreadySet=true to useSkill so that
-        // the cooldown is not re-checked (it would look "on cooldown" and fail).
-        {
-            bool onGCD = false;
-            if (!skillSystem_->trySetCooldown(casterId, skillSlug, skill.cooldownMs, skill.gcdMs, &onGCD))
-            {
-                if (onGCD)
-                {
-                    log_->warn("[initiateSkillUsage] GCD active for caster " + std::to_string(casterId) +
-                               " skill='" + skillSlug + "'");
-                    result.errorMessage = "Global cooldown active";
-                }
-                else
-                {
-                    log_->warn("[initiateSkillUsage] Skill '" + skillSlug + "' is on cooldown for caster " +
-                               std::to_string(casterId));
-                    result.errorMessage = "Skill is on cooldown";
-                }
-                return result;
-            }
-
-            // Persist cooldown for player characters so it survives reconnects.
-            if (skill.cooldownMs > 0)
-            {
-                auto charCheck = gameServices_->getCharacterManager().getCharacterData(casterId);
-                log_->info("[CooldownPersist] char={} skill={} cooldownMs={} charCheck.characterId={}",
-                    casterId,
-                    skillSlug,
-                    skill.cooldownMs,
-                    charCheck.characterId);
-                if (charCheck.characterId != 0)
-                {
-                    int64_t cooldownEndsAtMs =
-                        std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::system_clock::now().time_since_epoch())
-                            .count() +
-                        skill.cooldownMs;
-                    log_->info("[CooldownPersist] sending persist for char={} skill={} endsAtMs={}",
-                        casterId,
-                        skillSlug,
-                        cooldownEndsAtMs);
-                    gameServices_->sendSkillCooldownPersist(casterId, skillSlug, cooldownEndsAtMs);
-                }
-            }
-            else
-            {
-                log_->info("[CooldownPersist] skipped — cooldownMs=0 for char={} skill={}", casterId, skillSlug);
-            }
-        }
+        // Проверяем базовые требования без сайд-эффектов (читать состояние)
+        // перед мутирующими операциями (трата маны, установка кулдауна).
+        // Порядок важен: early-exit без изменений состояния → кулдаун только при
+        // полной валидации.
 
         // Проверяем, что у кастера нет активного каста — во время каста нельзя использовать
         // ни другой каст, ни мгновенный скил.
@@ -174,7 +123,7 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
             }
         }
 
-        // HIGH-8: mana check without exceptions
+        // HIGH-8: mana check without exceptions — must happen before cooldown is set
         {
             auto characterData = gameServices_->getCharacterManager().getCharacterData(casterId);
             if (characterData.characterId != 0) // player
@@ -261,6 +210,58 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
                     result.errorMessage = "Target is out of range";
                     return result;
                 }
+            }
+        }
+
+        // Атомарная проверка + установка кулдауна — только после валидации
+        // всех не-мутирующих требований выше (каст, мана, дистанция).
+        // executeSkillUsage will pass cooldownAlreadySet=true to useSkill so that
+        // the cooldown is not re-checked (it would look "on cooldown" and fail).
+        {
+            bool onGCD = false;
+            if (!skillSystem_->trySetCooldown(casterId, skillSlug, skill.cooldownMs, skill.gcdMs, &onGCD))
+            {
+                if (onGCD)
+                {
+                    log_->warn("[initiateSkillUsage] GCD active for caster " + std::to_string(casterId) +
+                               " skill='" + skillSlug + "'");
+                    result.errorMessage = "Global cooldown active";
+                }
+                else
+                {
+                    log_->warn("[initiateSkillUsage] Skill '" + skillSlug + "' is on cooldown for caster " +
+                               std::to_string(casterId));
+                    result.errorMessage = "Skill is on cooldown";
+                }
+                return result;
+            }
+
+            // Persist cooldown for player characters so it survives reconnects.
+            if (skill.cooldownMs > 0)
+            {
+                auto charCheck = gameServices_->getCharacterManager().getCharacterData(casterId);
+                log_->info("[CooldownPersist] char={} skill={} cooldownMs={} charCheck.characterId={}",
+                    casterId,
+                    skillSlug,
+                    skill.cooldownMs,
+                    charCheck.characterId);
+                if (charCheck.characterId != 0)
+                {
+                    int64_t cooldownEndsAtMs =
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count() +
+                        skill.cooldownMs;
+                    log_->info("[CooldownPersist] sending persist for char={} skill={} endsAtMs={}",
+                        casterId,
+                        skillSlug,
+                        cooldownEndsAtMs);
+                    gameServices_->sendSkillCooldownPersist(casterId, skillSlug, cooldownEndsAtMs);
+                }
+            }
+            else
+            {
+                log_->info("[CooldownPersist] skipped — cooldownMs=0 for char={} skill={}", casterId, skillSlug);
             }
         }
 
@@ -715,10 +716,7 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
 
                 if (zone.id > 0)
                 {
-                    PositionStruct dest;
-                    dest.positionX = zone.position.positionX;
-                    dest.positionY = zone.position.positionY;
-                    dest.positionZ = zone.position.positionZ;
+                    PositionStruct dest = gameServices_->getRespawnZoneManager().getRandomPointInZone(zone);
                     dest.rotationZ = casterPos.rotationZ;
 
                     // Update in-memory position so the server state is immediately consistent.

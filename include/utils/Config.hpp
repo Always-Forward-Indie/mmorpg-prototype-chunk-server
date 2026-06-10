@@ -1,5 +1,7 @@
 #pragma once  // Include guard to prevent multiple inclusions
 
+#include "JsonAssertFix.hpp"
+
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>

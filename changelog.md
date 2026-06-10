@@ -1,3 +1,64 @@
+v0.2.20
+10.06.2026
+================
+New:
+
+**Class spawn zones — приём и хранение стартовых зон для классов.**
+- `include/data/DataStructs.hpp` — структура `ClassSpawnZoneStruct` (id, classId, className, zoneId, shape+bounds: min/max/center/radius).
+- `include/events/Event.hpp` — новый тип `Event::SET_CLASS_SPAWN_ZONES`.
+- `include/events/EventData.hpp` — variant расширен: `std::vector<ClassSpawnZoneStruct>`.
+- `include/events/handlers/ZoneEventHandler.hpp` — `handleSetClassSpawnZonesEvent()`.
+- `src/events/handlers/ZoneEventHandler.cpp` — `handleSetClassSpawnZonesEvent`: принимает вектор зон от гейм-сервера, логирует количество.
+- `src/events/EventHandler.cpp::dispatchEvent()` — case `SET_CLASS_SPAWN_ZONES`.
+- `src/network/GameServerWorker.cpp` — `processGameServerData`: парсит `setClassSpawnZonesList` → `Event::SET_CLASS_SPAWN_ZONES`.
+- `include/utils/JSONParser.hpp` — `parseClassSpawnZonesList()`.
+- `src/utils/JSONParser.cpp` — реализован парсер: читает `body.classSpawnZonesData[]`, поля id, classId, className, zoneId, shape+bounds.
+
+**Respawn zones — area bounds, случайная точка респавна.**
+- `include/data/DataStructs.hpp` — `RespawnZoneStruct` расширен: `shape`, `minX/maxX/minY/maxY/minZ/maxZ`, `centerX/centerY`, `innerRadius/outerRadius`, метод `isAreaDefined()`.
+- `include/utils/JSONParser.hpp` — `parseRespawnZonesList` обновлён: читает shape+bounds поля из JSON.
+- `src/utils/JSONParser.cpp` — парсинг `shapeType` → `ZoneShape` enum, bounds-полей с fallback на 0.
+- `include/services/RespawnZoneManager.hpp` — `getRandomPointInZone(const RespawnZoneStruct&)`.
+- `src/services/RespawnZoneManager.cpp` — `getRandomPointInZone`: shape-aware random: uniform для RECT, sqrt-weighted для CIRCLE, equal-area для ANNULUS, fallback на фиксированную позицию если bounds не заданы.
+- `src/events/handlers/CharacterEventHandler.cpp::handlePlayerRespawnEvent` — респавн теперь использует `getRandomPointInZone()` вместо фиксированной `zone.position`.
+- `src/services/CombatSystem.cpp::executeSkillUsage` — телепорт (`teleport_respawn`) теперь использует `getRandomPointInZone()`.
+
+**Combat — кулдаун только после полной валидации.**
+- `src/services/CombatSystem.cpp::initiateSkillUsage` — блок проверки и установки кулдауна (`trySetCooldown` + `sendSkillCooldownPersist`) перенесён ниже: теперь выполняется после проверок active cast, маны, дистанции, таргета. Ранее кулдаун ставился до проверки маны → при недостатке маны скил уходил в кулдаун, но не применялся.
+- `src/events/handlers/CombatEventHandler.cpp::dispatchSkillAction` — при ошибке инициации/исполнения скила ответ отправляется только запросившему клиенту (не broadcast). `broadcastSkillInitiation` вызывается только при успехе инициации. `broadcastSkillExecution` вызывается только при успехе исполнения.
+
+**EventQueue — мониторинг дропнутых событий.**
+- `include/events/EventQueue.hpp` — добавлен `std::atomic<uint64_t> droppedEvents_`, метод `getDroppedCount()`, `#include <cstdint>`.
+- `src/events/EventQueue.cpp` — все пути отбрасывания событий (`push`, `push&&`, `pushBatch`, `enforceLimit`) инкрементируют `droppedEvents_` и пишут `spdlog::warn`. Добавлен `#include <spdlog/spdlog.h>`.
+
+**Build system — Debug/Release, Docker prod/dev разделение.**
+- `CMakeLists.txt` — убран хардкод `CMAKE_BUILD_TYPE Debug`. Тип сборки задаётся через `-DCMAKE_BUILD_TYPE=Debug|Release`.
+- `CMakeLists.txt` — AddressSanitizer (`-fsanitize=address`) теперь активен только в Debug-сборках (через `CMAKE_CXX_FLAGS_DEBUG`).
+- `Dockerfile` → переименован в `Dockerfile.dev` — dev-образ с Debug-сборкой, ASan (`libasan8`), Rust/watchexec, gdb, ccache.
+- Новый `Dockerfile` — production-образ: Release-сборка, stripped binary, **без** ASan, **без** `libasan8`, без watchexec, прямой `CMD`.
+- `docker-compose.yml` → переименован в `docker-compose.dev.yml` — dev compose с volume mounts, hot-reload, `dockerfile: Dockerfile.dev`.
+- Новый `docker-compose.yml` (по умолчанию) — production compose без volume mounts, с `deploy.resources.limits` (4 CPU / 4 GB RAM).
+- `watch_and_run.sh` — в cmake добавлен `-DCMAKE_BUILD_TYPE=Debug`.
+
+**Удалена мёртвая линковка libpqxx.**
+- `CMakeLists.txt` — удалены `find_package(PkgConfig REQUIRED)`, `pkg_check_modules(libpqxx ...)`, `PkgConfig::libpqxx` и `pq` из `target_link_libraries`.
+- `Dockerfile` и `Dockerfile.dev` — удалён `libpqxx-dev` и `pkg-config` из apt-пакетов.
+
+**JSON_ASSERT fix — защита от битого JSON в Release.**
+- `include/utils/JsonAssertFix.hpp` — переопределяет `JSON_ASSERT` на `std::abort()` вместо `assert()`, который удаляется в Release/NDEBUG.
+- `include/utils/Config.hpp` — добавлен `#include "JsonAssertFix.hpp"` перед `nlohmann/json.hpp`.
+- `include/data/DataStructs.hpp` — добавлен `#include "utils/JsonAssertFix.hpp"` перед `nlohmann/json.hpp`.
+
+Fixes:
+
+**Connection limits — лимит из config.json вместо хардкода.**
+- `src/network/NetworkManager.cpp::addActiveSession()` — хардкод `constexpr size_t MAX_CONCURRENT_SESSIONS = 1000` заменён на `std::get<1>(configs_).max_clients` из `config.json`.
+
+**TODO.md — отмечены исправленные баги.**
+- Отмечены как исправленные: flying numbers восстановления HP/MP; NPC collision с игроком при спавне; звуковая зона при смене уровня; окно настроек; курсор при открытых окнах; эффект низкого HP; локализация тайтлов; стартовые спавн-зоны классов; респавн-зоны со случайной точкой.
+
+---
+
 v0.2.19
 23.04.2026
 ================

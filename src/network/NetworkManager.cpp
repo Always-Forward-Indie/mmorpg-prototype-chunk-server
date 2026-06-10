@@ -296,11 +296,11 @@ NetworkManager::addActiveSession(std::shared_ptr<ClientSession> session)
     std::lock_guard<std::mutex> lock(sessionsMutex_);
 
     // Prevent DoS attacks by limiting maximum concurrent sessions
-    constexpr size_t MAX_CONCURRENT_SESSIONS = 1000;
-    if (activeSessions_.size() >= MAX_CONCURRENT_SESSIONS)
+    size_t maxSessions = static_cast<size_t>(std::get<1>(configs_).max_clients);
+    if (activeSessions_.size() >= maxSessions)
     {
         gameServices_.getLogger().logError("Maximum concurrent sessions reached (" +
-                                               std::to_string(MAX_CONCURRENT_SESSIONS) + "), rejecting new connection",
+                                               std::to_string(maxSessions) + "), rejecting new connection",
             RED);
         return; // Don't add the session
     }

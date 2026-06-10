@@ -1928,6 +1928,93 @@ JSONParser::parseRespawnZonesList(const char *data, size_t length)
                 zone.zoneId = z["zoneId"].get<int>();
             if (z.contains("isDefault") && z["isDefault"].is_boolean())
                 zone.isDefault = z["isDefault"].get<bool>();
+            // Area bounds (backward compatible — default 0)
+            if (z.contains("minX") && z["minX"].is_number())
+                zone.minX = z["minX"].get<float>();
+            if (z.contains("maxX") && z["maxX"].is_number())
+                zone.maxX = z["maxX"].get<float>();
+            if (z.contains("minY") && z["minY"].is_number())
+                zone.minY = z["minY"].get<float>();
+            if (z.contains("maxY") && z["maxY"].is_number())
+                zone.maxY = z["maxY"].get<float>();
+            if (z.contains("minZ") && z["minZ"].is_number())
+                zone.minZ = z["minZ"].get<float>();
+            if (z.contains("maxZ") && z["maxZ"].is_number())
+                zone.maxZ = z["maxZ"].get<float>();
+            if (z.contains("shapeType") && z["shapeType"].is_string())
+            {
+                std::string s = z["shapeType"].get<std::string>();
+                if (s == "CIRCLE") zone.shape = ZoneShape::CIRCLE;
+                else if (s == "ANNULUS") zone.shape = ZoneShape::ANNULUS;
+                else zone.shape = ZoneShape::RECT;
+            }
+            if (z.contains("centerX") && z["centerX"].is_number())
+                zone.centerX = z["centerX"].get<float>();
+            if (z.contains("centerY") && z["centerY"].is_number())
+                zone.centerY = z["centerY"].get<float>();
+            if (z.contains("innerRadius") && z["innerRadius"].is_number())
+                zone.innerRadius = z["innerRadius"].get<float>();
+            if (z.contains("outerRadius") && z["outerRadius"].is_number())
+                zone.outerRadius = z["outerRadius"].get<float>();
+            zones.push_back(std::move(zone));
+        }
+    }
+    catch (const std::exception &)
+    {
+        zones.clear();
+    }
+    return zones;
+}
+
+std::vector<ClassSpawnZoneStruct>
+JSONParser::parseClassSpawnZonesList(const char *data, size_t length)
+{
+    std::vector<ClassSpawnZoneStruct> zones;
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+        if (!jsonData.contains("body") || !jsonData["body"].contains("classSpawnZonesData") ||
+            !jsonData["body"]["classSpawnZonesData"].is_array())
+            return zones;
+
+        for (const auto &z : jsonData["body"]["classSpawnZonesData"])
+        {
+            ClassSpawnZoneStruct zone;
+            if (z.contains("id") && z["id"].is_number_integer())
+                zone.id = z["id"].get<int>();
+            if (z.contains("classId") && z["classId"].is_number_integer())
+                zone.classId = z["classId"].get<int>();
+            if (z.contains("className") && z["className"].is_string())
+                zone.className = z["className"].get<std::string>();
+            if (z.contains("zoneId") && z["zoneId"].is_number_integer())
+                zone.zoneId = z["zoneId"].get<int>();
+            if (z.contains("minX") && z["minX"].is_number())
+                zone.minX = z["minX"].get<float>();
+            if (z.contains("maxX") && z["maxX"].is_number())
+                zone.maxX = z["maxX"].get<float>();
+            if (z.contains("minY") && z["minY"].is_number())
+                zone.minY = z["minY"].get<float>();
+            if (z.contains("maxY") && z["maxY"].is_number())
+                zone.maxY = z["maxY"].get<float>();
+            if (z.contains("minZ") && z["minZ"].is_number())
+                zone.minZ = z["minZ"].get<float>();
+            if (z.contains("maxZ") && z["maxZ"].is_number())
+                zone.maxZ = z["maxZ"].get<float>();
+            if (z.contains("shapeType") && z["shapeType"].is_string())
+            {
+                std::string s = z["shapeType"].get<std::string>();
+                if (s == "CIRCLE") zone.shape = ZoneShape::CIRCLE;
+                else if (s == "ANNULUS") zone.shape = ZoneShape::ANNULUS;
+                else zone.shape = ZoneShape::RECT;
+            }
+            if (z.contains("centerX") && z["centerX"].is_number())
+                zone.centerX = z["centerX"].get<float>();
+            if (z.contains("centerY") && z["centerY"].is_number())
+                zone.centerY = z["centerY"].get<float>();
+            if (z.contains("innerRadius") && z["innerRadius"].is_number())
+                zone.innerRadius = z["innerRadius"].get<float>();
+            if (z.contains("outerRadius") && z["outerRadius"].is_number())
+                zone.outerRadius = z["outerRadius"].get<float>();
             zones.push_back(std::move(zone));
         }
     }

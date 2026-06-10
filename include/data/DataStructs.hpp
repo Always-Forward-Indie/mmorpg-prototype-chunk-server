@@ -1,4 +1,5 @@
 #pragma once
+#include "utils/JsonAssertFix.hpp"
 #include "SkillStructs.hpp"
 #include <boost/asio.hpp>
 #include <chrono>
@@ -1613,14 +1614,51 @@ struct SaveDurabilityChangeStruct
 
 // ============= RESPAWN ZONES =============
 
-/// A safe respawn point in the world (town / camp / shrine)
+/// A safe respawn zone in the world (town / camp / shrine).
+/// When area bounds (min/max) are set, a random point within the zone is chosen.
+/// Otherwise the fixed position (x,y,z) is used for backward compatibility.
 struct RespawnZoneStruct
 {
     int id = 0;
     std::string name = "";
-    PositionStruct position; ///< World coordinates of the respawn point
-    int zoneId = 0;          ///< Game zone this point belongs to
+    PositionStruct position; ///< Representative/center point of the zone
+    int zoneId = 0;          ///< Game zone this zone belongs to
     bool isDefault = false;  ///< Fallback when no closer zone is found
+
+    // Area bounds (for random point selection, 0 = bounds not set → fixed point)
+    ZoneShape shape = ZoneShape::RECT;
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    float minZ = 0.0f;
+    float maxZ = 0.0f;
+    float centerX = 0.0f;
+    float centerY = 0.0f;
+    float innerRadius = 0.0f;
+    float outerRadius = 0.0f;
+
+    bool isAreaDefined() const { return minX < maxX || minY < maxY; }
+};
+
+/// Starting spawn zone for a character class (first login).
+struct ClassSpawnZoneStruct
+{
+    int id = 0;
+    int classId = 0;
+    std::string className;
+    int zoneId = 0;
+    ZoneShape shape = ZoneShape::RECT;
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    float minZ = 0.0f;
+    float maxZ = 0.0f;
+    float centerX = 0.0f;
+    float centerY = 0.0f;
+    float innerRadius = 0.0f;
+    float outerRadius = 0.0f;
 };
 
 // ============= GAME ZONES =============

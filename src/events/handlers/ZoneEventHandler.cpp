@@ -111,6 +111,30 @@ ZoneEventHandler::handleSetRespawnZonesEvent(const Event &event)
 }
 
 void
+ZoneEventHandler::handleSetClassSpawnZonesEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        if (std::holds_alternative<std::vector<ClassSpawnZoneStruct>>(data))
+        {
+            std::vector<ClassSpawnZoneStruct> zones = std::get<std::vector<ClassSpawnZoneStruct>>(data);
+            // Store for future use (e.g. direct chunk-server-handled first-spawn)
+            log_->info("[ZoneEventHandler] Loaded {} class spawn zones", zones.size());
+        }
+        else
+        {
+            log_->error("[ZoneEventHandler] handleSetClassSpawnZonesEvent: unexpected data variant");
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("[ZoneEventHandler] handleSetClassSpawnZonesEvent: " + std::string(ex.what()));
+    }
+}
+
+void
 ZoneEventHandler::handleSetGameZonesEvent(const Event &event)
 {
     const auto &data = event.getData();

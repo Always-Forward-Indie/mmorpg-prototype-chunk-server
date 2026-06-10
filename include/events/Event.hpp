@@ -139,6 +139,7 @@ class Event
         SET_RESPAWN_ZONES,           // Game-server sends respawn zone list to chunk-server
         SET_STATUS_EFFECT_TEMPLATES, // Game-server sends status effect template list to chunk-server
         SET_GAME_ZONES,              // Game-server sends game zone list (AABB + exploration XP) to chunk-server
+        SET_CLASS_SPAWN_ZONES,       // Game-server sends class spawn zone list to chunk-server
         SET_PLAYER_PITY,             // Load pity kill counters for a character (on join)
         SET_PLAYER_BESTIARY,         // Load bestiary kill counts for a character (on join)
         GET_BESTIARY_ENTRY,          // Client requests a single bestiary entry for a mob template

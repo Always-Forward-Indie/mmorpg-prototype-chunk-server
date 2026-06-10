@@ -163,6 +163,7 @@ using EventData = std::variant<
     RespawnZoneStruct,
     RespawnRequestStruct,
     std::vector<RespawnZoneStruct>,
+    std::vector<ClassSpawnZoneStruct>,
     // Status effect template payloads
     std::vector<StatusEffectTemplate>,
     // Game zone payloads

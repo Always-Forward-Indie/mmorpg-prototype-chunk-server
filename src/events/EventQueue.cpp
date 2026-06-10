@@ -1,4 +1,5 @@
 #include "events/EventQueue.hpp"
+#include <spdlog/spdlog.h>
 
 EventQueue::EventQueue(size_t maxSize) : maxSize_(maxSize)
 {
@@ -16,7 +17,8 @@ EventQueue::push(const Event &event)
     }
     catch (const std::exception &e)
     {
-        // Skip corrupted events
+        droppedEvents_.fetch_add(1, std::memory_order_relaxed);
+        spdlog::warn("[EventQueue::push] Dropping event: {}", e.what());
     }
 }
 
@@ -32,7 +34,8 @@ EventQueue::push(Event &&event)
     }
     catch (const std::exception &e)
     {
-        // Skip corrupted events
+        droppedEvents_.fetch_add(1, std::memory_order_relaxed);
+        spdlog::warn("[EventQueue::push&&] Dropping event: {}", e.what());
     }
 }
 
@@ -63,7 +66,10 @@ EventQueue::pushBatch(const std::vector<Event> &events)
         for (size_t i = 0; i < eventsToRemove && !queue.empty(); ++i)
         {
             queue.pop();
+            droppedEvents_.fetch_add(1, std::memory_order_relaxed);
         }
+        spdlog::warn("[EventQueue::pushBatch] Queue overflow: dropped {} oldest events (limit={})",
+            eventsToRemove, maxSize_);
     }
 
     for (const auto &event : events)
@@ -76,7 +82,8 @@ EventQueue::pushBatch(const std::vector<Event> &events)
             // Check if the variant index is valid before proceeding
             if (eventData.index() >= std::variant_size_v<EventData>)
             {
-                // Invalid variant, skip this event
+                droppedEvents_.fetch_add(1, std::memory_order_relaxed);
+                spdlog::warn("[EventQueue::pushBatch] Dropping event with invalid variant index");
                 continue;
             }
 
@@ -92,7 +99,8 @@ EventQueue::pushBatch(const std::vector<Event> &events)
         }
         catch (const std::exception &e)
         {
-            // Skip corrupted events and log the issue
+            droppedEvents_.fetch_add(1, std::memory_order_relaxed);
+            spdlog::warn("[EventQueue::pushBatch] Dropping corrupted event: {}", e.what());
             continue;
         }
     }
@@ -104,10 +112,16 @@ EventQueue::pushBatch(const std::vector<Event> &events)
 void
 EventQueue::enforceLimit()
 {
-    // Remove oldest events if queue exceeds maximum size
+    size_t dropped = 0;
     while (queue.size() > maxSize_)
     {
-        queue.pop(); // Drop oldest events
+        queue.pop();
+        ++dropped;
+    }
+    if (dropped > 0)
+    {
+        droppedEvents_.fetch_add(dropped, std::memory_order_relaxed);
+        spdlog::warn("[EventQueue::enforceLimit] Dropped {} oldest events (limit={})", dropped, maxSize_);
     }
 }
 

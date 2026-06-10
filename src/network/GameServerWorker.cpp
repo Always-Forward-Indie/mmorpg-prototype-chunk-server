@@ -285,6 +285,11 @@ GameServerWorker::processGameServerData(std::string_view data)
         auto zones = jsonParser_.parseRespawnZonesList(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_RESPAWN_ZONES, clientData.clientId, zones);
     }
+    else if (eventType == "setClassSpawnZonesList")
+    {
+        auto zones = jsonParser_.parseClassSpawnZonesList(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_CLASS_SPAWN_ZONES, clientData.clientId, zones);
+    }
     else if (eventType == "setGameZonesList")
     {
         auto zones = jsonParser_.parseGameZonesList(data.data(), data.size());

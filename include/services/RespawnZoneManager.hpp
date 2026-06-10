@@ -30,6 +30,16 @@ class RespawnZoneManager
     RespawnZoneStruct findNearest(const PositionStruct &deathPosition) const;
 
     /**
+     * @brief Get a random point inside the zone's bounds.
+     *
+     * If the zone has no area bounds defined (isAreaDefined() == false),
+     * returns the zone's fixed position for backward compatibility.
+     * Otherwise uses shape-aware random sampling: uniform distribution for RECT,
+     * sqrt-weighted for CIRCLE, and equal-area for ANNULUS.
+     */
+    PositionStruct getRandomPointInZone(const RespawnZoneStruct &zone) const;
+
+    /**
      * @brief Return all loaded respawn zones (for debugging / admin tools).
      */
     std::vector<RespawnZoneStruct> getAllZones() const;

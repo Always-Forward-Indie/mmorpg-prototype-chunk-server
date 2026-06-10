@@ -485,14 +485,20 @@ CombatEventHandler::dispatchSkillAction(int characterId,
 {
     // LOW-4: shared initiate + execute logic factored out from handlePlayerAttack / handleSkillUsage
     auto initiationResult = combatSystem_->initiateSkillUsage(characterId, skillSlug, targetId, targetType);
-    broadcastSkillInitiation(initiationResult);
 
     if (!initiationResult.success)
     {
         log_->warn("[dispatchSkillAction] Skill initiation failed for char " + std::to_string(characterId) +
                    " skill='" + skillSlug + "': " + initiationResult.errorMessage);
+        // Send error directly to the requesting client, not broadcast to zone
+        auto response = responseBuilder_->buildSkillInitiationBroadcast(initiationResult);
+        std::string responseData = networkManager_.generateResponseMessage("error", response);
+        if (clientSocket)
+            networkManager_.sendResponse(clientSocket, responseData);
         return;
     }
+
+    broadcastSkillInitiation(initiationResult);
 
     // Skills with castMs > 0 are deferred: ongoingAction stays CASTING until castMs
     // elapses, then updateOngoingActions() fires the result.
@@ -522,14 +528,19 @@ CombatEventHandler::dispatchSkillAction(int characterId,
     {
         log_->warn("[dispatchSkillAction] Skill execution failed for char " + std::to_string(characterId) +
                    " skill='" + skillSlug + "': " + executionResult.errorMessage);
+        // Send error directly to the requesting client
+        auto response = responseBuilder_->buildSkillExecutionBroadcast(executionResult);
+        std::string responseData = networkManager_.generateResponseMessage("error", response);
+        if (clientSocket)
+            networkManager_.sendResponse(clientSocket, responseData);
     }
     else
     {
         log_->info("[dispatchSkillAction] Instant skill '" + skillSlug + "' executed OK for char " +
                    std::to_string(characterId) + " -> target " + std::to_string(targetId) +
                    " damage=" + std::to_string(executionResult.skillResult.damageResult.totalDamage));
+        broadcastSkillExecution(executionResult);
     }
-    broadcastSkillExecution(executionResult);
 
     // Handle teleport_respawn result: send teleport packet to the caster and
     // broadcast the new position to all nearby players.

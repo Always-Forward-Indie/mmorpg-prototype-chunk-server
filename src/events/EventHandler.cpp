@@ -225,6 +225,9 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::SET_RESPAWN_ZONES:
             zoneEventHandler_->handleSetRespawnZonesEvent(event);
             break;
+        case Event::SET_CLASS_SPAWN_ZONES:
+            zoneEventHandler_->handleSetClassSpawnZonesEvent(event);
+            break;
         case Event::SET_STATUS_EFFECT_TEMPLATES:
             handleSetStatusEffectTemplatesEvent(event);
             break;

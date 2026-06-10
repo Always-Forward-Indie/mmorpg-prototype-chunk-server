@@ -1315,7 +1315,7 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
         }
         else if (zone.id > 0)
         {
-            respawnPos = zone.position;
+            respawnPos = gameServices_.getRespawnZoneManager().getRandomPointInZone(zone);
         }
         else
         {

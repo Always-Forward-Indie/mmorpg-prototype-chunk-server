@@ -6,12 +6,8 @@ project(MMOChunkServer)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Set compiler flags for debug mode (remove when compiling for production)
-set(CMAKE_BUILD_TYPE Debug)
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g")
-# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address,undefined -g")
-#set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined")
+# Build type is set via -DCMAKE_BUILD_TYPE=Debug|Release (defaults to none if omitted)
+# AddressSanitizer is active only in Debug builds (CMAKE_CXX_FLAGS_DEBUG / CMAKE_LINKER_FLAGS_DEBUG)
 
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -fno-omit-frame-pointer -g")
@@ -185,15 +181,10 @@ set(HEADER_FILES
 # Include directories for your project's headers
 include_directories(include)
 
-# Ensure libpqxx is correctly detected
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(libpqxx REQUIRED IMPORTED_TARGET libpqxx)
-
 # spdlog
 find_package(spdlog REQUIRED)
 
 # Create the executable
 add_executable(${PROJECT_NAME} ${SOURCE_FILES} ${HEADER_FILES})
 
-# Link against libpqxx and PostgreSQL
-target_link_libraries(${PROJECT_NAME} PkgConfig::libpqxx pq spdlog::spdlog_header_only)
+target_link_libraries(${PROJECT_NAME} spdlog::spdlog_header_only)

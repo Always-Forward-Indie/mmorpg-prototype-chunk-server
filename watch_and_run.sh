@@ -41,7 +41,7 @@ exec watchexec -r -e cpp,h,hpp \
     -- \
     bash -c "
         cd /usr/src/app/build && \
-        cmake /usr/src/app && \
+        cmake -DCMAKE_BUILD_TYPE=Debug /usr/src/app && \
         make -j$(nproc) && \
         pgrep MMOChunkServer && pkill MMOChunkServer || true && \
         echo '✅ Server restarting...' && \
