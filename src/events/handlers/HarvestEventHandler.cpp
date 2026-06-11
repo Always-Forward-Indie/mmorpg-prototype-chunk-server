@@ -710,6 +710,10 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
         // Получаем доступный лут в трупе
         auto availableLoot = harvestManager.getCorpseLoot(inspectRequest.corpseUID);
 
+        // Reset cleanup timer — the player is actively inspecting the loot,
+        // so the corpse should not disappear mid-interaction.
+        harvestManager.resetCorpseTimer(inspectRequest.corpseUID);
+
         // Отправляем ответ клиенту
         auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
         if (clientSocket)

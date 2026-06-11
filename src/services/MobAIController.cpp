@@ -354,7 +354,18 @@ MobAIController::handleMobAttacked(int mobUID, int attackerPlayerId, int damage)
 
     movementData.targetPlayerId = attackerPlayerId;
     movementData.isReturningToSpawn = false;
+    movementData.hasReturnDestination = false;
     movementData.nextMoveTime = getCurrentGameTime();
+
+    // Reset chase timer on re-attack so the attacker can't game the system
+    // by hitting the mob once and running away — each hit resets the clock.
+    if (movementData.combatState == MobCombatState::CHASING ||
+        movementData.combatState == MobCombatState::PREPARING_ATTACK ||
+        movementData.combatState == MobCombatState::ATTACKING ||
+        movementData.combatState == MobCombatState::ATTACK_COOLDOWN)
+    {
+        movementData.stateChangeTime = getCurrentGameTime();
+    }
 
     mobMovementManager_->updateMobMovementData(mobUID, movementData);
 
@@ -404,35 +415,15 @@ MobAIController::handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct &zo
     if (!characterManager_)
         return;
 
-    // 1) Validate current target
+    // 1) Validate current target — dead/gone targets trigger leash.
     if (movementData.targetPlayerId > 0)
     {
-        auto currentTarget = characterManager_->getCharacterById(movementData.targetPlayerId);
-        if (currentTarget.characterId > 0 && isTargetAlive(movementData.targetPlayerId))
-        {
-            float distanceToTarget = calculateDistance(mob.position, currentTarget.characterPosition);
-            float maxChaseDistance = mob.aggroRange * mob.chaseMultiplier;
-
-            if (distanceToTarget > maxChaseDistance)
-            {
-                int lostTargetId = movementData.targetPlayerId;
-                movementData.targetPlayerId = 0;
-                movementData.isReturningToSpawn = true;
-                movementData.threatTable.clear();
-                mobMovementManager_->updateMobMovementData(mob.uid, movementData);
-                mobMovementManager_->sendMobTargetLost(mob, lostTargetId);
-
-                logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
-                            " lost target (distance " + std::to_string(distanceToTarget) +
-                            " > " + std::to_string(maxChaseDistance) + "), returning to spawn");
-                return;
-            }
-        }
-        else
+        if (!isTargetAlive(movementData.targetPlayerId))
         {
             int lostTargetId = movementData.targetPlayerId;
             movementData.targetPlayerId = 0;
             movementData.isReturningToSpawn = true;
+            movementData.hasReturnDestination = false;
             movementData.threatTable.clear();
             mobMovementManager_->updateMobMovementData(mob.uid, movementData);
             mobMovementManager_->sendMobTargetLost(mob, lostTargetId);
@@ -552,8 +543,54 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
     switch (movementData.combatState)
     {
     case MobCombatState::PATROLLING:
+        // HP regen: 5% maxHP/sec while idle, so mobs fully recover between engagements.
+        if (!mob.isDead && mob.currentHealth > 0 &&
+            mob.currentHealth < mob.maxHealth && mob.maxHealth > 0)
+        {
+            if (movementData.lastRegenTime == 0.0f)
+            {
+                movementData.lastRegenTime = currentTime;
+                mobMovementManager_->updateMobMovementData(mob.uid, movementData);
+            }
+            else
+            {
+                float regenDelta = currentTime - movementData.lastRegenTime;
+                if (regenDelta >= 1.0f)
+                {
+                    int healAmount = static_cast<int>(mob.maxHealth * 0.05f * regenDelta);
+                    if (healAmount > 0 && mobInstanceManager_)
+                    {
+                        auto result = mobInstanceManager_->applyHealToMob(mob.uid, healAmount);
+                        if (result.success)
+                        {
+                            movementData.lastRegenTime = currentTime;
+                            mobMovementManager_->updateMobMovementData(mob.uid, movementData);
+                            if (eventQueue_)
+                            {
+                                nlohmann::json healthData;
+                                healthData["mobUID"] = mob.uid;
+                                healthData["mobId"] = mob.id;
+                                healthData["currentHealth"] = result.newHealth;
+                                healthData["maxHealth"] = mob.maxHealth;
+                                EventData eventData = healthData;
+                                Event healthEvent(Event::MOB_HEALTH_UPDATE, 0, eventData);
+                                eventQueue_->push(healthEvent);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        else if (movementData.lastRegenTime != 0.0f &&
+                 (mob.currentHealth >= mob.maxHealth || mob.isDead))
+        {
+            movementData.lastRegenTime = 0.0f;
+            mobMovementManager_->updateMobMovementData(mob.uid, movementData);
+        }
+
         if (movementData.targetPlayerId > 0)
         {
+            movementData.lastRegenTime = 0.0f; // stop regen on combat entry
             movementData.combatState = MobCombatState::CHASING;
             movementData.stateChangeTime = currentTime;
             mobMovementManager_->updateMobMovementData(mob.uid, movementData);
@@ -810,21 +847,9 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                                     std::to_string(movementData.targetPlayerId) +
                                     " (distance: " + std::to_string(distance) + ")");
                     }
-                    else if (distance > mob.aggroRange * mob.chaseMultiplier)
-                    {
-                        int lostTargetId = movementData.targetPlayerId;
-                        movementData.targetPlayerId = 0;
-                        movementData.combatState = MobCombatState::RETURNING;
-                        movementData.stateChangeTime = currentTime;
-                        movementData.isReturningToSpawn = true;
-                        movementData.threatTable.clear();
-                        movementData.attackerTimestamps.clear();
-                        mobMovementManager_->updateMobMovementData(mob.uid, movementData);
-                        mobMovementManager_->sendMobTargetLost(mob, lostTargetId);
-                        logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
-                                    " target too far away (distance: " + std::to_string(distance) +
-                                    "), returning to spawn");
-                    }
+                    // No distance-based leash here — leash is timer-driven
+                    // (chaseDuration above). The mob will chase as long as
+                    // the timer hasn't expired, regardless of distance.
                 }
             }
         }

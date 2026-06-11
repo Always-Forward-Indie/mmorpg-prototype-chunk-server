@@ -139,6 +139,15 @@ class HarvestManager
     HarvestableCorpseStruct getCorpseByUID(int corpseUID) const;
 
     /**
+     * @brief Reset the cleanup timer for a corpse (extend its lifetime).
+     *        Called after harvest completion, loot inspect, and partial loot
+     *        pickup so the timer counts from the last player interaction rather
+     *        than from the mob's death time.
+     * @param corpseUID Unique corpse UID
+     */
+    void resetCorpseTimer(int corpseUID);
+
+    /**
      * @brief Clean up old corpses that can no longer be harvested
      * @param maxAgeSeconds Maximum age in seconds before cleanup
      */

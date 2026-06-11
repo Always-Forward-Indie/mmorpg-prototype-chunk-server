@@ -297,7 +297,25 @@ MobMovementManager::runMobTick(
     }
     else if (movementData.isReturningToSpawn)
     {
-        movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, movementData.spawnPosition, params);
+        // Pick a return destination inside the zone near the mob's current
+        // position. The mob walks to this point (not the exact spawn pixel,
+        // which may be on the opposite side of a large zone) and then resumes
+        // PATROLLING. This avoids long hikes across the zone after a chase ends.
+        if (!movementData.hasReturnDestination)
+        {
+            PositionStruct dest = pickReturnDestination(mob.position, zone);
+            if (dest.positionX != 0.0f || dest.positionY != 0.0f)
+            {
+                movementData.returnDestination = dest;
+                movementData.hasReturnDestination = true;
+                updateMobMovementData(mob.uid, movementData);
+            }
+        }
+
+        const PositionStruct &returnTarget = movementData.hasReturnDestination
+                                                 ? movementData.returnDestination
+                                                 : movementData.spawnPosition;
+        movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, returnTarget, params);
     }
     else if (movementData.targetPlayerId > 0 && characterManager_)
     {
@@ -559,6 +577,17 @@ MobMovementManager::calculateNewPosition(
                 }
                 if (waypointSet)
                 {
+                    // Clamp waypoint to patrol radius from spawn so the mob never
+                    // wanders beyond the chase leash boundary during patrol.
+                    float sdX = movementData.patrolTargetPoint.positionX - movementData.spawnPosition.positionX;
+                    float sdY = movementData.patrolTargetPoint.positionY - movementData.spawnPosition.positionY;
+                    float spawnDist = std::sqrt(sdX * sdX + sdY * sdY);
+                    if (spawnDist > mob.patrolRadius && spawnDist > 0.0f)
+                    {
+                        float scale = mob.patrolRadius / spawnDist;
+                        movementData.patrolTargetPoint.positionX = movementData.spawnPosition.positionX + sdX * scale;
+                        movementData.patrolTargetPoint.positionY = movementData.spawnPosition.positionY + sdY * scale;
+                    }
                     movementData.hasPatrolTarget = true;
                     updateMobMovementData(mob.uid, movementData);
                     wpDX = movementData.patrolTargetPoint.positionX - mob.position.positionX;
@@ -979,26 +1008,7 @@ MobMovementManager::calculateChaseMovement(
     float dy = targetY - mob.position.positionY;
     float distance = std::sqrt(dx * dx + dy * dy);
 
-    // ---- 2. Leash check (max chase distance from mob's per-mob settings) ----
-    float maxChaseDistance = mob.aggroRange * mob.chaseMultiplier;
-    if (distance > maxChaseDistance)
-    {
-        auto updated = getMobMovementDataInternal(mob.uid);
-        int lostTargetId = updated.targetPlayerId;
-        updated.targetPlayerId = 0;
-        updated.isReturningToSpawn = true;
-        updated.threatTable.clear();
-        updated.attackerTimestamps.clear();
-        updateMobMovementData(mob.uid, updated);
-        sendMobTargetLost(mob, lostTargetId);
-
-        logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) +
-                    " lost target (too far: " + std::to_string(distance) +
-                    "/" + std::to_string(maxChaseDistance) + "), returning to spawn");
-        return std::nullopt;
-    }
-
-    // ---- 3. Zone boundary check ----
+    // ---- 2. Zone boundary check (leash if mob is dragged outside its zone) ----
     if (shouldStopChasing(mob.position, zone))
     {
         auto updated = getMobMovementDataInternal(mob.uid);
@@ -1015,7 +1025,7 @@ MobMovementManager::calculateChaseMovement(
         return std::nullopt;
     }
 
-    // ---- 4. Attack range — stop movement, let combat state machine handle attacks ----
+    // ---- 2. Attack range — stop movement, let combat state machine handle attacks ----
     {
         std::lock_guard<std::mutex> lg(logMutex_);
         if (distance <= mob.attackRange)
@@ -1215,6 +1225,7 @@ MobMovementManager::calculateReturnToSpawnMovement(
         auto md = getMobMovementDataInternal(mob.uid);
         md.isReturningToSpawn = false;
         md.targetPlayerId = 0;
+        md.hasReturnDestination = false;
 
         // Инициализируем время следующего движения для нормального патруля
         float currentTime = getCurrentGameTime();
@@ -1271,6 +1282,42 @@ MobMovementManager::calculateReturnToSpawnMovement(
                        ? stepSize / aiConfig_.returnMovementInterval
                        : stepSize;
     return result;
+}
+
+PositionStruct
+MobMovementManager::pickReturnDestination(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
+{
+    // Try up to 20 random candidates within maxReturnWalkDistance of the mob.
+    // Return the first one inside the zone; fall back to the original spawn.
+    constexpr float maxReturnWalkDistance = 400.0f;
+    constexpr int maxAttempts = 20;
+
+    std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * static_cast<float>(M_PI));
+    std::uniform_real_distribution<float> distDist(50.0f, maxReturnWalkDistance);
+
+    for (int i = 0; i < maxAttempts; ++i)
+    {
+        float angle = angleDist(rng_);
+        float dist = distDist(rng_);
+        PositionStruct candidate;
+        candidate.positionX = mobPos.positionX + std::cos(angle) * dist;
+        candidate.positionY = mobPos.positionY + std::sin(angle) * dist;
+
+        if (ZoneBounds::contains(zone, candidate))
+        {
+            log_->info("Picked return destination for mob in zone " + std::to_string(zone.zoneId) +
+                       " at (" + std::to_string(candidate.positionX) + "," +
+                       std::to_string(candidate.positionY) + ")");
+            return candidate;
+        }
+    }
+
+    // No valid point found — fall back to the original spawn position.
+    // This should be rare (only if the mob is in a very tight corner of a
+    // small zone and most random directions go outside).
+    log_->warn("Could not pick return destination in zone " + std::to_string(zone.zoneId) +
+               " — using original spawn fallback");
+    return PositionStruct{};
 }
 
 void

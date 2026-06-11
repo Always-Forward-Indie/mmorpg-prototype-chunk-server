@@ -99,6 +99,7 @@ CharacterEventHandler::characterToJson(const CharacterDataStruct &characterData)
         {"name", characterData.characterName},
         {"class", characterData.characterClass},
         {"race", characterData.characterRace},
+        {"gender", characterData.characterGender},
         {"level", characterData.characterLevel},
         {"exp", {{"current", characterData.characterExperiencePoints}, {"levelStart", expForCurrentLevel}, {"levelEnd", characterData.expForNextLevel}}},
         {"stats", {{"health", {{"current", characterData.characterCurrentHealth}, {"max", characterData.characterMaxHealth}}}, {"mana", {{"current", characterData.characterCurrentMana}, {"max", characterData.characterMaxMana}}}}},
@@ -553,10 +554,23 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
             // ── Server-authoritative movement speed validation ────────────────────
             {
                 CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(movementData.characterId);
-                const int64_t srvNowMs = timestamps.serverRecvMs;
+                // Use wall-clock time NOW instead of packet's serverRecvMs.
+                // When multiple move packets arrive in a single TCP read batch, their
+                // serverRecvMs is set at parse time (microseconds apart), causing deltaMs≈0
+                // and making the speed check impossibly strict for every packet after the first.
+                // Wall-clock time accurately reflects the time the player had to move.
+                const int64_t srvNowMs = TimestampUtils::getCurrentTimestampMs();
 
                 if (charData.lastMoveSrvMs > 0 && srvNowMs > charData.lastMoveSrvMs)
                 {
+                    const float deltaMs = static_cast<float>(srvNowMs - charData.lastMoveSrvMs);
+
+                    // When packets are processed in a rapid burst (same event batch),
+                    // deltaMs can still be small. Use a minimum plausible frame interval
+                    // (16ms ≈ 60fps) so the client is never penalised for server-side batching.
+                    static constexpr float MIN_DELTA_MS = 16.0f;
+                    const float effectiveDelta = (deltaMs < MIN_DELTA_MS) ? MIN_DELTA_MS : deltaMs;
+
                     float moveSpeed = 5.0f;
                     bool moveSpeedFound = false;
                     for (const auto &attr : charData.attributes)
@@ -599,8 +613,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                         charData.activeEffects.size(),
                         moveSpeedUnits);
 
-                    const float deltaMs = static_cast<float>(srvNowMs - charData.lastMoveSrvMs);
-                    const float maxDist = moveSpeedUnits * (deltaMs / 1000.0f) * 1.3f;
+                    const float maxDist = moveSpeedUnits * (effectiveDelta / 1000.0f) * 1.3f;
                     const float dx = movementData.position.positionX - charData.lastValidatedPosition.positionX;
                     const float dy = movementData.position.positionY - charData.lastValidatedPosition.positionY;
                     // posZ is the vertical axis (altitude/terrain height); gravity and slopes are
@@ -642,7 +655,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                     }
                 }
 
-                // Accept: persist validation state before applying position
+                // Accept: persist validation state with wall-clock time before applying position
                 gameServices_.getCharacterManager().setLastValidatedMovement(
                     movementData.characterId, movementData.position, srvNowMs);
             }

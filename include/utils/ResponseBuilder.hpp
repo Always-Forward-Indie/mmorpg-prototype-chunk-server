@@ -48,6 +48,11 @@ class ResponseBuilder
             response["header"]["serverRecvMs"] = timestamps_.serverRecvMs;
             response["header"]["serverSendMs"] = timestamps_.serverSendMs;
             response["header"]["clientSendMsEcho"] = timestamps_.clientSendMsEcho;
+
+            if (!timestamps_.requestId.empty())
+            {
+                response["header"]["requestIdEcho"] = timestamps_.requestId;
+            }
         }
 
         return response; // returns the built JSON object

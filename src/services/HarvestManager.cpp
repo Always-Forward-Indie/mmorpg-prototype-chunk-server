@@ -325,6 +325,18 @@ HarvestManager::cleanupOldCorpses(int maxAgeSeconds)
     }
 }
 
+void
+HarvestManager::resetCorpseTimer(int corpseUID)
+{
+    std::unique_lock<std::shared_mutex> lock(corpsesMutex_);
+    auto it = harvestableCorpses_.find(corpseUID);
+    if (it != harvestableCorpses_.end())
+    {
+        it->second.deathTime = std::chrono::steady_clock::now();
+        log_->info("[HARVEST] Reset cleanup timer for corpse " + std::to_string(corpseUID));
+    }
+}
+
 HarvestManager::HarvestValidationResult
 HarvestManager::validateHarvest(
     int characterId, int corpseUID, const PositionStruct &playerPosition) const
@@ -476,6 +488,10 @@ HarvestManager::completeHarvestAndGenerateLoot(int characterId)
             corpseIt->second.hasBeenHarvested = true;
             corpseIt->second.harvestedByCharacterId = characterId;
             corpseIt->second.currentHarvesterCharacterId = 0; // Clear current harvester
+            // Reset the cleanup timer so the player gets a full 30s window
+            // to loot after harvest completes, regardless of how long ago
+            // the mob died.
+            corpseIt->second.deathTime = std::chrono::steady_clock::now();
         }
     }
 
@@ -651,6 +667,12 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
         }
         log_->info("[HARVEST] Corpse fully looted and removed immediately: " + std::to_string(corpseUID));
         broadcastCorpseRemoved(corpseUID);
+    }
+    else if (!successfulPickups.empty())
+    {
+        // Partial loot pickup — extend the corpse lifetime so the player
+        // has a fresh 30s window to claim the remaining items.
+        resetCorpseTimer(corpseUID);
     }
 
     // Логируем результат

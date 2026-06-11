@@ -375,6 +375,7 @@ struct CharacterDataStruct
     std::string characterClass = "";
     int classId = 0; // DB id for class restriction checks
     std::string characterRace = "";
+    std::string characterGender = ""; // slug (e.g. "male" / "female"), propagated from login-server via game-server
     PositionStruct characterPosition;
     std::vector<CharacterAttributeStruct> attributes;
     std::vector<SkillStruct> skills;
@@ -467,12 +468,13 @@ struct MobDataStruct
     float aggroRange = 400.0f;    // Aggro detection radius (world units)
     float attackRange = 150.0f;   // Melee/ranged attack range (world units)
     float attackCooldown = 2.0f;  // Seconds between attacks
-    float chaseMultiplier = 2.0f; // aggroRange * chaseMultiplier = max chase distance
+    float chaseMultiplier = 1.5f; // aggroRange * chaseMultiplier = max chase distance (default 400*1.5=600)
     float patrolSpeed = 1.0f;     // Patrol movement speed multiplier
+    float patrolRadius = 350.0f;  // Max distance from spawn during patrol (world units)
 
     // Social and chase behaviour (migration 012)
     bool isSocial = false;       // Group aggro / passive-social enabled
-    float chaseDuration = 30.0f; // Max seconds of pursuit before leashing
+    float chaseDuration = 10.0f; // Max seconds of pursuit before leashing (timer-based, resets on re-attack)
 
     // Rank info (used to scale XP reward)
     int rankId = 1;
@@ -656,7 +658,7 @@ struct MobAIConfig
 {
     // Aggro and chase distances
     float aggroRange = 400.0f;       // Дистанция агро (когда моб начинает преследовать)
-    float maxChaseDistance = 800.0f; // Максимальная дистанция преследования от цели
+    float maxChaseDistance = 2000.0f; // Catastrophic backup leash — main leash is timer-based (chaseDuration)
 
     // Zone-based distance calculations
     float returnToSpawnZoneDistance = 1000.0f; // Дистанция от границы зоны для возврата (сейчас не работает потому-что мы жестко ограничиваем передвижение без цели в рамках зоны)
@@ -677,8 +679,8 @@ struct MobAIConfig
     // Chase speed — задаётся напрямую в units/sec, шаг = скорость * interval.
     // На клиенте совпадает с velocity.speed в пакете mobMoveUpdate, используется
     // для Dead Reckoning: TargetPos = ServerPos + velocity * dt.
-    // Должен быть выше скорости игрока, иначе моб не догонит (player ~400-600 u/s).
-    float chaseSpeedUnitsPerSec = 450.0f;
+    // Должен быть выше скорости игрока, иначе моб не догонит (player ~200 u/s).
+    float chaseSpeedUnitsPerSec = 350.0f;
 
     // Return speed — скорость возврата к спавну (units/sec).
     // Намеренно ниже скорости преследования: моб не спринтует обратно.
@@ -800,6 +802,14 @@ struct MobMovementData
     // until it arrives, then picks a new random point inside the zone.
     PositionStruct patrolTargetPoint;
     bool hasPatrolTarget = false;
+
+    // Return-to-zone destination.
+    // When the mob enters RETURNING, a random point within the spawn zone is
+    // chosen near the mob's current position. The mob walks there and then
+    // resumes PATROLLING. This avoids the mob walking across the entire zone
+    // back to the exact spawn pixel.
+    PositionStruct returnDestination;
+    bool hasReturnDestination = false;
 
     // Melee slot queuing: prevents crowding jitter when too many mobs chase the
     // same player. Set by MobAIController in CHASING state when calculateDistance

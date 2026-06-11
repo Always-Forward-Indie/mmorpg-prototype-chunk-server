@@ -87,6 +87,12 @@ JSONParser::parseCharacterData(const char *data, size_t length)
         characterData.characterRace = jsonData["body"]["race"].get<std::string>();
     }
 
+    if (jsonData.contains("body") && jsonData["body"].is_object() &&
+        jsonData["body"].contains("gender") && jsonData["body"]["gender"].is_string())
+    {
+        characterData.characterGender = jsonData["body"]["gender"].get<std::string>();
+    }
+
     // get character attributes
     if (jsonData.contains("body") && jsonData["body"].is_object() &&
         jsonData["body"].contains("attributesData") && jsonData["body"]["attributesData"].is_array())
@@ -635,6 +641,8 @@ JSONParser::parseMobsList(const char *data, size_t length)
                 mobData.chaseMultiplier = mob["chaseMultiplier"].get<float>();
             if (mob.contains("patrolSpeed") && mob["patrolSpeed"].is_number())
                 mobData.patrolSpeed = mob["patrolSpeed"].get<float>();
+            if (mob.contains("patrolRadius") && mob["patrolRadius"].is_number())
+                mobData.patrolRadius = mob["patrolRadius"].get<float>();
 
             // Social behaviour (migration 012)
             if (mob.contains("isSocial") && mob["isSocial"].is_boolean())

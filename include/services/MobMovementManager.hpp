@@ -304,4 +304,11 @@ class MobMovementManager
      * @brief Check if mob should stop chasing based on zone boundaries
      */
     bool shouldStopChasing(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
+
+    /**
+     * @brief Pick a random point inside the spawn zone within a reasonable
+     *        distance of the mob's current position for return-to-zone.
+     *        Falls back to the original spawnPosition if no valid point is found.
+     */
+    PositionStruct pickReturnDestination(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
 };

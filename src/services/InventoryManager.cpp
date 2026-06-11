@@ -47,12 +47,18 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
 
     std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
 
-    // Find existing item in inventory
+    // Find existing item in inventory by template itemId.
     auto itemIt = findInventoryItem(characterId, itemId);
 
-    if (itemIt != playerInventories_[characterId].end())
+    // Never stack items with stackMax=1 (e.g. weapons, armour).
+    // These are equippable/unique-per-instance and each must be a separate
+    // row with its own durability and killCount. Stacking them would merge
+    // independent instances and break equip/unequip logic.
+    const bool canStack = (itemInfo.stackMax > 1);
+
+    if (canStack && itemIt != playerInventories_[characterId].end())
     {
-        // Item already exists, increase quantity
+        // Item already exists and is stackable, increase quantity
         itemIt->quantity += quantity;
         logger_.log("[INVENTORY] Added " + std::to_string(quantity) + "x " + itemInfo.slug +
                     " to character " + std::to_string(characterId) +
@@ -60,7 +66,7 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
     }
     else
     {
-        // New item, add to inventory
+        // New item (or non-stackable duplicate), add separate entry
         PlayerInventoryItemStruct newItem;
         newItem.characterId = characterId;
         newItem.itemId = itemId;
@@ -68,6 +74,12 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
         // ID will be set when syncing with database later
 
         playerInventories_[characterId].push_back(newItem);
+        // Re-find itemIt — push_back may invalidate iterators, so locate the
+        // freshly inserted element. For non-stackable items (stackMax=1) there
+        // can be multiple entries with the same template itemId; back() always
+        // returns the instance we just added.
+        auto &inv = playerInventories_[characterId];
+        itemIt = (inv.size() >= 1) ? inv.end() - 1 : inv.end();
         logger_.log("[INVENTORY] Added " + std::to_string(quantity) + "x " + itemInfo.slug +
                     " to character " + std::to_string(characterId) + " (new item)");
     }
@@ -75,8 +87,7 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
     // Persist item change to game server DB immediately
     if (saveInventoryCallback_)
     {
-        const auto savedIt = findInventoryItem(characterId, itemId);
-        if (savedIt != playerInventories_[characterId].end())
+        if (itemIt != playerInventories_[characterId].end())
         {
             nlohmann::json savePacket;
             savePacket["header"]["eventType"] = "saveInventoryChange";
@@ -84,8 +95,8 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
             savePacket["header"]["hash"] = "";
             savePacket["body"]["characterId"] = characterId;
             savePacket["body"]["itemId"] = itemId;
-            savePacket["body"]["quantity"] = savedIt->quantity;
-            savePacket["body"]["inventoryItemId"] = savedIt->id; // 0 = new row (INSERT), >0 = UPDATE
+            savePacket["body"]["quantity"] = itemIt->quantity;
+            savePacket["body"]["inventoryItemId"] = itemIt->id; // 0 = new row (INSERT), >0 = UPDATE
             saveInventoryCallback_(savePacket.dump() + "\n");
         }
     }
@@ -614,15 +625,39 @@ InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t new
     auto it = playerInventories_.find(characterId);
     if (it == playerInventories_.end())
         return;
+    bool updated = false;
     for (auto &item : it->second)
     {
-        if (item.itemId == itemId)
+        // Only update items with placeholder id==0 (awaiting DB sync).
+        // Non-stackable items (stackMax=1) can have multiple entries per
+        // template itemId; the sync always corresponds to the most recently
+        // inserted row, which still has id==0.
+        if (item.itemId == itemId && item.id == 0)
         {
             item.id = static_cast<int>(newId);
+            updated = true;
             log_->info("[INVENTORY] Updated in-memory id for char=" + std::to_string(characterId) +
                        " itemId=" + std::to_string(itemId) + " newId=" + std::to_string(newId));
-            return;
+            break;
         }
+    }
+    if (!updated)
+        return;
+
+    // Send INVENTORY_UPDATE to client so it learns the correct inventoryItemId.
+    // Without this, the client retains the placeholder id=0 and equip/lookup
+    // requests fail with ITEM_NOT_IN_INVENTORY because the server-side id no
+    // longer matches what the client cached from the initial INVENTORY_UPDATE.
+    if (eventQueue_)
+    {
+        nlohmann::json inventoryJson;
+        inventoryJson["characterId"] = characterId;
+        inventoryJson["items"] = nlohmann::json::array();
+        for (const auto &item : it->second)
+            inventoryJson["items"].push_back(inventoryItemToJson(item));
+        Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
+        lock.unlock();
+        eventQueue_->push(std::move(inventoryUpdateEvent));
     }
 }
 

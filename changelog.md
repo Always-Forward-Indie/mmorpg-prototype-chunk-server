@@ -1,3 +1,58 @@
+v0.2.21
+11.06.2026
+================
+New:
+
+**Character gender — прокинут слог gender от login-сервера.**
+- `CharacterDataStruct` — добавлено поле `characterGender` (slug: `"male"` / `"female"`), приходящее из game-сервера.
+- `JSONParser::parseCharacterData` — парсит `body.gender`.
+- `CharacterEventHandler::characterToJson` — поле `"gender"` включено в выходной JSON.
+
+**Mob patrol radius — ограничение радиуса патрулирования от спавна.**
+- `MobDataStruct` — новое поле `patrolRadius` (default `350.0f`): максимальная дистанция от точки спавна при патруле.
+- `MobMovementManager::calculateNewPosition` — waypoint клампится по `patrolRadius` от `spawnPosition`, чтобы моб не выходил за границу поводка погони во время патруля.
+- `JSONParser::parseMobsList` — парсит `patrolRadius` из пакета game-сервера.
+
+**Return-to-zone destination — моб возвращается к случайной точке внутри зоны, а не к пикселю спавна.**
+- `MobMovementData` — новые поля `returnDestination` (PositionStruct) и `hasReturnDestination`. При переходе в RETURNING выбирается случайная точка внутри зоны в радиусе 400 u от текущей позиции моба; моб идёт туда и возобновляет PATROLLING. Исключает долгий переход через всю зону после погони.
+- `MobMovementManager::pickReturnDestination` — новый метод: до 20 попыток случайного направления, выбор первой точки внутри `ZoneBounds::contains()`, fallback на исходный спавн.
+- `MobMovementManager::runMobTick` — при `isReturningToSpawn` и отсутствии `returnDestination` вызывает `pickReturnDestination`.
+- `calculateReturnToSpawnMovement` — сбрасывает `hasReturnDestination` при достижении цели.
+- `handleMobAttacked` / `handlePlayerAggro` — сбрасывают `hasReturnDestination` при начале погони.
+
+**Mob HP regen in PATROLLING — 5% maxHP/сек восстановление здоровья в idle.**
+- `MobAIController::updateMobCombatState` (PATROLLING) — если моб жив, HP < max и в комбат не вошёл: раз в секунду восстанавливается `5% × maxHealth`, броадкастится `MOB_HEALTH_UPDATE`.
+- Реген сбрасывается/останавливается при входе в CHASING или при HP == max / смерти.
+
+**requestIdEcho — эхо requestId в ответах.**
+- `ResponseBuilder` — если `timestamps_.requestId` непустой, добавляет `"requestIdEcho"` в `header` ответа.
+
+Fixes:
+
+**Movement speed validation — использование wall-clock вместо serverRecvMs.**
+- `CharacterEventHandler::handleMoveCharacterEvent` — `srvNowMs` теперь берётся из `TimestampUtils::getCurrentTimestampMs()` вместо `timestamps.serverRecvMs`. При батч-обработке нескольких move-пакетов в одном TCP-чтении `serverRecvMs` у них практически одинаковый → `deltaMs ≈ 0` → speed check невозможен. Добавлен `MIN_DELTA_MS = 16ms` (60fps floor) для защиты от серверного батчинга.
+- `setLastValidatedMovement` — сохраняет wall-clock время вместо `serverRecvMs`.
+
+**Inventory non-stackable items — предметы с stackMax=1 больше не стакаются.**
+- `InventoryManager::addItemToInventory` — при `stackMax == 1` (оружие, броня и т.п.) каждая копия создаёт отдельный инвентарный слот вместо увеличения quantity существующего. Ранее стакинг объединял независимые экземпляры и ломал логику equip/unequip.
+- `InventoryManager::updateInventoryItemId` — после синка с БД отправляет клиенту `INVENTORY_UPDATE`, чтобы тот узнал реальный `inventoryItemId` вместо плейсхолдера `id=0`. Без этого equip/lookup запросы падали с `ITEM_NOT_IN_INVENTORY`.
+
+**Corpse timer reset — сброс таймера очистки трупа при взаимодействии игрока.**
+- `HarvestManager::resetCorpseTimer` — новый публичный метод: сбрасывает `deathTime` на `steady_clock::now()`.
+- Вызывается: после завершения харвеста (`completeHarvestAndGenerateLoot`), при инспекте лута (`handleCorpseLootInspect`), при частичном подборе (`pickupCorpseLoot` с неполным забором). Игрок получает полные 30 сек на лут после последнего взаимодействия, а не от момента смерти моба.
+
+**Timer-based chase leash вместо distance-based.**
+- Убрана дистанционная привязка `aggroRange * chaseMultiplier` из `handlePlayerAggro`, `updateMobCombatState` (CHASING) и `calculateChaseMovement`. Поводок теперь чисто таймерный через `chaseDuration` (10s). Моб преследует цель пока не истечёт таймер, независимо от дистанции.
+- `handleMobAttacked` — при повторной атаке по мобу, уже находящемуся в комбат-состоянии, сбрасывает `stateChangeTime` (перезапуск таймера погони). Исключает китинг: hit-and-run не работает.
+- `MobAIConfig::maxChaseDistance` увеличен с 800 до 2000 (катастрофический backup на случай багов).
+- `MobAIConfig::chaseSpeedUnitsPerSec` снижен с 450 до 350 u/s (актуальная скорость игрока ~200).
+
+**Балансные правки мобов по умолчанию:**
+- `chaseMultiplier` 2.0 → 1.5 (`aggroRange × 1.5 = 600`)
+- `chaseDuration` 30.0 → 10.0 сек (таймерный поводок, сбрасывается при повторной атаке)
+
+---
+
 v0.2.20
 10.06.2026
 ================
