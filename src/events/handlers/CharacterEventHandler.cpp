@@ -354,8 +354,11 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::system_clock::now().time_since_epoch())
                                  .count();
+                auto nowSteady = std::chrono::steady_clock::now();
                 characterData.sessionId = "sess_" + std::to_string(characterData.characterId) +
                                           "_" + std::to_string(nowMs);
+                characterData.sessionStartAt = nowSteady;
+                characterData.lastPlayTimeSaveAt = nowSteady;
                 gameServices_.getCharacterManager().loadCharacterData(characterData);
             }
 
@@ -1115,7 +1118,10 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
         auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch())
                          .count();
+        auto nowSteady = std::chrono::steady_clock::now();
         characterData.sessionId = "sess_" + std::to_string(characterId) + "_" + std::to_string(nowMs);
+        characterData.sessionStartAt = nowSteady;
+        characterData.lastPlayTimeSaveAt = nowSteady;
         gameServices_.getCharacterManager().loadCharacterData(characterData);
     }
 

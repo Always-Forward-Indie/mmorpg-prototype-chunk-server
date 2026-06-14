@@ -122,6 +122,8 @@ class CharacterManager
     /// Assign or clear a hotbar slot for a character (in-memory only; persist via game server)
     void updateSkillBarSlot(int characterID, int slotIndex, const std::string &skillSlug);
 
+    void updateLastPlayTimeSaveAt(int characterID, std::chrono::steady_clock::time_point t);
+
   private:
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;

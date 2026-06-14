@@ -414,6 +414,12 @@ struct CharacterDataStruct
     // Format: "sess_{characterId}_{unix_timestamp_ms}".
     // Passed in every AnalyticsEventStruct so all events of one session are groupable.
     std::string sessionId = "";
+
+    // Play time tracking
+    int64_t totalPlayTimeSec = 0;
+    int64_t lastSessionPlayTimeSec = 0;
+    std::chrono::steady_clock::time_point sessionStartAt = {};
+    std::chrono::steady_clock::time_point lastPlayTimeSaveAt = {};
 };
 
 struct ClientDataStruct

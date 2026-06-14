@@ -711,3 +711,12 @@ CharacterManager::updateSkillBarSlot(int characterID, int slotIndex, const std::
         slots.push_back({slotIndex, skillSlug});
     }
 }
+
+void
+CharacterManager::updateLastPlayTimeSaveAt(int characterID, std::chrono::steady_clock::time_point t)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it != charactersMap_.end())
+        it->second.lastPlayTimeSaveAt = t;
+}

@@ -1098,6 +1098,50 @@ ChunkServer::mainEventLoopCH()
     );
     scheduler_.scheduleTask(saveHpManaTask);
 
+    // Periodic task: save accumulated play time to game server every 60 seconds
+    Task savePlayTimeTask(
+        [this]
+        {
+            auto charactersList = gameServices_.getCharacterManager().getCharactersList();
+            if (charactersList.empty())
+                return;
+
+            auto now = std::chrono::steady_clock::now();
+            for (const auto &character : charactersList)
+            {
+                if (character.characterId <= 0)
+                    continue;
+                if (character.lastPlayTimeSaveAt.time_since_epoch().count() == 0)
+                    continue;
+
+                int64_t delta = std::chrono::duration_cast<std::chrono::seconds>(now - character.lastPlayTimeSaveAt).count();
+                if (delta <= 0)
+                    continue;
+
+                nlohmann::json pkt;
+                pkt["header"]["eventType"] = "savePlayTime";
+                pkt["header"]["clientId"] = 0;
+                pkt["header"]["hash"] = "";
+                pkt["body"]["characterId"] = character.characterId;
+                pkt["body"]["sessionPlayTimeSec"] = delta;
+                pkt["body"]["lastSessionPlayTimeSec"] = 0;
+                pkt["body"]["isDisconnect"] = false;
+
+                gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+                gameServices_.getCharacterManager().updateLastPlayTimeSaveAt(character.characterId, now);
+            }
+
+            gameServices_.getLogger().log(
+                "[SAVE_PLAY_TIME] Sent play time for " + std::to_string(charactersList.size()) +
+                    " character(s)",
+                GREEN);
+        },
+        60000,                                                                   // Every 60 seconds
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(60 * 1000), // First run after 60s
+        20                                                                       // unique task ID
+    );
+    scheduler_.scheduleTask(savePlayTimeTask);
+
     // HP/MP regeneration task — fires every 4 seconds by default.
     // Actual regen amounts are driven by config keys (regen.*) read live each tick.
     // The tick interval itself uses the config value at start-up; if not yet loaded

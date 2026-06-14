@@ -1,5 +1,6 @@
 #include "events/handlers/ClientEventHandler.hpp"
 #include "events/EventData.hpp"
+#include <chrono>
 #include <spdlog/logger.h>
 
 ClientEventHandler::ClientEventHandler(
@@ -221,6 +222,33 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 }
                 else
                 {
+                    // Save play time to game server before other save operations
+                    try
+                    {
+                        auto now = std::chrono::steady_clock::now();
+                        int64_t remainingDelta = std::chrono::duration_cast<std::chrono::seconds>(now - charData.lastPlayTimeSaveAt).count();
+                        int64_t fullSessionSec = std::chrono::duration_cast<std::chrono::seconds>(now - charData.sessionStartAt).count();
+                        if (remainingDelta > 0 || fullSessionSec > 0)
+                        {
+                            nlohmann::json ptPkt;
+                            ptPkt["header"]["eventType"] = "savePlayTime";
+                            ptPkt["header"]["clientId"] = 0;
+                            ptPkt["header"]["hash"] = "";
+                            ptPkt["body"]["characterId"] = passedClientData.characterId;
+                            ptPkt["body"]["sessionPlayTimeSec"] = remainingDelta;
+                            ptPkt["body"]["lastSessionPlayTimeSec"] = fullSessionSec;
+                            ptPkt["body"]["isDisconnect"] = true;
+                            gameServerWorker_.sendDataToGameServer(ptPkt.dump() + "\n");
+                            log_->info("[DISCONNECT] Saved play time for characterId: " + std::to_string(passedClientData.characterId));
+                        }
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError(
+                            "[DISCONNECT] Failed to save play time for characterId: " +
+                            std::to_string(passedClientData.characterId) + " - " + ex.what());
+                    }
+
                     // Save last known position to game server
                     try
                     {

@@ -1,3 +1,18 @@
+v0.2.24
+15.06.2026
+================
+New:
+
+**Трекинг времени игры персонажа.**
+- `CharacterDataStruct` — новые поля: `totalPlayTimeSec`, `lastSessionPlayTimeSec`, `sessionStartAt`, `lastPlayTimeSaveAt` (std::chrono::steady_clock::time_point).
+- `CharacterEventHandler::handleJoinCharacterEvent` — при входе сохраняется `sessionStartAt` и `lastPlayTimeSaveAt` (в обоих путях: прямой и pending-запросы).
+- `ClientEventHandler::handleDisconnectClientEvent` — перед сохранением позиции отправляет пакет `savePlayTime` в game-сервер с `sessionPlayTimeSec` (оставшаяся дельта), `lastSessionPlayTimeSec` (полная длительность сессии), `isDisconnect: true`.
+- `CharacterManager::updateLastPlayTimeSaveAt` — новый метод для обновления времени последнего сохранения.
+
+**Периодическое сохранение времени игры (каждые 60 секунд).**
+- `ChunkServer` — новый Task `savePlayTimeTask` (ID 20): раз в минуту для каждого онлайн-персонажа вычисляет дельту с последнего сохранения и отправляет `savePlayTime` в game-сервер, затем обновляет `lastPlayTimeSaveAt`.
+- Данные отправляются в формате: `{characterId, sessionPlayTimeSec: delta, lastSessionPlayTimeSec: 0, isDisconnect: false}`.
+
 v0.2.23
 14.06.2026
 ================
