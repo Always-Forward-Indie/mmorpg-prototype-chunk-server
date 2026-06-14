@@ -33,7 +33,7 @@ main()
         // Initialize Config
         Config config;
         // Get configs for connections to servers from config.json
-        auto configs = config.parseConfig("config.json");
+        auto configs = config.parseConfig();
 
         // Initialize EventQueue
         EventQueue eventQueueChunkServer;

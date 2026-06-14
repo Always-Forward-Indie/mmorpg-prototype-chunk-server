@@ -1,3 +1,19 @@
+v0.2.23
+14.06.2026
+================
+Breaking:
+
+**Переход на переменные окружения вместо config.json.**
+- Удалён `config.json`, вся конфигурация теперь через env vars.
+- `Config.cpp` переписан: вместо парсинга JSON через nlohmann читает `std::getenv()` с дефолтами.
+- `Config.hpp`: убраны зависимости от `nlohmann/json.hpp`, `fstream`, `JsonAssertFix.hpp`.
+- Добавлен `.env.example` с документированными переменными и `.env` для локальной разработки.
+- `.env` добавлен в `.gitignore`.
+
+Docker:
+- `docker-compose.yml`: хардкод-переменные заменены на `env_file: .env`, `GAME_SERVER_HOST=game-server` оверрайдом.
+- `Dockerfile`: убран `COPY config.json`.
+
 v0.2.22
 11.06.2026
 ================
