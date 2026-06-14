@@ -394,6 +394,16 @@ EventDispatcher::handleMoveCharacter(const EventContext &context, std::shared_pt
     movementData.position = context.positionData;
     movementData.timestamps = context.timestamps; // Add timestamps for lag compensation
 
+    try
+    {
+        auto jsonData = nlohmann::json::parse(context.fullMessage);
+        if (jsonData.contains("body") && jsonData["body"].is_object() && jsonData["body"].contains("isFalling"))
+        {
+            movementData.isFalling = jsonData["body"]["isFalling"].get<bool>();
+        }
+    }
+    catch (...) {}
+
     // Log character data for debugging
     log_->info("Creating MOVE_CHARACTER event with movement data:");
     log_->info("Client ID: " + std::to_string(movementData.clientId));

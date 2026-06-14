@@ -734,7 +734,8 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
             // Create minimal character data for response (only essential movement data)
             nlohmann::json characterJson = {
                 {"id", movementData.characterId},
-                {"position", {{"x", movementData.position.positionX}, {"y", movementData.position.positionY}, {"z", movementData.position.positionZ}, {"rotationZ", movementData.position.rotationZ}}}};
+                {"position", {{"x", movementData.position.positionX}, {"y", movementData.position.positionY}, {"z", movementData.position.positionZ}, {"rotationZ", movementData.position.rotationZ}}},
+                {"isFalling", movementData.isFalling}};
 
             // Validate authentication
             if (clientID == 0)
@@ -1517,7 +1518,7 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
                                            .setHeader("clientId", clientId)
                                            .setHeader("eventType", "moveCharacter")
                                            .setTimestamps(req.timestamps)
-                                           .setBody("character", nlohmann::json{{"id", characterId}, {"position", {{"x", respawnPos.positionX}, {"y", respawnPos.positionY}, {"z", respawnPos.positionZ}, {"rotationZ", respawnPos.rotationZ}}}})
+                                            .setBody("character", nlohmann::json{{"id", characterId}, {"position", {{"x", respawnPos.positionX}, {"y", respawnPos.positionY}, {"z", respawnPos.positionZ}, {"rotationZ", respawnPos.rotationZ}}}, {"isFalling", false}})
                                            .build();
         broadcastToAllClientsWithTimestamps("success", broadcastJson, req.timestamps);
 

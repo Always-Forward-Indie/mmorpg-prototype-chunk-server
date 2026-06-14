@@ -37,6 +37,7 @@ struct MovementDataStruct
     int characterId = 0;
     PositionStruct position;
     TimestampStruct timestamps; // Lag compensation timestamps
+    bool isFalling = false;     // Client physics state: true = airborne (jumping/falling)
 };
 
 struct MessageStruct
