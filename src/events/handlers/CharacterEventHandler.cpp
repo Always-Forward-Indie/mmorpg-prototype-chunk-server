@@ -907,6 +907,7 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
 {
     const auto &data = event.getData();
     int clientID = event.getClientID();
+    const auto &timestamps = event.getTimestamps();
 
     if (!std::holds_alternative<CharacterDataStruct>(data))
     {
@@ -1017,6 +1018,20 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
                              .build();
     networkManager_.sendResponse(clientSocket,
         networkManager_.generateResponseMessage("success", ack));
+
+    // Broadcast this player's join to all other already-online clients.
+    // The direct join path in handleJoinCharacterEvent only unicasts to the
+    // joining client (race-condition avoidance); the broadcast is deferred
+    // here because the socket is now fully registered.
+    nlohmann::json joinBroadcast = ResponseBuilder()
+                                       .setHeader("message", "Player joined!")
+                                       .setHeader("hash", "")
+                                       .setHeader("clientId", clientID)
+                                       .setHeader("eventType", "joinGameCharacter")
+                                       .setTimestamps(timestamps)
+                                       .setBody("character", characterToJson(characterData))
+                                       .build();
+    broadcastToAllClientsWithTimestamps("success", joinBroadcast, timestamps, clientID);
 
     log_->info("[PLAYER_READY] Phase 4 complete for char=" + std::to_string(characterId));
 }
