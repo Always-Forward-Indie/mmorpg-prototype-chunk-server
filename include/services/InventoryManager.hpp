@@ -183,4 +183,7 @@ class InventoryManager
      */
     std::vector<PlayerInventoryItemStruct>::iterator findInventoryItem(int characterId, int itemId);
     std::vector<PlayerInventoryItemStruct>::const_iterator findInventoryItem(int characterId, int itemId) const;
+
+    // Merge duplicate stacks of the same item (same itemId) into a single row
+    void consolidateInventory(int characterId);
 };

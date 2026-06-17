@@ -54,7 +54,11 @@ class ClientEventHandler : public BaseEventHandler
      */
     void handleDisconnectClientEvent(const Event &event);
 
+    void setCharacterEventHandler(class CharacterEventHandler *handler) { characterEventHandler_ = handler; }
+
   private:
+    class CharacterEventHandler *characterEventHandler_ = nullptr;
+
     /**
      * @brief Validate client authentication data
      *

@@ -218,41 +218,63 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
 
     std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
 
-    auto itemIt = findInventoryItem(characterId, itemId);
-
-    if (itemIt == playerInventories_[characterId].end())
+    auto mapIt = playerInventories_.find(characterId);
+    if (mapIt == playerInventories_.end())
     {
         logger_.logError("Attempted to remove item " + std::to_string(itemId) + " from character " +
-                         std::to_string(characterId) + " but item not found in inventory");
+                         std::to_string(characterId) + " but inventory is empty");
         return false;
     }
 
-    if (itemIt->quantity < quantity)
+    auto &inventory = mapIt->second;
+
+    // Count total across all stacks of this item
+    int totalQty = 0;
+    for (const auto &item : inventory)
+        if (item.itemId == itemId)
+            totalQty += item.quantity;
+
+    if (totalQty < quantity)
     {
         logger_.logError("Attempted to remove " + std::to_string(quantity) + " of item " +
                          std::to_string(itemId) + " from character " + std::to_string(characterId) +
-                         " but only has " + std::to_string(itemIt->quantity));
+                         " but only has " + std::to_string(totalQty));
         return false;
     }
 
     ItemDataStruct itemInfo = itemManager_.getItemById(itemId);
-    const int invItemId = itemIt->id; // capture before potential erase
+    int remainingToRemove = quantity;
+    int lastInvItemId = 0;
+    int finalQty = 0;
 
-    itemIt->quantity -= quantity;
-    const int finalQty = itemIt->quantity;
+    // Remove from multiple stacks if needed
+    for (auto it = inventory.begin(); it != inventory.end() && remainingToRemove > 0; )
+    {
+        if (it->itemId != itemId)
+        {
+            ++it;
+            continue;
+        }
 
-    if (itemIt->quantity == 0)
-    {
-        // Remove item completely
-        playerInventories_[characterId].erase(itemIt);
-        log_->info("[INVENTORY] Removed all " + itemInfo.slug + " from character " + std::to_string(characterId));
+        lastInvItemId = it->id;
+        int deduct = std::min(it->quantity, remainingToRemove);
+        it->quantity -= deduct;
+        remainingToRemove -= deduct;
+        finalQty = it->quantity;
+
+        if (it->quantity == 0)
+        {
+            it = inventory.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
     }
-    else
-    {
-        logger_.log("[INVENTORY] Removed " + std::to_string(quantity) + "x " + itemInfo.slug +
-                    " from character " + std::to_string(characterId) +
-                    " (remaining: " + std::to_string(itemIt->quantity) + ")");
-    }
+
+    log_->info("[INVENTORY] Removed " + std::to_string(quantity) + "x " + itemInfo.slug +
+               " from character " + std::to_string(characterId) +
+               " (remaining total: " + std::to_string(totalQty - quantity) + ")");
 
     // Persist item change to game server DB immediately
     if (saveInventoryCallback_)
@@ -264,7 +286,7 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
         savePacket["body"]["characterId"] = characterId;
         savePacket["body"]["itemId"] = itemId;
         savePacket["body"]["quantity"] = finalQty;
-        savePacket["body"]["inventoryItemId"] = invItemId; // >0 = UPDATE by id; 0 = fallback DELETE by itemId
+        savePacket["body"]["inventoryItemId"] = lastInvItemId; // >0 = UPDATE by id; 0 = fallback DELETE by itemId
         saveInventoryCallback_(savePacket.dump() + "\n");
     }
 
@@ -319,18 +341,17 @@ InventoryManager::getItemQuantity(int characterId, int itemId) const
 {
     std::shared_lock<std::shared_mutex> lock(inventoryMutex_);
 
-    auto itemIt = findInventoryItem(characterId, itemId);
-
     auto mapIt = playerInventories_.find(characterId);
     if (mapIt == playerInventories_.end())
         return 0;
 
-    if (itemIt != mapIt->second.end())
+    int total = 0;
+    for (const auto &item : mapIt->second)
     {
-        return itemIt->quantity;
+        if (item.itemId == itemId)
+            total += item.quantity;
     }
-
-    return 0;
+    return total;
 }
 
 void
@@ -470,8 +491,35 @@ InventoryManager::loadPlayerInventory(int characterId, const std::vector<PlayerI
 {
     std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
     playerInventories_[characterId] = items;
+    consolidateInventory(characterId);
     log_->info("[INVENTORY] Loaded " + std::to_string(items.size()) +
                " items from DB for character " + std::to_string(characterId));
+}
+
+void
+InventoryManager::consolidateInventory(int characterId)
+{
+    auto it = playerInventories_.find(characterId);
+    if (it == playerInventories_.end())
+        return;
+
+    auto &inventory = it->second;
+    std::map<int, int> merged; // itemId → total quantity
+    for (const auto &item : inventory)
+        merged[item.itemId] += item.quantity;
+
+    // Rebuild inventory with one row per unique itemId
+    std::vector<PlayerInventoryItemStruct> consolidated;
+    for (auto &[itemId, totalQty] : merged)
+    {
+        // Find the first occurrence to preserve its id, durability, etc.
+        auto first = std::find_if(inventory.begin(), inventory.end(),
+            [itemId](const PlayerInventoryItemStruct &i) { return i.itemId == itemId; });
+        PlayerInventoryItemStruct entry = *first;
+        entry.quantity = totalQty;
+        consolidated.push_back(std::move(entry));
+    }
+    inventory = std::move(consolidated);
 }
 
 std::vector<PlayerInventoryItemStruct>

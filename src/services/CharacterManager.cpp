@@ -1,4 +1,5 @@
 #include "services/CharacterManager.hpp"
+#include "utils/TimeUtils.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -281,6 +282,9 @@ CharacterManager::applyDamageToCharacter(int characterID, int damageAmount)
     if (it != charactersMap_.end())
     {
         auto &ch = it->second;
+        float now = getCurrentGameTime();
+        if (ch.respawnInvulUntil > 0.0f && now < ch.respawnInvulUntil)
+            return {ch.characterCurrentHealth, ch.characterCurrentMana, false};
         bool wasAlive = (ch.characterCurrentHealth > 0);
         int newHp = std::max(0, ch.characterCurrentHealth - damageAmount);
         ch.characterCurrentHealth = newHp;
@@ -348,6 +352,19 @@ CharacterManager::updateCharacterMana(int characterID, int newMana)
         return;
     }
     log_->error("Character " + std::to_string(characterID) + " not found when updating mana");
+}
+
+void
+CharacterManager::setRespawnInvulUntil(int characterID, float timestamp)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it != charactersMap_.end())
+    {
+        it->second.respawnInvulUntil = timestamp;
+        return;
+    }
+    log_->error("Character " + std::to_string(characterID) + " not found when setting respawnInvulUntil");
 }
 
 std::vector<CharacterDataStruct>
@@ -557,6 +574,18 @@ CharacterManager::processEffectTicks()
         std::unique_lock<std::shared_mutex> lock(mutex_);
         for (auto &[id, character] : charactersMap_)
         {
+            int effectiveMaxHealth = character.characterMaxHealth;
+            for (const auto &eff : character.activeEffects)
+            {
+                if (eff.expiresAt != 0 && eff.expiresAt <= nowSec)
+                    continue;
+                if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
+                    continue;
+                if (eff.attributeSlug == "max_health")
+                    effectiveMaxHealth += static_cast<int>(eff.value);
+            }
+            effectiveMaxHealth = std::max(1, effectiveMaxHealth);
+
             for (auto &eff : character.activeEffects)
             {
                 if (eff.tickMs <= 0)
@@ -565,6 +594,12 @@ CharacterManager::processEffectTicks()
                     continue;
                 if (character.characterCurrentHealth <= 0)
                     continue; // already dead — skip ticks
+                if (eff.effectTypeSlug == "dot" && effectiveMaxHealth > 0 &&
+                    character.characterCurrentHealth <= static_cast<int>(effectiveMaxHealth * 0.10f))
+                {
+                    eff.nextTickAt = now + std::chrono::milliseconds(eff.tickMs);
+                    continue;
+                }
                 if (now < eff.nextTickAt)
                     continue; // not yet time
 

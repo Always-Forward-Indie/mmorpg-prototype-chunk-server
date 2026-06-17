@@ -341,12 +341,6 @@ ClientSession::handleClientDisconnect()
         }
     }
 
-    // Clean up the socket from ClientManager if it exists
-    if (socket_)
-    {
-        gameServices_.getClientManager().removeClientDataBySocket(socket_);
-    }
-
     // Only create disconnect event if we have valid client ID
     if (clientId > 0)
     {
@@ -363,7 +357,9 @@ ClientSession::handleClientDisconnect()
         Event disconnectEvent(Event::DISCONNECT_CLIENT, clientId, disconnectData); // Use real clientId in event
 
         eventsBatch.push_back(disconnectEvent);
-        // Push the disconnect event to the event queue
+        // Push the disconnect event to the event queue FIRST,
+        // before cleaning up ClientManager, so the disconnect handler
+        // can still look up client data for proper cleanup.
         eventQueue_.pushBatch(eventsBatch);
 
         log_->info("Disconnect event created for clientId: " + std::to_string(clientId));
@@ -371,6 +367,12 @@ ClientSession::handleClientDisconnect()
     else
     {
         log_->info("No valid clientId found, skipping disconnect event");
+    }
+
+    // Clean up the socket from ClientManager AFTER the event is pushed
+    if (socket_)
+    {
+        gameServices_.getClientManager().removeClientDataBySocket(socket_);
     }
 
     // Notify NetworkManager about session cleanup

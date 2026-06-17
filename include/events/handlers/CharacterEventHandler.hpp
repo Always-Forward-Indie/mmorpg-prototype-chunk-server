@@ -192,6 +192,13 @@ class CharacterEventHandler : public BaseEventHandler
      */
     void initializePlayerSkills(const CharacterDataStruct &characterData, int clientID, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket);
 
+    /**
+     * @brief Remove all pending join requests for a specific character (cleanup on disconnect)
+     *
+     * @param characterId Character ID whose pending requests should be discarded
+     */
+    void removePendingJoinRequests(int characterId);
+
   private:
     /**
      * @brief Convert character data to JSON format

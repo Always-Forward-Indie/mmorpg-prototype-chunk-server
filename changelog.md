@@ -1,3 +1,39 @@
+v0.2.25
+17.06.2026
+================
+New:
+
+**Пост-респавн неуязвимость.**
+- `CharacterDataStruct` — новое поле `float respawnInvulUntil = 0.0f` (абсолютное игровое время, 0 = нет неуязвимости).
+- `CharacterManager::setRespawnInvulUntil()` — новый метод.
+- `CharacterManager::applyDamageToCharacter()` — если `respawnInvulUntil > 0` и `now < respawnInvulUntil`, урон не наносится, возвращается текущее HP/Mana без изменений.
+- `CharacterEventHandler::handlePlayerRespawnEvent()` — после воскрешения устанавливает `respawnInvulUntil = getCurrentGameTime() + respawn.invuln_sec` (default 3.0s). Предотвращает мгновенную повторную смерть при респавне под атакой.
+
+Fixes:
+
+**Очистка pending join requests при дисконнекте.**
+- `CharacterEventHandler::removePendingJoinRequests()` — новый метод: удаляет повисшие запросы на подключение для персонажа.
+- `ClientEventHandler` — ссылка на `CharacterEventHandler` через `setCharacterEventHandler()`. При `handleDisconnectClientEvent` вызывает `removePendingJoinRequests(characterId)` перед выгрузкой данных персонажа.
+- Проводка установлена в конструкторе `EventHandler`.
+
+**ClientSession — порядок дисконнекта исправлен.**
+- `handleClientDisconnect()` — удаление сокета из `ClientManager` (`removeClientDataBySocket`) теперь происходит ПОСЛЕ `eventQueue_.pushBatch(eventsBatch)`. Ранее сокет удалялся до отправки события → обработчик не мог найти данные клиента для корректной выгрузки.
+
+**Join broadcast race fix.**
+- `handleJoinCharacterEvent` — Phase 1 `success`-ответ теперь отправляется напрямую на сокет клиента через `networkManager_.sendResponse(clientSocket, ...)` вместо `broadcastToAllClients()`. Устраняет гонку, когда сокет ещё не зарегистрирован глобально в `ClientManager`.
+
+**Move speed default — повышен до 7.0.**
+- `handleMoveCharacterEvent()` — дефолтная `moveSpeed` изменена с 5.0f на 7.0f (соответствует ребалансу `class_stat_formula`).
+
+**DoT-тики останавливаются при критическом HP.**
+- `CharacterManager::processEffectTicks()` — перед обработкой тиков вычисляется `effectiveMaxHealth`. Если HP персонажа ≤ 10% от `effectiveMaxHealth`, DoT-тики пропускаются (переносятся на следующий цикл). Предотвращает смерть от остаточных тиков после выхода из боя.
+
+**Инвентарь — консолидация дубликатов при загрузке.**
+- `InventoryManager::consolidateInventory()` — новый метод: мержит дубликаты одного `itemId` в одну строку с суммированным `quantity`. Вызывается в `loadPlayerInventory()` после вставки предметов из БД.
+- `InventoryManager::removeItemFromInventory()` — полная переработка: теперь корректно обрабатывает предметы, разбросанные по нескольким стакам. Суммирует total quantity по всем стакам, списывает из нескольких слотов последовательно, удаляет опустевшие строки.
+- `InventoryManager::getItemQuantity()` — суммирует quantity по всем стакам одного `itemId`.
+
+---
 v0.2.24
 15.06.2026
 ================

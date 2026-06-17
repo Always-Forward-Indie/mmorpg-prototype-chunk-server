@@ -47,6 +47,9 @@ EventHandler::EventHandler(
     // before playerReady and the EventHandler guard skips the broadcast).
     characterEventHandler_->setEquipmentEventHandler(equipmentEventHandler_.get());
     characterEventHandler_->setWorldObjectEventHandler(worldObjectEventHandler_.get());
+
+    // Wire character event handler reference for pending join request cleanup on disconnect
+    clientEventHandler_->setCharacterEventHandler(characterEventHandler_.get());
 }
 
 void

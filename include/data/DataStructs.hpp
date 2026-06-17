@@ -407,6 +407,10 @@ struct CharacterDataStruct
     // zero-initialised = "never been in combat" → regen is allowed immediately on join.
     std::chrono::steady_clock::time_point lastInCombatAt = {};
 
+    // Post-respawn invulnerability: absolute game time until which the character
+    // is immune to damage. Zero = not invulnerable.
+    float respawnInvulUntil = 0.0f;
+
     // Hotbar slot assignments (loaded on join from character_skill_bar, updated on setSkillBarSlot)
     std::vector<SkillBarSlotStruct> skillBarSlots;
 

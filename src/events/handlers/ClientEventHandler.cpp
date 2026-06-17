@@ -1,4 +1,5 @@
 #include "events/handlers/ClientEventHandler.hpp"
+#include "events/handlers/CharacterEventHandler.hpp"
 #include "events/EventData.hpp"
 #include <chrono>
 #include <spdlog/logger.h>
@@ -214,6 +215,9 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
             // Only save and clean up character data if the character is actually loaded in CharacterManager
             if (passedClientData.characterId > 0)
             {
+                if (characterEventHandler_)
+                    characterEventHandler_->removePendingJoinRequests(passedClientData.characterId);
+
                 CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(passedClientData.characterId);
                 if (charData.characterId == 0)
                 {

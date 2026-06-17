@@ -6,6 +6,7 @@
 #include "events/handlers/NPCEventHandler.hpp"
 #include "events/handlers/WorldObjectEventHandler.hpp"
 #include "utils/TimestampUtils.hpp"
+#include "utils/TimeUtils.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -372,7 +373,10 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                                                    .setBody("character", characterJson)
                                                    .build();
 
-            broadcastToAllClientsWithTimestamps("success", broadcastResponse, timestamps);
+            // Send directly to the joining client via its socket to avoid race
+            // conditions where the socket hasn't been registered globally yet.
+            std::string responseData = networkManager_.generateResponseMessage("success", broadcastResponse, timestamps);
+            networkManager_.sendResponse(clientSocket, responseData);
 
             // ── Phase 2: character-private data ──────────────────────────────────────
             // These can be sent while the client is still on the loading screen.
@@ -574,7 +578,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                     static constexpr float MIN_DELTA_MS = 16.0f;
                     const float effectiveDelta = (deltaMs < MIN_DELTA_MS) ? MIN_DELTA_MS : deltaMs;
 
-                    float moveSpeed = 5.0f;
+                    float moveSpeed = 7.0f;
                     bool moveSpeedFound = false;
                     for (const auto &attr : charData.attributes)
                     {
@@ -1294,6 +1298,19 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
 }
 
 void
+CharacterEventHandler::removePendingJoinRequests(int characterId)
+{
+    std::lock_guard<std::mutex> lock(pendingJoinRequestsMutex_);
+    auto it = pendingJoinRequests_.find(characterId);
+    if (it != pendingJoinRequests_.end())
+    {
+        log_->info("Removing " + std::to_string(it->second.size()) +
+                   " pending join requests for disconnected character ID: " + std::to_string(characterId));
+        pendingJoinRequests_.erase(it);
+    }
+}
+
+void
 CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
 {
     const auto &data = event.getData();
@@ -1459,6 +1476,12 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
         charMgr.setLastValidatedMovement(characterId, respawnPos, 0); // reset: player teleported
 
         charMgr.setCharacterActiveEffects(characterId, currentEffects);
+
+        // ── Grant brief post-respawn invulnerability ───────────────────────────
+        {
+            const float invulnSec = gameServices_.getGameConfigService().getFloat("respawn.invuln_sec", 3.0f);
+            charMgr.setRespawnInvulUntil(characterId, getCurrentGameTime() + invulnSec);
+        }
 
         // ── Persist experience debt to DB ────────────────────────────────────
         {

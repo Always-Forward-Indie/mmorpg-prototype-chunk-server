@@ -57,6 +57,9 @@ class CharacterManager
     // Update character mana
     void updateCharacterMana(int characterID, int newMana);
 
+    // Set post-respawn invulnerability end timestamp (game time, seconds)
+    void setRespawnInvulUntil(int characterID, float timestamp);
+
     // Atomically apply damage: reads HP, subtracts delta, clamps to [0, maxHp], writes back.
     // Returns {newHealth, currentMana, died} where died=true means health crossed 0 this call.
     struct HealthUpdateResult
