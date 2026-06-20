@@ -36,6 +36,9 @@ ClientEventHandler::handlePingClientEvent(const Event &event)
     const auto data = event.getData();
     const TimestampStruct timestamps = event.getTimestamps();
 
+    // Record ping time for idle timeout detection
+    gameServices_.getClientManager().recordPingTime(clientID);
+
     try
     {
         if (std::holds_alternative<ClientDataStruct>(data))
@@ -81,6 +84,9 @@ ClientEventHandler::handleJoinClientEvent(const Event &event)
 
             // Set client socket
             gameServices_.getClientManager().setClientSocket(clientID, clientSocket);
+
+            // Record initial ping time for idle timeout detection
+            gameServices_.getClientManager().recordPingTime(clientID);
 
             // Prepare success response and broadcast to all clients (including sender) with timestamps
             nlohmann::json broadcastResponse = ResponseBuilder()
@@ -211,6 +217,7 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
 
             // Remove the client data
             gameServices_.getClientManager().removeClientData(passedClientData.clientId);
+            gameServices_.getClientManager().removePingTime(passedClientData.clientId);
 
             // Only save and clean up character data if the character is actually loaded in CharacterManager
             if (passedClientData.characterId > 0)

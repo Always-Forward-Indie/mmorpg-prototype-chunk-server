@@ -39,7 +39,7 @@ class NetworkManager
     void setChunkServer(ChunkServer *ChunkServer);
 
     // Session management methods to prevent memory leaks
-    void addActiveSession(std::shared_ptr<ClientSession> session);
+    bool addActiveSession(std::shared_ptr<ClientSession> session);
     void removeActiveSession(std::shared_ptr<ClientSession> session);
     void cleanupInactiveSessions();
 

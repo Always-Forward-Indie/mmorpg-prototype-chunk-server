@@ -12,6 +12,7 @@ struct GameServerConfig {
 
 struct ChunkServerConfig {
     std::string host;
+    std::string publicHost;
     short port;
     short max_clients;
 };

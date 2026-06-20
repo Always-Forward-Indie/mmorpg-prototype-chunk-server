@@ -140,6 +140,8 @@ CharacterManager::loadCharacterData(CharacterDataStruct characterData)
         else
         {
             // Character not yet in map (race during login) — insert it
+            if (characterData.joinTimestamp == std::chrono::steady_clock::time_point{})
+                characterData.joinTimestamp = std::chrono::steady_clock::now();
             charactersMap_[characterData.characterId] = characterData;
         }
     }
@@ -164,6 +166,11 @@ CharacterManager::addCharacter(const CharacterDataStruct &characterData)
     }
 
     charactersMap_[characterData.characterId] = characterData;
+
+    // Set join timestamp for ghost character detection if not already set
+    if (charactersMap_[characterData.characterId].joinTimestamp == std::chrono::steady_clock::time_point{})
+        charactersMap_[characterData.characterId].joinTimestamp = std::chrono::steady_clock::now();
+
     log_->info("Character with ID " + std::to_string(characterData.characterId) + " added/updated.");
 }
 

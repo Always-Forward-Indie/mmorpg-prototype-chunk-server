@@ -450,3 +450,31 @@ ClientManager::cleanupDeadSockets()
         }
     }
 }
+
+void
+ClientManager::recordPingTime(int clientID)
+{
+    std::lock_guard<std::mutex> lock(pingMutex_);
+    clientPingTimes_[clientID] = std::chrono::steady_clock::now();
+}
+
+void
+ClientManager::removePingTime(int clientID)
+{
+    std::lock_guard<std::mutex> lock(pingMutex_);
+    clientPingTimes_.erase(clientID);
+}
+
+std::vector<int>
+ClientManager::getInactiveClientIds(int timeoutSec) const
+{
+    std::lock_guard<std::mutex> lock(pingMutex_);
+    auto now = std::chrono::steady_clock::now();
+    std::vector<int> inactive;
+    for (const auto &[clientId, lastPing] : clientPingTimes_)
+    {
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastPing).count() >= timeoutSec)
+            inactive.push_back(clientId);
+    }
+    return inactive;
+}

@@ -2,6 +2,7 @@
 #include "events/EventDispatcher.hpp"
 #include "handlers/MessageHandler.hpp"
 #include "utils/TimestampUtils.hpp"
+#include <netinet/tcp.h>
 #include <spdlog/logger.h>
 
 NetworkManager::NetworkManager(
@@ -51,17 +52,38 @@ NetworkManager::startAccept()
             boost::asio::ip::tcp::endpoint remoteEndpoint = clientSocket->remote_endpoint();
             std::string clientIP = remoteEndpoint.address().to_string();
             std::string portNumber = std::to_string(remoteEndpoint.port());
-            log_->info("New Client with IP: " + clientIP + " Port: " + portNumber + " - connected!");
-            
+
+            {
+                boost::system::error_code ec;
+                clientSocket->set_option(boost::asio::socket_base::keep_alive(true), ec);
+                if (ec)
+                    log_->warn("Failed to set SO_KEEPALIVE on client socket: " + ec.message());
+#if defined(TCP_KEEPIDLE) && defined(TCP_KEEPINTVL) && defined(TCP_KEEPCNT)
+                int keepidle = 60;
+                int keepintvl = 10;
+                int keepcnt = 3;
+                setsockopt(clientSocket->native_handle(), IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+                setsockopt(clientSocket->native_handle(), IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+                setsockopt(clientSocket->native_handle(), IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+#endif
+            }
+
             // Create session and add to active sessions list
             auto session = std::make_shared<ClientSession>(clientSocket, chunkServer_, gameServices_, eventQueue_, eventQueuePing_, jsonParser_, *eventDispatcher_, *messageHandler_);
-            
+
             // Setup cleanup callback safely
             setupSessionCallback(session);
-            
-            // Start the session and add it to active sessions
-            addActiveSession(session);
-            session->start();
+
+            // Start the session only if it was accepted (not rejected due to max_clients limit)
+            if (addActiveSession(session)) {
+                log_->info("New Client with IP: " + clientIP + " Port: " + portNumber + " - connected!");
+                session->start();
+            } else {
+                log_->warn("Rejected client connection from " + clientIP + ":" + portNumber +
+                           " (max_clients limit reached)");
+                boost::system::error_code ec;
+                clientSocket->close(ec);
+            }
         }
         else{
             log_->warn("Accept client connection error: " + error.message());
@@ -290,7 +312,7 @@ NetworkManager::setChunkServer(ChunkServer *chunkServer)
 }
 
 // Session management methods to prevent memory leaks
-void
+bool
 NetworkManager::addActiveSession(std::shared_ptr<ClientSession> session)
 {
     std::lock_guard<std::mutex> lock(sessionsMutex_);
@@ -302,11 +324,12 @@ NetworkManager::addActiveSession(std::shared_ptr<ClientSession> session)
         gameServices_.getLogger().logError("Maximum concurrent sessions reached (" +
                                                std::to_string(maxSessions) + "), rejecting new connection",
             RED);
-        return; // Don't add the session
+        return false; // Don't add the session
     }
 
     activeSessions_.insert(session);
     gameServices_.getLogger().log("Added session to active sessions. Total active: " + std::to_string(activeSessions_.size()), GREEN);
+    return true;
 }
 
 void

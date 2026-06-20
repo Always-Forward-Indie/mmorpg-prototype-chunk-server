@@ -424,6 +424,11 @@ struct CharacterDataStruct
     int64_t lastSessionPlayTimeSec = 0;
     std::chrono::steady_clock::time_point sessionStartAt = {};
     std::chrono::steady_clock::time_point lastPlayTimeSaveAt = {};
+
+    // Ghost character detection: timestamp when character data was first added
+    // to CharacterManager (set by handleSetCharacterDataEvent / addCharacter).
+    // Zero-initialized = no timestamp recorded (legacy compatibility).
+    std::chrono::steady_clock::time_point joinTimestamp = {};
 };
 
 struct ClientDataStruct

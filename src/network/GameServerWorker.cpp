@@ -67,7 +67,7 @@ GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endpoints
                 nlohmann::json handshake;
                 handshake["header"]["eventType"] = "chunkServerConnection";
                 handshake["header"]["id"] = 1;
-                handshake["header"]["ip"] = chunkServerConfig_.host;
+                handshake["header"]["ip"] = chunkServerConfig_.publicHost;
                 handshake["header"]["port"] = chunkServerConfig_.port;
                 // add delimiter string to the dump
                 std::string delimiter = "\n";

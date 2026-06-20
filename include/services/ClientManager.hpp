@@ -1,6 +1,7 @@
 #pragma once
 
 #include "data/DataStructs.hpp"
+#include <chrono>
 #include <iostream>
 #include <shared_mutex>
 #include <unordered_map>
@@ -69,6 +70,11 @@ class ClientManager
     // Force cleanup of all disconnected clients and shrink containers to prevent memory leaks
     void forceCleanupMemory();
 
+    // Ping timeout tracking (crashed-client detection)
+    void recordPingTime(int clientID);
+    std::vector<int> getInactiveClientIds(int timeoutSec) const;
+    void removePingTime(int clientID);
+
   private:
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
@@ -79,4 +85,8 @@ class ClientManager
 
     // Mutex for clients list
     mutable std::shared_mutex mutex_;
+
+    // Ping timeout tracking: clientId → last ping time (steady_clock)
+    std::unordered_map<int, std::chrono::steady_clock::time_point> clientPingTimes_;
+    mutable std::mutex pingMutex_;
 };

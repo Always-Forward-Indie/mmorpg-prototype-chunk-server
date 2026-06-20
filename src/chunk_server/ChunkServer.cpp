@@ -1222,6 +1222,113 @@ ChunkServer::mainEventLoopCH()
     );
     scheduler_.scheduleTask(zoneEventTickTask);
 
+    // Ping timeout task: disconnect clients that haven't sent a ping for >30 seconds.
+    // Catches crashed clients that never sent a clean TCP RST/EOF.
+    Task pingTimeoutTask(
+        [this]
+        {
+            try
+            {
+                constexpr int PING_TIMEOUT_SEC = 30;
+                auto inactiveIds = gameServices_.getClientManager().getInactiveClientIds(PING_TIMEOUT_SEC);
+                for (int clientId : inactiveIds)
+                {
+                    // Verify client still exists and has a closed/broken socket
+                    auto clientData = gameServices_.getClientManager().getClientData(clientId);
+                    if (clientData.clientId == 0)
+                    {
+                        gameServices_.getClientManager().removePingTime(clientId);
+                        continue;
+                    }
+                    auto socket = gameServices_.getClientManager().getClientSocket(clientId);
+                    if (!socket || !socket->is_open())
+                    {
+                        gameServices_.getClientManager().removePingTime(clientId);
+                        continue;
+                    }
+                    log_->warn("[PING_TIMEOUT] Client " + std::to_string(clientId) +
+                               " timed out after " + std::to_string(PING_TIMEOUT_SEC) +
+                               "s without ping, force disconnecting");
+
+                    // Create disconnect event
+                    ClientDataStruct disconnectData;
+                    disconnectData.clientId = clientId;
+                    disconnectData.characterId = clientData.characterId;
+                    disconnectData.hash = clientData.hash;
+
+                    EventData evData{std::in_place_type<ClientDataStruct>, disconnectData};
+                    Event disconnectEvent(Event::DISCONNECT_CLIENT, clientId, evData);
+                    std::vector<Event> batch;
+                    batch.push_back(disconnectEvent);
+                    eventQueueChunkServer_.pushBatch(batch);
+                }
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[Scheduler] pingTimeoutTask error: " + std::string(ex.what()));
+            }
+        },
+        15000,
+        std::chrono::steady_clock::now() + std::chrono::seconds(30),
+        21 // unique task ID
+    );
+    scheduler_.scheduleTask(pingTimeoutTask);
+
+    // Ghost character cleanup: remove characters that were added to CharacterManager
+    // but never received a joinGameCharacter from the client (orphaned by failed joins).
+    Task ghostCharacterCleanupTask(
+        [this]
+        {
+            try
+            {
+                constexpr int GHOST_TIMEOUT_SEC = 60;
+                auto charactersList = gameServices_.getCharacterManager().getCharactersList();
+                auto now = std::chrono::steady_clock::now();
+
+                for (const auto &character : charactersList)
+                {
+                    if (character.characterId <= 0)
+                        continue;
+
+                    if (character.joinTimestamp == std::chrono::steady_clock::time_point{})
+                        continue; // legacy entries without timestamp, skip
+
+                    int64_t age = std::chrono::duration_cast<std::chrono::seconds>(
+                        now - character.joinTimestamp).count();
+                    if (age < GHOST_TIMEOUT_SEC)
+                        continue;
+
+                    // Check if any active client has this character
+                    bool hasClient = false;
+                    auto clientsList = gameServices_.getClientManager().getClientsList();
+                    for (const auto &client : clientsList)
+                    {
+                        if (client.characterId == character.characterId)
+                        {
+                            hasClient = true;
+                            break;
+                        }
+                    }
+
+                    if (!hasClient)
+                    {
+                        log_->warn("[GHOST_CLEANUP] Character " + std::to_string(character.characterId) +
+                                   " is orphaned (age=" + std::to_string(age) + "s, no client), removing");
+                        gameServices_.getCharacterManager().removeCharacter(character.characterId);
+                    }
+                }
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[Scheduler] ghostCharacterCleanupTask error: " + std::string(ex.what()));
+            }
+        },
+        30000,
+        std::chrono::steady_clock::now() + std::chrono::seconds(60),
+        22 // unique task ID
+    );
+    scheduler_.scheduleTask(ghostCharacterCleanupTask);
+
     try
     {
         log_->info("Starting Game Server Event Loop...");

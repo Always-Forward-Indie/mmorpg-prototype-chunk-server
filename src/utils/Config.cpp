@@ -17,6 +17,7 @@ std::tuple<GameServerConfig, ChunkServerConfig> Config::parseConfig() {
 
     ChunkServerConfig CSConfig;
     CSConfig.host        = getEnvOrDefault("SERVER_HOST", "0.0.0.0");
+    CSConfig.publicHost  = getEnvOrDefault("CHUNK_PUBLIC_HOST", CSConfig.host.c_str());
     CSConfig.port        = static_cast<short>(std::stoi(getEnvOrDefault("SERVER_PORT", "27017")));
     CSConfig.max_clients = static_cast<short>(std::stoi(getEnvOrDefault("SERVER_MAX_CLIENTS", "3000")));
 
