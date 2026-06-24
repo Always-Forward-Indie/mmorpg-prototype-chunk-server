@@ -940,6 +940,5 @@ HarvestManager::calculateDistance(const PositionStruct &pos1, const PositionStru
 {
     float dx = pos1.positionX - pos2.positionX;
     float dy = pos1.positionY - pos2.positionY;
-    float dz = pos1.positionZ - pos2.positionZ;
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
+    return std::sqrt(dx * dx + dy * dy);
 }

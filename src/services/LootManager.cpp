@@ -345,7 +345,13 @@ LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruc
     {
         logger_.logError("Player " + std::to_string(characterId) + " too far from item UID " +
                          std::to_string(itemUID) + " - Distance: " + std::to_string(distance) +
-                         ", Max: " + std::to_string(MAX_PICKUP_DISTANCE));
+                         ", Max: " + std::to_string(MAX_PICKUP_DISTANCE) +
+                         " | Player(" + std::to_string(playerPosition.positionX) + "," +
+                         std::to_string(playerPosition.positionY) + "," +
+                         std::to_string(playerPosition.positionZ) + ") Item(" +
+                         std::to_string(droppedItem.position.positionX) + "," +
+                         std::to_string(droppedItem.position.positionY) + "," +
+                         std::to_string(droppedItem.position.positionZ) + ")");
         return false;
     }
 
@@ -570,7 +576,6 @@ LootManager::calculateDistance(const PositionStruct &pos1, const PositionStruct 
 {
     float dx = pos1.positionX - pos2.positionX;
     float dy = pos1.positionY - pos2.positionY;
-    float dz = pos1.positionZ - pos2.positionZ;
 
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
+    return std::sqrt(dx * dx + dy * dy);
 }
