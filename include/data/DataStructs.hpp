@@ -752,6 +752,7 @@ struct MobMovementData
     float speedMultiplier = 1.0f;
     float stepMultiplier = 0.0f;
     int resetStepCounter = 0;
+    int stuckCount = 0; // Consecutive movement-failure counter for stuck-guard escalation
 
     // AI behavior data
     int targetPlayerId = 0;          // ID игрока, которого преследует моб
@@ -994,6 +995,43 @@ struct ZoneBounds
         else if (pos.positionY > maxY)
             dy = pos.positionY - maxY;
         return std::sqrt(dx * dx + dy * dy);
+    }
+
+    /// Shape-aware distance-to-boundary for any zone geometry.
+    /// For RECT zones this delegates to the AABB version above.
+    /// For CIRCLE/ANNULUS it computes the actual Euclidean distance to the
+    /// circular boundary, not the enclosing box, so that corner positions
+    /// are reported accurately.
+    static float distanceToZone(const PositionStruct &pos, const SpawnZoneStruct &zone)
+    {
+        switch (zone.shape)
+        {
+        case ZoneShape::CIRCLE:
+        {
+            float dx = pos.positionX - zone.centerX;
+            float dy = pos.positionY - zone.centerY;
+            float d = std::sqrt(dx * dx + dy * dy);
+            if (d <= zone.outerRadius)
+                return 0.0f;
+            return d - zone.outerRadius;
+        }
+        case ZoneShape::ANNULUS:
+        {
+            float dx = pos.positionX - zone.centerX;
+            float dy = pos.positionY - zone.centerY;
+            float d = std::sqrt(dx * dx + dy * dy);
+            if (d >= zone.innerRadius && d <= zone.outerRadius)
+                return 0.0f;
+            if (d < zone.innerRadius)
+                return zone.innerRadius - d;
+            return d - zone.outerRadius;
+        }
+        default: // RECT — use AABB
+        {
+            ZoneBounds bounds(zone);
+            return bounds.distanceToZone(pos);
+        }
+        }
     }
 
     float distanceFromZoneEdge(const PositionStruct &pos, float additionalRange) const

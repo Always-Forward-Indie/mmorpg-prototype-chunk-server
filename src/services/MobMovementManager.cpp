@@ -350,6 +350,12 @@ MobMovementManager::runMobTick(
             movementResult->deflectionSign);
 
         mobInstanceManager_->updateMobPosition(mob.uid, movementResult->newPosition);
+
+        // Reset stuck counter on successful movement
+        auto successData = getMobMovementDataInternal(mob.uid);
+        successData.stuckCount = 0;
+        updateMobMovementData(mob.uid, successData);
+
         return true;
     }
 
@@ -365,8 +371,10 @@ MobMovementManager::runMobTick(
 
     // STUCK-GUARD: patrolling mob failed to find a valid position (corner / cluster).
     // Back off nextMoveTime so the scheduler does not retry the same blocked spot
-    // every 50 ms.  Also reset direction and waypoint so the next attempt explores
-    // a fresh random heading instead of repeating the one that just failed.
+    // every 50 ms.  Also re-randomize stepMultiplier (set to 0 triggers re-roll at
+    // line 450) so mobs with permanently-small step sizes get a fresh chance.
+    // Track consecutive failures and teleport to a random position after N attempts
+    // to break separation deadlocks in small crowded zones.
     if (!hasTarget)
     {
         auto stuckData = getMobMovementDataInternal(mob.uid);
@@ -377,6 +385,55 @@ MobMovementManager::runMobTick(
             stuckData.movementDirectionX = 0.0f;
             stuckData.movementDirectionY = 0.0f;
             stuckData.hasPatrolTarget = false; // force a new waypoint on next attempt
+            stuckData.stepMultiplier = 0.0f;   // re-roll on next calculateNewPosition call
+            stuckData.stuckCount++;
+
+            if (stuckData.stuckCount >= 10)
+            {
+                // Force-teleport to random position inside the zone to break deadlock
+                bool teleported = false;
+                for (int attempt = 0; attempt < 20; ++attempt)
+                {
+                    PositionStruct randPos;
+                    randPos.positionZ = mob.position.positionZ;
+
+                    if (zone.shape == ZoneShape::CIRCLE || zone.shape == ZoneShape::ANNULUS)
+                    {
+                        std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * M_PI);
+                        float angle = angleDist(rng_);
+                        float rMin = (zone.shape == ZoneShape::ANNULUS) ? zone.innerRadius : 0.0f;
+                        std::uniform_real_distribution<float> radiusDist(rMin, zone.outerRadius);
+                        float radius = radiusDist(rng_);
+                        randPos.positionX = zone.centerX + radius * std::cos(angle);
+                        randPos.positionY = zone.centerY + radius * std::sin(angle);
+                    }
+                    else // RECT
+                    {
+                        std::uniform_real_distribution<float> dxDist(zone.minX, zone.maxX);
+                        std::uniform_real_distribution<float> dyDist(zone.minY, zone.maxY);
+                        randPos.positionX = dxDist(rng_);
+                        randPos.positionY = dyDist(rng_);
+                    }
+
+                    if (ZoneBounds::contains(zone, randPos))
+                    {
+                        mobInstanceManager_->updateMobPosition(mob.uid, randPos);
+                        logger_.log("[STUCK-GUARD] Mob UID " + std::to_string(mob.uid) +
+                                    " teleported after " + std::to_string(stuckData.stuckCount) +
+                                    " consecutive stuck cycles in zone " + std::to_string(zone.zoneId));
+                        teleported = true;
+                        break;
+                    }
+                }
+                if (!teleported)
+                {
+                    logger_.log("[STUCK-GUARD] Mob UID " + std::to_string(mob.uid) +
+                                " failed to find teleport position after " +
+                                std::to_string(stuckData.stuckCount) + " stuck cycles");
+                }
+                stuckData.stuckCount = 0;
+            }
+
             updateMobMovementData(mob.uid, stuckData);
         }
     }
@@ -1413,17 +1470,13 @@ MobMovementManager::getAIConfig() const
 float
 MobMovementManager::calculateDistanceFromZone(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {
-    // AABB-based calculation using zone boundaries
-    ZoneBounds bounds(zone);
-    return bounds.distanceToZone(mobPos);
+    return ZoneBounds::distanceToZone(mobPos, zone);
 }
 
 bool
 MobMovementManager::shouldReturnToSpawn(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {
-    // Zone-based calculation using zone boundaries
-    ZoneBounds bounds(zone);
-    float distanceFromZoneEdge = bounds.distanceToZone(mobPos);
+    float distanceFromZoneEdge = ZoneBounds::distanceToZone(mobPos, zone);
 
     // If mob is outside zone by more than allowed distance, return to spawn
     return distanceFromZoneEdge > aiConfig_.returnToSpawnZoneDistance;
@@ -1432,9 +1485,7 @@ MobMovementManager::shouldReturnToSpawn(const PositionStruct &mobPos, const Spaw
 bool
 MobMovementManager::canSearchNewTargets(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {
-    // Zone-based calculation using zone boundaries
-    ZoneBounds bounds(zone);
-    float distanceFromZoneEdge = bounds.distanceToZone(mobPos);
+    float distanceFromZoneEdge = ZoneBounds::distanceToZone(mobPos, zone);
 
     // Can search for targets if close enough to zone
     return distanceFromZoneEdge <= aiConfig_.newTargetZoneDistance;
@@ -1463,9 +1514,7 @@ MobMovementManager::calculateNextMoveTime(float currentTime,
 bool
 MobMovementManager::shouldStopChasing(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {
-    // Zone-based calculation using zone boundaries
-    ZoneBounds bounds(zone);
-    float distanceFromZoneEdge = bounds.distanceToZone(mobPos);
+    float distanceFromZoneEdge = ZoneBounds::distanceToZone(mobPos, zone);
 
     // Stop chasing if too far from zone edge
     return distanceFromZoneEdge > aiConfig_.maxChaseFromZoneEdge;

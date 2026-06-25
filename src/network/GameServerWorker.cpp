@@ -75,6 +75,10 @@ GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endpoints
 
                 sendDataToGameServer(handshakeMessage);
 
+                // Invoke reconnect callback so ChunkServer can restore online status
+                if (onReconnect_)
+                    onReconnect_();
+
                 receiveDataFromGameServer(); // Receive data from the Game Server
             } else {
                 log_->error("Error connecting to the Game Server: " + ec.message());

@@ -248,6 +248,31 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
         log_->error("[EVICT] ItemSoul flush error for characterId: " + std::to_string(characterId) + " - " + ex.what());
     }
 
+    // ── 4b. Notify game server that the stale character session is over ─────
+    try
+    {
+        auto now = std::chrono::steady_clock::now();
+        int64_t remainingDelta = std::chrono::duration_cast<std::chrono::seconds>(now - staleChar.lastPlayTimeSaveAt).count();
+        int64_t fullSessionSec = std::chrono::duration_cast<std::chrono::seconds>(now - staleChar.sessionStartAt).count();
+        if (remainingDelta > 0 || fullSessionSec > 0)
+        {
+            nlohmann::json ptPkt;
+            ptPkt["header"]["eventType"] = "savePlayTime";
+            ptPkt["header"]["clientId"] = 0;
+            ptPkt["header"]["hash"] = "";
+            ptPkt["body"]["characterId"] = characterId;
+            ptPkt["body"]["sessionPlayTimeSec"] = remainingDelta;
+            ptPkt["body"]["lastSessionPlayTimeSec"] = fullSessionSec;
+            ptPkt["body"]["isDisconnect"] = true;
+            gameServerWorker_.sendDataToGameServer(ptPkt.dump() + "\n");
+            log_->info("[EVICT] Sent savePlayTime(disconnect) for characterId: " + std::to_string(characterId));
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[EVICT] Failed to send savePlayTime for characterId: " + std::to_string(characterId) + " - " + ex.what());
+    }
+
     // ── 5. Remove from managers ──────────────────────────────────────────────
     gameServices_.getCharacterManager().removeCharacter(characterId);
     if (staleClientId > 0)

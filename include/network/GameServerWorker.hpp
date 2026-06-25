@@ -7,6 +7,7 @@
 #include "utils/Logger.hpp"
 #include <array>
 #include <boost/asio.hpp>
+#include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <queue>
@@ -42,6 +43,9 @@ class GameServerWorker
     /// LOW-8: stored so receiveDataFromGameServer can reconnect on disconnect
     boost::asio::ip::tcp::resolver::results_type endpoints_;
 
+    /// Called after successful connection handshake to restore online status
+    std::function<void()> onReconnect_;
+
     // Process received data from the Game Server
     void processGameServerData(std::string_view data);
     /// Dequeue and async_write the next pending message; must run on strand_.
@@ -57,4 +61,8 @@ class GameServerWorker
     void receiveDataFromGameServer();
     void connect(boost::asio::ip::tcp::resolver::results_type endpoints, int currentRetryCount = 0);
     void closeConnection();
+
+    // Callback invoked after connection (or reconnection) handshake completes.
+    // ChunkServer uses this to restore online status for loaded characters.
+    void setOnReconnectCallback(std::function<void()> callback) { onReconnect_ = std::move(callback); }
 };

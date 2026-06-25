@@ -61,6 +61,37 @@ ChunkServer::ChunkServer(GameServices &gameServices,
     // Wire up QuestManager → GameServerWorker for persistence
     gameServices_.getQuestManager().setGameServerWorker(&gameServerWorker_);
 
+    // Wire up reconnect callback: restore is_online=true for all loaded characters
+    // after the chunk server reconnects to the game server (network blip recovery)
+    gameServerWorker_.setOnReconnectCallback(
+        [this]()
+        {
+            auto characters = gameServices_.getCharacterManager().getCharactersList();
+            if (characters.empty())
+                return;
+
+            nlohmann::json pkt;
+            pkt["header"]["eventType"] = "markCharactersOnline";
+            pkt["header"]["clientId"] = 0;
+            pkt["header"]["hash"] = "";
+            pkt["body"]["characterIds"] = nlohmann::json::array();
+            for (const auto &ch : characters)
+            {
+                if (ch.characterId > 0)
+                    pkt["body"]["characterIds"].push_back(ch.characterId);
+            }
+
+            if (!pkt["body"]["characterIds"].empty())
+            {
+                gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+                gameServices_.getLogger().log(
+                    "[RECONNECT] Restoring online status for " +
+                        std::to_string(pkt["body"]["characterIds"].size()) +
+                        " character(s)",
+                    GREEN);
+            }
+        });
+
     // Wire up QuestManager → NetworkManager for sending packets to clients
     gameServices_.getQuestManager().setNetworkManager(&networkManager_);
 
@@ -555,7 +586,10 @@ ChunkServer::mainEventLoopCH()
 
             for (const auto &zone : spawnZones)
             {
-                if (!zone.second.spawnEnabled || zone.second.spawnedMobsCount == 0)
+                // Use actual alive count from MobInstanceManager instead of spawnedMobsCount
+                // legacy counter, which can underflow and permanently freeze a zone's mobs.
+                int aliveCount = gameServices_.getMobInstanceManager().getAliveMobCountInZone(zone.second.zoneId);
+                if (!zone.second.spawnEnabled || aliveCount == 0)
                     continue;
 
                 // Single movement tick for ALL mobs in zone.
