@@ -266,6 +266,6 @@ class HarvestManager
 
     // Configuration
     static constexpr float DEFAULT_HARVEST_DURATION = 3.0f;     // seconds
-    static constexpr float DEFAULT_INTERACTION_RADIUS = 150.0f; // units
+    static constexpr float DEFAULT_INTERACTION_RADIUS = 300.0f; // units
     static constexpr float DEFAULT_MAX_MOVE_DISTANCE = 50.0f;   // units
 };

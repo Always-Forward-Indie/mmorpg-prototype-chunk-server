@@ -696,6 +696,13 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
             gameServices_.getCharacterManager().setCharacterPosition(
                 movementData.characterId, movementData.position);
 
+            // Send ground items snapshot if player has moved far enough
+            if (itemEventHandler_)
+            {
+                itemEventHandler_->maybeSendGroundItemsToClient(
+                    clientID, movementData.characterId, clientSocket);
+            }
+
             // Trigger reach-type quest step check
             gameServices_.getQuestManager().onPositionReached(
                 movementData.characterId,

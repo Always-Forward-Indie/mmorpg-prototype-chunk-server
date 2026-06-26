@@ -769,7 +769,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getHarvestManager().updateHarvestProgress();
 
                 // Clean up old corpses that can no longer be harvested
-                gameServices_.getHarvestManager().cleanupOldCorpses(30); // 30 seconds
+                 gameServices_.getHarvestManager().cleanupOldCorpses(60); // 60 seconds
             }
             catch (const std::exception &ex)
             {
@@ -824,7 +824,7 @@ ChunkServer::mainEventLoopCH()
                 std::vector<int> deadMobUIDs;
 
                 // Find dead mobs whose corpse timer has expired
-                constexpr int64_t CORPSE_DURATION_MS = 30'000; // corpse lies for 30 s
+                constexpr int64_t CORPSE_DURATION_MS = 60'000; // corpse lies for 60 s
                 auto now = std::chrono::steady_clock::now();
                 for (const auto &mob : mobsInZone)
                 {

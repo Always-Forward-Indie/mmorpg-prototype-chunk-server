@@ -114,8 +114,21 @@ class ItemEventHandler : public BaseEventHandler
      *        Called on character join so the client can spawn existing world items.
      * @param clientId  Target client ID
      * @param socket    Target socket
+     * @param lootRadius Radius for nearby item filter (default 5000)
      */
     void sendGroundItemsToClient(int clientId,
+        std::shared_ptr<boost::asio::ip::tcp::socket> socket,
+        float lootRadius = 5000.0f);
+
+    /**
+     * @brief Send ground items snapshot with distance throttling.
+     *        Called from movement handler; only sends if the character has moved
+     *        far enough since the last snapshot.
+     * @param clientId    Target client ID
+     * @param characterId Character ID
+     * @param socket      Target socket
+     */
+    void maybeSendGroundItemsToClient(int clientId, int characterId,
         std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
   private:
@@ -128,6 +141,17 @@ class ItemEventHandler : public BaseEventHandler
     // from concurrent event-processing threads.
     mutable std::mutex itemCooldownMutex_;
     std::unordered_map<int, std::unordered_map<int, std::chrono::steady_clock::time_point>> itemCooldowns_;
+
+    // Per-character last position where loot snapshot was sent (for movement throttling)
+    static constexpr float LOOT_RADIUS = 5000.0f;
+    static constexpr float LOOT_SNAPSHOT_DISTANCE_THRESHOLD = 2000.0f;
+    std::unordered_map<int, PositionStruct> lastLootSnapshotPosition_;
+    mutable std::shared_mutex lootSnapshotMutex_;
+
+    /**
+     * @brief Broadcast a raw payload string only to clients near a given position.
+     */
+    void broadcastToNearbyClients(const std::string &responseData, const PositionStruct &center, float radius = LOOT_RADIUS);
 
     /**
      * @brief Check and set item use cooldown atomically.

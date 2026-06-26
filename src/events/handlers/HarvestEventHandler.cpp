@@ -213,7 +213,7 @@ HarvestEventHandler::handleGetNearbyCorpses(const Event &event)
         // Получаем ближайшие трупы
         PositionStruct playerPosition = player.characterPosition;
 
-        auto nearbyCorpses = harvestManager.getHarvestableCorpsesNearPosition(playerPosition, 5.0f);
+        auto nearbyCorpses = harvestManager.getHarvestableCorpsesNearPosition(playerPosition, 300.0f);
 
         // Отправляем ответ клиенту
         auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);

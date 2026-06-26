@@ -1,6 +1,7 @@
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/Event.hpp"
 #include "utils/ResponseBuilder.hpp"
+#include <cmath>
 #include <spdlog/logger.h>
 
 ItemEventHandler::ItemEventHandler(
@@ -89,7 +90,7 @@ ItemEventHandler::handleItemDropEvent(const Event &event)
             std::vector<DroppedItemStruct> droppedItems = std::get<std::vector<DroppedItemStruct>>(data);
 
             gameServices_.getLogger().log("[ITEM_DROP_EVENT] Broadcasting " +
-                                          std::to_string(droppedItems.size()) + " dropped items");
+                                          std::to_string(droppedItems.size()) + " dropped items to nearby clients");
 
             // Build response with all dropped items
             nlohmann::json droppedItemsArray = nlohmann::json::array();
@@ -108,9 +109,13 @@ ItemEventHandler::handleItemDropEvent(const Event &event)
 
             std::string responseData = networkManager_.generateResponseMessage("success", response);
 
-            log_->info("[ITEM_DROP_EVENT] Sending to clients: " + responseData);
+            log_->info("[ITEM_DROP_EVENT] Sending to nearby clients: " + responseData);
 
-            broadcastToAllClients(responseData);
+            // Send only to clients near the drop position
+            if (!droppedItems.empty())
+            {
+                broadcastToNearbyClients(responseData, droppedItems[0].position);
+            }
         }
         else
         {
@@ -662,19 +667,21 @@ ItemEventHandler::handleInventoryUpdateEvent(const Event &event)
 }
 
 // ---------------------------------------------------------------------------
-// sendGroundItemsToClient — snapshot of all dropped items to one socket
+// sendGroundItemsToClient — snapshot of nearby dropped items to one socket
 // ---------------------------------------------------------------------------
 void
 ItemEventHandler::sendGroundItemsToClient(int clientId,
-    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket)
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+    float lootRadius)
 {
-    auto allDropped = gameServices_.getLootManager().getAllDroppedItems();
+    ClientDataStruct clientData = gameServices_.getClientManager().getClientData(clientId);
+    PositionStruct playerPos = gameServices_.getCharacterManager().getCharacterPosition(clientData.characterId);
+
+    auto nearbyItems = gameServices_.getLootManager().getDroppedItemsNearPosition(playerPos, lootRadius);
 
     nlohmann::json itemsArray = nlohmann::json::array();
-    for (const auto &[uid, drop] : allDropped)
+    for (const auto &drop : nearbyItems)
         itemsArray.push_back(droppedItemToJson(drop));
-
-    ClientDataStruct clientData = gameServices_.getClientManager().getClientData(clientId);
 
     nlohmann::json response = ResponseBuilder()
                                   .setHeader("message", "success")
@@ -1080,4 +1087,79 @@ ItemEventHandler::handleUseItemEvent(const Event &event)
     {
         log_->error("[USE_ITEM] Exception: " + std::string(ex.what()));
     }
+}
+
+// ---------------------------------------------------------------------------
+// broadcastToNearbyClients — send a raw payload to clients within radius
+// ---------------------------------------------------------------------------
+void
+ItemEventHandler::broadcastToNearbyClients(const std::string &responseData,
+    const PositionStruct &center, float radius)
+{
+    auto sharedData = std::make_shared<const std::string>(responseData);
+    auto clients = gameServices_.getClientManager().getClientsListReadOnly();
+
+    for (const auto &client : clients)
+    {
+        if (client.characterId <= 0)
+            continue;
+
+        PositionStruct charPos = gameServices_.getCharacterManager().getCharacterPosition(client.characterId);
+        float dx = charPos.positionX - center.positionX;
+        float dy = charPos.positionY - center.positionY;
+        float dz = charPos.positionZ - center.positionZ;
+        float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (dist > radius)
+            continue;
+
+        auto sock = gameServices_.getClientManager().getClientSocket(client.clientId);
+        if (sock && sock->is_open())
+        {
+            try
+            {
+                networkManager_.sendResponse(sock, sharedData);
+            }
+            catch (const std::exception &ex)
+            {
+                log_->warn("[LOOT] Failed to send to client " +
+                           std::to_string(client.clientId) + ": " + ex.what());
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// maybeSendGroundItemsToClient — send loot snapshot with movement throttling
+// ---------------------------------------------------------------------------
+void
+ItemEventHandler::maybeSendGroundItemsToClient(int clientId, int characterId,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (!socket || !socket->is_open())
+        return;
+
+    PositionStruct currentPos = gameServices_.getCharacterManager().getCharacterPosition(characterId);
+
+    {
+        std::shared_lock<std::shared_mutex> lock(lootSnapshotMutex_);
+        auto it = lastLootSnapshotPosition_.find(characterId);
+        if (it != lastLootSnapshotPosition_.end())
+        {
+            float dx = currentPos.positionX - it->second.positionX;
+            float dy = currentPos.positionY - it->second.positionY;
+            float dz = currentPos.positionZ - it->second.positionZ;
+            float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+            if (dist < LOOT_SNAPSHOT_DISTANCE_THRESHOLD)
+                return;
+        }
+    }
+
+    {
+        std::unique_lock<std::shared_mutex> lock(lootSnapshotMutex_);
+        lastLootSnapshotPosition_[characterId] = currentPos;
+    }
+
+    sendGroundItemsToClient(clientId, socket, LOOT_RADIUS);
 }
