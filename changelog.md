@@ -1,3 +1,130 @@
+v0.2.27
+26.06.2026
+================
+New:
+
+**Ghost Character Cleanup — очистка персонажей-призраков.**
+- Task 22 (каждые 30s) — удаляет персонажей, загруженных из game-сервера но не вошедших в мир ни от одного клиента (grace period 60s).
+- `CharacterDataStruct::joinTimestamp` — время загрузки данных, по которому определяется призрак.
+- Предотвращает утечку памяти от частичных/оборванных join-последовательностей.
+
+**Ping Timeout Crash Detection — детект мёртвых клиентов.**
+- Task 21 (каждые 15s) — сканирует клиентов без пинга >30s, создаёт `DISCONNECT_CLIENT` события.
+- `ClientManager::recordPingTime()` / `getInactiveClientIds()` / `removePingTime()` — новые методы.
+- Решает проблему клиентов, отвалившихся без чистого TCP RST/EOF (краш, пропал интернет).
+
+**GameServerWorker — автоматическое переподключение.**
+- При обрыве соединения с game-сервером: exponential backoff (5s × 2^retryCount, max 5 попыток).
+- При успешном переподключении: `onReconnectCallback` → `markCharactersOnline` для всех загруженных персонажей.
+- Дренирование send-очереди при дисконнекте.
+
+**Memory Management Suite — управление памятью.**
+- Task 4 (каждые 5s) — мониторинг `/proc/self/status`: логирует VmRSS.
+- Task 5 (каждые 30s) — агрессивная очистка: `ClientManager::forceCleanupMemory()`, `NetworkManager::cleanupInactiveSessions()`, `EventQueue::forceCleanup()` на всех 3 очередях, `malloc_trim(0)` (glibc) для возврата памяти ОС. Логирует VmRSS/VmSize до/после.
+- Task 3 (каждые 10s) — регулярная очистка отключённых клиентов, мониторинг размеров очередей с порогом warn (>500).
+
+**TCP Keepalive — кастомные параметры.**
+- Клиентские сокеты: `TCP_KEEPIDLE=60`, `TCP_KEEPINTVL=10`, `TCP_KEEPCNT=3`.
+- Детект мёртвых сокетов за ~90s вместо OS-default ~2h.
+
+**Client Buffer Overflow Protection — защита от переполнения буфера.**
+- `ClientSession` — лимит 64KB на накопленные данные recv-буфера. При превышении — принудительный дисконнект.
+
+**Zone Event System — полная реализация.**
+- `ZoneEventManager` (`include/services/ZoneEventManager.hpp`) — три типа триггеров: `scheduled` (каждые N часов), `random` (вероятность в час), `manual` (внешний запуск).
+- Активные ивенты применяют зональные множители: loot multiplier, mob speed multiplier, spawn rate multiplier.
+- Invasion waves — спавн мобов волнами с опциональным champion-финалом.
+- Lock-free atomic snapshot на hot-path — нулевая блокировка при чтении активных ивентов.
+- Task 19 (каждые 30s) — `tickEventScheduler()`.
+
+**Threshold Champions — чемпионы по порогу убийств.**
+- `ChampionManager::recordMobKill()` — отслеживает per-zone per-template счётчик убийств.
+- При достижении порога спавнит чемпиона, сбрасывает счётчик при убийстве/деспавне.
+
+**Survival Champions — чемпионы по времени выживания.**
+- Task 18 (каждые 5 мин) — `tickSurvivalEvolution()`: сканирует всех живых мобов, эволюционирует выживших дольше `survival_champion.evolve_hours` в Survival Champions на месте.
+
+**Item Use Effects (Consumables) — полная система расходников.**
+- `ItemUseEffectStruct` (`DataStructs.hpp`) — поля `is_instant`, `duration_seconds`, `tick_ms`, `cooldown_seconds`.
+- Instant-эффекты: Health Potion (+50 HP, 30s cd).
+- Timed-эффекты: Bread (HoT +5HP/2s на 30s, 60s cd).
+- `ItemEventHandler::handleUseItemEvent()` — полная цепочка: проверка жив/доступен/кулдаун, применение `ActiveEffectStruct` с `sourceType="item_use"`, персистенция кулдауна на game-сервер.
+
+**Skill Cooldown Restore on Login.**
+- `SkillSystem::restoreCooldown()` — восстановление активных кулдаунов из БД при входе персонажа.
+- `GameServices::sendSkillCooldownPersist()` — fire-and-forget сохранение кулдауна при каждом использовании скила.
+- Античит: кулдауны переживают релог.
+
+**5 новых dialogue condition types.**
+- `DialogueConditionEvaluator` расширен условиями:
+  - `reputation` — проверка значения (gte/lte/eq/gt/lt) + tier (enemy/stranger/neutral/friendly/ally).
+  - `mastery` — проверка уровня владения оружием.
+  - `has_skill_points` — проверка доступных SP.
+  - `skill_learned` / `skill_not_learned` — проверка наличия конкретного скила.
+  - `object_state` — проверка runtime-состояния WIO (active/depleted/disabled).
+
+Improvements:
+
+**CharacterManager — HIGH-9: O(1) lookup.**
+- Внутреннее хранилище изменено с `std::vector` (O(N)) на `std::unordered_map<int, CharacterDataStruct>` (O(1)). Экономия 200K+ итераций/сек при 2K онлайн-игроков — затрагивает каждый hot-path: атака, DoT-тик, движение и т.д.
+
+**SocketWriteQueue — полная приоритетная очередь.**
+- Per-socket ASIO `strand` для сериализации записи.
+- Два deque: CRITICAL (бой, статы, sendResponse) и BULK (позиции мобов).
+- `sendResponseBulk()` — отправка моб-апдейтов через BULK-очередь.
+- `getOrCreateWriteQueue()` / `removeWriteQueue()` — управление очередями при connect/disconnect.
+
+**GameServerWorker — CRITICAL-2: strand-сериализация отправки.**
+- Все отправки на game-сервер идут через ASIO `strand` + `sendQueue_` + флаг `writePending_`. Устраняет UB конкурентной `async_write` на одном сокете из разных потоков.
+
+**MobMovement — предотвращение осцилляции и тюнинг возврата.**
+- `lastDeflectionSign` (±1/0) — предотвращает ±90° осцилляцию при скучивании мобов.
+- `returnSpeedUnitsPerSec = 200` — скорость возврата намеренно ниже скорости погони.
+- `maxRetries` увеличен с 4 до 8 — больше попыток найти свободное направление.
+- `forceNextUpdate` — state-transition пакеты всегда обходят rate-limit.
+
+Migrations:
+
+**Migration 050 — Schema Integrity Audit.**
+- 13 FK constraints добавлены на 10 таблиц.
+- GIN-индекс на `npc_dialogue.condition_group`.
+- 10+ новых операционных индексов.
+- 80+ `COMMENT ON TABLE/COLUMN` для 19 таблиц.
+- Исправлены NULL-дефолты в `zone_event_templates`.
+
+**Migration 052 — Item Use Effects seed data.**
+- `status_effects` — Health Potion (instant +50 HP, 30s cd) и Bread (HoT +5HP/2s на 30s, 60s cd).
+- `item_use_effects` — привязка расходников к эффектам.
+
+**Migration 056 — Ruins Dying Stranger NPC.**
+- Новый NPC (id=6): «Умирающий незнакомец» в руинах.
+- Полное определение: атрибуты (HP=50, MP=0), размещение (x=18870, y=-15430, z=1490).
+- 3 ambient speech линии.
+- 6-узловое диалоговое дерево с одноразовым подарком (Iron Sword + 2× Health Potion) под флагом `ruins_dying_stranger.received_gift` с `hide_if_locked`.
+
+**Migration 057 — Class-based gift.**
+- Развилка подарка: Warrior → Iron Sword, Mage → Wooden Staff.
+
+**Migration 061 — Rewrite Ruins Dying Stranger dialogue.**
+- Реструктуризация диалогового дерева ruins_dying_stranger.
+
+**Migration 062 — Переписанные диалоги деревни + Varan Fox Quest.**
+- Полный рерайт диалогов 5 NPC деревни (Milaya, Varan, Edrik, Theron, Sylara).
+- Новый квест `varan_fox_menace` (id=2): kill 8 foxes, collect 8 fox skins.
+- Новый предмет Fox Skin (id=28).
+- Удалён старый `wolf_hunt_intro` квест и прогресс игроков.
+
+**Migration 063 — Fix vendor shops + drop npc_position.**
+- Каждому NPC деревни свой ассортимент: Milaya — зелья/еда, Edrik — книги скилов, Theron — оружие/броня, Sylara — книги томов, Varan — крафтовые ресурсы.
+- Исправлена привязка тренеров: Edrik = Warrior trainer, Theron НЕ тренер.
+- `DROP TABLE npc_position` — удалена устаревшая таблица (заменена `npc_placements` из migration 047).
+
+Config:
+
+**CHUNK_PUBLIC_HOST — отдельная env-переменная для NAT/Docker.**
+- `Config` читает `CHUNK_PUBLIC_HOST` — публичный IP, который чанк-сервер анонсирует game-серверу. Fallback на `SERVER_HOST`.
+
+---
 v0.2.26
 20.06.2026
 ================
