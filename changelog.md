@@ -1,3 +1,27 @@
+v0.2.29
+30.06.2026
+================
+New:
+
+**Movement Speed Sliding Window — толерантность к VPN-джиттеру.**
+- `MovementSample` (`DataStructs.hpp`) — структура `{PositionStruct position, int64_t srvMs}` для кольцевого буфера.
+- `CharacterDataStruct` — кольцевой буфер `movementWindow[5]`, индексы `movementWindowHead`/`movementWindowCount`. Сбрасывается при телепорте/респавне/позиционной коррекции (`srvMs=0` в `setLastValidatedMovement`).
+- `CharacterEventHandler::handleMoveCharacterEvent` — при провале индивидуальной проверки скорости (пакеты пришли burst-ом): fallback-проверка средней скорости по окну из последних N позиций. Если средняя скорость в пределах лимита — движение принимается, позиционная коррекция не отправляется.
+- `movement.speed_buffer_multiplier` — множитель буфера теперь читается из `GameConfigService` (default 1.3) вместо хардкода `1.3f`.
+
+**Proportional XP — распределение опыта моба по вкладу урона.**
+- `CombatSystem::handleMobDeath` — полная переработка системы начисления опыта: опыт делится между всеми игроками из `threatTable` пропорционально нанесённому урону (damage contribution). Порог минимального вклада — 5% от total threat. Убийца (last hit) получает +10% бонус к своей доле. Если threatTable пуст — fallback на killer-only как раньше.
+- Аналитика `level_up` теперь отправляется для каждого повысившего уровень участника, а не только для убийцы.
+
+**Proportional Fellowship Bonus.**
+- Fellowship-бонус (XP за убийство моба) теперь распределяется пропорционально угрозе из `threatTable` (5% порог), а не полным фиксированным процентом всем участникам группы. Бонус для убийцы и феллоу вычисляется через общий `grantFellowshipBonus()`.
+
+Fixes:
+
+**ItemRemove on Pickup Failure.**
+- `ItemEventHandler::handleItemPickupEvent` — при ошибке подбора (предмет уже подобран/деспавнен) клиенту дополнительно отправляется `itemRemove` пакет с `{uids: [droppedItemUID]}`, чтобы клиентский UI удалил ghost-visual предмета.
+
+---
 v0.2.28
 30.06.2026
 ================

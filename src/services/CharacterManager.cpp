@@ -264,6 +264,21 @@ CharacterManager::setLastValidatedMovement(int characterID, PositionStruct posit
     {
         it->second.lastValidatedPosition = position;
         it->second.lastMoveSrvMs = srvMs;
+
+        if (srvMs == 0)
+        {
+            // Reset sliding window on teleport / respawn / rejection
+            it->second.movementWindowHead = 0;
+            it->second.movementWindowCount = 0;
+        }
+        else
+        {
+            auto &win = it->second.movementWindow;
+            win[it->second.movementWindowHead] = {position, srvMs};
+            it->second.movementWindowHead = (it->second.movementWindowHead + 1) % CharacterDataStruct::MOVEMENT_WINDOW_SIZE;
+            if (it->second.movementWindowCount < CharacterDataStruct::MOVEMENT_WINDOW_SIZE)
+                ++it->second.movementWindowCount;
+        }
     }
 }
 

@@ -1245,69 +1245,155 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
         auto mobData = gameServices_->getMobInstanceManager().getMobInstance(mobId);
         gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " (level " + std::to_string(mobData.level) + ") was killed by " + std::to_string(killerId));
 
-        // Начисляем опыт убийце, если он является персонажем игрока
+        // ── Proportional XP based on damage contribution ────────────────────
+        // Splits mob XP among all players who damaged the mob, weighted by
+        // damage dealt (threatTable).  The killer (last hit) receives an
+        // additional +10 % finishing blow bonus on top of their share.
+        // Falls back to killer-only XP if threatTable is empty.
         try
         {
-            auto killerData = gameServices_->getCharacterManager().getCharacterData(killerId);
             auto &experienceManager = gameServices_->getExperienceManager();
-
-            // Вычисляем количество опыта за убийство моба
-            // rankMult масштабирует XP: элитный моб (2.20x) даёт в 2.2 раза больше опыта
             const int scaledBaseXp = static_cast<int>(mobData.baseExperience * mobData.rankMult);
-            int expAmount = experienceManager.calculateMobExperience(mobData.level, killerData.characterLevel, scaledBaseXp);
 
-            if (expAmount > 0)
+            auto mobMovData = gameServices_->getMobMovementManager().getMobMovementData(mobId);
+            const auto &threatTable = mobMovData.threatTable;
+
+            if (!threatTable.empty())
             {
-                auto result = experienceManager.grantExperience(killerId, expAmount, "mob_kill", mobId);
+                int totalThreat = 0;
+                for (const auto &[pid, threat] : threatTable)
+                    totalThreat += threat;
+                if (totalThreat <= 0) totalThreat = 1;
 
-                if (result.success)
+                for (const auto &[playerId, threat] : threatTable)
                 {
-                    gameServices_->getLogger().log("Character " + std::to_string(killerId) +
-                                                   " gained " + std::to_string(expAmount) +
-                                                   " experience for killing mob " + std::to_string(mobId));
-
-                    if (result.levelUp)
+                    try
                     {
-                        gameServices_->getLogger().log("Character " + std::to_string(killerId) +
-                                                           " leveled up to level " + std::to_string(result.experienceEvent.newLevel),
-                            CYAN);
+                        auto playerData = gameServices_->getCharacterManager().getCharacterData(playerId);
+                        if (playerData.characterId == 0)
+                            continue;
 
-                        // Analytics: level_up
-                        try
+                        const float share = static_cast<float>(threat) / static_cast<float>(totalThreat);
+                        if (share < 0.05f)  // minimum 5 % contribution threshold
+                            continue;
+
+                        const int personalBaseXp = experienceManager.calculateMobExperience(
+                            mobData.level, playerData.characterLevel, scaledBaseXp);
+                        int xpAward = static_cast<int>(static_cast<float>(personalBaseXp) * share);
+
+                        // Killer finishing blow bonus: +10 % on their share
+                        if (playerId == killerId)
+                            xpAward = static_cast<int>(static_cast<float>(xpAward) * 1.10f);
+
+                        if (xpAward > 0)
                         {
-                            auto levelData = gameServices_->getCharacterManager().getCharacterData(killerId);
-                            if (!levelData.sessionId.empty())
+                            auto result = experienceManager.grantExperience(playerId, xpAward, "mob_kill", mobId);
+
+                            if (result.success)
                             {
-                                int zoneId = 0;
-                                auto zoneOpt = gameServices_->getGameZoneManager().getZoneForPosition(levelData.characterPosition);
-                                if (zoneOpt.has_value())
-                                    zoneId = zoneOpt->id;
-                                nlohmann::json ap;
-                                ap["header"]["eventType"] = "analyticsEvent";
-                                ap["body"]["analyticsType"] = "level_up";
-                                ap["body"]["characterId"] = killerId;
-                                ap["body"]["sessionId"] = levelData.sessionId;
-                                ap["body"]["level"] = result.experienceEvent.newLevel;
-                                ap["body"]["zoneId"] = zoneId;
-                                ap["body"]["payload"] = {{"oldLevel", result.experienceEvent.newLevel - 1}};
-                                gameServices_->sendAnalytics(ap.dump() + "\n");
+                                log_->info("[XP] char {} gained {} XP ({}% dmg) for mob {}",
+                                    playerId, xpAward, static_cast<int>(share * 100.0f), mobId);
+
+                                if (result.levelUp)
+                                {
+                                    gameServices_->getLogger().log("Character " + std::to_string(playerId) +
+                                                  " leveled up to level " + std::to_string(result.experienceEvent.newLevel),
+                                        CYAN);
+
+                                    try
+                                    {
+                                        auto levelData = gameServices_->getCharacterManager().getCharacterData(playerId);
+                                        if (!levelData.sessionId.empty())
+                                        {
+                                            int zoneId = 0;
+                                            auto zoneOpt = gameServices_->getGameZoneManager().getZoneForPosition(levelData.characterPosition);
+                                            if (zoneOpt.has_value())
+                                                zoneId = zoneOpt->id;
+                                            nlohmann::json ap;
+                                            ap["header"]["eventType"] = "analyticsEvent";
+                                            ap["body"]["analyticsType"] = "level_up";
+                                            ap["body"]["characterId"] = playerId;
+                                            ap["body"]["sessionId"] = levelData.sessionId;
+                                            ap["body"]["level"] = result.experienceEvent.newLevel;
+                                            ap["body"]["zoneId"] = zoneId;
+                                            ap["body"]["payload"] = {{"oldLevel", result.experienceEvent.newLevel - 1}};
+                                            gameServices_->sendAnalytics(ap.dump() + "\n");
+                                        }
+                                    }
+                                    catch (...) {}
+                                }
+                            }
+                            else
+                            {
+                                log_->error("Failed to grant experience to char " + std::to_string(playerId) +
+                                            ": " + result.errorMessage);
                             }
                         }
-                        catch (...)
-                        {
-                        }
+                    }
+                    catch (const std::exception &)
+                    {
+                        // Non-player entry in threatTable — skip
                     }
                 }
-                else
+            }
+            else
+            {
+                // Fallback: no threat data → award full XP to killer only
+                auto killerData = gameServices_->getCharacterManager().getCharacterData(killerId);
+                if (killerData.characterId != 0)
                 {
-                    log_->error("Failed to grant experience: " + result.errorMessage);
+                    int expAmount = experienceManager.calculateMobExperience(
+                        mobData.level, killerData.characterLevel, scaledBaseXp);
+                    if (expAmount > 0)
+                    {
+                        auto result = experienceManager.grantExperience(killerId, expAmount, "mob_kill", mobId);
+
+                        if (result.success)
+                        {
+                            log_->info("Character " + std::to_string(killerId) +
+                                           " gained " + std::to_string(expAmount) +
+                                           " experience for killing mob " + std::to_string(mobId));
+
+                            if (result.levelUp)
+                            {
+                                gameServices_->getLogger().log("Character " + std::to_string(killerId) +
+                                              " leveled up to level " + std::to_string(result.experienceEvent.newLevel),
+                                    CYAN);
+
+                                try
+                                {
+                                    auto levelData = gameServices_->getCharacterManager().getCharacterData(killerId);
+                                    if (!levelData.sessionId.empty())
+                                    {
+                                        int zoneId = 0;
+                                        auto zoneOpt = gameServices_->getGameZoneManager().getZoneForPosition(levelData.characterPosition);
+                                        if (zoneOpt.has_value())
+                                            zoneId = zoneOpt->id;
+                                        nlohmann::json ap;
+                                        ap["header"]["eventType"] = "analyticsEvent";
+                                        ap["body"]["analyticsType"] = "level_up";
+                                        ap["body"]["characterId"] = killerId;
+                                        ap["body"]["sessionId"] = levelData.sessionId;
+                                        ap["body"]["level"] = result.experienceEvent.newLevel;
+                                        ap["body"]["zoneId"] = zoneId;
+                                        ap["body"]["payload"] = {{"oldLevel", result.experienceEvent.newLevel - 1}};
+                                        gameServices_->sendAnalytics(ap.dump() + "\n");
+                                    }
+                                }
+                                catch (...) {}
+                            }
+                        }
+                        else
+                        {
+                            log_->error("Failed to grant experience: " + result.errorMessage);
+                        }
+                    }
                 }
             }
         }
         catch (const std::exception &e)
         {
-            // Убийца не является персонажем игрока (возможно, моб убил моба)
-            log_->info("Killer " + std::to_string(killerId) + " is not a player character, no experience granted");
+            log_->warn("[XP] Experience award error for mob " + std::to_string(mobId) + ": " + std::string(e.what()));
         }
 
         // --- Fellowship Bonus ---
@@ -1349,38 +1435,41 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
                 auto &expMgr = gameServices_->getExperienceManager();
                 const int scaledBaseXp = static_cast<int>(mobData.baseExperience * mobData.rankMult);
 
-                // Bonus to killer
-                {
-                    auto killerData = gameServices_->getCharacterManager().getCharacterData(killerId);
-                    if (killerData.characterId != 0)
+                // Compute total threat for proportional fellowship bonus
+                int totalThreat = 0;
+                for (const auto &[pid, threat] : mobMovData.threatTable)
+                    totalThreat += threat;
+                if (totalThreat <= 0) totalThreat = 1;
+
+                // Helper: proportional fellowship bonus for a player
+                auto grantFellowshipBonus = [&](int playerId) {
+                    auto playerData = gameServices_->getCharacterManager().getCharacterData(playerId);
+                    if (playerData.characterId == 0) return;
+
+                    float share = 0.0f;
+                    auto threatIt = mobMovData.threatTable.find(playerId);
+                    if (threatIt != mobMovData.threatTable.end())
+                        share = static_cast<float>(threatIt->second) / static_cast<float>(totalThreat);
+                    if (share < 0.05f) return;  // minimum 5 % contribution
+
+                    const int personalBaseXp = expMgr.calculateMobExperience(
+                        mobData.level, playerData.characterLevel, scaledBaseXp);
+                    int bonus = static_cast<int>(static_cast<float>(personalBaseXp) * share * bonusPct);
+                    if (bonus > 0)
                     {
-                        int bonus = static_cast<int>(
-                            expMgr.calculateMobExperience(mobData.level, killerData.characterLevel, scaledBaseXp) * bonusPct);
-                        if (bonus > 0)
-                        {
-                            expMgr.grantExperience(killerId, bonus, "fellowship_bonus", mobId);
-                            gameServices_->getStatsNotificationService().sendWorldNotification(
-                                killerId, "fellowship_bonus", nlohmann::json{{"xpBonus", bonus}}, "low", "float_text");
-                        }
+                        expMgr.grantExperience(playerId, bonus, "fellowship_bonus", mobId);
+                        gameServices_->getStatsNotificationService().sendWorldNotification(
+                            playerId, "fellowship_bonus", nlohmann::json{{"xpBonus", bonus}}, "low", "float_text");
+                        log_->info("[Fellowship] +" + std::to_string(bonus) + " XP -> char " + std::to_string(playerId));
                     }
-                }
+                };
+
+                // Bonus to killer
+                grantFellowshipBonus(killerId);
 
                 // Bonus to each fellow
                 for (int fellowId : fellows)
-                {
-                    auto fellowData = gameServices_->getCharacterManager().getCharacterData(fellowId);
-                    if (fellowData.characterId == 0)
-                        continue;
-                    int bonus = static_cast<int>(
-                        expMgr.calculateMobExperience(mobData.level, fellowData.characterLevel, scaledBaseXp) * bonusPct);
-                    if (bonus > 0)
-                    {
-                        expMgr.grantExperience(fellowId, bonus, "fellowship_bonus", mobId);
-                        gameServices_->getStatsNotificationService().sendWorldNotification(
-                            fellowId, "fellowship_bonus", nlohmann::json{{"xpBonus", bonus}}, "low", "float_text");
-                        log_->info("[Fellowship] +" + std::to_string(bonus) + " XP \u2192 char " + std::to_string(fellowId));
-                    }
-                }
+                    grantFellowshipBonus(fellowId);
 
                 log_->info("[Fellowship] Mob " + std::to_string(mobId) + " had " +
                            std::to_string(fellows.size()) + " fellow attacker(s)");

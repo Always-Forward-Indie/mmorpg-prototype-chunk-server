@@ -669,7 +669,8 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                         charData.activeEffects.size(),
                         moveSpeedUnits);
 
-                    const float maxDist = moveSpeedUnits * (effectiveDelta / 1000.0f) * 1.3f;
+                    const float speedBuffer = gameServices_.getGameConfigService().getFloat("movement.speed_buffer_multiplier", 1.3f);
+                    const float maxDist = moveSpeedUnits * (effectiveDelta / 1000.0f) * speedBuffer;
                     const float dx = movementData.position.positionX - charData.lastValidatedPosition.positionX;
                     const float dy = movementData.position.positionY - charData.lastValidatedPosition.positionY;
                     // posZ is the vertical axis (altitude/terrain height); gravity and slopes are
@@ -678,36 +679,68 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
 
                     if (actualDist > maxDist)
                     {
-                        log_->warn("[MOVE_VALIDATE] char {} moved {:.2f} units in {}ms (max {:.2f}) — rejected",
-                            movementData.characterId,
-                            actualDist,
-                            static_cast<int>(deltaMs),
-                            maxDist);
-
-                        if (clientSocket)
+                        // Sliding window fallback — tolerates VPN jitter where
+                        // packets arrive in bursts.  Checks average speed over
+                        // the last N valid positions instead of just the last one.
+                        bool windowPassed = false;
+                        if (charData.movementWindowCount >= 2)
                         {
-                            nlohmann::json correction = ResponseBuilder()
-                                                            .setHeader("status", "error")
-                                                            .setHeader("message", "Position validation failed")
-                                                            .setHeader("hash", "")
-                                                            .setHeader("clientId", clientID)
-                                                            .setHeader("eventType", "positionCorrection")
-                                                            .setTimestamps(timestamps)
-                                                            .setBody("characterId", movementData.characterId)
-                                                            .setBody("position", nlohmann::json{{"x", charData.lastValidatedPosition.positionX}, {"y", charData.lastValidatedPosition.positionY}, {"z", charData.lastValidatedPosition.positionZ}, {"rotationZ", charData.lastValidatedPosition.rotationZ}})
-                                                            .build();
-                            networkManager_.sendResponse(clientSocket,
-                                networkManager_.generateResponseMessage("error", correction));
+                            const int oldestIdx = (charData.movementWindowCount < CharacterDataStruct::MOVEMENT_WINDOW_SIZE)
+                                ? 0
+                                : charData.movementWindowHead;
+                            const auto &oldest = charData.movementWindow[oldestIdx];
+                            const float windowDeltaMs = static_cast<float>(srvNowMs - oldest.srvMs);
+                            if (windowDeltaMs > 0.0f)
+                            {
+                                const float wx = movementData.position.positionX - oldest.position.positionX;
+                                const float wy = movementData.position.positionY - oldest.position.positionY;
+                                const float windowDist = std::sqrt(wx * wx + wy * wy);
+                                const float windowMaxDist = moveSpeedUnits * (windowDeltaMs / 1000.0f) * speedBuffer;
+                                windowPassed = (windowDist <= windowMaxDist);
+
+                                log_->debug("[MOVE_VALIDATE] char {} individual failed ({:.2f} > {:.2f}), window {} (wDist={:.2f}, wMax={:.2f}, wMs={:.0f}, samples={})",
+                                    movementData.characterId,
+                                    actualDist, maxDist,
+                                    windowPassed ? "passed" : "failed",
+                                    windowDist, windowMaxDist,
+                                    windowDeltaMs,
+                                    charData.movementWindowCount);
+                            }
                         }
 
-                        // Reset lastMoveSrvMs so the next packet is treated as the first movement
-                        // (no speed check). This breaks the rejection loop: the client may take
-                        // one RTT to apply the teleport; without this reset every packet in flight
-                        // during that RTT would be rejected and the loop would never terminate.
-                        gameServices_.getCharacterManager().setLastValidatedMovement(
-                            movementData.characterId, charData.lastValidatedPosition, 0);
+                        if (!windowPassed)
+                        {
+                            log_->warn("[MOVE_VALIDATE] char {} moved {:.2f} units in {}ms (max {:.2f}) — rejected",
+                                movementData.characterId,
+                                actualDist,
+                                static_cast<int>(deltaMs),
+                                maxDist);
 
-                        return;
+                            if (clientSocket)
+                            {
+                                nlohmann::json correction = ResponseBuilder()
+                                                                .setHeader("status", "error")
+                                                                .setHeader("message", "Position validation failed")
+                                                                .setHeader("hash", "")
+                                                                .setHeader("clientId", clientID)
+                                                                .setHeader("eventType", "positionCorrection")
+                                                                .setTimestamps(timestamps)
+                                                                .setBody("characterId", movementData.characterId)
+                                                                .setBody("position", nlohmann::json{{"x", charData.lastValidatedPosition.positionX}, {"y", charData.lastValidatedPosition.positionY}, {"z", charData.lastValidatedPosition.positionZ}, {"rotationZ", charData.lastValidatedPosition.rotationZ}})
+                                                                .build();
+                                networkManager_.sendResponse(clientSocket,
+                                    networkManager_.generateResponseMessage("error", correction));
+                            }
+
+                            // Reset lastMoveSrvMs so the next packet is treated as the first movement
+                            // (no speed check). This breaks the rejection loop: the client may take
+                            // one RTT to apply the teleport; without this reset every packet in flight
+                            // during that RTT would be rejected and the loop would never terminate.
+                            gameServices_.getCharacterManager().setLastValidatedMovement(
+                                movementData.characterId, charData.lastValidatedPosition, 0);
+
+                            return;
+                        }
                     }
                 }
 

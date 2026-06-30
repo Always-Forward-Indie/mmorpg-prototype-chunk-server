@@ -245,7 +245,7 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
             {
                 log_->error("[ITEM_PICKUP_EVENT] Failed to pickup item");
 
-                // Send failure response to all clients (TODO: optimize to send only to requesting client)
+                // Send failure response to all clients
                 nlohmann::json response = ResponseBuilder()
                                               .setHeader("message", "Item pickup failed")
                                               .setHeader("hash", "")
@@ -257,6 +257,24 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
 
                 std::string responseData = networkManager_.generateResponseMessage("error", response);
                 broadcastToAllClients(responseData);
+
+                // Send itemRemove to the requesting client so it can clean up
+                // the ghost item visual (e.g. item already picked up / despawned).
+                auto charData = gameServices_.getCharacterManager().getCharacterData(pickupRequest.characterId);
+                if (charData.clientId > 0)
+                {
+                    auto clientSocket = gameServices_.getClientManager().getClientSocket(charData.clientId);
+                    if (clientSocket && clientSocket->is_open())
+                    {
+                        nlohmann::json removeMsg = ResponseBuilder()
+                                                       .setHeader("message", "success")
+                                                       .setHeader("eventType", "itemRemove")
+                                                       .setBody("uids", nlohmann::json::array({pickupRequest.droppedItemUID}))
+                                                       .build();
+                        networkManager_.sendResponse(clientSocket,
+                            networkManager_.generateResponseMessage("success", removeMsg));
+                    }
+                }
             }
         }
         else

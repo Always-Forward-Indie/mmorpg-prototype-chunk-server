@@ -361,6 +361,14 @@ struct SkillBarSlotStruct
     std::string skillSlug = "";
 };
 
+/// Single sample in the sliding window for movement speed validation.
+/// Stored as a fixed-size ring buffer inside CharacterDataStruct.
+struct MovementSample
+{
+    PositionStruct position;
+    int64_t srvMs = 0;
+};
+
 struct CharacterDataStruct
 {
     int clientId = 0;
@@ -401,6 +409,15 @@ struct CharacterDataStruct
     // lastMoveSrvMs == 0 means uninitialized (first packet after join/respawn accepted unconditionally)
     PositionStruct lastValidatedPosition;
     int64_t lastMoveSrvMs = 0;
+
+    // Sliding window for VPN jitter tolerance.
+    // When an individual move check fails (packets arrived in a burst), the
+    // average speed over the window is checked as a fallback.  Teleport/respawn
+    // clears the window (srvMs=0).  Size 5 ≈ 250 ms @ 50 ms client tick.
+    static constexpr int MOVEMENT_WINDOW_SIZE = 5;
+    MovementSample movementWindow[MOVEMENT_WINDOW_SIZE]{};
+    int movementWindowHead = 0;
+    int movementWindowCount = 0;
 
     // Runtime-only: last time this character took or dealt damage (combat timestamp).
     // Used by RegenManager to suppress regen during/after combat.
