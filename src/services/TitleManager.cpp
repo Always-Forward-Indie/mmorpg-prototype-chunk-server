@@ -196,15 +196,25 @@ TitleManager::checkAndGrantTitles(int characterId,
             else if (condition == "reputation")
             {
                 // conditionParams: {"factionSlug":"…", "minTierName":"ally"}
+                // Use ordinal comparison so intermediate tiers are not skipped when
+                // reputation jumps across multiple boundaries in a single action.
                 matches = p.contains("factionSlug") && p.contains("minTierName") &&
-                          eventData.value("factionSlug", "") == p["factionSlug"].get<std::string>() &&
-                          eventData.value("tierName", "") == p["minTierName"].get<std::string>();
+                          eventData.value("factionSlug", "") == p["factionSlug"].get<std::string>();
+                if (matches && gs_)
+                {
+                    int currentOrdinal = gs_->getReputationManager().getTierOrdinal(
+                        eventData.value("tierName", ""));
+                    int minOrdinal = gs_->getReputationManager().getTierOrdinal(
+                        p["minTierName"].get<std::string>());
+                    matches = (currentOrdinal >= minOrdinal);
+                }
             }
             else if (condition == "level")
             {
                 // conditionParams: {"level":N}
+                // Use >= so multi-level jumps via grantExperience() are handled correctly.
                 matches = p.contains("level") &&
-                          eventData.value("level", 0) == p["level"].get<int>();
+                          eventData.value("level", 0) >= p["level"].get<int>();
             }
             else if (condition == "quest")
             {

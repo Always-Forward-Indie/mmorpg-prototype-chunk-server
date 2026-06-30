@@ -32,6 +32,101 @@ MasteryManager::unloadCharacterMasteries(int characterId)
     hitCounters_.erase(characterId);
 }
 
+void
+MasteryManager::loadMasteryDefinitions(const std::vector<MasteryDefinitionStruct> &defs)
+{
+    std::unique_lock lk(mutex_);
+    for (const auto &d : defs)
+        definitions_[d.slug] = d;
+    log_->info("[Mastery] Loaded {} static definitions", defs.size());
+}
+
+std::string
+MasteryManager::getTargetAttribute(const std::string &masterySlug) const
+{
+    // definitions_ is populated once on startup and never modified; shared_lock is safe.
+    std::shared_lock lk(mutex_);
+    auto it = definitions_.find(masterySlug);
+    return it != definitions_.end() ? it->second.targetAttributeSlug : "physical_attack";
+}
+
+void
+MasteryManager::reapplyMilestoneEffects(int characterId)
+{
+    if (!gs_)
+        return;
+
+    // Snapshot mastery data under lock, then apply effects outside.
+    std::unordered_map<std::string, float> snapshot;
+    {
+        std::shared_lock lk(mutex_);
+        auto cit = data_.find(characterId);
+        if (cit == data_.end())
+            return;
+        snapshot = cit->second;
+    }
+
+    auto &cfg = gs_->getGameConfigService();
+    const float t1 = cfg.getFloat("mastery.tier1_value", 20.f);
+    const float t2 = cfg.getFloat("mastery.tier2_value", 50.f);
+    const float t3 = cfg.getFloat("mastery.tier3_value", 80.f);
+    const float t4 = cfg.getFloat("mastery.tier4_value", 100.f);
+
+    for (const auto &[masterySlug, value] : snapshot)
+    {
+        if (value >= t1)
+        {
+            ActiveEffectStruct eff;
+            eff.effectSlug = masterySlug + "_t1_damage";
+            eff.effectTypeSlug = "buff";
+            eff.attributeSlug = getTargetAttribute(masterySlug);
+            eff.value = 1.0f;
+            eff.sourceType = "mastery";
+            eff.expiresAt = 0;
+            eff.tickMs = 0;
+            gs_->getCharacterManager().addActiveEffect(characterId, eff);
+        }
+        if (value >= t2)
+        {
+            ActiveEffectStruct eff;
+            eff.effectSlug = masterySlug + "_t2_damage";
+            eff.effectTypeSlug = "buff";
+            eff.attributeSlug = getTargetAttribute(masterySlug);
+            eff.value = 4.0f;
+            eff.sourceType = "mastery";
+            eff.expiresAt = 0;
+            eff.tickMs = 0;
+            gs_->getCharacterManager().addActiveEffect(characterId, eff);
+        }
+        if (value >= t3)
+        {
+            ActiveEffectStruct eff;
+            eff.effectSlug = masterySlug + "_t3_crit";
+            eff.effectTypeSlug = "buff";
+            eff.attributeSlug = "crit_chance";
+            eff.value = 3.0f;
+            eff.sourceType = "mastery";
+            eff.expiresAt = 0;
+            eff.tickMs = 0;
+            gs_->getCharacterManager().addActiveEffect(characterId, eff);
+        }
+        if (value >= t4)
+        {
+            ActiveEffectStruct eff;
+            eff.effectSlug = masterySlug + "_t4_parry";
+            eff.effectTypeSlug = "buff";
+            eff.attributeSlug = "parry_chance";
+            eff.value = 2.0f;
+            eff.sourceType = "mastery";
+            eff.expiresAt = 0;
+            eff.tickMs = 0;
+            gs_->getCharacterManager().addActiveEffect(characterId, eff);
+        }
+    }
+
+    log_->info("[Mastery] Reapplied milestone effects for char={}, {} masteries checked", characterId, snapshot.size());
+}
+
 // ── Query ──────────────────────────────────────────────────────────────────
 
 float
@@ -165,6 +260,7 @@ MasteryManager::checkAndApplyMilestone(int characterId,
     {
         ActiveEffectStruct eff;
         eff.effectSlug = effectSlug;
+        eff.effectTypeSlug = "buff";
         eff.attributeSlug = attrSlug;
         eff.value = value;
         eff.sourceType = "mastery";
@@ -189,13 +285,13 @@ MasteryManager::checkAndApplyMilestone(int characterId,
     };
 
     if (oldValue < t1 && newValue >= t1)
-        applyEffect(masterySlug + "_t1_damage", "physical_attack", 0.01f, 1);
+        applyEffect(masterySlug + "_t1_damage", getTargetAttribute(masterySlug), 1.0f, 1);
     if (oldValue < t2 && newValue >= t2)
-        applyEffect(masterySlug + "_t2_damage", "physical_attack", 0.04f, 2); // additive +4% (total 5%)
+        applyEffect(masterySlug + "_t2_damage", getTargetAttribute(masterySlug), 4.0f, 2); // additive +4 (total +5)
     if (oldValue < t3 && newValue >= t3)
-        applyEffect(masterySlug + "_t3_crit", "crit_chance", 0.03f, 3);
+        applyEffect(masterySlug + "_t3_crit", "crit_chance", 3.0f, 3);
     if (oldValue < t4 && newValue >= t4)
-        applyEffect(masterySlug + "_t4_parry", "parry_chance", 0.02f, 4);
+        applyEffect(masterySlug + "_t4_parry", "parry_chance", 2.0f, 4);
 }
 
 // ── Persistence ────────────────────────────────────────────────────────────

@@ -411,7 +411,7 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
         const SpawnZoneStruct &chosen = *candidates[pick(rng)];
 
         PositionStruct p;
-        p.positionZ = 200.0f;
+        p.positionZ = (chosen.minZ + chosen.maxZ) * 0.5f;
 
         if (chosen.shape == ZoneShape::ANNULUS)
         {
@@ -444,11 +444,23 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
         return p;
     }
 
-    // Fallback: centre of the game zone AABB
+    // Fallback: centre of the game zone AABB, with Z from any spawn zone inside this game zone.
+    float fallbackZ = 500.0f;
+    for (const auto &[szId, sz] : spawnZones)
+    {
+        float cx = sz.centerX;
+        float cy = sz.centerY;
+        if (cx >= gz.minX && cx <= gz.maxX && cy >= gz.minY && cy <= gz.maxY)
+        {
+            fallbackZ = (sz.minZ + sz.maxZ) * 0.5f;
+            break;
+        }
+    }
+
     PositionStruct p;
     p.positionX = (gz.minX + gz.maxX) * 0.5f;
     p.positionY = (gz.minY + gz.maxY) * 0.5f;
-    p.positionZ = 200.0f;
+    p.positionZ = fallbackZ;
     return p;
 }
 

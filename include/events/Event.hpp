@@ -155,6 +155,7 @@ class Event
         // Stage 4: Skill Mastery system
         SET_PLAYER_MASTERIES, // Load mastery values for a character (on join)
         SAVE_MASTERY,         // Persist a mastery value change to game-server
+        SET_MASTERY_DEFINITIONS, // Load static mastery_definitions (slug → target_attribute_slug)
 
         // Stage 4: Zone Events
         SET_ZONE_EVENT_TEMPLATES,       // Game-server sends zone event template list to chunk-server

@@ -273,7 +273,31 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
         log_->error("[EVICT] Failed to send savePlayTime for characterId: " + std::to_string(characterId) + " - " + ex.what());
     }
 
-    // ── 5. Remove from managers ──────────────────────────────────────────────
+    // ── 5. Close any active trade session and notify the other party ──────────
+    {
+        auto *session = gameServices_.getTradeSessionManager().getSessionByCharacter(characterId);
+        if (session)
+        {
+            int otherClientId = (session->charAId == characterId) ? session->clientBId : session->clientAId;
+            if (otherClientId > 0)
+            {
+                auto otherSocket = gameServices_.getClientManager().getClientSocket(otherClientId);
+                if (otherSocket && otherSocket->is_open())
+                {
+                    nlohmann::json cancel;
+                    cancel["header"]["eventType"] = "tradeCancelled";
+                    cancel["header"]["status"] = "cancelled";
+                    cancel["header"]["clientId"] = otherClientId;
+                    cancel["body"]["reason"] = "partner_disconnected";
+                    networkManager_.sendResponse(otherSocket,
+                        networkManager_.generateResponseMessage("cancelled", cancel));
+                }
+            }
+            gameServices_.getTradeSessionManager().closeSession(session->sessionId);
+        }
+    }
+
+    // ── 6. Remove from managers ──────────────────────────────────────────────
     gameServices_.getCharacterManager().removeCharacter(characterId);
     if (staleClientId > 0)
     {
@@ -1502,9 +1526,9 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
             if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
                 continue;
             if (eff.attributeSlug == "max_health")
-                effectiveMaxHealth += static_cast<int>(eff.value);
+                effectiveMaxHealth += static_cast<int>(std::round(eff.value));
             else if (eff.attributeSlug == "max_mana")
-                effectiveMaxMana += static_cast<int>(eff.value);
+                effectiveMaxMana += static_cast<int>(std::round(eff.value));
         }
         effectiveMaxHealth = std::max(1, effectiveMaxHealth);
         effectiveMaxMana = std::max(0, effectiveMaxMana);

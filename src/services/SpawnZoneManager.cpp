@@ -370,7 +370,7 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
                 continue;
             }
 
-            mob.position.positionZ = 200;
+            mob.position.positionZ = (zone->second.minZ + zone->second.maxZ) * 0.5f;
             mob.position.rotationZ = rotDist(gen);
             mob.uid = Generators::generateUniqueMobUID();
             mob.spawnEpochSec = static_cast<int64_t>(std::time(nullptr));

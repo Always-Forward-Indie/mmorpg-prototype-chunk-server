@@ -51,6 +51,9 @@ class ReputationManager
     /// Human-readable tier for a raw value: "enemy"|"stranger"|"neutral"|"friendly"|"ally"
     static std::string getTier(int value);
 
+    /// Ordinal index for tier name comparison (0=enemy → 4=ally, -1=unknown).
+    static int getTierOrdinal(const std::string &tierName);
+
     // ── Mutation ───────────────────────────────────────────────────────────
     /**
      * @brief Change reputation for a character with a faction.

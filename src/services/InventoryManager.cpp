@@ -504,20 +504,34 @@ InventoryManager::consolidateInventory(int characterId)
         return;
 
     auto &inventory = it->second;
-    std::map<int, int> merged; // itemId → total quantity
-    for (const auto &item : inventory)
-        merged[item.itemId] += item.quantity;
 
-    // Rebuild inventory with one row per unique itemId
+    // Group items by template itemId so we can decide per-group whether to
+    // merge (stackable) or keep every instance (non-stackable).
+    std::map<int, std::vector<PlayerInventoryItemStruct>> groups;
+    for (auto &item : inventory)
+        groups[item.itemId].push_back(std::move(item));
+
     std::vector<PlayerInventoryItemStruct> consolidated;
-    for (auto &[itemId, totalQty] : merged)
+    for (auto &[itemId, items] : groups)
     {
-        // Find the first occurrence to preserve its id, durability, etc.
-        auto first = std::find_if(inventory.begin(), inventory.end(),
-            [itemId](const PlayerInventoryItemStruct &i) { return i.itemId == itemId; });
-        PlayerInventoryItemStruct entry = *first;
-        entry.quantity = totalQty;
-        consolidated.push_back(std::move(entry));
+        ItemDataStruct itemInfo = itemManager_.getItemById(itemId);
+        // stackMax > 1: stackable (consumables, materials) — merge into one row.
+        // stackMax ≤ 1 or item not found: non-stackable (weapons, armour) —
+        // every instance has its own durability, killCount and equip state.
+        const bool canStack = (itemInfo.id != 0 && itemInfo.stackMax > 1);
+
+        if (canStack)
+        {
+            auto &first = items.front();
+            for (size_t i = 1; i < items.size(); ++i)
+                first.quantity += items[i].quantity;
+            consolidated.push_back(std::move(first));
+        }
+        else
+        {
+            for (auto &item : items)
+                consolidated.push_back(std::move(item));
+        }
     }
     inventory = std::move(consolidated);
 }
@@ -615,6 +629,19 @@ InventoryManager::addInstancedItemToInventory(int characterId, const PlayerInven
                   { return s.id == inst.id; }),
         inv.end());
     inv.push_back(inst);
+
+    // Broadcast updated inventory so client UI reflects the picked-up / traded item.
+    if (eventQueue_)
+    {
+        nlohmann::json inventoryJson;
+        inventoryJson["characterId"] = characterId;
+        inventoryJson["items"] = nlohmann::json::array();
+        for (const auto &item : inv)
+            inventoryJson["items"].push_back(inventoryItemToJson(item));
+        Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
+        lock.unlock();
+        eventQueue_->push(std::move(inventoryUpdateEvent));
+    }
 }
 
 void

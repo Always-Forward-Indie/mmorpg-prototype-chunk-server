@@ -342,6 +342,28 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                     }
 
                     gameServices_.getCharacterManager().removeCharacter(passedClientData.characterId);
+
+                    // Close any active trade session and notify the other party.
+                    auto *session = gameServices_.getTradeSessionManager().getSessionByCharacter(passedClientData.characterId);
+                    if (session)
+                    {
+                        int otherClientId = (session->charAId == passedClientData.characterId) ? session->clientBId : session->clientAId;
+                        if (otherClientId > 0)
+                        {
+                            auto otherSocket = gameServices_.getClientManager().getClientSocket(otherClientId);
+                            if (otherSocket && otherSocket->is_open())
+                            {
+                                nlohmann::json cancel;
+                                cancel["header"]["eventType"] = "tradeCancelled";
+                                cancel["header"]["status"] = "cancelled";
+                                cancel["header"]["clientId"] = otherClientId;
+                                cancel["body"]["reason"] = "partner_disconnected";
+                                networkManager_.sendResponse(otherSocket,
+                                    networkManager_.generateResponseMessage("cancelled", cancel));
+                            }
+                        }
+                        gameServices_.getTradeSessionManager().closeSession(session->sessionId);
+                    }
                 }
 
                 try

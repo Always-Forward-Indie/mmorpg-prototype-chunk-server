@@ -6,6 +6,7 @@
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <chrono>
+#include <cmath>
 #include <nlohmann/json.hpp>
 #include <spdlog/logger.h>
 #include <unordered_map>
@@ -147,7 +148,7 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
     // ── Build effective attributes: base + equipment bonuses + active effects ─
     // Start with base character attributes
     std::unordered_map<std::string, int> baseValues;
-    std::unordered_map<std::string, int> effectiveValues;
+    std::unordered_map<std::string, float> effectiveValues;
     std::unordered_map<std::string, std::string> attrNames;
 
     for (const auto &a : characterData.attributes)
@@ -189,7 +190,7 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
             continue;
         if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
             continue;
-        effectiveValues[eff.attributeSlug] += static_cast<int>(eff.value);
+        effectiveValues[eff.attributeSlug] += static_cast<float>(eff.value);
         if (attrNames.find(eff.attributeSlug) == attrNames.end())
             attrNames[eff.attributeSlug] = eff.attributeSlug;
     }
@@ -267,11 +268,11 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
     // This matches what is reported in the attributes array and prevents false "current > max"
     // warnings when passive skills (e.g. mana_shield) raise the effective maximum.
     const int effectiveMaxHealth = effectiveValues.count("max_health")
-                                       ? effectiveValues.at("max_health")
-                                       : characterData.characterMaxHealth;
+                                        ? static_cast<int>(std::round(effectiveValues.at("max_health")))
+                                        : characterData.characterMaxHealth;
     const int effectiveMaxMana = effectiveValues.count("max_mana")
-                                     ? effectiveValues.at("max_mana")
-                                     : characterData.characterMaxMana;
+                                      ? static_cast<int>(std::round(effectiveValues.at("max_mana")))
+                                      : characterData.characterMaxMana;
 
     TimestampStruct timestamps = TimestampUtils::createReceiveTimestamp(0, requestId);
     ResponseBuilder builder;

@@ -965,6 +965,19 @@ ItemEventHandler::handleUseItemEvent(const Event &event)
         {
             log_->warn("[USE_ITEM] Character " + std::to_string(characterId) +
                        " tried to use '" + itemInfo.slug + "' while still on cooldown");
+
+            auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+            if (clientSocket && clientSocket->is_open())
+            {
+                nlohmann::json resp;
+                resp["header"]["eventType"] = "useItem";
+                resp["header"]["status"] = "error";
+                resp["header"]["clientId"] = clientId;
+                resp["body"]["reason"] = "cooldown";
+                resp["body"]["itemId"] = itemId;
+                networkManager_.sendResponse(clientSocket,
+                    networkManager_.generateResponseMessage("error", resp));
+            }
             return;
         }
 

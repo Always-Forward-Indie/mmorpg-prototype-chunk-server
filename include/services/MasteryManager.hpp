@@ -23,8 +23,8 @@ class GameServices;
  * against weaker ones (diminishing returns).
  *
  * Tier milestones apply permanent ActiveEffects to the character:
- *   tier1 (20):  +1% damage bonus
- *   tier2 (50):  +5% damage bonus
+ *   tier1 (20):  +1 attack bonus
+ *   tier2 (50):  +4 attack bonus (total +5)
  *   tier3 (80):  +3% crit_chance
  *   tier4 (100): +2% parry_chance
  *
@@ -44,6 +44,18 @@ class MasteryManager
         const std::unordered_map<std::string, float> &masteries);
 
     void unloadCharacterMasteries(int characterId);
+
+    /// Load static mastery definitions (target_attribute_slug per mastery_slug)
+    /// from the game server. Called exactly once after SET_MASTERY_DEFINITIONS.
+    void loadMasteryDefinitions(const std::vector<MasteryDefinitionStruct> &defs);
+
+    /**
+     * @brief Re-apply permanent mastery milestone ActiveEffects on login.
+     *        Mastery values must already be loaded via loadCharacterMasteries().
+     *        Uses the same milestone logic as checkAndApplyMilestone() but
+     *        operates on already-attained thresholds instead of crossings.
+     */
+    void reapplyMilestoneEffects(int characterId);
 
     // ── Query ──────────────────────────────────────────────────────────────
     /// Returns 0.0f if not found.
@@ -91,8 +103,15 @@ class MasteryManager
     void checkAndApplyMilestone(int characterId, const std::string &masterySlug, float oldValue, float newValue);
     void persist(int characterId, const std::string &masterySlug, float value);
 
+    /// Look up which attributeSlug this mastery type's milestone buffs should modify.
+    /// Returns "physical_attack" if the definitions haven't been loaded yet (safe default).
+    std::string getTargetAttribute(const std::string &masterySlug) const;
+
     GameServices *gs_;
     std::shared_ptr<spdlog::logger> log_;
+
+    // mastery_slug → static definition (loaded once from game-server)
+    std::unordered_map<std::string, MasteryDefinitionStruct> definitions_;
 
     // characterId → (mastery_slug → value)
     std::unordered_map<int, std::unordered_map<std::string, float>> data_;

@@ -47,13 +47,13 @@ CombatCalculator::mergeEffects(const CharacterDataStruct &character) const
             { return a.slug == eff.attributeSlug; });
         if (it != attrs.end())
         {
-            it->value += static_cast<int>(eff.value);
+            it->value += static_cast<int>(std::round(eff.value));
         }
         else
         {
             CharacterAttributeStruct newAttr;
             newAttr.slug = eff.attributeSlug;
-            newAttr.value = static_cast<int>(eff.value);
+            newAttr.value = static_cast<int>(std::round(eff.value));
             attrs.push_back(std::move(newAttr));
         }
     }

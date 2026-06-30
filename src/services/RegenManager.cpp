@@ -6,6 +6,7 @@
 #include "utils/Logger.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <ctime>
 #include <spdlog/logger.h>
 
@@ -87,7 +88,7 @@ RegenManager::tickRegen()
             if (eff.tickMs > 0)
                 continue;
             const auto &slug = eff.attributeSlug;
-            const int val = static_cast<int>(eff.value);
+            const int val = static_cast<int>(std::round(eff.value));
             if (slug == "hp_regen_per_s")
                 hpRegenBase += val;
             else if (slug == "mp_regen_per_s")

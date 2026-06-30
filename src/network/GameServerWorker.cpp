@@ -339,6 +339,11 @@ GameServerWorker::processGameServerData(std::string_view data)
         nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_LEARNED_SKILL, clientData.clientId, body);
     }
+    else if (eventType == "setMasteryDefinitionsData")
+    {
+        nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_MASTERY_DEFINITIONS, clientData.clientId, body);
+    }
     else if (eventType == "setTitleDefinitionsData")
     {
         nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());

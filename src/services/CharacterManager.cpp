@@ -500,7 +500,7 @@ CharacterManager::restoreManaToCharacter(int characterID, int amount)
                 continue; // skip DoT/HoT
             if (eff.expiresAt != 0 && eff.expiresAt <= nowSec)
                 continue;
-            effectiveMaxMana += static_cast<int>(eff.value);
+            effectiveMaxMana += static_cast<int>(std::round(eff.value));
         }
         int newMana = std::min(effectiveMaxMana, it->second.characterCurrentMana + amount);
         it->second.characterCurrentMana = newMana;
@@ -589,7 +589,7 @@ CharacterManager::processEffectTicks()
                 if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
                     continue;
                 if (eff.attributeSlug == "max_health")
-                    effectiveMaxHealth += static_cast<int>(eff.value);
+                    effectiveMaxHealth += static_cast<int>(std::round(eff.value));
             }
             effectiveMaxHealth = std::max(1, effectiveMaxHealth);
 

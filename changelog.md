@@ -1,3 +1,62 @@
+v0.2.28
+30.06.2026
+================
+New:
+
+**Mastery Definition System — data-driven target attributes.**
+- `MasteryDefinitionStruct` (`DataStructs.hpp`) — новая структура: slug, name, weaponTypeSlug, maxValue, targetAttributeSlug.
+- `SET_MASTERY_DEFINITIONS` — новый тип события: приём статических определений из таблицы `mastery_definitions` от game-сервера.
+- `EventHandler::handleSetMasteryDefinitionsEvent()` — обработчик: парсит JSON, вызывает `MasteryManager::loadMasteryDefinitions()`.
+- `MasteryManager::loadMasteryDefinitions()` — сохраняет определения во внутреннюю map `definitions_`.
+- `MasteryManager::getTargetAttribute()` — look up целевого атрибута для milestone-баффов по mastery_slug. Заменяет хардкод `"physical_attack"` на data-driven подход.
+
+**Mastery Milestone Persistence — переприменение эффектов при логине.**
+- `MasteryManager::reapplyMilestoneEffects()` — новый метод: применяет перманентные ActiveEffect на основе текущих значений мастерства (t1: +1 target-attribute, t2: +4 target-attribute = total +5, t3: +3% crit_chance, t4: +2% parry_chance).
+- Вызывается из `SET_PLAYER_ACTIVE_EFFECTS` (после загрузки эффектов и reapply титулов) и из `SET_PLAYER_MASTERIES` (covers late-arrival race когда мастерства приходят позже эффектов).
+- Эффекты с `sourceType="mastery"` и `expiresAt=0` — дедупликация через `addActiveEffect` по `effectSlug`.
+
+**Mastery Milestone Balance — flat-значения вместо процентов.**
+- `checkAndApplyMilestone` — t1 damage: `0.01f → 1.0f`, t2 damage: `0.04f → 4.0f` (total +5 flat атаки вместо +5%). t3/t4 без изменений. Добавлен `effectTypeSlug = "buff"`. t1/t2 используют `getTargetAttribute()`.
+
+**Integer Rounding Fix — `std::round()` для float-эффектов.**
+- `CharacterEventHandler::handlePlayerRespawnEvent` — `effectiveMaxHealth/Mana` используют `std::round(eff.value)`.
+- `CharacterManager::restoreManaToCharacter` — `effectiveMaxMana` с `std::round()`.
+- `CharacterManager::processEffectTicks` — `effectiveMaxHealth` с `std::round()`.
+- `CharacterStatsNotificationService::buildStatsUpdatePacket` — `effectiveValues` изменён с `int` на `float`, `effectiveMaxHealth/Mana` округляются через `std::round()`.
+- `CombatCalculator::mergeEffects` — `eff.value` округляется через `std::round()`.
+- `ExperienceManager::grantExperience` — `effectiveMaxHealth/Mana` округляются через `std::round()`.
+- `RegenManager::tickRegen` — `hp/mp_regen_per_s` округляются через `std::round()`.
+
+**Trade Session Cleanup on Disconnect.**
+- `ClientEventHandler::handleDisconnectClientEvent` — при дисконнекте персонажа: если открыта торговая сессия, закрывает её и отправляет второй стороне `tradeCancelled` с reason `partner_disconnected`.
+- `CharacterEventHandler::evictStaleSession` — та же логика при evict старой сессии при логине с нового клиента.
+
+**Periodic Cleanup of Expired Trade Sessions.**
+- Task 27 (каждые 30s) — вызывает `TradeSessionManager::cleanupExpiredSessions()`. Удаляет висящие истёкшие торговые сессии.
+
+**Item Use — error response при кулдауне.**
+- `ItemEventHandler::handleUseItemEvent` — при попытке использовать предмет на кулдауне теперь отправляет клиенту `useItem` error-ответ с reason `cooldown` и `itemId` (ранее только warn в лог).
+
+**Title System — проверка тайтлов при level-up и ординальное сравнение репутации.**
+- `ExperienceManager::handleLevelUp` — при каждом новом уровне вызывает `TitleManager::checkAndGrantTitles(characterId, "level", {level})`. Условие `level` в `checkAndGrantTitles` использует `>=` вместо `==` для корректной обработки multi-level скачков.
+- `ReputationManager::getTierOrdinal()` — новый статический метод: enemy=0 → ally=4, -1=unknown.
+- `TitleManager::checkAndGrantTitles` (репутация) — сравнение через `getTierOrdinal()` с `>=` вместо точного совпадения имени тира. Обрабатывает репутационные скачки через несколько границ.
+
+**Inventory — консолидация с учётом stackable/non-stackable.**
+- `InventoryManager::consolidateInventory` — группирует предметы по `itemId`, мержит только стакаемые (`stackMax > 1`). Нестакаемые предметы (оружие/броня с уникальными durability, killCount, equip) сохраняются отдельными строками.
+
+**Inventory — broadcast после инстанс-добавления.**
+- `InventoryManager::addInstancedItemToInventory` — после добавления предмета броадкастит `INVENTORY_UPDATE` через `eventQueue_`, чтобы клиентский UI немедленно отразил picked-up/traded предметы.
+
+Fixes:
+
+**Champion Z-position — из спавн-зон вместо хардкода.**
+- `ChampionManager::resolveChampionSpawnPoint` — Z для чемпиона = `(chosen.minZ + chosen.maxZ) * 0.5f`. Fallback Z ищет Z из спавн-зон, пересекающихся с game zone AABB, вместо хардкода 200/500.
+
+**Spawn mobs Z-position — из зоны вместо хардкода.**
+- `SpawnZoneManager::spawnMobsInZone` — `mob.position.positionZ = (zone.minZ + zone.maxZ) * 0.5f` вместо хардкода 200.
+
+---
 v0.2.27
 26.06.2026
 ================

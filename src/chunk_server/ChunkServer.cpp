@@ -1049,11 +1049,23 @@ ChunkServer::mainEventLoopCH()
         {
             gameServices_.getDialogueSessionManager().cleanupExpiredSessions();
         },
-        60000,                                                                   // Every 60 seconds
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(60 * 1000), // First run after 60s
-        11                                                                       // unique task ID
+        60000,
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(60 * 1000),
+        11
     );
     scheduler_.scheduleTask(cleanupDialogueSessionsTask);
+
+    // Periodic task: clean up expired trade sessions every 30 seconds
+    Task cleanupTradeSessionsTask(
+        [this]
+        {
+            gameServices_.getTradeSessionManager().cleanupExpiredSessions();
+        },
+        30000,
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000),
+        27
+    );
+    scheduler_.scheduleTask(cleanupTradeSessionsTask);
 
     // Periodic task: flush dirty quest progress + pending flags every 5 seconds
     Task flushQuestProgressTask(

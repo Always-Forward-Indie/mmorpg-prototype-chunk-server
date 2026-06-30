@@ -347,6 +347,9 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::SET_PLAYER_MASTERIES:
             handleSetPlayerMasteriesEvent(event);
             break;
+        case Event::SET_MASTERY_DEFINITIONS:
+            handleSetMasteryDefinitionsEvent(event);
+            break;
         case Event::SET_ZONE_EVENT_TEMPLATES:
             handleSetZoneEventTemplatesEvent(event);
             break;
@@ -700,6 +703,13 @@ EventHandler::handleSetPlayerActiveEffectsEvent(const Event &event)
 
         // Re-apply equipped title bonuses — may have been wiped by the setCharacterActiveEffects() call above.
         gameServices_.getTitleManager().reapplyEquippedBonuses(characterId);
+
+        // Re-apply permanent mastery milestone effects — mastery values are loaded
+        // from DB via SET_PLAYER_MASTERIES but the corresponding ActiveEffects (damage
+        // bonus, crit, parry) are computed in-memory and not persisted to the
+        // active_effects table.  Re-apply them on every login so they survive server
+        // restarts and player reconnects.
+        gameServices_.getMasteryManager().reapplyMilestoneEffects(characterId);
 
         // Refresh HUD: active effects may modify attributes (stat buffs/debuffs).
         gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
@@ -1405,6 +1415,16 @@ EventHandler::handleSetPlayerMasteriesEvent(const Event &event)
         log_->info("[EH] SET_PLAYER_MASTERIES: loaded " + std::to_string(masteries.size()) +
                    " entries for character " + std::to_string(characterId));
 
+        // Re-apply permanent mastery milestone effects from the freshly loaded values.
+        // Handles both the initial login path (masteries arrive first) and the late-arrival
+        // race (masteries arrive AFTER SET_PLAYER_ACTIVE_EFFECTS).  The effects deduplicate
+        // via addActiveEffect (same effectSlug = refresh), so double-application is safe.
+        if (!masteries.empty())
+        {
+            gameServices_.getMasteryManager().reapplyMilestoneEffects(characterId);
+            gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+        }
+
         // Push mastery state to the client immediately
         int clientId = 0;
         {
@@ -1671,6 +1691,45 @@ EventHandler::handleSetTitleDefinitionsEvent(const Event &event)
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("Error processing SET_TITLE_DEFINITIONS: " + std::string(e.what()));
+    }
+}
+
+// ── SET_MASTERY_DEFINITIONS ────────────────────────────────────────────────
+void
+EventHandler::handleSetMasteryDefinitionsEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_MASTERY_DEFINITIONS: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+
+        std::vector<MasteryDefinitionStruct> defs;
+        if (body.contains("definitions") && body["definitions"].is_array())
+        {
+            for (const auto &d : body["definitions"])
+            {
+                MasteryDefinitionStruct md;
+                md.slug = d.value("slug", "");
+                md.name = d.value("name", "");
+                md.weaponTypeSlug = d.value("weaponTypeSlug", "");
+                md.maxValue = d.value("maxValue", 100.0);
+                md.targetAttributeSlug = d.value("targetAttributeSlug", "physical_attack");
+                if (!md.slug.empty())
+                    defs.push_back(std::move(md));
+            }
+        }
+
+        gameServices_.getMasteryManager().loadMasteryDefinitions(defs);
+        log_->info("[EH] SET_MASTERY_DEFINITIONS: loaded {} definitions", defs.size());
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error processing SET_MASTERY_DEFINITIONS: " + std::string(e.what()));
     }
 }
 

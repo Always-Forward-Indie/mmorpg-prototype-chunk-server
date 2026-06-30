@@ -1905,6 +1905,16 @@ struct TitleBonusStruct
 };
 
 /// Static title definition loaded from game-server (table: titles)
+/// Static definition of a mastery progression line (game-config level, from mastery_definitions table)
+struct MasteryDefinitionStruct
+{
+    std::string slug;               ///< e.g. "sword_mastery", "staff_mastery"
+    std::string name;               ///< e.g. "Мастерство меча"
+    std::string weaponTypeSlug;     ///< e.g. "sword", "staff", "axe", "bow" (NULL for unarmed)
+    double maxValue = 100.0;        ///< cap for this mastery (always 100 currently)
+    std::string targetAttributeSlug = "physical_attack"; ///< which stat the milestone buffs modify
+};
+
 struct TitleDefinitionStruct
 {
     int id = 0;

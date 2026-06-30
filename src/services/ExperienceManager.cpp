@@ -139,9 +139,9 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
                 if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
                     continue;
                 if (eff.attributeSlug == "max_health")
-                    effectiveMaxHealthLvl += static_cast<int>(eff.value);
+                    effectiveMaxHealthLvl += static_cast<int>(std::round(eff.value));
                 else if (eff.attributeSlug == "max_mana")
-                    effectiveMaxManaLvl += static_cast<int>(eff.value);
+                    effectiveMaxManaLvl += static_cast<int>(std::round(eff.value));
             }
             effectiveMaxHealthLvl = std::max(1, effectiveMaxHealthLvl);
             effectiveMaxManaLvl = std::max(0, effectiveMaxManaLvl);
@@ -388,6 +388,10 @@ ExperienceManager::handleLevelUp(int characterId, int oldLevel, int newLevel, Ex
     // Например, каждые 5 уровней игрок получает новую способность
     for (int level = oldLevel + 1; level <= newLevel; level++)
     {
+        // Check for level-based title grants on every new level reached.
+        gameServices_->getTitleManager().checkAndGrantTitles(characterId, "level",
+            nlohmann::json{{"level", level}});
+
         if (level % 5 == 0)
         {
             std::string newAbility = "ability_level_" + std::to_string(level);

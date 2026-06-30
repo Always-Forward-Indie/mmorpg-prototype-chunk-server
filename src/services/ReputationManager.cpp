@@ -77,6 +77,22 @@ ReputationManager::getTier(int value)
     return "ally";
 }
 
+int
+ReputationManager::getTierOrdinal(const std::string &tierName)
+{
+    if (tierName == "enemy")
+        return 0;
+    if (tierName == "stranger")
+        return 1;
+    if (tierName == "neutral")
+        return 2;
+    if (tierName == "friendly")
+        return 3;
+    if (tierName == "ally")
+        return 4;
+    return -1;
+}
+
 // ── Mutation ───────────────────────────────────────────────────────────────
 
 void
