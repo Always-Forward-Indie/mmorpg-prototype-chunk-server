@@ -213,8 +213,46 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
             }
         }
 
+        // Target alive check: reject initiation if target is dead.
+        // Must happen before cooldown is claimed.
+        if (targetType == CombatTargetType::MOB)
+        {
+            auto mobData = gameServices_->getMobInstanceManager().getMobInstance(targetId);
+            if (mobData.uid == 0 || mobData.isDead)
+            {
+                log_->warn("[COMBAT] Target mob {} is dead — rejecting initiation by caster {}",
+                           targetId, casterId);
+                result.errorMessage = "Target is dead";
+                return result;
+            }
+        }
+        else if (targetType == CombatTargetType::PLAYER && targetId != casterId)
+        {
+            auto charData = gameServices_->getCharacterManager().getCharacterData(targetId);
+            if (charData.characterId == 0 || charData.isDead)
+            {
+                log_->warn("[COMBAT] Target player {} is dead — rejecting initiation by caster {}",
+                           targetId, casterId);
+                result.errorMessage = "Target is dead";
+                return result;
+            }
+        }
+
+        // PvP guard: damage-dealing / debuff skills cannot target other players
+        // until a PvP consent system (zone flags, duel, etc.) is implemented.
+        if (targetType == CombatTargetType::PLAYER && targetId != casterId)
+        {
+            if (skill.skillEffectType == "damage" || skill.skillEffectType == "debuff")
+            {
+                log_->warn("[COMBAT] PvP blocked during initiation: caster {} -> player {} ({})",
+                           casterId, targetId, skillSlug);
+                result.errorMessage = "PvP is not available";
+                return result;
+            }
+        }
+
         // Атомарная проверка + установка кулдауна — только после валидации
-        // всех не-мутирующих требований выше (каст, мана, дистанция).
+        // всех не-мутирующих требований выше (каст, мана, дистанция, alive, PvP).
         // executeSkillUsage will pass cooldownAlreadySet=true to useSkill so that
         // the cooldown is not re-checked (it would look "on cooldown" and fail).
         {
