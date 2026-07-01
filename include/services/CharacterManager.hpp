@@ -60,6 +60,8 @@ class CharacterManager
     // Set post-respawn invulnerability end timestamp (game time, seconds)
     void setRespawnInvulUntil(int characterID, float timestamp);
 
+    void clearDeathState(int characterID);
+
     // Atomically apply damage: reads HP, subtracts delta, clamps to [0, maxHp], writes back.
     // Returns {newHealth, currentMana, died} where died=true means health crossed 0 this call.
     struct HealthUpdateResult
@@ -124,6 +126,8 @@ class CharacterManager
     int getCharacterFreeSkillPoints(int characterID) const;
     /// Assign or clear a hotbar slot for a character (in-memory only; persist via game server)
     void updateSkillBarSlot(int characterID, int slotIndex, const std::string &skillSlug);
+
+    void addExperienceDebt(int characterID, int debt);
 
     void updateLastPlayTimeSaveAt(int characterID, std::chrono::steady_clock::time_point t);
 

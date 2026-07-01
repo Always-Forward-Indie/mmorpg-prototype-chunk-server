@@ -1,3 +1,25 @@
+v0.2.30
+01.07.2026
+================
+
+New:
+
+**Death State Tracking — isDead флаг вместо косвенной проверки HP.**
+- `CharacterDataStruct` — новые поля `bool isDead` (explicit death marker) и `std::chrono::steady_clock::time_point deathTimestamp`. Флаг устанавливается в `applyDamageToCharacter` при переходе HP с >0 на ≤0.
+- Все проверки `characterCurrentHealth <= 0` заменены на `isDead`: `AttackSystem::isValidTarget`, `BaseEventHandler::isPlayerAlive`, `CharacterEventHandler::characterToJson`, `CharacterManager::getCharactersInZone`, `CharacterManager::processEffectTicks`, `MobAIController::isTargetAlive`, `RegenManager::tickRegen`, `SkillSystem::validateTarget`.
+- `applyHealToCharacter` — теперь не лечит мёртвого персонажа (early return).
+- `updateCharacterHealth` — при `newHealth > 0` сбрасывает `isDead = false`.
+- `CharacterManager::clearDeathState()` — новый метод: сбрасывает `isDead` и `deathTimestamp`. Вызывается в `handlePlayerRespawnEvent` после установки HP/MP.
+
+**Experience Debt — исправление записи долга опыта.**
+- `CombatSystem::handleTargetDeath` — замена `loadCharacterData(characterData)` на `addExperienceDebt(targetId, penaltyAmount)`. Ранее полная перезапись объекта через `loadCharacterData` могла откатить параллельные изменения (Heal, эффекты, движение). Теперь долг начисляется атомарно через новый метод `CharacterManager::addExperienceDebt()`.
+
+**PvP Skill Guards — корректная обработка заблокированных скилов.**
+- `executeSkillUsage` — при блоке PvP-урона (`"PvP is not available"`) флаг `success` теперь выставляется в `false` (ранее стоял `true`, что могло создать иллюзию применения скила). Добавлена передача `finalTargetHealth`/`finalTargetMana` в ответ для актуального состояния цели.
+- `executeAoESkillUsage` — добавлен PvP-guard: AoE-урон больше не проходит по другим игрокам (ранее блокировка была только direct-target; AoE мог наносить PvP-урон в обход проверки).
+
+---
+
 v0.2.29
 30.06.2026
 ================

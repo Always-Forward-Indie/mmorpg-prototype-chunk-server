@@ -428,6 +428,9 @@ struct CharacterDataStruct
     // is immune to damage. Zero = not invulnerable.
     float respawnInvulUntil = 0.0f;
 
+    bool isDead = false;
+    std::chrono::steady_clock::time_point deathTimestamp = {};
+
     // Hotbar slot assignments (loaded on join from character_skill_bar, updated on setSkillBarSlot)
     std::vector<SkillBarSlotStruct> skillBarSlots;
 

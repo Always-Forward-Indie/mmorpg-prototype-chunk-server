@@ -214,7 +214,7 @@ MobAIController::isTargetAlive(int targetPlayerId)
     if (player.characterId == 0)
         return false;
 
-    return player.characterCurrentHealth > 0;
+    return !player.isDead;
 }
 
 // ---------------------------------------------------------------------------

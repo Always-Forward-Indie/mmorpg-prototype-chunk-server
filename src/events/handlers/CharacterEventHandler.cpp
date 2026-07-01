@@ -105,7 +105,7 @@ CharacterEventHandler::characterToJson(const CharacterDataStruct &characterData)
         {"exp", {{"current", characterData.characterExperiencePoints}, {"levelStart", expForCurrentLevel}, {"levelEnd", characterData.expForNextLevel}}},
         {"stats", {{"health", {{"current", characterData.characterCurrentHealth}, {"max", characterData.characterMaxHealth}}}, {"mana", {{"current", characterData.characterCurrentMana}, {"max", characterData.characterMaxMana}}}}},
         {"position", {{"x", characterData.characterPosition.positionX}, {"y", characterData.characterPosition.positionY}, {"z", characterData.characterPosition.positionZ}, {"rotationZ", characterData.characterPosition.rotationZ}}},
-        {"isDead", characterData.characterCurrentHealth <= 0},
+        {"isDead", characterData.isDead},
         {"equippedTitleSlug", equippedTitleSlug},
         {"equippedTitleDisplayName", equippedTitleDisplayName}};
 
@@ -1574,6 +1574,7 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
 
         charMgr.updateCharacterHealth(characterId, newHp);
         charMgr.updateCharacterMana(characterId, newMana);
+        charMgr.clearDeathState(characterId);
 
         // ── Teleport to respawn zone ──────────────────────────────────────────
         charMgr.setCharacterPosition(characterId, respawnPos);

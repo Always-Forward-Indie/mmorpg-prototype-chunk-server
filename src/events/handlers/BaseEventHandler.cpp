@@ -21,7 +21,7 @@ BaseEventHandler::isPlayerAlive(int characterId)
     try
     {
         const auto &charData = gameServices_.getCharacterManager().getCharacterData(characterId);
-        return charData.characterCurrentHealth > 0;
+        return !charData.isDead;
     }
     catch (...)
     {

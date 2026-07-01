@@ -53,7 +53,7 @@ RegenManager::tickRegen()
             continue;
 
         // ── Skip dead characters ──────────────────────────────────────────────
-        if (ch.characterCurrentHealth <= 0)
+        if (ch.isDead)
             continue;
 
         // ── Skip characters in combat window ─────────────────────────────────

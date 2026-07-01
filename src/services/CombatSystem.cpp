@@ -463,7 +463,7 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             }
 
             auto charData = gameServices_->getCharacterManager().getCharacterData(targetId);
-            if (charData.characterId == 0 || charData.characterCurrentHealth <= 0)
+            if (charData.characterId == 0 || charData.isDead)
             {
                 result.errorMessage = "Target is dead";
                 return result;
@@ -495,7 +495,17 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             {
                 log_->warn("[COMBAT] PvP damage blocked: caster {} -> player {}", casterId, targetId);
                 result.errorMessage = "PvP is not available";
-                result.success = true; // skill was used (mana spent, CD set) — just no damage
+                result.success = false;
+                try
+                {
+                    auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
+                    result.finalTargetHealth = targetData.characterCurrentHealth;
+                    result.finalTargetMana = targetData.characterCurrentMana;
+                    result.healthPopulated = true;
+                }
+                catch (...)
+                {
+                }
                 return result;
             }
 
@@ -973,6 +983,10 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug, b
             if (target.characterId == casterId)
                 continue;
 
+            // PvP guard: AoE damage cannot hit other players (consistent with direct-target guard)
+            log_->warn("[COMBAT] PvP AoE damage blocked: caster {} -> player {}", casterId, target.characterId);
+            continue;
+
             auto dmgResult = calc->calculateSkillDamage(skill, casterData, target);
             if (dmgResult.isMissed)
                 continue;
@@ -1136,10 +1150,10 @@ CombatSystem::handleTargetDeath(int targetId, CombatTargetType targetType)
 
             // Guard: character may have been healed between the death event and this handler
             // (e.g. HoT tick fired concurrently). Also prevents double-death penalty.
-            if (characterData.characterCurrentHealth > 0)
+            if (!characterData.isDead)
             {
                 gameServices_->getLogger().log("Player " + std::to_string(targetId) +
-                                               " handleTargetDeath called but HP=" + std::to_string(characterData.characterCurrentHealth) + " — skipping penalty");
+                                               " handleTargetDeath called but isDead=false — skipping penalty");
                 return;
             }
 
@@ -1150,7 +1164,7 @@ CombatSystem::handleTargetDeath(int targetId, CombatTargetType targetType)
                 // Set experience debt instead of removing XP immediately.
                 // The debt will be paid off gradually as the player earns XP (50% per gain).
                 characterData.experienceDebt += penaltyAmount;
-                gameServices_->getCharacterManager().loadCharacterData(characterData);
+                gameServices_->getCharacterManager().addExperienceDebt(targetId, penaltyAmount);
                 gameServices_->getLogger().log("Player " + std::to_string(targetId) + " died — experience debt set to " +
                                                std::to_string(characterData.experienceDebt));
             }

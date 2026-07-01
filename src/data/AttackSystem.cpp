@@ -785,7 +785,7 @@ AttackSystem::isValidTarget(
     }
 
     // Check if target is alive
-    if (candidate.data->characterCurrentHealth <= 0)
+    if (candidate.data->isDead)
     {
         candidate.invalidReason = "Target is dead";
         return false;

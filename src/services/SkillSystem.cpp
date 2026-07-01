@@ -552,7 +552,7 @@ SkillSystem::validateTarget(int casterId, int targetId, CombatTargetType targetT
         if (targetType == CombatTargetType::PLAYER)
         {
             auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
-            return targetData.characterId != 0 && targetData.characterCurrentHealth > 0;
+            return targetData.characterId != 0 && !targetData.isDead;
         }
         else if (targetType == CombatTargetType::MOB)
         {

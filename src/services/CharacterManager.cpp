@@ -290,6 +290,8 @@ CharacterManager::updateCharacterHealth(int characterID, int newHealth)
     if (it != charactersMap_.end())
     {
         it->second.characterCurrentHealth = newHealth;
+        if (newHealth > 0)
+            it->second.isDead = false;
         logger_.log("Updated character " + std::to_string(characterID) + " health to " + std::to_string(newHealth));
         return;
     }
@@ -310,6 +312,11 @@ CharacterManager::applyDamageToCharacter(int characterID, int damageAmount)
         bool wasAlive = (ch.characterCurrentHealth > 0);
         int newHp = std::max(0, ch.characterCurrentHealth - damageAmount);
         ch.characterCurrentHealth = newHp;
+        if (wasAlive && newHp <= 0)
+        {
+            ch.isDead = true;
+            ch.deathTimestamp = std::chrono::steady_clock::now();
+        }
         return {newHp, ch.characterCurrentMana, wasAlive && (newHp <= 0)};
     }
     log_->error("Character " + std::to_string(characterID) + " not found in applyDamageToCharacter");
@@ -324,6 +331,8 @@ CharacterManager::applyHealToCharacter(int characterID, int healAmount)
     if (it != charactersMap_.end())
     {
         auto &ch = it->second;
+        if (ch.isDead)
+            return {ch.characterCurrentHealth, ch.characterCurrentMana, false};
         int newHp = std::min(ch.characterMaxHealth, ch.characterCurrentHealth + healAmount);
         ch.characterCurrentHealth = newHp;
         return {newHp, ch.characterCurrentMana, false};
@@ -389,6 +398,29 @@ CharacterManager::setRespawnInvulUntil(int characterID, float timestamp)
     log_->error("Character " + std::to_string(characterID) + " not found when setting respawnInvulUntil");
 }
 
+void
+CharacterManager::clearDeathState(int characterID)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it != charactersMap_.end())
+    {
+        it->second.isDead = false;
+        it->second.deathTimestamp = {};
+    }
+}
+
+void
+CharacterManager::addExperienceDebt(int characterID, int debt)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it != charactersMap_.end())
+    {
+        it->second.experienceDebt += debt;
+    }
+}
+
 std::vector<CharacterDataStruct>
 CharacterManager::getCharactersInZone(float centerX, float centerY, float radius)
 {
@@ -401,7 +433,7 @@ CharacterManager::getCharactersInZone(float centerX, float centerY, float radius
             {centerX, centerY, 0.0f, 0.0f},
             character.characterPosition);
 
-        if (distance <= radius && character.characterCurrentHealth > 0)
+        if (distance <= radius && !character.isDead)
         {
             charactersInZone.push_back(character);
         }
@@ -614,7 +646,7 @@ CharacterManager::processEffectTicks()
                     continue; // not a tick effect
                 if (eff.effectTypeSlug != "dot" && eff.effectTypeSlug != "hot")
                     continue;
-                if (character.characterCurrentHealth <= 0)
+                if (character.isDead)
                     continue; // already dead — skip ticks
                 if (eff.effectTypeSlug == "dot" && effectiveMaxHealth > 0 &&
                     character.characterCurrentHealth <= static_cast<int>(effectiveMaxHealth * 0.10f))
