@@ -7,11 +7,11 @@ class MessageHandler
   public:
     MessageHandler(JSONParser &jsonParser);
 
-    std::tuple<std::string, ClientDataStruct, CharacterDataStruct, PositionStruct, MessageStruct>
-    parseMessage(const std::string &message);
-
+    // Single-parse path: takes the already-parsed wire JSON (see
+    // ClientSession::processMessage). NOTE: parseMessage(string) was removed
+    // as dead code (no callers); do not reintroduce string-based parsing.
     std::tuple<std::string, ClientDataStruct, CharacterDataStruct, PositionStruct, MessageStruct, TimestampStruct>
-    parseMessageWithTimestamps(const std::string &message);
+    parseMessageWithTimestamps(const nlohmann::json &jsonData);
 
   private:
     JSONParser &jsonParser_;

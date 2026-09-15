@@ -10,7 +10,12 @@ JSONParser::~JSONParser() {}
 CharacterDataStruct
 JSONParser::parseCharacterData(const char *data, size_t length)
 {
-    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    return parseCharacterData(nlohmann::json::parse(data, data + length));
+}
+
+CharacterDataStruct
+JSONParser::parseCharacterData(const nlohmann::json &jsonData)
+{
     CharacterDataStruct characterData;
 
     if (jsonData.contains("body") && jsonData["body"].is_object() &&
@@ -266,7 +271,12 @@ JSONParser::parseCharacterData(const char *data, size_t length)
 PositionStruct
 JSONParser::parsePositionData(const char *data, size_t length)
 {
-    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    return parsePositionData(nlohmann::json::parse(data, data + length));
+}
+
+PositionStruct
+JSONParser::parsePositionData(const nlohmann::json &jsonData)
+{
     PositionStruct positionData;
 
     if (jsonData.contains("body") && jsonData["body"].is_object() &&
@@ -312,7 +322,12 @@ JSONParser::parsePositionData(const char *data, size_t length)
 ClientDataStruct
 JSONParser::parseClientData(const char *data, size_t length)
 {
-    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    return parseClientData(nlohmann::json::parse(data, data + length));
+}
+
+ClientDataStruct
+JSONParser::parseClientData(const nlohmann::json &jsonData)
+{
     ClientDataStruct clientData;
 
     if (jsonData.contains("header") && jsonData["header"].is_object() &&
@@ -394,7 +409,12 @@ JSONParser::parseCharactersList(const char *data, size_t length)
 MessageStruct
 JSONParser::parseMessage(const char *data, size_t length)
 {
-    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    return parseMessage(nlohmann::json::parse(data, data + length));
+}
+
+MessageStruct
+JSONParser::parseMessage(const nlohmann::json &jsonData)
+{
     MessageStruct message;
 
     if (jsonData.contains("header") && jsonData["header"].is_object() &&
@@ -415,7 +435,12 @@ JSONParser::parseMessage(const char *data, size_t length)
 std::string
 JSONParser::parseEventType(const char *data, size_t length)
 {
-    nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    return parseEventType(nlohmann::json::parse(data, data + length));
+}
+
+std::string
+JSONParser::parseEventType(const nlohmann::json &jsonData)
+{
     std::string eventType;
 
     if (jsonData.contains("header") && jsonData["header"].is_object() &&

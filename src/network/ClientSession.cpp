@@ -164,6 +164,9 @@ ClientSession::processMessage(const std::string &message)
             // Only process ping events for authenticated clients (clientId != 0)
             if (clientData.clientId != 0)
             {
+                // Liveness: any authenticated packet proves the client alive
+                // (PING_TIMEOUT must never fire on chatting/moving players).
+                gameServices_.getClientManager().recordPingTime(clientData.clientId);
                 // Parse timestamps for ping events to support lag compensation
                 TimestampStruct timestamps = jsonParser_.parseTimestamps(jsonData);
                 std::string requestId = jsonParser_.parseRequestId(jsonData);
@@ -189,8 +192,10 @@ ClientSession::processMessage(const std::string &message)
             return;
         }
 
-        // For non-ping events, do full parsing using MessageHandler with timestamps
-        auto [fullEventType, clientData, characterData, positionData, messageStruct, timestamps] = messageHandler_.parseMessageWithTimestamps(message);
+        // For non-ping events, do full parsing using MessageHandler with timestamps.
+        // Single-parse: jsonData was already parsed at the top of processMessage;
+        // field extractors below must not re-parse the wire bytes.
+        auto [fullEventType, clientData, characterData, positionData, messageStruct, timestamps] = messageHandler_.parseMessageWithTimestamps(jsonData);
 
         // If client ID is not provided in the message (or is 0), try to look it up by socket
         if (clientData.clientId == 0 && socket_)
@@ -217,6 +222,8 @@ ClientSession::processMessage(const std::string &message)
         // Populate character ID from ClientManager if client ID is valid
         if (clientData.clientId != 0)
         {
+            // Liveness: any authenticated packet proves the client alive.
+            gameServices_.getClientManager().recordPingTime(clientData.clientId);
             try
             {
                 ClientDataStruct serverClientData = gameServices_.getClientManager().getClientData(clientData.clientId);

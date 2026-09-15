@@ -13,10 +13,15 @@ class JSONParser
     ~JSONParser();
 
     CharacterDataStruct parseCharacterData(const char *data, size_t length);
+    CharacterDataStruct parseCharacterData(const nlohmann::json &jsonData);
     PositionStruct parsePositionData(const char *data, size_t length);
+    PositionStruct parsePositionData(const nlohmann::json &jsonData);
     ClientDataStruct parseClientData(const char *data, size_t length);
+    ClientDataStruct parseClientData(const nlohmann::json &jsonData);
     MessageStruct parseMessage(const char *data, size_t length);
+    MessageStruct parseMessage(const nlohmann::json &jsonData);
     std::string parseEventType(const char *data, size_t length);
+    std::string parseEventType(const nlohmann::json &jsonData);
     ChunkInfoStruct parseChunkInfo(const char *data, size_t length);
     std::vector<SpawnZoneStruct> parseSpawnZonesList(const char *data, size_t length);
     std::vector<RespawnZoneStruct> parseRespawnZonesList(const char *data, size_t length);
