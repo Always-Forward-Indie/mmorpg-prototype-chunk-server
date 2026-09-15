@@ -56,6 +56,11 @@ class NetworkManager
         std::deque<std::shared_ptr<const std::string>> criticalQ;
         std::deque<std::shared_ptr<const std::string>> bulkQ;
         bool writing{false};
+        // P0: identity of the socket object this queue belongs to. A raw
+        // socket* key alone is unsafe: after free+realloc a fresh socket may
+        // sit at the same address and would inherit a stale queue (stuck
+        // writing=true or wiped buffers => silently dropped broadcasts).
+        std::weak_ptr<boost::asio::ip::tcp::socket> owner;
 
         explicit SocketWriteQueue(boost::asio::io_context &ioc)
             : strand(boost::asio::make_strand(ioc))
@@ -64,9 +69,20 @@ class NetworkManager
     };
 
     /// Get or create the write queue for a socket (thread-safe via writeQueuesMutex_).
-    std::shared_ptr<SocketWriteQueue> getOrCreateWriteQueue(boost::asio::ip::tcp::socket *key);
-    /// Remove write queue on disconnect to free memory.
-    void removeWriteQueue(boost::asio::ip::tcp::socket *key);
+    /// Same live object => same queue (one strand per socket, always).
+    /// Raw-address reuse => the mapping is REPLACED with a fresh queue; the
+    /// old object is never mutated (it may still serve in-flight callbacks).
+    std::shared_ptr<SocketWriteQueue> getOrCreateWriteQueue(
+        const std::shared_ptr<boost::asio::ip::tcp::socket> &socket);
+    /// Legacy removal hook: now only drops owner-expired entries (see
+    /// gcWriteQueues). Never erases a live mapping — that could strand a
+    /// second queue on one socket (concurrent async_write = UB).
+    void removeWriteQueue(boost::asio::ip::tcp::socket *key,
+        const std::shared_ptr<boost::asio::ip::tcp::socket> &expectedOwner);
+    /// Reclaim idle queues (owner-expired only; provably no pending work).
+    /// Called periodically (see cleanupInactiveSessions).
+    void gcWriteQueues();
+    size_t writeQueueCount() const;
     /// Enqueue data for writing; critical=true means CRITICAL queue, false means BULK.
     void enqueueWrite(std::shared_ptr<boost::asio::ip::tcp::socket> socket,
         std::shared_ptr<const std::string> data,
@@ -76,7 +92,7 @@ class NetworkManager
         std::shared_ptr<SocketWriteQueue> queue);
 
     std::unordered_map<boost::asio::ip::tcp::socket *, std::shared_ptr<SocketWriteQueue>> writeQueues_;
-    std::mutex writeQueuesMutex_;
+    mutable std::mutex writeQueuesMutex_;
 
     static constexpr size_t max_length = 1024;
     boost::asio::io_context io_context_;

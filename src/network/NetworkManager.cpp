@@ -168,22 +168,88 @@ NetworkManager::sendResponseBulk(std::shared_ptr<boost::asio::ip::tcp::socket> c
 }
 
 std::shared_ptr<NetworkManager::SocketWriteQueue>
-NetworkManager::getOrCreateWriteQueue(boost::asio::ip::tcp::socket *key)
+NetworkManager::getOrCreateWriteQueue(
+    const std::shared_ptr<boost::asio::ip::tcp::socket> &socket)
 {
+    if (!socket)
+        return nullptr;
+    boost::asio::ip::tcp::socket *key = socket.get();
     std::lock_guard<std::mutex> lock(writeQueuesMutex_);
     auto it = writeQueues_.find(key);
     if (it != writeQueues_.end())
-        return it->second;
+    {
+        // Owner identity check: the same live object always reuses its queue
+        // (one strand per socket — concurrent async_write is UB in Asio).
+        auto owner = it->second->owner.lock();
+        if (owner && owner.get() == key)
+            return it->second;
+        // Stale mapping (owner dead, or raw address reused by a new object):
+        // REPLACE the entry with a fresh queue. Never mutate the old queue
+        // in place — strand callbacks may still reference it, and touching
+        // writing/queues off-strand breaks the single-writer invariant
+        // (SEGV under connect/disconnect churn, found by 200-bot load).
+        // The old queue object stays alive via outstanding captures and
+        // drains harmlessly (its socket is closed/dead).
+        auto q = std::make_shared<SocketWriteQueue>(io_context_);
+        q->owner = socket;
+        it->second = q;
+        return q;
+    }
     auto q = std::make_shared<SocketWriteQueue>(io_context_);
+    q->owner = socket;
     writeQueues_.emplace(key, q);
     return q;
 }
 
 void
-NetworkManager::removeWriteQueue(boost::asio::ip::tcp::socket *key)
+NetworkManager::removeWriteQueue(boost::asio::ip::tcp::socket *key,
+    const std::shared_ptr<boost::asio::ip::tcp::socket> &expectedOwner)
+{
+    // Intentionally NOT erasing here anymore: erase-then-recreate for the
+    // same live socket (teardown racing a straggler send) yields two strands
+    // writing one socket => UB. Entries are reclaimed by gcWriteQueues()
+    // (owner-expired only, which provably has no pending strand work: every
+    // posted lambda holds the socket). The expectedOwner check below keeps
+    // the call safe if anyone still invokes it during migration.
+    if (!key)
+        return;
+    std::lock_guard<std::mutex> lock(writeQueuesMutex_);
+    auto it = writeQueues_.find(key);
+    if (it == writeQueues_.end())
+        return;
+    if (expectedOwner)
+    {
+        auto owner = it->second->owner.lock();
+        // Live entry (any owner): keep. Only an expired owner with no
+        // replacement may go now.
+        if (owner)
+            return;
+    }
+    writeQueues_.erase(it);
+}
+
+void
+NetworkManager::gcWriteQueues()
 {
     std::lock_guard<std::mutex> lock(writeQueuesMutex_);
-    writeQueues_.erase(key);
+    for (auto it = writeQueues_.begin(); it != writeQueues_.end();)
+    {
+        // Owner expired => no shared_ptr exists anywhere, hence no posted
+        // strand lambda can reference the socket; erasing the map entry only
+        // drops our reference to an idle queue object. No queue fields are
+        // touched (deque access off-strand would race).
+        if (it->second->owner.expired())
+            it = writeQueues_.erase(it);
+        else
+            ++it;
+    }
+}
+
+size_t
+NetworkManager::writeQueueCount() const
+{
+    std::lock_guard<std::mutex> lock(writeQueuesMutex_);
+    return writeQueues_.size();
 }
 
 void
@@ -191,7 +257,9 @@ NetworkManager::enqueueWrite(std::shared_ptr<boost::asio::ip::tcp::socket> socke
     std::shared_ptr<const std::string> data,
     bool critical)
 {
-    auto queue = getOrCreateWriteQueue(socket.get());
+    auto queue = getOrCreateWriteQueue(socket);
+    if (!queue)
+        return;
     boost::asio::post(queue->strand,
         [this, socket = std::move(socket), queue, data = std::move(data), critical]() mutable
         {
@@ -336,8 +404,13 @@ void
 NetworkManager::removeActiveSession(std::shared_ptr<ClientSession> session)
 {
     // Remove the per-socket write queue to free memory and stop future enqueues.
+    // P0: owner-checked — a reused address keeps the fresh queue.
     if (session)
-        removeWriteQueue(session->getSocket().get());
+    {
+        auto sock = session->getSocket();
+        if (sock)
+            removeWriteQueue(sock.get(), sock);
+    }
 
     std::lock_guard<std::mutex> lock(sessionsMutex_);
     activeSessions_.erase(session);
@@ -346,9 +419,15 @@ NetworkManager::removeActiveSession(std::shared_ptr<ClientSession> session)
 void
 NetworkManager::cleanupInactiveSessions()
 {
-    std::lock_guard<std::mutex> lock(sessionsMutex_);
+    // NOTE: keep gcWriteQueues() outside sessionsMutex_ on principle —
+    // the two mutexes must never nest (removeActiveSession touches both
+    // paths), so GC runs after this scope.
+    size_t initialSize = 0;
+    size_t finalSize = 0;
+    {
+        std::lock_guard<std::mutex> lock(sessionsMutex_);
 
-    size_t initialSize = activeSessions_.size();
+        initialSize = activeSessions_.size();
 
     // Remove expired sessions: sole reliable indicator is the socket being closed.
     // use_count() was intentionally removed — reference-count snapshots have an
@@ -374,13 +453,19 @@ NetworkManager::cleanupInactiveSessions()
         }
     }
 
-    size_t finalSize = activeSessions_.size();
-    if (initialSize > finalSize)
-    {
-        gameServices_.getLogger().log("Session cleanup: removed " + std::to_string(initialSize - finalSize) +
-                                          " inactive sessions. Active: " + std::to_string(finalSize),
-            GREEN);
+        finalSize = activeSessions_.size();
+        if (initialSize > finalSize)
+        {
+            gameServices_.getLogger().log("Session cleanup: removed " + std::to_string(initialSize - finalSize) +
+                                              " inactive sessions. Active: " + std::to_string(finalSize),
+                GREEN);
+        }
     }
+
+    // Reclaim idle write queues (owner-expired only; see gcWriteQueues).
+    // Runs on the same periodic cadence as session cleanup, outside
+    // sessionsMutex_ (see lock-order note above).
+    gcWriteQueues();
 }
 
 void
