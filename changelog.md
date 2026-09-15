@@ -1,3 +1,45 @@
+v0.2.32
+15.09.2026
+================
+
+Fixes:
+
+**SEGV под churn — race-free lifecycle per-socket write-очередей.**
+- Причина: erase + recreate записи очереди при churn (теардаун сессии стирал запись, а отставшая отправка тут же создавала новую на тот же живой сокет) → два strand писали в один сокет конкурентно → `async_write` падал с SEGV в `epoll start_op` (поймано ASan под 200 онлайна).
+- `NetworkManager::getOrCreateWriteQueue` — один живой сокет всегда переиспользует свою очередь; stale-маппинг только заменяется целиком, никогда не мутируется и не стирается на теардауне. Рекламация только через `gcWriteQueues()` (owner-expired — доказуемо нет pending-работ, т.к. каждая держит сокет), на периодике `cleanupInactiveSessions` (вне `sessionsMutex_`, без инверсии порядка локов). Счётчик `writeQueueCount()` для мониторинга.
+- Проверено повтором 200/200, ноль ASan.
+
+**Stale-disconnect затирал живые сессии — generation-stamp реестра сокетов.**
+- `ClientManager` — `SocketEntry{sock, gen}`, поколение на каждый `setClientSocket`, O(1) reverse-индекс `socket->client` с подтверждением, удаление `removeClientData(id, gen)` только при совпадении поколения. Убран временный `[SESSDBG]`-лог.
+- `NetworkManager` — очереди проверяют owner-identity (переиспользованный адрес не наследует чужую очередь).
+
+New:
+
+**Interest v2 — подписки, фан-аут, вотчлист, тиринг, слепки входа.**
+- Новый `InterestManager`: юниформ-сетка (`interest.cell_size`, default 1500), подписка 3×3 (`interest.view_radius`), rehome-маржа от дребезга (`interest.rehome_margin_frac`), телепорты, вотчлист целей атаки с TTL 30с, метрики (клиенты/ячейки/подписки/ресабы/построено/отправлено/слепки). Всё в `GameConfigService` + килл-свитч `interest.enabled`. Хуки: движение, `playerReady` (сид), дисконнект/эвикт (чистка).
+- Фан-аут мобов — только подписчикам ячейки + вотчеры + fail-open (грузящиеся/без позиции — как раньше всем); дедуп получателей.
+- Движение игроков, бой/скиллы/эмоты/снаряжение, лут/трупы/смерти/титулы/хилы — позиционные бродкасты (`broadcastPositional`, роутинг по инспекции пакета `broadcastRouted`, raw-вариант без смены формата). Неизвестная форма/позиция — fail-open в глобал. Чат не тронут.
+- Слепок входа (`sendCellSnapshot`: мобы + трупы + NPC, wire-совместимые форматы) + rate-limit 2с (`interest.snapshots`, `interest.snapshot_cooldown_ms`).
+- Тиринг по плотности подписок: 100/200мс рядом, 500мс соседи, 1000мс никого.
+- TTL трупов/дропа в конфиге (`corpse.ttl_ms`, `drop.ttl_sec`, дефолты прежние).
+- Замерено: 123719 построено → 17991 отправлено (85% отсева), p99 комбат 17мс / мув 63мс на 20 онлайна.
+- `main.cpp` — исправлен перепутанный порядок аргументов очередей в конструктор `ChunkServer` (очереди game/client были перекрещены; работало только потому, что оба цикла зовут один `processBatch`).
+
+**Scheduler guard — бросающий таск больше не роняет поток.**
+- `Scheduler::run` (чанк): `t.func()` в try/catch (PING-reaper, чистки, тики мобов переживают чужое исключение).
+
+Perf:
+
+**JSON hot path — один парс вместо семи.**
+- `JSONParser` — `FromJson`-перегрузки для `parseEventType/ClientData/CharacterData/PositionData/Message` (buf-версии стали тонкими обертками); `MessageHandler::parseMessageWithTimestamps` принимает распарсенный JSON (мертвый `parseMessage(string)` удален); `ClientSession` передает уже распарсенное. Game-линк (низкочастотный) не тронут.
+
+Tests:
+
+**Папка `tests/` — юнит-тесты без gtest.**
+- `tests/test_interest.cpp` + `tests/README.md`: подписки 3×3, маржа, телепорт, вотчлист, shared-ячейки, disabled, `recipientsFor`. Сборка/прогон внутри контейнера одной командой, вотчер сборку не триггерит (папка не монтируется).
+
+---
+
 v0.2.31
 01.07.2026
 ================

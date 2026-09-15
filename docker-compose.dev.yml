@@ -9,14 +9,19 @@ services:
       - ./src:/usr/src/app/src  # ✅ Mount only the `src` folder
       - ./include:/usr/src/app/include  # ✅ Mount only the `include` folder
       - ./CMakeLists.txt:/usr/src/app/CMakeLists.txt  # ✅ Mount CMakeLists.txt so new source files are picked up without image rebuilds
+    env_file:
+      - .env
     environment:
       - ENV=development
+      - GAME_SERVER_HOST=game-server
       - LOG_LEVEL=info
       - LOG_LEVEL_NETWORK=warn
       - LOG_LEVEL_GAMELOOP=warn
       - LOG_LEVEL_EVENTS=warn
     security_opt:
       - seccomp=unconfined
+    # Self-heal after daemon/VM flaps (boot order still: login(db) -> game -> chunk).
+    restart: unless-stopped
     networks:
       - mmo_network
 
