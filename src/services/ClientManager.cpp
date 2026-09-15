@@ -65,46 +65,11 @@ ClientManager::loadClientData(ClientDataStruct clientData)
 std::vector<ClientDataStruct>
 ClientManager::getClientsList()
 {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-
-    // Clean up invalid clients first by checking the socket map
-    for (auto it = clientsList_.begin(); it != clientsList_.end();)
-    {
-        bool shouldRemove = false;
-        auto socketIt = clientSockets_.find(it->clientId);
-
-        if (socketIt == clientSockets_.end() || !socketIt->second)
-        {
-            shouldRemove = true;
-        }
-        else
-        {
-            try
-            {
-                if (!socketIt->second->is_open())
-                {
-                    shouldRemove = true;
-                }
-            }
-            catch (const std::exception &e)
-            {
-                // Socket is likely invalid/freed
-                shouldRemove = true;
-            }
-        }
-
-        if (shouldRemove)
-        {
-            log_->info("Removing client with invalid socket during getClientsList, ID: " + std::to_string(it->clientId));
-            // Remove from both the list and socket map
-            clientSockets_.erase(it->clientId);
-            it = clientsList_.erase(it);
-        }
-        else
-        {
-            ++it;
-        }
-    }
+    // Read-only: never mutate here. Dead-socket cleanup lives exclusively in
+    // cleanupDeadSockets() (scheduler). Purging inside this getter previously
+    // erased LIVE sessions when is_open() raced with reconnects, which broke
+    // gameplay packets (silent characterId 0) for healthy clients.
+    std::shared_lock<std::shared_mutex> lock(mutex_);
 
     // Return a copy of the client list (without socket references)
     return clientsList_;
@@ -150,7 +115,7 @@ ClientManager::getClientSocket(int clientID)
     auto it = clientSockets_.find(clientID);
     if (it != clientSockets_.end())
     {
-        return it->second;
+        return it->second.sock;
     }
     return nullptr;
 }
@@ -158,22 +123,38 @@ ClientManager::getClientSocket(int clientID)
 int
 ClientManager::getClientIdBySocket(std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
+    if (!socket)
+        return 0;
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    for (const auto &pair : clientSockets_)
+    auto it = socketToClient_.find(socket.get());
+    if (it != socketToClient_.end())
     {
-        if (pair.second == socket)
-        {
-            return pair.first;
-        }
+        // Confirm the forward entry still points at this exact socket object
+        // (guards against raw-pointer address reuse after free).
+        auto fwd = clientSockets_.find(it->second);
+        if (fwd != clientSockets_.end() && fwd->second.sock.get() == socket.get())
+            return it->second;
     }
     return 0; // Return 0 if socket not found (0 means invalid client ID)
 }
 
-void
+uint64_t
 ClientManager::setClientSocket(int clientID, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    clientSockets_[clientID] = socket;
+    // Drop the reverse index of any previous socket for this client first so
+    // a stale disconnect for the old socket can never resolve to the new one.
+    auto prev = clientSockets_.find(clientID);
+    if (prev != clientSockets_.end() && prev->second.sock &&
+        (!socket || prev->second.sock.get() != socket.get()))
+    {
+        socketToClient_.erase(prev->second.sock.get());
+    }
+    const uint64_t gen = nextGen_.fetch_add(1, std::memory_order_relaxed);
+    clientSockets_[clientID] = SocketEntry{socket, gen};
+    if (socket)
+        socketToClient_[socket.get()] = clientID;
+    return gen;
 }
 
 // Set client character ID
@@ -228,10 +209,21 @@ ClientManager::isClientWorldReady(int clientID) const
 }
 
 // remove client by ID
-void
-ClientManager::removeClientData(int clientID)
+bool
+ClientManager::removeClientData(int clientID, uint64_t expectedGen)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
+
+    if (expectedGen != 0)
+    {
+        auto entry = clientSockets_.find(clientID);
+        if (entry == clientSockets_.end() || entry->second.gen != expectedGen)
+        {
+            // Stale removal for a previous generation — the client has
+            // reconnected since; never wipe the live session.
+            return false;
+        }
+    }
 
     // Remove from client list
     for (auto it = clientsList_.begin(); it != clientsList_.end(); ++it)
@@ -243,24 +235,36 @@ ClientManager::removeClientData(int clientID)
         }
     }
 
-    // Remove from socket map
-    clientSockets_.erase(clientID);
+    // Remove from socket map + reverse index
+    auto entry = clientSockets_.find(clientID);
+    if (entry != clientSockets_.end())
+    {
+        if (entry->second.sock)
+            socketToClient_.erase(entry->second.sock.get());
+        clientSockets_.erase(entry);
+    }
+    return true;
 }
 
 void
 ClientManager::removeClientDataBySocket(std::shared_ptr<boost::asio::ip::tcp::socket> socket)
 {
+    if (!socket)
+        return;
     std::unique_lock<std::shared_mutex> lock(mutex_);
 
-    // Find the client ID that corresponds to this socket
+    // Resolve via the reverse index; confirm the forward entry still points
+    // at this exact socket object (address reuse after free must not remove
+    // a fresh registration that happens to sit at the same address).
     int clientIDToRemove = -1;
-    for (const auto &pair : clientSockets_)
+    auto rev = socketToClient_.find(socket.get());
+    if (rev != socketToClient_.end())
     {
-        if (pair.second == socket)
-        {
-            clientIDToRemove = pair.first;
-            break;
-        }
+        auto fwd = clientSockets_.find(rev->second);
+        if (fwd != clientSockets_.end() && fwd->second.sock.get() == socket.get())
+            clientIDToRemove = rev->second;
+        else
+            socketToClient_.erase(rev); // dangling reverse entry, drop it
     }
 
     // Remove both from client list and socket map
@@ -275,6 +279,7 @@ ClientManager::removeClientDataBySocket(std::shared_ptr<boost::asio::ip::tcp::so
             }
         }
         clientSockets_.erase(clientIDToRemove);
+        socketToClient_.erase(socket.get());
     }
 }
 
@@ -288,7 +293,7 @@ ClientManager::cleanupInvalidClients()
         bool shouldRemove = false;
         auto socketIt = clientSockets_.find(it->clientId);
 
-        if (socketIt == clientSockets_.end() || !socketIt->second)
+        if (socketIt == clientSockets_.end() || !socketIt->second.sock)
         {
             shouldRemove = true;
         }
@@ -296,7 +301,7 @@ ClientManager::cleanupInvalidClients()
         {
             try
             {
-                if (!socketIt->second->is_open())
+                if (!socketIt->second.sock->is_open())
                 {
                     shouldRemove = true;
                 }
@@ -311,8 +316,13 @@ ClientManager::cleanupInvalidClients()
         if (shouldRemove)
         {
             log_->info("Removing client with invalid socket, ID: " + std::to_string(it->clientId));
-            // Remove from both the list and socket map
-            clientSockets_.erase(it->clientId);
+            // Remove from both the list and socket map + reverse index
+            if (socketIt != clientSockets_.end())
+            {
+                if (socketIt->second.sock)
+                    socketToClient_.erase(socketIt->second.sock.get());
+                clientSockets_.erase(socketIt);
+            }
             it = clientsList_.erase(it);
         }
         else
@@ -337,7 +347,7 @@ ClientManager::forceCleanupMemory()
         bool shouldRemove = false;
         auto socketIt = clientSockets_.find(it->clientId);
 
-        if (socketIt == clientSockets_.end() || !socketIt->second)
+        if (socketIt == clientSockets_.end() || !socketIt->second.sock)
         {
             shouldRemove = true;
         }
@@ -345,7 +355,7 @@ ClientManager::forceCleanupMemory()
         {
             try
             {
-                if (!socketIt->second->is_open())
+                if (!socketIt->second.sock->is_open())
                 {
                     shouldRemove = true;
                 }
@@ -359,7 +369,12 @@ ClientManager::forceCleanupMemory()
         if (shouldRemove)
         {
             log_->info("Force cleanup removing client ID: " + std::to_string(it->clientId));
-            clientSockets_.erase(it->clientId);
+            if (socketIt != clientSockets_.end())
+            {
+                if (socketIt->second.sock)
+                    socketToClient_.erase(socketIt->second.sock.get());
+                clientSockets_.erase(socketIt);
+            }
             it = clientsList_.erase(it);
         }
         else
@@ -393,14 +408,49 @@ ClientManager::getActiveSockets(int excludeClientId) const
     std::shared_lock<std::shared_mutex> lock(mutex_);
     std::vector<std::shared_ptr<boost::asio::ip::tcp::socket>> result;
     result.reserve(clientSockets_.size());
-    for (const auto &[id, sock] : clientSockets_)
+    for (const auto &[id, entry] : clientSockets_)
     {
-        if (id != excludeClientId && sock)
+        if (id != excludeClientId && entry.sock)
         {
-            result.push_back(sock);
+            result.push_back(entry.sock);
         }
     }
     return result;
+}
+
+// P0: generation-stamped snapshot so senders can validate registrations.
+std::vector<ClientManager::SocketSnapshot>
+ClientManager::getActiveSnapshots(int excludeClientId) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    std::vector<SocketSnapshot> result;
+    result.reserve(clientSockets_.size());
+    for (const auto &[id, entry] : clientSockets_)
+    {
+        if (id != excludeClientId && entry.sock)
+        {
+            result.push_back(SocketSnapshot{entry.sock, entry.gen, id});
+        }
+    }
+    return result;
+}
+
+bool
+ClientManager::isLiveRegistration(int clientId, uint64_t gen) const
+{
+    if (gen == 0)
+        return false;
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto it = clientSockets_.find(clientId);
+    return it != clientSockets_.end() && it->second.gen == gen && it->second.sock;
+}
+
+uint64_t
+ClientManager::getSocketGen(int clientId) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto it = clientSockets_.find(clientId);
+    return it != clientSockets_.end() ? it->second.gen : 0;
 }
 
 // Separated dead-socket cleanup from the hot broadcast path.
@@ -413,7 +463,7 @@ ClientManager::cleanupDeadSockets()
     for (auto it = clientSockets_.begin(); it != clientSockets_.end();)
     {
         bool dead = false;
-        if (!it->second)
+        if (!it->second.sock)
         {
             dead = true;
         }
@@ -421,7 +471,7 @@ ClientManager::cleanupDeadSockets()
         {
             try
             {
-                dead = !it->second->is_open();
+                dead = !it->second.sock->is_open();
             }
             catch (...)
             {
@@ -442,6 +492,8 @@ ClientManager::cleanupDeadSockets()
                     break;
                 }
             }
+            if (it->second.sock)
+                socketToClient_.erase(it->second.sock.get());
             it = clientSockets_.erase(it);
         }
         else
