@@ -911,6 +911,7 @@ VendorEventHandler::handleTradeRequestEvent(const Event &event)
         }
 
         const auto &myChar = gameServices_.getCharacterManager().getCharacterData(req.characterId);
+        gameServices_.getTradeSessionManager().addInvite(req.characterId, req.targetCharacterId);
         ResponseBuilder inviteBuilder;
         std::string inviteMsg = networkManager_.generateResponseMessage("pending", inviteBuilder.setHeader("eventType", "tradeInvite").setHeader("status", "pending").setHeader("clientId", targetChar.clientId).setHeader("hash", "").setBody("fromCharacterId", req.characterId).setBody("fromCharacterName", myChar.characterName).build());
         networkManager_.sendResponse(targetSocket, inviteMsg);
@@ -964,6 +965,14 @@ VendorEventHandler::handleTradeAcceptEvent(const Event &event)
             return;
         }
 
+        // Accept must match a live invite — otherwise a blind accept would
+        // fabricate a session out of thin air (and break the real one).
+        if (!gameServices_.getTradeSessionManager().consumeInvite(initiatorCharId, req.characterId))
+        {
+            sendErrorResponseWithTimestamps(socket, "no_pending_invite", "tradeAccept", req.clientId, req.timestamps);
+            return;
+        }
+
         // Create session: initiator=A, accepter=B
         auto &session = gameServices_.getTradeSessionManager().createSession(
             initiatorChar.clientId, initiatorCharId, req.clientId, req.characterId);
@@ -1000,6 +1009,7 @@ VendorEventHandler::handleTradeDeclineEvent(const Event &event)
 
         if (initiatorCharId > 0)
         {
+            gameServices_.getTradeSessionManager().removeInvitesFor(req.characterId);
             const auto &initiatorChar = gameServices_.getCharacterManager().getCharacterData(initiatorCharId);
             auto initiatorSocket = gameServices_.getClientManager().getClientSocket(initiatorChar.clientId);
             if (initiatorSocket)

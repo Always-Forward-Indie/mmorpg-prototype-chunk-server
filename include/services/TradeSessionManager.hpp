@@ -1,6 +1,7 @@
 #pragma once
 #include "data/DataStructs.hpp"
 #include "utils/Logger.hpp"
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -40,6 +41,12 @@ class TradeSessionManager
     /** Close any session belonging to the character. */
     void closeSessionByCharacter(int characterId);
 
+    /** Pending trade invites: accept must match one, else `no_pending_invite`.
+     *  Invite TTL is 60 s (same as sessions). Thread-safe. */
+    void addInvite(int fromCharacterId, int toCharacterId);
+    bool consumeInvite(int fromCharacterId, int toCharacterId);
+    void removeInvitesFor(int characterId);
+
     // ── Maintenance ──────────────────────────────────────────────────────────
 
     /** Remove sessions whose last activity exceeds TTL_SECONDS.
@@ -50,6 +57,13 @@ class TradeSessionManager
     mutable std::mutex mutex_;
     std::unordered_map<std::string, TradeSessionStruct> sessions_;
     std::unordered_map<int, std::string> characterToSession_; ///< charId → sessionId
+    struct PendingInvite
+    {
+        int fromCharacterId = 0;
+        std::chrono::steady_clock::time_point created{};
+    };
+    std::unordered_map<int, PendingInvite> pendingInvites_; ///< toCharId → invite
+    static constexpr long long INVITE_TTL_MS = 60000;
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 };

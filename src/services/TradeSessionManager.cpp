@@ -123,4 +123,49 @@ TradeSessionManager::cleanupExpiredSessions()
             ++it;
         }
     }
+    for (auto it = pendingInvites_.begin(); it != pendingInvites_.end();)
+    {
+        auto ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - it->second.created)
+                         .count();
+        if (ageMs > INVITE_TTL_MS)
+            it = pendingInvites_.erase(it);
+        else
+            ++it;
+    }
+}
+
+void
+TradeSessionManager::addInvite(int fromCharacterId, int toCharacterId)
+{
+    std::lock_guard lock(mutex_);
+    pendingInvites_[toCharacterId] = PendingInvite{fromCharacterId, std::chrono::steady_clock::now()};
+}
+
+bool
+TradeSessionManager::consumeInvite(int fromCharacterId, int toCharacterId)
+{
+    std::lock_guard lock(mutex_);
+    auto it = pendingInvites_.find(toCharacterId);
+    if (it == pendingInvites_.end() || it->second.fromCharacterId != fromCharacterId)
+        return false;
+    auto ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - it->second.created)
+                     .count();
+    pendingInvites_.erase(it);
+    return ageMs <= INVITE_TTL_MS;
+}
+
+void
+TradeSessionManager::removeInvitesFor(int characterId)
+{
+    std::lock_guard lock(mutex_);
+    pendingInvites_.erase(characterId);
+    for (auto it = pendingInvites_.begin(); it != pendingInvites_.end();)
+    {
+        if (it->second.fromCharacterId == characterId)
+            it = pendingInvites_.erase(it);
+        else
+            ++it;
+    }
 }
