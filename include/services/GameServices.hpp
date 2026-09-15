@@ -16,6 +16,7 @@
 #include "services/GameConfigService.hpp"
 #include "services/GameZoneManager.hpp"
 #include "services/HarvestManager.hpp"
+#include "services/InterestManager.hpp"
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
 #include "services/LootManager.hpp"
@@ -61,6 +62,7 @@ class GameServices
           lootManager_(itemManager_, logger_),
           inventoryManager_(itemManager_, logger_),
           harvestManager_(itemManager_, logger_),
+          interestManager_(logger_),
           npcManager_(logger_),
           dialogueManager_(logger_),
           dialogueSessionManager_(logger_),
@@ -153,6 +155,10 @@ class GameServices
     HarvestManager &getHarvestManager()
     {
         return harvestManager_;
+    }
+    InterestManager &getInterestManager()
+    {
+        return interestManager_;
     }
     SkillManager &getSkillManager()
     {
@@ -313,6 +319,7 @@ class GameServices
     LootManager lootManager_;
     InventoryManager inventoryManager_;
     HarvestManager harvestManager_;
+    InterestManager interestManager_;
     NPCManager npcManager_;
     DialogueManager dialogueManager_;
     DialogueSessionManager dialogueSessionManager_;

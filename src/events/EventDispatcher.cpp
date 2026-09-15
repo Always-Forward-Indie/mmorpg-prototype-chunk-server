@@ -655,6 +655,19 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
             Event playerAttackEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, fullData}, context.timestamps);
             eventsBatch_.push_back(playerAttackEvent);
 
+            // Interest watch: the attacker's client keeps receiving this mob's
+            // updates regardless of cell subscription (hunters track targets).
+            try
+            {
+                const auto &body = fullData["body"];
+                if (body.value("targetType", 0) == 3)
+                    gameServices_.getInterestManager().watch(
+                        context.clientData.clientId, body.value("targetId", 0));
+            }
+            catch (...)
+            {
+            }
+
             if (eventsBatch_.size() >= BATCH_SIZE)
             {
                 eventQueue_.pushBatch(eventsBatch_);
@@ -1103,16 +1116,13 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
         response["timestamps"]["clientSendMsEcho"] = context.timestamps.clientSendMsEcho;
         response["timestamps"]["requestId"] = context.timestamps.requestId;
 
-        // Send response to client
-        if (socket && socket->is_open())
+        // Send response to client via the strand-serialized write queue.
+        // (Never raw async_write here: the local buffer would die with this
+        // frame = use-after-free, and concurrent writes would interleave.)
+        if (socket && socket->is_open() && chunkServer_)
         {
-            std::string responseStr = response.dump();
-            boost::asio::async_write(*socket, boost::asio::buffer(responseStr), [this, socket](boost::system::error_code ec, std::size_t /*length*/)
-                {
-                    if (ec)
-                    {
-                        log_->error("Error sending character experience response: " + ec.message());
-                    } });
+            auto responseData = std::make_shared<const std::string>(response.dump());
+            chunkServer_->getNetworkManager().sendResponse(socket, responseData);
         }
 
         log_->info("Sent character experience data for character " +
@@ -1130,15 +1140,10 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
         errorResponse["header"]["timestamp"] = context.timestamps.serverSendMs;
         errorResponse["header"]["requestId"] = context.timestamps.requestId;
 
-        if (socket && socket->is_open())
+        if (socket && socket->is_open() && chunkServer_)
         {
-            std::string responseStr = errorResponse.dump();
-            boost::asio::async_write(*socket, boost::asio::buffer(responseStr), [this](boost::system::error_code ec, std::size_t /*length*/)
-                {
-                    if (ec)
-                    {
-                        log_->error("Error sending character experience error response: " + ec.message());
-                    } });
+            auto errorData = std::make_shared<const std::string>(errorResponse.dump());
+            chunkServer_->getNetworkManager().sendResponse(socket, errorData);
         }
     }
 }

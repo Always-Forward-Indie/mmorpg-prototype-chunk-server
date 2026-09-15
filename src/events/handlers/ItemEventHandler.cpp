@@ -176,9 +176,12 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                                               .setBody("droppedItemUID", pickupRequest.droppedItemUID)
                                               .build();
 
-                // Broadcast to all clients in the area
-                std::string responseData = networkManager_.generateResponseMessage("success", response);
-                broadcastToAllClients(responseData);
+                // Interest v2 (phase 4): subscribers of the pickup cell.
+                // Picker participates explicitly (always sees own pickup).
+                broadcastPositional("success", response,
+                    pickupRequest.playerPosition.positionX,
+                    pickupRequest.playerPosition.positionY,
+                    {clientForCharacter(pickupRequest.characterId)});
 
                 // Update carry weight for the player who picked up the item
                 auto charData = gameServices_.getCharacterManager().getCharacterData(pickupRequest.characterId);
@@ -255,8 +258,11 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                                               .setBody("droppedItemUID", pickupRequest.droppedItemUID)
                                               .build();
 
-                std::string responseData = networkManager_.generateResponseMessage("error", response);
-                broadcastToAllClients(responseData);
+                // Interest v2 (phase 4): same cell routing as success.
+                broadcastPositional("error", response,
+                    pickupRequest.playerPosition.positionX,
+                    pickupRequest.playerPosition.positionY,
+                    {clientForCharacter(pickupRequest.characterId)});
 
                 // Send itemRemove to the requesting client so it can clean up
                 // the ghost item visual (e.g. item already picked up / despawned).

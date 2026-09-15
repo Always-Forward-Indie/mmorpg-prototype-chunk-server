@@ -12,6 +12,7 @@ GameServerWorker::GameServerWorker(EventQueue &eventQueue,
       work_(boost::asio::make_work_guard(io_context_game_server_)),
       game_server_socket_(std::make_shared<boost::asio::ip::tcp::socket>(io_context_game_server_)),
       retry_timer_(io_context_game_server_),
+      heartbeat_timer_(io_context_game_server_),
       eventQueue_(eventQueue),
       logger_(logger),
       jsonParser_(),
@@ -45,6 +46,12 @@ GameServerWorker::startIOEventLoop()
 GameServerWorker::~GameServerWorker()
 {
     log_->error("Game Server destructor is called...");
+    // Cancel timers first: pending async_waits count as io_context work and
+    // would keep run() alive forever (join would hang). The heartbeat chain
+    // stops on the cancelled error code.
+    boost::system::error_code ign;
+    heartbeat_timer_.cancel(ign);
+    retry_timer_.cancel(ign);
     work_.reset();
     for (auto &thread : io_threads_)
     {
@@ -62,18 +69,11 @@ GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endpoints
         {
             if (!ec) {
                 log_->info("Connected to the Game Server!");
-                
-                // Send handshake connection info to the game server
-                nlohmann::json handshake;
-                handshake["header"]["eventType"] = "chunkServerConnection";
-                handshake["header"]["id"] = 1;
-                handshake["header"]["ip"] = chunkServerConfig_.publicHost;
-                handshake["header"]["port"] = chunkServerConfig_.port;
-                // add delimiter string to the dump
-                std::string delimiter = "\n";
-                std::string handshakeMessage = handshake.dump() += delimiter;
 
-                sendDataToGameServer(handshakeMessage);
+                // Send handshake connection info to the game server
+                sendDataToGameServer(buildHandshakeMessage());
+                // Start (or keep) the registration heartbeat.
+                scheduleHeartbeat();
 
                 // Invoke reconnect callback so ChunkServer can restore online status
                 if (onReconnect_)
@@ -99,6 +99,45 @@ GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endpoints
             } });
 }
 
+std::string
+GameServerWorker::buildHandshakeMessage() const
+{
+    nlohmann::json handshake;
+    handshake["header"]["eventType"] = "chunkServerConnection";
+    handshake["header"]["id"] = 1;
+    handshake["header"]["ip"] = chunkServerConfig_.publicHost;
+    handshake["header"]["port"] = chunkServerConfig_.port;
+    return handshake.dump() + "\n";
+}
+
+void
+GameServerWorker::scheduleHeartbeat()
+{
+    // Registration heartbeat (60s): re-assert chunkServerConnection so the
+    // game can never permanently lose this chunk's registration (stale
+    // disconnect races, missed events). The game side is idempotent
+    // (addChunkInfo overwrites). Timer re-arms itself; safe across
+    // reconnects (re-arming an armed timer just reschedules).
+    heartbeat_timer_.expires_after(std::chrono::seconds(60));
+    heartbeat_timer_.async_wait([this](const boost::system::error_code &timerEc)
+        {
+            if (timerEc)
+                return; // cancelled (shutdown): stop the chain
+            bool open = false;
+            try
+            {
+                open = game_server_socket_ && game_server_socket_->is_open();
+            }
+            catch (...)
+            {
+                open = false;
+            }
+            if (open)
+                sendDataToGameServer(buildHandshakeMessage());
+            scheduleHeartbeat();
+        });
+}
+
 void
 GameServerWorker::sendDataToGameServer(const std::string &data)
 {
@@ -122,10 +161,13 @@ GameServerWorker::doNextWrite()
     writePending_ = true;
     auto payload = std::make_shared<std::string>(std::move(sendQueue_.front()));
     sendQueue_.pop();
+    // R6: capture the socket — an async_write must never dereference
+    // game_server_socket_ directly, it can be reset by reconnect meanwhile.
+    auto sock = game_server_socket_;
     boost::asio::async_write(
-        *game_server_socket_,
+        *sock,
         boost::asio::buffer(*payload),
-        boost::asio::bind_executor(strand_, [this, payload](const boost::system::error_code &error, std::size_t bytes_transferred)
+        boost::asio::bind_executor(strand_, [this, payload, sock](const boost::system::error_code &error, std::size_t bytes_transferred)
             {
             if (!error) {
                 log_->debug("Bytes sent: " + std::to_string(bytes_transferred));
@@ -406,17 +448,21 @@ GameServerWorker::receiveDataFromGameServer()
             }
             else
             {
-                // LOW-8: on disconnect, close socket and reconnect from the beginning
+                // LOW-8: on disconnect, close socket and reconnect from the beginning.
+                // R6: the reset + queue drain + connect all run ON the strand, so no
+                // in-flight async_write can observe a swapped game_server_socket_.
                 log_->error("Connection to Game Server lost: " + ec.message() + ". Reconnecting...");
-                if (game_server_socket_->is_open())
-                    game_server_socket_->close();
-                // Reset socket and drain pending sends
-                game_server_socket_ = std::make_shared<boost::asio::ip::tcp::socket>(io_context_game_server_);
                 boost::asio::post(strand_, [this]()
                     {
+                    boost::system::error_code ign;
+                    // Stop the heartbeat chain; connect() re-arms it on success.
+                    // (Otherwise chains accumulate across reconnects.)
+                    heartbeat_timer_.cancel(ign);
+                    game_server_socket_->close(ign);
+                    game_server_socket_ = std::make_shared<boost::asio::ip::tcp::socket>(io_context_game_server_);
                     while (!sendQueue_.empty()) sendQueue_.pop();
-                    writePending_ = false; });
-                connect(endpoints_, 0);
+                    writePending_ = false;
+                    connect(endpoints_, 0); });
             }
         });
 }

@@ -56,7 +56,12 @@ main()
         EventHandler eventHandler(networkManager, gameServerWorker, gameServices);
 
         // Initialize GameServer
-        ChunkServer chunkServer(gameServices, eventHandler, eventQueueChunkServer, eventQueueGameServer, eventQueueChunkServerPing, scheduler, gameServerWorker, networkManager);
+        // NOTE: argument order must match the ctor
+        // (eventQueueGameServer, eventQueueChunkServer, eventQueueGameServerPing).
+        // Swapping the first two silently crosses the game-data and client
+        // gameplay queues (both loops call the same processBatch, so nothing
+        // crashes — but queue-size logs and thread names lie).
+        ChunkServer chunkServer(gameServices, eventHandler, eventQueueGameServer, eventQueueChunkServer, eventQueueChunkServerPing, scheduler, gameServerWorker, networkManager);
 
         // Set the ChunkServer object in the NetworkManager
         networkManager.setChunkServer(&chunkServer);

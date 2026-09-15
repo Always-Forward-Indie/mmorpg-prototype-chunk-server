@@ -1,6 +1,7 @@
 #include "events/handlers/CharacterEventHandler.hpp"
 #include "events/EventData.hpp"
 #include "events/handlers/EquipmentEventHandler.hpp"
+#include "events/handlers/HarvestEventHandler.hpp"
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/handlers/MobEventHandler.hpp"
 #include "events/handlers/NPCEventHandler.hpp"
@@ -68,6 +69,39 @@ void
 CharacterEventHandler::setWorldObjectEventHandler(WorldObjectEventHandler *worldObjectEventHandler)
 {
     worldObjectEventHandler_ = worldObjectEventHandler;
+}
+
+void
+CharacterEventHandler::setHarvestEventHandler(HarvestEventHandler *harvestEventHandler)
+{
+    harvestEventHandler_ = harvestEventHandler;
+}
+
+void
+CharacterEventHandler::sendCellSnapshot(int clientId, float cx, float cy, float halfDiag)
+{
+    // Interest v2 enter-snapshot: everything a client must (re)create when a
+    // cell enters its subscription. All shapes reuse existing spawn-shaped
+    // events (client skips existing UIDs). Drops are covered by the existing
+    // move-gated ground snapshot (maybeSendGroundItemsToClient).
+    try
+    {
+        if (mobEventHandler_ != nullptr)
+            mobEventHandler_->sendCellMobsSnapshot(clientId, cx, cy, halfDiag);
+        if (harvestEventHandler_ != nullptr)
+            harvestEventHandler_->sendCellCorpsesSnapshot(clientId, cx, cy, halfDiag);
+        if (npcEventHandler_ != nullptr)
+        {
+            PositionStruct center;
+            center.positionX = cx;
+            center.positionY = cy;
+            npcEventHandler_->sendNPCSpawnDataToClient(clientId, center, halfDiag * 1.5f);
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("Error in sendCellSnapshot: " + std::string(ex.what()));
+    }
 }
 
 bool
@@ -302,6 +336,7 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
     if (staleClientId > 0)
     {
         gameServices_.getClientManager().removeClientData(staleClientId);
+        gameServices_.getInterestManager().removeClient(staleClientId);
     }
 
     // ── 6. Broadcast disconnectClient to all other players ───────────────────
@@ -753,6 +788,43 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
             gameServices_.getCharacterManager().setCharacterPosition(
                 movementData.characterId, movementData.position);
 
+            // Interest v2 (phase 5a): update spatial subscription; every newly
+            // entered cell gets an enter-snapshot (mobs + corpses + NPCs) so
+            // returning clients recreate entities instead of seeing ghosts.
+            // Never fails the move.
+            try
+            {
+                auto &interest = gameServices_.getInterestManager();
+                auto diff = interest.onPlayerMoved(
+                    clientID, movementData.characterId,
+                    movementData.position.positionX,
+                    movementData.position.positionY);
+                if (!diff.entered.empty())
+                {
+                    if (diff.entered.size() > 12)
+                    {
+                        log_->warn("sendCellSnapshot: " + std::to_string(diff.entered.size()) +
+                                   " entered cells for client " + std::to_string(clientID) +
+                                   " (teleport?)");
+                    }
+                    // Storm gate: at most one snapshot batch per client per
+                    // cooldown (skipped batches rely on the next enter; stationary
+                    // clients keep existing state, nothing is lost).
+                    if (interest.snapshotAllowed(clientID))
+                    {
+                        const float cs = interest.cellSize();
+                        for (const auto &cell : diff.entered)
+                        {
+                            sendCellSnapshot(clientID,
+                                (cell.cx + 0.5f) * cs, (cell.cy + 0.5f) * cs, cs * 0.75f);
+                        }
+                    }
+                }
+            }
+            catch (...)
+            {
+            }
+
             // Send ground items snapshot if player has moved far enough
             if (itemEventHandler_)
             {
@@ -852,8 +924,32 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
 
             gameServices_.getLogger().log("Client data map size: " + std::to_string(gameServices_.getClientManager().getClientsList().size()));
 
-            // Broadcast to all clients with timestamps
-            broadcastToAllClientsWithTimestamps("success", successResponse, timestamps);
+            // Interest v2 (phase 3): player movement goes to subscribers of
+            // the mover's cell (+ fail-open). Disabled interest falls back to
+            // legacy broadcast-all (recipientsFor returns empty).
+            {
+                auto clients = gameServices_.getClientManager().getClientsListReadOnly();
+                std::vector<std::pair<int, bool>> viewers;
+                viewers.reserve(clients.size());
+                for (const auto &c : clients)
+                    viewers.emplace_back(c.clientId, c.isWorldReady);
+                auto recipients = gameServices_.getInterestManager().recipientsFor(
+                    movementData.position.positionX, movementData.position.positionY,
+                    viewers, -1 /* include mover, legacy parity */);
+                if (recipients.empty() && gameServices_.getInterestManager().isEnabled())
+                {
+                    // Nobody subscribed and nobody fail-open: nobody to send to.
+                }
+                else if (recipients.empty())
+                {
+                    // Interest disabled: legacy broadcast-all.
+                    broadcastToAllClientsWithTimestamps("success", successResponse, timestamps);
+                }
+                else
+                {
+                    broadcastToClientIds("success", successResponse, timestamps, recipients);
+                }
+            }
         }
         else
         {
@@ -892,8 +988,19 @@ CharacterEventHandler::broadcastTitleChanged(int characterId, int excludeClientI
                                   .setBody("equippedTitleDisplayName", equippedDisplayName)
                                   .build();
 
-    std::string responseData = networkManager_.generateResponseMessage("success", response);
-    broadcastToAllClients(responseData, excludeClientId);
+    // Interest v2: title floats over the head — visible nearby; the owner
+    // always sees it via participants. Unknown position stays global.
+    float tx = 0.0f, ty = 0.0f;
+    if (charPos(characterId, tx, ty))
+    {
+        broadcastPositional("success", response, tx, ty,
+            {clientForCharacter(characterId)}, excludeClientId);
+    }
+    else
+    {
+        std::string responseData = networkManager_.generateResponseMessage("success", response);
+        broadcastToAllClients(responseData, excludeClientId);
+    }
 }
 
 void
@@ -1030,6 +1137,19 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     {
         log_->error("[PLAYER_READY] character " + std::to_string(characterId) + " not found in manager");
         return;
+    }
+
+    // Seed interest subscription at spawn (stationary clients never move, so
+    // the move-path hook alone would leave them unsubscribed = fail-open).
+    try
+    {
+        gameServices_.getInterestManager().onPlayerMoved(
+            clientID, characterId,
+            characterData.characterPosition.positionX,
+            characterData.characterPosition.positionY);
+    }
+    catch (...)
+    {
     }
 
     // 1. NPCs in range

@@ -36,6 +36,12 @@ class MobEventHandler : public BaseEventHandler
     void handleZoneMoveMobsEvent(const Event &event);
 
     /**
+     * @brief Cell enter-snapshot (interest v2): spawnMobsInZone-shaped unicast
+     * with mobs in the rect. Client-safe: SpawnMOB skips existing UIDs.
+     */
+    void sendCellMobsSnapshot(int clientId, float cx, float cy, float halfDiag);
+
+    /**
      * @brief Handle mob death event
      *
      * Sends notification to clients about mob death/removal

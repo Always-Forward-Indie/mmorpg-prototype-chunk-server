@@ -26,6 +26,12 @@ class GameServerWorker
     boost::asio::executor_work_guard<boost::asio::io_context::executor_type> work_;
     std::shared_ptr<boost::asio::ip::tcp::socket> game_server_socket_;
     boost::asio::steady_timer retry_timer_;
+    // Registration heartbeat: re-asserts the chunkServerConnection handshake
+    // every 60s so the game never permanently loses the chunk registration
+    // (stale-disconnect races, missed events). Idempotent server-side.
+    boost::asio::steady_timer heartbeat_timer_;
+    void scheduleHeartbeat();
+    std::string buildHandshakeMessage() const;
     std::vector<std::thread> io_threads_;
     EventQueue &eventQueue_;
     Logger &logger_;

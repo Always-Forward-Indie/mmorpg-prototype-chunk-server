@@ -173,6 +173,8 @@ class HarvestManager
      * @param networkManager NetworkManager for sending messages
      */
     void setManagerReferences(class ClientManager *clientManager, class NetworkManager *networkManager);
+    // Interest v2 (phase 4): harvest broadcasts go to cell subscribers.
+    void setInterestManager(class InterestManager *interest);
 
     /**
      * @brief Broadcast harvest start notification to all clients
@@ -218,6 +220,12 @@ class HarvestManager
     // Manager references for broadcasting
     class ClientManager *clientManager_;
     class NetworkManager *networkManager_;
+    class InterestManager *interest_ = nullptr;
+
+    // Positional send: subscribers of (x, y) + participant + fail-open.
+    // hasPos == false (or interest unset/disabled) => legacy broadcast-all.
+    void sendToInterested(const std::string &messageData, float x, float y,
+        bool hasPos, int participantClientId);
 
     // Store all harvestable corpses (corpseUID -> HarvestableCorpseStruct)
     std::unordered_map<int, HarvestableCorpseStruct> harvestableCorpses_;

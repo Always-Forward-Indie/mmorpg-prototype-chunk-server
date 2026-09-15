@@ -34,6 +34,11 @@ class BaseEventHandler
     virtual ~BaseEventHandler() = default;
 
   protected:
+    // Packet route resolver for broadcastRouted (static: no instance state
+    // beyond the handler's own protected lookups).
+    static bool resolveRoute(BaseEventHandler &h, const nlohmann::json &packet,
+        float &x, float &y, std::vector<int> &participants);
+
     /**
      * @brief Safely get client socket from event
      *
@@ -99,6 +104,17 @@ class BaseEventHandler
         int excludeClientId = -1);
 
     /**
+     * @brief Send a broadcast payload to an explicit recipient list
+     * (interest v2: subscribers + fail-open). Empty list = send to nobody;
+     * callers fall back to broadcastToAllClients* when interest is disabled.
+     */
+    void broadcastToClientIds(
+        const std::string &status,
+        const nlohmann::json &response,
+        const TimestampStruct &timestamps,
+        const std::vector<int> &recipientIds);
+
+    /**
      * @brief Send error response to client
      *
      * @param clientSocket Client socket to send response to
@@ -141,6 +157,44 @@ class BaseEventHandler
      * @param response JSON response data
      */
     void sendGameServerResponse(const std::string &status, const nlohmann::json &response);
+
+    /**
+     * @brief Positional broadcast (interest v2): subscribers of the (x, y)
+     * cell + explicit participant clientIds + fail-open clients.
+     * Falls back to broadcast-all when interest is disabled or the position
+     * is unknown. Participants are ALWAYS included (owner must see own
+     * actions even across cells).
+     */
+    void broadcastPositional(const std::string &status, const nlohmann::json &response,
+        const TimestampStruct &timestamps, float x, float y,
+        const std::vector<int> &participantClientIds, int excludeClientId = -1);
+    void broadcastPositional(const std::string &status, const nlohmann::json &response,
+        float x, float y, const std::vector<int> &participantClientIds,
+        int excludeClientId = -1);
+
+    /**
+     * @brief Routed broadcast: inspects packet body for casterId/characterId,
+     * resolves position + participants, then broadcastPositional().
+     * Unknown shape or unresolvable position => legacy broadcast-all
+     * (fail-open, never drops).
+     */
+    void broadcastRouted(const std::string &status, const nlohmann::json &packet);
+    void broadcastRouted(const std::string &status, const nlohmann::json &packet,
+        const TimestampStruct &timestamps);
+
+    /**
+     * @brief Positional send of an already-encoded payload (wire bytes
+     * unchanged): subscribers of (x, y) + participants + fail-open.
+     * For legacy raw-string broadcasts (e.g. characterMoved teleports).
+     */
+    void sendPositionalRaw(const std::string &rawData, float x, float y,
+        const std::vector<int> &participantClientIds, int excludeClientId = -1);
+
+    // Position lookups (false when unknown => caller fails open to global).
+    bool charPos(int characterId, float &x, float &y);
+    bool mobPos(int mobUid, float &x, float &y);
+    // clientId for a character, 0 when offline/unknown.
+    int clientForCharacter(int characterId);
 
     /**
      * @brief Broadcast message to all connected clients

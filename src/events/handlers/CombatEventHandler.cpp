@@ -41,8 +41,10 @@ CombatEventHandler::sendBroadcast(const nlohmann::json &packet)
     try
     {
         std::string messageType = "success"; // По умолчанию success для AI атак
-        std::string responseData = networkManager_.generateResponseMessage(messageType, packet);
-        broadcastToAllClients(responseData);
+        // Interest v2 (phase 4): route by caster/character position when the
+        // packet shape allows it; mixed personal packets (exp/stats) still
+        // reach their owner via participants; unknown shapes stay global.
+        broadcastRouted(messageType, packet);
     }
     catch (const std::exception &ex)
     {
@@ -285,17 +287,34 @@ CombatEventHandler::updateOngoingActions()
                     gameServerWorker_.sendDataToGameServer(savePos.dump() + "\n");
                 }
 
-                // 3. Broadcast position update to other players
-                {
-                    nlohmann::json posBroadcast;
-                    posBroadcast["header"]["eventType"] = "characterMoved";
-                    posBroadcast["body"]["characterId"] = characterId;
-                    posBroadcast["body"]["posX"] = dest.positionX;
-                    posBroadcast["body"]["posY"] = dest.positionY;
-                    posBroadcast["body"]["posZ"] = dest.positionZ;
-                    posBroadcast["body"]["rotZ"] = dest.rotationZ;
-                    broadcastToAllClients(posBroadcast.dump() + "\n", casterClientId);
-                }
+        // 3. Broadcast position update to other players.
+        // Interest v2 (phase 4): subscribers of the DESTINATION cell
+        // (+ fail-open). Wire bytes unchanged (raw, no envelope).
+        // Teleports also notify the SOURCE cell so watchers there drop the
+        // ghost instead of tracking a stale position forever.
+        {
+            nlohmann::json posBroadcast;
+            posBroadcast["header"]["eventType"] = "characterMoved";
+            posBroadcast["body"]["characterId"] = characterId;
+            posBroadcast["body"]["posX"] = dest.positionX;
+            posBroadcast["body"]["posY"] = dest.positionY;
+            posBroadcast["body"]["posZ"] = dest.positionZ;
+            posBroadcast["body"]["rotZ"] = dest.rotationZ;
+            const std::string raw = posBroadcast.dump() + "\n";
+            float ox = 0.0f, oy = 0.0f;
+            const bool haveOld = charPos(characterId, ox, oy);
+            sendPositionalRaw(raw, dest.positionX, dest.positionY, {}, casterClientId);
+            if (haveOld)
+            {
+                // Same-cell teleports must not duplicate the packet.
+                const float cs = gameServices_.getInterestManager().cellSize();
+                const auto dstCell = InterestManager::cellFor(
+                    dest.positionX, dest.positionY, cs);
+                const auto srcCell = InterestManager::cellFor(ox, oy, cs);
+                if (!(dstCell == srcCell))
+                    sendPositionalRaw(raw, ox, oy, {}, casterClientId);
+            }
+        }
 
                 // Reset server-side movement validation state so the next
                 // moveCharacter packet is not rejected as a speed violation.
@@ -446,10 +465,9 @@ CombatEventHandler::broadcastSkillInitiation(const SkillInitiationResult &result
     {
         auto response = responseBuilder_->buildSkillInitiationBroadcast(result);
         std::string messageType = result.success ? "success" : "error";
-        std::string responseData = networkManager_.generateResponseMessage(messageType, response);
 
-        // Отправляем всем клиентам
-        broadcastToAllClients(responseData);
+        // Interest v2 (phase 4): spectators = subscribers of caster cell.
+        broadcastRouted(messageType, response);
     }
     catch (const std::exception &ex)
     {
@@ -464,10 +482,9 @@ CombatEventHandler::broadcastSkillExecution(const SkillExecutionResult &result)
     {
         auto response = responseBuilder_->buildSkillExecutionBroadcast(result);
         std::string messageType = result.success ? "success" : "error";
-        std::string responseData = networkManager_.generateResponseMessage(messageType, response);
 
-        // Отправляем всем клиентам
-        broadcastToAllClients(responseData);
+        // Interest v2 (phase 4): spectators = subscribers of caster cell.
+        broadcastRouted(messageType, response);
     }
     catch (const std::exception &ex)
     {
@@ -588,7 +605,9 @@ CombatEventHandler::dispatchSkillAction(int characterId,
             gameServerWorker_.sendDataToGameServer(savePos.dump() + "\n");
         }
 
-        // 3. Broadcast position update to all other players in the chunk
+        // 3. Broadcast position update to players interested in the
+        // destination (interest v2, phase 4; wire bytes unchanged). The
+        // source cell is notified too so no ghost remains behind.
         {
             nlohmann::json posBroadcast;
             posBroadcast["header"]["eventType"] = "characterMoved";
@@ -597,7 +616,17 @@ CombatEventHandler::dispatchSkillAction(int characterId,
             posBroadcast["body"]["posY"] = dest.positionY;
             posBroadcast["body"]["posZ"] = dest.positionZ;
             posBroadcast["body"]["rotZ"] = dest.rotationZ;
-            broadcastToAllClients(posBroadcast.dump() + "\n", casterClientId);
+            const std::string raw = posBroadcast.dump() + "\n";
+            float ox = 0.0f, oy = 0.0f;
+            const bool haveOld = charPos(characterId, ox, oy);
+            sendPositionalRaw(raw, dest.positionX, dest.positionY, {}, casterClientId);
+            if (haveOld)
+            {
+                const float cs = gameServices_.getInterestManager().cellSize();
+                if (!(InterestManager::cellFor(dest.positionX, dest.positionY, cs) ==
+                      InterestManager::cellFor(ox, oy, cs)))
+                    sendPositionalRaw(raw, ox, oy, {}, casterClientId);
+            }
         }
 
         // Reset server-side movement validation state so the next

@@ -13,6 +13,7 @@ class ItemEventHandler;
 class MobEventHandler;
 class EquipmentEventHandler;
 class WorldObjectEventHandler;
+class HarvestEventHandler;
 
 /**
  * @brief Structure to hold pending join requests
@@ -72,6 +73,18 @@ class CharacterEventHandler : public BaseEventHandler
      * @brief Set world-object event handler for sending WIO data on join
      */
     void setWorldObjectEventHandler(WorldObjectEventHandler *worldObjectEventHandler);
+
+    /**
+     * @brief Set harvest event handler for cell enter-snapshots (corpses)
+     */
+    void setHarvestEventHandler(HarvestEventHandler *harvestEventHandler);
+
+    /**
+     * @brief Cell enter-snapshot (interest v2): mobs + corpses + NPCs of the
+     * cell around (cx, cy) as unicast spawn-shaped packets (client-safe:
+     * existing UIDs are skipped client-side).
+     */
+    void sendCellSnapshot(int clientId, float cx, float cy, float halfDiag);
 
     /**
      * @brief Handle character join event
@@ -268,6 +281,9 @@ class CharacterEventHandler : public BaseEventHandler
 
     // Reference to world-object event handler for sending WIO data on player join
     WorldObjectEventHandler *worldObjectEventHandler_{nullptr};
+
+    // Reference to harvest event handler for cell enter-snapshots (corpses)
+    HarvestEventHandler *harvestEventHandler_{nullptr};
 
     // Last known GameZone id per characterId — used to detect zone transitions
     std::unordered_map<int, int> lastZoneByCharacter_;

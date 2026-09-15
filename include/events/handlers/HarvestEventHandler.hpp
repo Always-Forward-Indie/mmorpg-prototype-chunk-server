@@ -37,6 +37,12 @@ class HarvestEventHandler : public BaseEventHandler
     void handleGetNearbyCorpses(const Event &event);
 
     /**
+     * @brief Cell enter-snapshot (interest v2): nearbyCorpsesResponse-shaped
+     * unicast with corpses in the rect (same fields as the request path).
+     */
+    void sendCellCorpsesSnapshot(int clientId, float cx, float cy, float halfDiag);
+
+    /**
      * @brief Handle harvest cancellation request
      *
      * Cancels active harvest for a player

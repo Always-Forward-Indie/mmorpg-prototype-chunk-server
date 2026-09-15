@@ -203,6 +203,21 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 }
             }
 
+            // Stale-event guard: disconnect events are processed async and may
+            // arrive AFTER the same clientId reconnected. Never wipe a live
+            // session — only remove when the registered socket is gone/closed.
+            {
+                auto liveSocket = gameServices_.getClientManager().getClientSocket(passedClientData.clientId);
+                bool live = false;
+                try { live = liveSocket && liveSocket->is_open(); } catch (...) {}
+                if (live)
+                {
+                    log_->info("Client " + std::to_string(passedClientData.clientId) +
+                               " has a live socket — stale disconnect event, skipping removal.");
+                    return;
+                }
+            }
+
             // Get the list of clients BEFORE removing the disconnecting client
             std::vector<ClientDataStruct> clientDataMap;
             try
@@ -218,6 +233,7 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
             // Remove the client data
             gameServices_.getClientManager().removeClientData(passedClientData.clientId);
             gameServices_.getClientManager().removePingTime(passedClientData.clientId);
+            gameServices_.getInterestManager().removeClient(passedClientData.clientId);
 
             // Only save and clean up character data if the character is actually loaded in CharacterManager
             if (passedClientData.characterId > 0)

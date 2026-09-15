@@ -3,6 +3,7 @@
 #include "events/EventQueue.hpp"
 #include "network/NetworkManager.hpp"
 #include "services/ClientManager.hpp"
+#include "services/InterestManager.hpp"
 #include "services/InventoryManager.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <algorithm>
@@ -33,6 +34,48 @@ HarvestManager::setManagerReferences(ClientManager *clientManager, NetworkManage
 {
     clientManager_ = clientManager;
     networkManager_ = networkManager;
+}
+
+void
+HarvestManager::setInterestManager(InterestManager *interest)
+{
+    interest_ = interest;
+}
+
+void
+HarvestManager::sendToInterested(const std::string &messageData, float x, float y,
+    bool hasPos, int participantClientId)
+{
+    auto clientsList = clientManager_->getClientsListReadOnly();
+    const bool routed = hasPos && interest_ != nullptr && interest_->isEnabled();
+    if (!routed)
+    {
+        // No position, interest unset/disabled: legacy broadcast-all.
+        for (const auto &client : clientsList)
+        {
+            auto sock = clientManager_->getClientSocket(client.clientId);
+            if (sock)
+                networkManager_->sendResponse(sock, messageData);
+        }
+        return;
+    }
+    std::vector<std::pair<int, bool>> viewers;
+    viewers.reserve(clientsList.size());
+    for (const auto &c : clientsList)
+        viewers.emplace_back(c.clientId, c.isWorldReady);
+    auto ids = interest_->recipientsFor(x, y, viewers, -1);
+    if (participantClientId > 0 &&
+        std::find(ids.begin(), ids.end(), participantClientId) == ids.end())
+        ids.push_back(participantClientId);
+    if (ids.empty())
+        return;
+    auto dataPtr = std::make_shared<const std::string>(messageData);
+    for (int id : ids)
+    {
+        auto sock = clientManager_->getClientSocket(id);
+        if (sock)
+            networkManager_->sendResponse(sock, dataPtr);
+    }
 }
 
 void
@@ -764,24 +807,13 @@ HarvestManager::broadcastHarvestStart(int characterId, int corpseUID, const Posi
             return;
         }
 
-        log_->info("[HARVEST] Starting to send messages to clients");
-        for (const auto &client : clientsList)
-        {
-            log_->info("[HARVEST] Processing client " + std::to_string(client.clientId));
-            auto clientSocket = clientManager_->getClientSocket(client.clientId);
-            if (clientSocket)
-            {
-                log_->info("[HARVEST] Sending message to client " + std::to_string(client.clientId));
-                networkManager_->sendResponse(clientSocket, messageData);
-                log_->info("[HARVEST] Sent message to client " + std::to_string(client.clientId));
-            }
-            else
-            {
-                log_->info("[HARVEST] No socket for client " + std::to_string(client.clientId));
-            }
-        }
+        // Interest v2 (phase 4): subscribers of the harvest cell.
+        const int participant =
+            clientManager_->getClientDataByCharacterId(characterId).clientId;
+        sendToInterested(messageData, playerPosition.positionX,
+            playerPosition.positionY, true, participant);
 
-        logger_.log("[HARVEST] Broadcasted harvest start to " + std::to_string(clientsList.size()) + " clients");
+        logger_.log("[HARVEST] Broadcasted harvest start to interested clients");
     }
     catch (const std::exception &e)
     {
@@ -800,8 +832,6 @@ HarvestManager::broadcastHarvestComplete(int characterId, int corpseUID, const P
 
     try
     {
-        auto clientsList = clientManager_->getClientsListReadOnly();
-
         // Создаем правильную структуру для generateResponseMessage
         nlohmann::json broadcastMessage;
 
@@ -827,16 +857,13 @@ HarvestManager::broadcastHarvestComplete(int characterId, int corpseUID, const P
 
         std::string messageData = networkManager_->generateResponseMessage("success", broadcastMessage);
 
-        for (const auto &client : clientsList)
-        {
-            auto clientSocket = clientManager_->getClientSocket(client.clientId);
-            if (clientSocket)
-            {
-                networkManager_->sendResponse(clientSocket, messageData);
-            }
-        }
+        // Interest v2 (phase 4): subscribers of the harvest cell.
+        const int participant =
+            clientManager_->getClientDataByCharacterId(characterId).clientId;
+        sendToInterested(messageData, playerPosition.positionX,
+            playerPosition.positionY, true, participant);
 
-        logger_.log("[HARVEST] Broadcasted harvest complete to " + std::to_string(clientsList.size()) + " clients");
+        logger_.log("[HARVEST] Broadcasted harvest complete to interested clients");
     }
     catch (const std::exception &e)
     {
@@ -855,8 +882,6 @@ HarvestManager::broadcastHarvestCancel(int characterId, int corpseUID, const std
 
     try
     {
-        auto clientsList = clientManager_->getClientsListReadOnly();
-
         // Создаем правильную структуру для generateResponseMessage
         nlohmann::json broadcastMessage;
 
@@ -875,16 +900,24 @@ HarvestManager::broadcastHarvestCancel(int characterId, int corpseUID, const std
 
         std::string messageData = networkManager_->generateResponseMessage("success", broadcastMessage);
 
-        for (const auto &client : clientsList)
+        // Interest v2 (phase 4): subscribers of the corpse cell (corpse may
+        // be gone already => fail-open global). Cancelling client participates.
+        bool hasPos = false;
+        float cx = 0.0f, cy = 0.0f;
         {
-            auto clientSocket = clientManager_->getClientSocket(client.clientId);
-            if (clientSocket)
+            auto corpse = getCorpseByUID(corpseUID);
+            if (corpse.mobUID != 0)
             {
-                networkManager_->sendResponse(clientSocket, messageData);
+                cx = corpse.position.positionX;
+                cy = corpse.position.positionY;
+                hasPos = true;
             }
         }
+        const int participant =
+            clientManager_->getClientDataByCharacterId(characterId).clientId;
+        sendToInterested(messageData, cx, cy, hasPos, participant);
 
-        logger_.log("[HARVEST] Broadcasted harvest cancel to " + std::to_string(clientsList.size()) + " clients");
+        logger_.log("[HARVEST] Broadcasted harvest cancel to interested clients");
     }
     catch (const std::exception &e)
     {
@@ -903,8 +936,6 @@ HarvestManager::broadcastCorpseRemoved(int corpseUID)
 
     try
     {
-        auto clientsList = clientManager_->getClientsListReadOnly();
-
         nlohmann::json broadcastMessage;
         broadcastMessage["header"]["eventType"] = "corpseRemoved";
         broadcastMessage["header"]["message"] = "Corpse removed";
@@ -917,17 +948,23 @@ HarvestManager::broadcastCorpseRemoved(int corpseUID)
 
         std::string messageData = networkManager_->generateResponseMessage("success", broadcastMessage);
 
-        for (const auto &client : clientsList)
+        // Interest v2 (phase 4): subscribers of the corpse cell. The corpse
+        // row may already be erased => fail-open global (correct: everyone
+        // drops a visual they might hold).
+        bool hasPos = false;
+        float cx = 0.0f, cy = 0.0f;
         {
-            auto clientSocket = clientManager_->getClientSocket(client.clientId);
-            if (clientSocket)
+            auto corpse = getCorpseByUID(corpseUID);
+            if (corpse.mobUID != 0)
             {
-                networkManager_->sendResponse(clientSocket, messageData);
+                cx = corpse.position.positionX;
+                cy = corpse.position.positionY;
+                hasPos = true;
             }
         }
+        sendToInterested(messageData, cx, cy, hasPos, 0);
 
-        logger_.log("[HARVEST] Broadcasted corpse removed (UID=" + std::to_string(corpseUID) +
-                    ") to " + std::to_string(clientsList.size()) + " clients");
+        logger_.log("[HARVEST] Broadcasted corpse removed (UID=" + std::to_string(corpseUID) + ")");
     }
     catch (const std::exception &e)
     {

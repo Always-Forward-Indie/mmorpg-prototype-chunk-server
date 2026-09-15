@@ -163,8 +163,9 @@ EmoteEventHandler::handleUseEmoteEvent(const Event &event)
             return;
         }
 
-        // Broadcast emote action to ALL clients in the zone (including the sender — client
-        // can optimistically play locally, but authoritative broadcast confirms it)
+        // Broadcast emote action to subscribers of the actor's cell
+        // (interest v2, phase 4; including the sender — client can play
+        // locally, but authoritative broadcast confirms it).
         nlohmann::json broadcast;
         broadcast["header"]["eventType"] = "emoteAction";
         broadcast["header"]["status"] = "success";
@@ -173,8 +174,17 @@ EmoteEventHandler::handleUseEmoteEvent(const Event &event)
         broadcast["body"]["animationName"] = def.animationName;
         broadcast["body"]["serverTimestamp"] = req.timestamps.serverRecvMs;
 
-        broadcastToAllClients(
-            networkManager_.generateResponseMessage("success", broadcast));
+        float ex = 0.0f, ey = 0.0f;
+        if (charPos(req.characterId, ex, ey))
+        {
+            broadcastPositional("success", broadcast, ex, ey,
+                {clientForCharacter(req.characterId)});
+        }
+        else
+        {
+            broadcastToAllClients(
+                networkManager_.generateResponseMessage("success", broadcast));
+        }
 
         log_->info("[Emote] char={} plays emote '{}'", req.characterId, req.emoteSlug);
     }

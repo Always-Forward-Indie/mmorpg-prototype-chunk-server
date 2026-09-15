@@ -51,9 +51,21 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 
     // Set manager references for HarvestManager to broadcast harvest events
     gameServices_.getHarvestManager().setManagerReferences(&gameServices_.getClientManager(), &networkManager_);
+    gameServices_.getHarvestManager().setInterestManager(&gameServices_.getInterestManager());
 
     // Set CombatSystem for MobMovementManager to handle mob attacks
     gameServices_.getMobMovementManager().setCombatSystem(eventHandler_.getCombatEventHandler().getCombatSystem());
+
+    // Interest v2 (phase 1: track + metrics only, fan-out untouched).
+    // All geometry is live-tunable via GameConfigService (game_config table).
+    gameServices_.getInterestManager().configure(
+        gameServices_.getGameConfigService().getFloat("interest.cell_size", 1500.0f),
+        gameServices_.getGameConfigService().getInt("interest.view_radius", 1),
+        gameServices_.getGameConfigService().getFloat("interest.rehome_margin_frac", 0.15f),
+        gameServices_.getGameConfigService().getBool("interest.enabled", true));
+    gameServices_.getInterestManager().setSnapshots(
+        gameServices_.getGameConfigService().getBool("interest.snapshots", true),
+        gameServices_.getGameConfigService().getInt("interest.snapshot_cooldown_ms", 2000));
 
     // Set MobManager so MobAIController can look up skill templates (plan §2.1)
     gameServices_.getMobMovementManager().setMobManager(&gameServices_.getMobManager());
@@ -583,6 +595,53 @@ ChunkServer::mainEventLoopCH()
             auto connectedClients = gameServices_.getClientManager().getClientsListReadOnly();
             std::unordered_map<int, std::vector<MobMoveUpdateStruct>> clientUpdates;
             clientUpdates.reserve(connectedClients.size());
+            // Dedup: one client can match several sources at once (subscribed
+            // cell + watchlist + fail-open). Remember last mob uid per client.
+            std::unordered_map<int, int> lastUidByClient;
+            lastUidByClient.reserve(connectedClients.size() * 2);
+            auto pushUpdate = [&](int clientId, const MobMoveUpdateStruct &u)
+            {
+                auto it = lastUidByClient.find(clientId);
+                if (it != lastUidByClient.end() && it->second == u.uid)
+                    return;
+                lastUidByClient[clientId] = u.uid;
+                clientUpdates[clientId].push_back(u);
+            };
+
+            // Interest v2 (phase 2): fan out mob updates to subscribers of the
+            // mob's cell. Fail-open set (per tick): untracked clients (never
+            // moved/joined yet) and clients still loading (!isWorldReady) get
+            // everything — identical to legacy broadcast for them. Disabled
+            // interest (config) also falls back to legacy broadcast.
+            auto &interest = gameServices_.getInterestManager();
+            const bool useInterest = interest.isEnabled();
+            InterestManager::Snapshot interestSnap;
+            std::unordered_map<int, std::vector<int>> interestWatch;
+            float interestCell = 1500.0f;
+            std::vector<int> failOpen;
+            if (useInterest)
+            {
+                interestSnap = interest.snapshot();
+                interestWatch = interest.watchIndex();
+                interestCell = interest.cellSize();
+                failOpen.reserve(connectedClients.size());
+                for (const auto &client : connectedClients)
+                {
+                    if (client.clientId <= 0)
+                        continue;
+                    if (!client.isWorldReady ||
+                        interestSnap.tracked.find(client.clientId) == interestSnap.tracked.end())
+                        failOpen.push_back(client.clientId);
+                }
+            }
+
+            // SPATIAL v1 was REVERTED (2026-09-14): distance culling made distant
+            // mobs "ghosts" — clients track positions only from spawn lists +
+            // move updates, so culled mobs froze in client state and hunters
+            // chased stale points forever (kill/quest regressions). At the
+            // current ≤200 cap, global fan-out is cheap enough (bulk lane);
+            // proper v2 needs per-client subscriptions (zone enter → full sync
+            // + thin updates), not blind culling. See plan notes.
 
             for (const auto &zone : spawnZones)
             {
@@ -607,10 +666,46 @@ ChunkServer::mainEventLoopCH()
 
                     auto mvData = gameServices_.getMobMovementManager().getMobMovementData(mob.uid);
 
-                    // Per-mob rate limit: patrol gets 200ms budget, combat 100ms.
-                    // forceNextUpdate bypasses the limit for instant state-change delivery.
+                    // Per-mob rate limit with interest tiering (phase 5b):
+                    // - same-cell subscribers or fail-open clients: combat
+                    //   100ms / patrol 200ms (legacy budgets, smooth nearby);
+                    // - only neighbouring cells subscribed: 500ms thin woods;
+                    // - nobody around (watchers only): 1000ms trickle so a
+                    //   tracked target never freezes completely.
+                    // forceNextUpdate bypasses the limit for instant
+                    // state-change delivery in every tier.
                     const bool isActiveCombat = (mvData.combatState != MobCombatState::PATROLLING);
-                    const int64_t minIntervalMs = isActiveCombat ? 100 : 200;
+                    int64_t minIntervalMs = isActiveCombat ? 100 : 200;
+                    if (useInterest)
+                    {
+                        size_t sameSubs = 0;
+                        bool nearSubs = false;
+                        const auto mcell = InterestManager::cellFor(
+                            mob.position.positionX, mob.position.positionY, interestCell);
+                        const auto mcit = interestSnap.members.find(mcell);
+                        if (mcit != interestSnap.members.end())
+                            sameSubs = mcit->second.size();
+                        if (sameSubs == 0)
+                        {
+                            for (int dx = -1; dx <= 1 && !nearSubs; ++dx)
+                                for (int dy = -1; dy <= 1; ++dy)
+                                {
+                                    if (dx == 0 && dy == 0)
+                                        continue;
+                                    InterestManager::CellKey nc{
+                                        static_cast<int32_t>(mcell.cx + dx),
+                                        static_cast<int32_t>(mcell.cy + dy)};
+                                    const auto nit = interestSnap.members.find(nc);
+                                    if (nit != interestSnap.members.end() && !nit->second.empty())
+                                    {
+                                        nearSubs = true;
+                                        break;
+                                    }
+                                }
+                        }
+                        if (sameSubs == 0 && failOpen.empty())
+                            minIntervalMs = nearSubs ? 500 : 1000;
+                    }
 
                     if (!mvData.forceNextUpdate && (nowMs - mvData.lastBroadcastMs) < minIntervalMs)
                         continue;
@@ -664,23 +759,47 @@ ChunkServer::mainEventLoopCH()
 
                     gameServices_.getMobMovementManager().updateLastBroadcastMs(mob.uid, nowMs);
 
-                    for (const auto &client : connectedClients)
+                    if (!useInterest)
                     {
-                        if (client.clientId <= 0)
-                            continue;
-                        clientUpdates[client.clientId].push_back(upd);
+                        for (const auto &client : connectedClients)
+                        {
+                            if (client.clientId <= 0)
+                                continue;
+                            clientUpdates[client.clientId].push_back(upd);
+                        }
+                        continue;
                     }
+                    const auto cell = InterestManager::cellFor(
+                        mob.position.positionX, mob.position.positionY, interestCell);
+                    const auto subsIt = interestSnap.members.find(cell);
+                    if (subsIt != interestSnap.members.end())
+                    {
+                        for (int subId : subsIt->second)
+                            pushUpdate(subId, upd);
+                    }
+                    const auto watchIt = interestWatch.find(mob.uid);
+                    if (watchIt != interestWatch.end())
+                    {
+                        for (int watchId : watchIt->second)
+                            pushUpdate(watchId, upd);
+                    }
+                    for (int foId : failOpen)
+                        pushUpdate(foId, upd);
                 }
             }
 
             // Push ONE event per connected client containing ALL zone updates.
             // This replaces the old per-zone-per-client approach that produced
             // N_zones × N_clients events per tick.
+            uint64_t tickBuilt = 0;
             for (auto &[clientId, updates] : clientUpdates)
             {
+                tickBuilt += updates.size();
                 Event mobUpdateEvent(Event::MOB_MOVE_UPDATE, clientId, std::move(updates));
                 eventQueueGameServer_.push(std::move(mobUpdateEvent));
             }
+            if (useInterest)
+                interest.recordFanout(tickBuilt, clientUpdates.size());
         },
         50, // 50ms scheduling resolution; actual mob movement is gated internally
         std::chrono::steady_clock::now(),
@@ -745,6 +864,18 @@ ChunkServer::mainEventLoopCH()
             gameServices_.getLogger().log("Chunk Server Queue size: " + std::to_string(eventQueueChunkServer_.size()), BLUE);
             gameServices_.getLogger().log("Ping Queue size: " + std::to_string(eventQueueGameServerPing_.size()), BLUE);
             gameServices_.getLogger().log("ThreadPool Queue size: " + std::to_string(threadPool_.getTaskQueueSize()), BLUE);
+            {
+                auto istats = gameServices_.getInterestManager().stats();
+                gameServices_.getLogger().log(
+                    "Interest: clients=" + std::to_string(istats.trackedClients) +
+                    " cells=" + std::to_string(istats.liveCells) +
+                    " subs=" + std::to_string(istats.totalSubs) +
+                    " resubscribes=" + std::to_string(istats.resubscribes) +
+                    " tickMobs=" + std::to_string(istats.tickMobs) +
+                    " tickEvents=" + std::to_string(istats.tickEvents) +
+                    " snaps=" + std::to_string(istats.snapshotsSent) +
+                    "/" + std::to_string(istats.snapshotsSkipped), BLUE);
+            }
 
             // If any queue is getting too large, log a warning
             if (eventQueueGameServer_.size() > 500 || eventQueueChunkServer_.size() > 500 || eventQueueGameServerPing_.size() > 500 || threadPool_.getTaskQueueSize() > 500)
@@ -789,7 +920,9 @@ ChunkServer::mainEventLoopCH()
         {
             try
             {
-                gameServices_.getLootManager().cleanupOldDroppedItems(300); // 5 minutes
+                // TTL lives in GameConfigService (drop.ttl_sec, default 300).
+                const int ttlSec = gameServices_.getGameConfigService().getInt("drop.ttl_sec", 300);
+                gameServices_.getLootManager().cleanupOldDroppedItems(ttlSec);
             }
             catch (const std::exception &ex)
             {
@@ -823,8 +956,10 @@ ChunkServer::mainEventLoopCH()
                 auto mobsInZone = gameServices_.getMobInstanceManager().getMobInstancesInZone(zone.second.zoneId);
                 std::vector<int> deadMobUIDs;
 
-                // Find dead mobs whose corpse timer has expired
-                constexpr int64_t CORPSE_DURATION_MS = 60'000; // corpse lies for 60 s
+                // Find dead mobs whose corpse timer has expired.
+                // TTL lives in GameConfigService (corpse.ttl_ms, default 60 s).
+                const int64_t CORPSE_DURATION_MS = static_cast<int64_t>(
+                    gameServices_.getGameConfigService().getInt("corpse.ttl_ms", 60'000));
                 auto now = std::chrono::steady_clock::now();
                 for (const auto &mob : mobsInZone)
                 {
@@ -1279,6 +1414,12 @@ ChunkServer::mainEventLoopCH()
                 auto inactiveIds = gameServices_.getClientManager().getInactiveClientIds(PING_TIMEOUT_SEC);
                 for (int clientId : inactiveIds)
                 {
+                    // Grace: clients still loading the world (no playerReady yet)
+                    // must not be reaped — scene + F4 flood can exceed 30s.
+                    if (!gameServices_.getClientManager().isClientWorldReady(clientId))
+                    {
+                        continue;
+                    }
                     // Verify client still exists and has a closed/broken socket
                     auto clientData = gameServices_.getClientManager().getClientData(clientId);
                     if (clientData.clientId == 0)

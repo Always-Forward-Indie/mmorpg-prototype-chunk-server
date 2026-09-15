@@ -104,6 +104,52 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
 }
 
 void
+MobEventHandler::sendCellMobsSnapshot(int clientId, float cx, float cy, float halfDiag)
+{
+    try
+    {
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (!clientSocket || !clientSocket->is_open())
+            return;
+
+        // Rect query via radius covering the cell diagonal (overlap harmless:
+        // client SpawnMOB skips existing UIDs).
+        auto mobs = gameServices_.getMobInstanceManager().getMobsInRange(cx, cy, halfDiag * 1.5f);
+        nlohmann::json mobsArray = nlohmann::json::array();
+        size_t cap = 150; // bound teleport-into-crowd spikes
+        for (const auto &mob : mobs)
+        {
+            if (mob.isDead || mobsArray.size() >= cap)
+                continue;
+            nlohmann::json mobJson = mobToJson(mob);
+            mobJson["combatState"] = static_cast<int>(
+                gameServices_.getMobMovementManager().getMobMovementData(mob.uid).combatState);
+            mobsArray.push_back(std::move(mobJson));
+        }
+        if (mobsArray.empty())
+            return;
+
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("message", "Cell snapshot: mobs in area")
+                                      .setHeader("hash", "")
+                                      .setHeader("clientId", clientId)
+                                      .setHeader("eventType", "spawnMobsInZone")
+                                      .setBody("zoneId", -1)
+                                      .setBody("mobs", mobsArray)
+                                      .build();
+
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", response));
+        log_->info("Cell snapshot: " + std::to_string(mobsArray.size()) +
+                   " mobs to client " + std::to_string(clientId));
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("Error in sendCellMobsSnapshot: " + std::string(ex.what()));
+    }
+}
+
+void
 MobEventHandler::sendSpawnZonesToClient(int clientID, std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket)
 {
     if (!clientSocket || !clientSocket->is_open())
@@ -324,8 +370,17 @@ MobEventHandler::handleMobDeathEvent(const Event &event)
                                           .setBody("zoneId", zoneId)
                                           .build();
 
-            std::string responseData = networkManager_.generateResponseMessage("success", response);
-            broadcastToAllClients(responseData);
+            // Interest v2 (phase 4): death is visible nearby (harvesters must
+            // see it); unresolvable position (instance already reaped) stays
+            // global. No participants: corpse discovery is positional.
+            float dx = 0.0f, dy = 0.0f;
+            if (mobPos(mobUID, dx, dy))
+                broadcastPositional("success", response, dx, dy, {});
+            else
+            {
+                std::string responseData = networkManager_.generateResponseMessage("success", response);
+                broadcastToAllClients(responseData);
+            }
         }
         else
         {
@@ -371,8 +426,18 @@ MobEventHandler::handleMobTargetLostEvent(const Event &event)
                                           .setBody("rotationZ", targetLostData["rotationZ"])
                                           .build();
 
-            std::string responseData = networkManager_.generateResponseMessage("success", response);
-            broadcastToAllClients(responseData);
+            // Interest v2 (phase 4): positional by the body coordinates.
+            if (targetLostData.contains("positionX") && targetLostData.contains("positionY"))
+            {
+                broadcastPositional("success", response,
+                    targetLostData.value("positionX", 0.0f),
+                    targetLostData.value("positionY", 0.0f), {});
+            }
+            else
+            {
+                std::string responseData = networkManager_.generateResponseMessage("success", response);
+                broadcastToAllClients(responseData);
+            }
         }
         else
         {
@@ -477,8 +542,16 @@ MobEventHandler::handleMobHealthUpdateEvent(const Event &event)
                                           .setBody("maxHealth", maxHealth)
                                           .build();
 
-            std::string responseData = networkManager_.generateResponseMessage("success", response);
-            broadcastToAllClients(responseData);
+            // Interest v2 (phase 4): HP bars matter nearby (watchers get
+            // move updates anyway; unresolvable position stays global).
+            float hx = 0.0f, hy = 0.0f;
+            if (mobPos(mobUID, hx, hy))
+                broadcastPositional("success", response, hx, hy, {});
+            else
+            {
+                std::string responseData = networkManager_.generateResponseMessage("success", response);
+                broadcastToAllClients(responseData);
+            }
         }
         else
         {

@@ -200,11 +200,32 @@ HarvestEventHandler::handleGetNearbyCorpses(const Event &event)
     {
         int clientId = event.getClientID();
 
+        // Resolve the CHARACTER id (not the client id!) via the session
+        // binding first, falling back to the client record.
+        int characterId = 0;
+        {
+            const auto &data = event.getData();
+            // GET_NEARBY_CORPSES carries CharacterDataStruct from the dispatcher.
+            // (Parsed defensively: dispatcher context always sets it.)
+            try
+            {
+                // CharacterDataStruct has characterId field; access via known layout.
+                // Fallback below covers any other variant.
+                characterId = std::get<CharacterDataStruct>(data).characterId;
+            }
+            catch (...) {}
+        }
+        if (characterId == 0)
+        {
+            characterId = gameServices_.getClientManager().getClientData(clientId).characterId;
+        }
+
         // Получаем игрока
-        auto player = gameServices_.getCharacterManager().getCharacterById(clientId);
+        auto player = gameServices_.getCharacterManager().getCharacterById(characterId);
         if (player.characterId == 0)
         {
-            log_->error("Player not found for nearby corpses request: " + std::to_string(clientId));
+            log_->error("Player not found for nearby corpses request: client " +
+                        std::to_string(clientId) + " char " + std::to_string(characterId));
             return;
         }
 
@@ -251,6 +272,57 @@ HarvestEventHandler::handleGetNearbyCorpses(const Event &event)
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("Exception in handleGetNearbyCorpses: " + std::string(e.what()));
+    }
+}
+
+void
+HarvestEventHandler::sendCellCorpsesSnapshot(int clientId, float cx, float cy, float halfDiag)
+{
+    try
+    {
+        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
+        if (!clientSocket || !clientSocket->is_open())
+            return;
+
+        PositionStruct center;
+        center.positionX = cx;
+        center.positionY = cy;
+        auto corpses = gameServices_.getHarvestManager().getHarvestableCorpsesNearPosition(
+            center, halfDiag * 1.5f);
+        if (corpses.empty())
+            return;
+
+        nlohmann::json corpsesArray = nlohmann::json::array();
+        for (const auto &corpse : corpses)
+        {
+            nlohmann::json corpseJson;
+            corpseJson["id"] = corpse.mobUID;
+            corpseJson["mobId"] = corpse.mobId;
+            corpseJson["positionX"] = corpse.position.positionX;
+            corpseJson["positionY"] = corpse.position.positionY;
+            corpseJson["hasBeenHarvested"] = corpse.hasBeenHarvested;
+            corpseJson["harvestedByCharacterId"] = corpse.harvestedByCharacterId;
+            corpseJson["currentHarvesterCharacterId"] = corpse.currentHarvesterCharacterId;
+            corpseJson["isBeingHarvested"] = (corpse.currentHarvesterCharacterId != 0);
+            corpsesArray.push_back(corpseJson);
+        }
+
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("message", "Cell snapshot: nearby corpses")
+                                      .setHeader("clientId", std::to_string(clientId))
+                                      .setHeader("eventType", "nearbyCorpsesResponse")
+                                      .setBody("corpses", corpsesArray)
+                                      .setBody("count", corpses.size())
+                                      .build();
+
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", response));
+        log_->info("Cell snapshot: " + std::to_string(corpses.size()) +
+                   " corpses to client " + std::to_string(clientId));
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("Error in sendCellCorpsesSnapshot: " + std::string(ex.what()));
     }
 }
 

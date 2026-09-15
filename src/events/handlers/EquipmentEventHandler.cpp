@@ -73,8 +73,19 @@ EquipmentEventHandler::broadcastEquipmentUpdate(int characterId, int excludeClie
                                   .setBody("slots", slotsJson)
                                   .build();
 
-    std::string responseData = networkManager_.generateResponseMessage("success", response);
-    broadcastToAllClients(responseData, excludeClientId);
+    float ex = 0.0f, ey = 0.0f;
+    if (charPos(characterId, ex, ey))
+    {
+        // Interest v2 (phase 4): gear changes are visible nearby; the
+        // owner always sees them via participants.
+        broadcastPositional("success", response, ex, ey,
+            {clientForCharacter(characterId)}, excludeClientId);
+    }
+    else
+    {
+        std::string responseData = networkManager_.generateResponseMessage("success", response);
+        broadcastToAllClients(responseData, excludeClientId);
+    }
 }
 
 void
