@@ -1,10 +1,19 @@
 #include "services/CombatCalculator.hpp"
 #include <algorithm>
 #include <cmath>
+#include <random>
 
 CombatCalculator::CombatCalculator(GameConfigService *configService)
-    : gen_(rd_()), dis_(0.0f, 1.0f), gameConfig_(configService)
+    : gameConfig_(configService)
 {
+}
+
+float
+CombatCalculator::rollUniform01()
+{
+    thread_local std::mt19937 gen{std::random_device{}()};
+    thread_local std::uniform_real_distribution<float> dis(0.0f, 1.0f);
+    return dis(gen);
 }
 
 void
@@ -231,7 +240,7 @@ CombatCalculator::calculateHealAmount(
     rawHeal = std::max(1, rawHeal);
 
     const float variance = cfg("combat.heal_variance", 0.10f);
-    float factor = 1.0f + (dis_(gen_) * 2.0f - 1.0f) * variance;
+    float factor = 1.0f + (rollUniform01() * 2.0f - 1.0f) * variance;
     return std::max(1, static_cast<int>(std::lround(rawHeal * factor)));
 }
 
@@ -246,7 +255,7 @@ CombatCalculator::calculateBaseDamage(
 
     // Разброс урона ±N%: каждый удар не должен быть детерминированным числом
     const float variance = cfg("combat.damage_variance", 0.12f);
-    float factor = 1.0f + (dis_(gen_) * 2.0f - 1.0f) * variance; // [1-v, 1+v]
+    float factor = 1.0f + (rollUniform01() * 2.0f - 1.0f) * variance; // [1-v, 1+v]
     return std::max(1, static_cast<int>(std::lround(rawDamage * factor)));
 }
 
@@ -260,7 +269,7 @@ CombatCalculator::calculateBaseDamage(
     rawDamage = std::max(1, rawDamage);
 
     const float variance = cfg("combat.damage_variance", 0.12f);
-    float factor = 1.0f + (dis_(gen_) * 2.0f - 1.0f) * variance;
+    float factor = 1.0f + (rollUniform01() * 2.0f - 1.0f) * variance;
     return std::max(1, static_cast<int>(std::lround(rawDamage * factor)));
 }
 
@@ -270,7 +279,7 @@ CombatCalculator::rollCriticalHit(const std::vector<CharacterAttributeStruct> &a
     int critChance = getAttributeValue(attackerAttributes, "crit_chance");
     const float cap = cfg("combat.crit_chance_cap", 75.0f);
     float effective = std::min(static_cast<float>(critChance), cap);
-    return dis_(gen_) < (effective / 100.0f);
+    return rollUniform01() < (effective / 100.0f);
 }
 
 bool
@@ -279,7 +288,7 @@ CombatCalculator::rollCriticalHit(const std::vector<MobAttributeStruct> &attacke
     int critChance = getAttributeValue(attackerAttributes, "crit_chance");
     const float cap = cfg("combat.crit_chance_cap", 75.0f);
     float effective = std::min(static_cast<float>(critChance), cap);
-    return dis_(gen_) < (effective / 100.0f);
+    return rollUniform01() < (effective / 100.0f);
 }
 
 bool
@@ -288,7 +297,7 @@ CombatCalculator::rollBlock(const std::vector<CharacterAttributeStruct> &targetA
     int blockChance = getAttributeValue(targetAttributes, "block_chance");
     const float cap = cfg("combat.block_chance_cap", 75.0f);
     float effective = std::min(static_cast<float>(blockChance), cap);
-    return dis_(gen_) < (effective / 100.0f);
+    return rollUniform01() < (effective / 100.0f);
 }
 
 bool
@@ -307,7 +316,7 @@ CombatCalculator::rollMiss(
     float hitChance = baseHit + (accuracy - evasion) * 0.01f + hitModifier;
     hitChance = std::clamp(hitChance, minHit, maxHit);
 
-    return dis_(gen_) > hitChance;
+    return rollUniform01() > hitChance;
 }
 
 bool
@@ -326,7 +335,7 @@ CombatCalculator::rollMiss(
     float hitChance = baseHit + (accuracy - evasion) * 0.01f + hitModifier;
     hitChance = std::clamp(hitChance, minHit, maxHit);
 
-    return dis_(gen_) > hitChance;
+    return rollUniform01() > hitChance;
 }
 
 int

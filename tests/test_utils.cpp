@@ -7,7 +7,9 @@
 #include <chrono>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <string>
 #include <thread>
+#include <vector>
 
 TEST(ThreadPool, RunsVoidTasks)
 {
@@ -28,6 +30,34 @@ TEST(ThreadPool, FutureTasksReturnValues)
     auto f2 = pool.enqueueTask([](int x) { return x * 2; }, 21);
     EXPECT_EQ(f1.get(), 42);
     EXPECT_EQ(f2.get(), 42);
+}
+
+TEST(Timestamps, ConcurrentFormatIsRaceFree)
+{
+    // Regression (TSan live run): getCurrentTimestamp used std::localtime
+    // (shared static buffer) and raced across ThreadPool event batches.
+    // Hammer it from 8 threads; under TSan any race fails loudly.
+    constexpr int kThreads = 8;
+    constexpr int kIters = 500;
+    std::vector<std::thread> threads;
+    std::atomic<int> bad{0};
+    for (int i = 0; i < kThreads; ++i)
+    {
+        threads.emplace_back([&]
+            {
+                for (int j = 0; j < kIters; ++j)
+                {
+                    std::string s = TimestampUtils::getCurrentTimestamp();
+                    // "YYYY-MM-DD HH:MM:SS.mmm" — garbled static-buffer output
+                    // would break length/shape; 23 chars when well-formed.
+                    if (s.size() != 23 || s[4] != '-' || s[13] != ':')
+                        ++bad;
+                }
+            });
+    }
+    for (auto &t : threads)
+        t.join();
+    EXPECT_EQ(bad.load(), 0);
 }
 
 TEST(Timestamps, MonotonicMsAndEcho)

@@ -1,0 +1,30 @@
+# ThreadSanitizer suppressions for chunk-server unit tests.
+#
+# Usage (inside the dev image, see tests/README.md "Sanitizers"):
+#   TSAN_OPTIONS="suppressions=/usr/src/app/tests/TSanSuppressions.txt" \
+#     ./build-tsan-nopie/tests/unit_tests
+#
+# KNOWN ARTIFACT 1 (verified 2026-09-16, ~780 reports triaged, zero app frames):
+# spdlog async thread_pool teardown races with its own worker threads during
+# Logger destruction (mpmc queue push vs worker dequeue, double lock in
+# enqueue-at-shutdown). Every unit test builds Logger{"test"} (one
+# init_thread_pool + shutdown per fixture, 264 lifetimes per run), so the
+# global registry churns constantly. Production owns a single Logger for the
+# whole process lifetime and shuts down once at exit. Suppression matches
+# only stacks containing spdlog frames; races purely in application memory
+# (managers, cooldown maps, threat tables) have no spdlog frames and still
+# report.
+#
+# KNOWN ARTIFACT 2 (Scheduler, NOT suppressed — read before touching):
+# Flaky (~10-20% of runs) same-mutex reports on the scheduler heap
+# (empty()/push()/pop() pairs, always one mutex held on both sides).
+# Investigated 2026-09-16 with an isolated repro: textbook locking, two
+# independent tools (TSan + Helgrind) flag the identical shape, widening the
+# window does not scale per-hit counts (constant 8+1 signature), production
+# never exhibited symptoms, ASan clean. Verdict: sanitizer modeling edge on
+# condition_variable wakeup paths with this toolchain, not an application
+# race. Deliberately NOT suppressed: any NEW Scheduler stack shape must be
+# triaged as guilty until proven otherwise.
+race:spdlog::*
+deadlock:spdlog::*
+mutex:spdlog::*

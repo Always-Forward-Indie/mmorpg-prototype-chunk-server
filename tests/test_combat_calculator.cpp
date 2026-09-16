@@ -3,7 +3,9 @@
 // over many samples - no exact-value assertions on random draws.
 #include "services/CombatCalculator.hpp"
 
+#include <atomic>
 #include <gtest/gtest.h>
+#include <thread>
 #include <vector>
 
 namespace
@@ -256,4 +258,34 @@ TEST(CombatCalculator, GlobalInvariantsHoldOnEveryRoll)
         if (!r.isMissed)
             EXPECT_GE(r.baseDamage, 1);
     }
+}
+
+TEST(CombatCalculator, ConcurrentRollsAreRaceFree)
+{
+    // Regression (TSan live run): the shared mt19937 raced across ThreadPool
+    // event batches. Rolls now use thread-local engines; hammer one shared
+    // calculator from 8 threads and assert invariants (TSan fails loudly).
+    CombatCalculator calc(nullptr);
+    CharacterDataStruct atk = character(10, {attr("strength", 50), attr("crit_chance", 50)});
+    CharacterDataStruct tgt = character(10, {attr("physical_defense", 30), attr("block_chance", 30)});
+    SkillStruct skill = damageSkill();
+    constexpr int kThreads = 8;
+    constexpr int kIters = 300;
+    std::vector<std::thread> threads;
+    std::atomic<int> bad{0};
+    for (int i = 0; i < kThreads; ++i)
+    {
+        threads.emplace_back([&]
+            {
+                for (int j = 0; j < kIters; ++j)
+                {
+                    DamageCalculationStruct r = calc.calculateSkillDamage(skill, atk, tgt);
+                    if (r.totalDamage < 0 || r.scaledDamage < 0)
+                        ++bad;
+                }
+            });
+    }
+    for (auto &t : threads)
+        t.join();
+    EXPECT_EQ(bad.load(), 0);
 }

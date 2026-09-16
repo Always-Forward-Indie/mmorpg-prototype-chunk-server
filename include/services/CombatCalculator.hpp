@@ -153,10 +153,12 @@ class CombatCalculator
     std::vector<CharacterAttributeStruct> mergeEffects(const CharacterDataStruct &character) const;
 
   private:
-    std::random_device rd_;
-    std::mt19937 gen_;
-    std::uniform_real_distribution<float> dis_;
     GameConfigService *gameConfig_ = nullptr; ///< nullable, reads gameplay constants
+
+    /// @brief Thread-local uniform [0,1) roll. The old shared mt19937 raced
+    /// across ThreadPool event batches (TSan-confirmed); per-thread engines
+    /// keep identical distribution with no locking.
+    static float rollUniform01();
 
     /// @brief Reads float constant from config if loaded, otherwise returns defaultValue.
     float cfg(const std::string &key, float defaultValue) const;
