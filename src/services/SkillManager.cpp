@@ -1,34 +1,31 @@
 #include "services/SkillManager.hpp"
 #include "services/CharacterManager.hpp"
-#include "services/GameServices.hpp"
+#include "services/GameConfigService.hpp"
+#include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
+#include "utils/Logger.hpp"
 #include <algorithm>
 #include <climits>
 #include <cmath>
 #include <spdlog/logger.h>
 
-SkillManager::SkillManager()
+SkillManager::SkillManager(CharacterManager &characterManager,
+    MobManager &mobManager,
+    MobInstanceManager &mobInstanceManager,
+    MobMovementManager &mobMovementManager,
+    GameConfigService &gameConfigService,
+    Logger &logger)
     : combatCalculator_(std::make_unique<CombatCalculator>()),
-      gameServices_(nullptr)
+      characterManager_(characterManager),
+      mobManager_(mobManager),
+      mobInstanceManager_(mobInstanceManager),
+      mobMovementManager_(mobMovementManager),
+      gameConfigService_(gameConfigService),
+      logger_(logger)
 {
-}
-
-SkillManager::SkillManager(GameServices *gameServices)
-    : combatCalculator_(std::make_unique<CombatCalculator>()),
-      gameServices_(gameServices)
-{
-    log_ = gameServices_->getLogger().getSystem("skill");
-    if (gameServices_)
-    {
-        combatCalculator_->setGameConfigService(&gameServices_->getGameConfigService());
-    }
-}
-
-void
-SkillManager::setGameServices(GameServices *gameServices)
-{
-    gameServices_ = gameServices;
+    log_ = logger_.getSystem("skill");
+    combatCalculator_->setGameConfigService(&gameConfigService_);
 }
 
 SkillUsageResult
@@ -37,16 +34,10 @@ SkillManager::useCharacterSkill(int casterId, const std::string &skillSlug, int 
     SkillUsageResult result;
     result.success = false;
 
-    if (!gameServices_)
-    {
-        result.errorMessage = "GameServices not initialized";
-        return result;
-    }
-
     try
     {
         // 1. Получаем данные кастера
-        auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
+        auto casterData = characterManager_.getCharacterData(casterId);
         if (casterData.characterId == 0)
         {
             result.errorMessage = "Caster not found";
@@ -87,7 +78,7 @@ SkillManager::useCharacterSkill(int casterId, const std::string &skillSlug, int 
         }
 
         // 4. Получаем данные цели
-        auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
+        auto targetData = characterManager_.getCharacterData(targetId);
         if (targetData.characterId == 0)
         {
             result.errorMessage = "Target not found";
@@ -102,7 +93,7 @@ SkillManager::useCharacterSkill(int casterId, const std::string &skillSlug, int 
         if (!isInRange(*skill, distance))
         {
             // debug distance and max range using logger
-            gameServices_->getLogger().log("Distance: " + std::to_string(distance) + ", Max Range: " + std::to_string(skill->maxRange * 100.0f), YELLOW);
+            logger_.log("Distance: " + std::to_string(distance) + ", Max Range: " + std::to_string(skill->maxRange * 100.0f), YELLOW);
 
             result.errorMessage = "Target is out of range";
             return result;
@@ -115,12 +106,12 @@ SkillManager::useCharacterSkill(int casterId, const std::string &skillSlug, int 
         if (result.damageResult.totalDamage > 0)
         {
             int newHealth = std::max<int>(0, targetData.characterCurrentHealth - result.damageResult.totalDamage);
-            gameServices_->getCharacterManager().updateCharacterHealth(targetId, newHealth);
+            characterManager_.updateCharacterHealth(targetId, newHealth);
         }
 
         // 8. Тратим ману кастера
         int newMana = std::max<int>(0, casterData.characterCurrentMana - skill->costMp);
-        gameServices_->getCharacterManager().updateCharacterMana(casterId, newMana);
+        characterManager_.updateCharacterMana(casterId, newMana);
 
         // 9. Устанавливаем кулдаун
         setCooldown(casterId, skillSlug, skill->cooldownMs);
@@ -141,16 +132,10 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
     SkillUsageResult result;
     result.success = false;
 
-    if (!gameServices_)
-    {
-        result.errorMessage = "GameServices not initialized";
-        return result;
-    }
-
     try
     {
         // 1. Получаем данные кастера
-        auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
+        auto casterData = characterManager_.getCharacterData(casterId);
         if (casterData.characterId == 0)
         {
             result.errorMessage = "Caster not found";
@@ -194,7 +179,7 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
         float distance = 0.0f;
         if (targetType == CombatTargetType::PLAYER)
         {
-            auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
+            auto targetData = characterManager_.getCharacterData(targetId);
             if (targetData.characterId == 0)
             {
                 result.errorMessage = "Target player not found";
@@ -219,12 +204,12 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
             if (result.damageResult.totalDamage > 0)
             {
                 int newHealth = std::max<int>(0, targetData.characterCurrentHealth - result.damageResult.totalDamage);
-                gameServices_->getCharacterManager().updateCharacterHealth(targetId, newHealth);
+                characterManager_.updateCharacterHealth(targetId, newHealth);
             }
         }
         else if (targetType == CombatTargetType::MOB)
         {
-            auto mobData = gameServices_->getMobInstanceManager().getMobInstance(targetId);
+            auto mobData = mobInstanceManager_.getMobInstance(targetId);
             if (mobData.uid == 0)
             {
                 result.errorMessage = "Target mob not found";
@@ -265,12 +250,12 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
             {
                 // Skip damage while mob is leashing (RETURNING) or in post-leash
                 // invulnerability window (EVADING).
-                auto mobMoveData = gameServices_->getMobMovementManager().getMobMovementData(targetId);
+                auto mobMoveData = mobMovementManager_.getMobMovementData(targetId);
                 bool isEvading = (mobMoveData.combatState == MobCombatState::RETURNING ||
                                   mobMoveData.combatState == MobCombatState::EVADING);
                 if (!isEvading)
                 {
-                    auto updateResult = gameServices_->getMobInstanceManager().applyDamageToMob(
+                    auto updateResult = mobInstanceManager_.applyDamageToMob(
                         targetId, result.damageResult.totalDamage);
 
                     if (!updateResult.success)
@@ -298,7 +283,7 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
                 result.healAmount = result.damageResult.totalDamage; // Используем "урон" как лечение
                 result.damageResult.totalDamage = 0;                 // Убираем урон для лечения
 
-                gameServices_->getCharacterManager().applyHealToCharacter(casterId, result.healAmount);
+                characterManager_.applyHealToCharacter(casterId, result.healAmount);
             }
         }
         else
@@ -308,7 +293,7 @@ SkillManager::useCharacterSkillWithTargetType(int casterId, const std::string &s
         }
 
         // 5. Тратим ману кастера
-        gameServices_->getCharacterManager().applyManaCostToCharacter(casterId, skill->costMp);
+        characterManager_.applyManaCostToCharacter(casterId, skill->costMp);
 
         // 6. Устанавливаем кулдаун
         setCooldown(casterId, skillSlug, skill->cooldownMs);
@@ -329,16 +314,11 @@ SkillManager::useMobSkill(int mobId, const std::string &skillSlug, int targetId)
     SkillUsageResult result;
     result.success = false;
 
-    if (!gameServices_)
-    {
-        result.errorMessage = "GameServices not initialized";
-        return result;
-    }
-
     try
     {
-        // 1. Получаем данные моба по UID (int ID)
-        auto mobData = gameServices_->getMobManager().getMobByUid(mobId);
+        // 1. Получаем шаблон моба по ID типа (шаблоны keyed by id; uid есть
+        // только у инстансов, поэтому getMobByUid здесь никогда не находил).
+        auto mobData = mobManager_.getMobById(mobId);
         if (mobData.id == 0)
         {
             result.errorMessage = "Mob not found";
@@ -372,7 +352,7 @@ SkillManager::useMobSkill(int mobId, const std::string &skillSlug, int targetId)
         }
 
         // 4. Получаем данные цели (персонажа)
-        auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
+        auto targetData = characterManager_.getCharacterData(targetId);
         if (targetData.characterId == 0)
         {
             result.errorMessage = "Target not found";
@@ -397,12 +377,12 @@ SkillManager::useMobSkill(int mobId, const std::string &skillSlug, int targetId)
         if (result.damageResult.totalDamage > 0)
         {
             int newHealth = std::max<int>(0, targetData.characterCurrentHealth - result.damageResult.totalDamage);
-            gameServices_->getCharacterManager().updateCharacterHealth(targetId, newHealth);
+            characterManager_.updateCharacterHealth(targetId, newHealth);
         }
 
         // 8. Тратим ману моба
         int newMana = std::max<int>(0, mobData.currentMana - skill->costMp);
-        gameServices_->getMobManager().updateMobMana(mobData.uid, newMana);
+        mobManager_.updateMobMana(mobData.uid, newMana);
 
         // 9. Устанавливаем кулдаун
         setCooldown(mobId, skillSlug, skill->cooldownMs);

@@ -75,7 +75,7 @@ CombatCalculator::calculateSkillDamage(
 
     // Level difference modifier
     const int rawDiff = attacker.characterLevel - target.characterLevel;
-    const int cap = static_cast<int>(cfg("combat.level_diff_cap", 10.0f));
+    const int cap = static_cast<int>(std::lround(cfg("combat.level_diff_cap", 10.0f)));
     const int levelDiff = std::clamp(rawDiff, -cap, cap);
     const float hitMod = levelDiff * cfg("combat.level_diff_hit_per_level", 0.02f);
     const float dmgMod = 1.0f + levelDiff * cfg("combat.level_diff_damage_per_level", 0.04f);
@@ -97,7 +97,7 @@ CombatCalculator::calculateSkillDamage(
         float critMultiplierPct = static_cast<float>(getAttributeValue(effAtk, "crit_multiplier"));
         if (critMultiplierPct <= 0.0f)
             critMultiplierPct = cfg("combat.default_crit_multiplier", 200.0f);
-        result.scaledDamage = static_cast<int>(result.baseDamage * (critMultiplierPct / 100.0f));
+        result.scaledDamage = static_cast<int>(std::lround(result.baseDamage * (critMultiplierPct / 100.0f)));
     }
     else
     {
@@ -113,7 +113,7 @@ CombatCalculator::calculateSkillDamage(
     }
 
     // Бонус/штраф за разницу уровней (после блока, до защиты)
-    result.scaledDamage = std::max(0, static_cast<int>(result.scaledDamage * dmgMod));
+    result.scaledDamage = std::max(0, static_cast<int>(std::lround(result.scaledDamage * dmgMod)));
 
     // Применение защиты
     int defenseValue;
@@ -133,7 +133,7 @@ CombatCalculator::calculateSkillDamage(
         int resistRaw = getAttributeValue(effTgt, skill.school + "_resistance");
         const float maxResCap = cfg("combat.max_resistance_cap", 75.0f);
         const float resistPct = std::min(static_cast<float>(resistRaw), maxResCap) / 100.0f;
-        result.totalDamage = std::max(0, static_cast<int>(result.totalDamage * (1.0f - resistPct)));
+        result.totalDamage = std::max(0, static_cast<int>(std::lround(result.totalDamage * (1.0f - resistPct))));
     }
 
     return result;
@@ -153,7 +153,7 @@ CombatCalculator::calculateMobSkillDamage(
 
     // Level difference modifier (mob level - character level)
     const int rawDiff = attacker.level - target.characterLevel;
-    const int cap = static_cast<int>(cfg("combat.level_diff_cap", 10.0f));
+    const int cap = static_cast<int>(std::lround(cfg("combat.level_diff_cap", 10.0f)));
     const int levelDiff = std::clamp(rawDiff, -cap, cap);
     const float hitMod = levelDiff * cfg("combat.level_diff_hit_per_level", 0.02f);
     const float dmgMod = 1.0f + levelDiff * cfg("combat.level_diff_damage_per_level", 0.04f);
@@ -175,7 +175,7 @@ CombatCalculator::calculateMobSkillDamage(
         float critMultiplierPct = static_cast<float>(getAttributeValue(attacker.attributes, "crit_multiplier"));
         if (critMultiplierPct <= 0.0f)
             critMultiplierPct = cfg("combat.default_crit_multiplier", 200.0f);
-        result.scaledDamage = static_cast<int>(result.baseDamage * (critMultiplierPct / 100.0f));
+        result.scaledDamage = static_cast<int>(std::lround(result.baseDamage * (critMultiplierPct / 100.0f)));
     }
     else
     {
@@ -191,7 +191,7 @@ CombatCalculator::calculateMobSkillDamage(
     }
 
     // Бонус/штраф за разницу уровней
-    result.scaledDamage = std::max(0, static_cast<int>(result.scaledDamage * dmgMod));
+    result.scaledDamage = std::max(0, static_cast<int>(std::lround(result.scaledDamage * dmgMod)));
 
     // Применение защиты
     int defenseValue;
@@ -211,7 +211,7 @@ CombatCalculator::calculateMobSkillDamage(
         int resistRaw = getAttributeValue(effTgt, skill.school + "_resistance");
         const float maxResCap = cfg("combat.max_resistance_cap", 75.0f);
         const float resistPct = std::min(static_cast<float>(resistRaw), maxResCap) / 100.0f;
-        result.totalDamage = std::max(0, static_cast<int>(result.totalDamage * (1.0f - resistPct)));
+        result.totalDamage = std::max(0, static_cast<int>(std::lround(result.totalDamage * (1.0f - resistPct))));
     }
 
     return result;
@@ -227,12 +227,12 @@ CombatCalculator::calculateHealAmount(
     // A separate heal-variance config key (default 0.10 = ±10%) ensures heals are
     // slightly randomised but more predictable than damage.
     int scaleStat = getAttributeValue(casterAttributes, skill.scaleStat);
-    int rawHeal = static_cast<int>(skill.flatAdd + (scaleStat * skill.coeff));
+    int rawHeal = static_cast<int>(std::lround(skill.flatAdd + (scaleStat * skill.coeff)));
     rawHeal = std::max(1, rawHeal);
 
     const float variance = cfg("combat.heal_variance", 0.10f);
     float factor = 1.0f + (dis_(gen_) * 2.0f - 1.0f) * variance;
-    return std::max(1, static_cast<int>(rawHeal * factor));
+    return std::max(1, static_cast<int>(std::lround(rawHeal * factor)));
 }
 
 int
@@ -241,13 +241,13 @@ CombatCalculator::calculateBaseDamage(
     const std::vector<CharacterAttributeStruct> &attackerAttributes)
 {
     int scaleStatValue = getAttributeValue(attackerAttributes, skill.scaleStat);
-    int rawDamage = static_cast<int>(skill.flatAdd + (scaleStatValue * skill.coeff));
+    int rawDamage = static_cast<int>(std::lround(skill.flatAdd + (scaleStatValue * skill.coeff)));
     rawDamage = std::max(1, rawDamage);
 
     // Разброс урона ±N%: каждый удар не должен быть детерминированным числом
     const float variance = cfg("combat.damage_variance", 0.12f);
     float factor = 1.0f + (dis_(gen_) * 2.0f - 1.0f) * variance; // [1-v, 1+v]
-    return std::max(1, static_cast<int>(rawDamage * factor));
+    return std::max(1, static_cast<int>(std::lround(rawDamage * factor)));
 }
 
 int
@@ -256,12 +256,12 @@ CombatCalculator::calculateBaseDamage(
     const std::vector<MobAttributeStruct> &attackerAttributes)
 {
     int scaleStatValue = getAttributeValue(attackerAttributes, skill.scaleStat);
-    int rawDamage = static_cast<int>(skill.flatAdd + (scaleStatValue * skill.coeff));
+    int rawDamage = static_cast<int>(std::lround(skill.flatAdd + (scaleStatValue * skill.coeff)));
     rawDamage = std::max(1, rawDamage);
 
     const float variance = cfg("combat.damage_variance", 0.12f);
     float factor = 1.0f + (dis_(gen_) * 2.0f - 1.0f) * variance;
-    return std::max(1, static_cast<int>(rawDamage * factor));
+    return std::max(1, static_cast<int>(std::lround(rawDamage * factor)));
 }
 
 bool
@@ -368,6 +368,6 @@ CombatCalculator::applyDefense(int damage, int defenseValue, const std::string &
                             (static_cast<float>(defenseValue) + K * static_cast<float>(effectiveLevel));
     damageReduction = std::clamp(damageReduction, 0.0f, cap);
 
-    int finalDamage = static_cast<int>(damage * (1.0f - damageReduction));
+    int finalDamage = static_cast<int>(std::lround(damage * (1.0f - damageReduction)));
     return std::max(0, finalDamage);
 }

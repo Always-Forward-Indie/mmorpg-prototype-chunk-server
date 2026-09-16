@@ -1,15 +1,18 @@
 #include "services/CombatResponseBuilder.hpp"
 #include "services/CharacterManager.hpp"
-#include "services/GameServices.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "utils/Logger.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <spdlog/logger.h>
 
-CombatResponseBuilder::CombatResponseBuilder(GameServices *gameServices)
-    : gameServices_(gameServices)
+CombatResponseBuilder::CombatResponseBuilder(CharacterManager &characterManager,
+    MobInstanceManager &mobInstanceManager,
+    Logger &logger)
+    : characterManager_(characterManager),
+      mobInstanceManager_(mobInstanceManager),
+      logger_(logger)
 {
-    log_ = gameServices_->getLogger().getSystem("combat");
+    log_ = logger_.getSystem("combat");
 }
 
 nlohmann::json
@@ -191,11 +194,11 @@ int
 CombatResponseBuilder::determineCharacterType(int characterId)
 {
     // HIGH-8: no exceptions — managers return default structs (id==0) when not found
-    auto characterData = gameServices_->getCharacterManager().getCharacterData(characterId);
+    auto characterData = characterManager_.getCharacterData(characterId);
     if (characterData.characterId != 0)
         return 1; // PLAYER
 
-    auto mobData = gameServices_->getMobInstanceManager().getMobInstance(characterId);
+    auto mobData = mobInstanceManager_.getMobInstance(characterId);
     if (mobData.uid != 0)
         return 2; // MOB
 

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <nlohmann/json.hpp>
 #include <spdlog/logger.h>
+#include <unordered_set>
 
 HarvestManager::HarvestManager(ItemManager &itemManager, Logger &logger)
     : itemManager_(itemManager), logger_(logger), eventQueue_(nullptr),
@@ -324,6 +325,20 @@ HarvestManager::cleanupOldCorpses(int maxAgeSeconds)
 {
     std::vector<int> corpsesToCleanup;
 
+    // Snapshot corpses with an active harvest first: deleting one mid-harvest
+    // orphans the session — completion then fails with "Corpse not found" and
+    // the client waits forever with no signal. (Locks taken sequentially,
+    // never nested, same order as cancelHarvest: harvests -> corpses.)
+    std::unordered_set<int> protectedCorpses;
+    {
+        std::shared_lock<std::shared_mutex> harvestLock(harvestsMutex_);
+        for (const auto &[characterId, harvest] : activeHarvests_)
+        {
+            if (harvest.isActive)
+                protectedCorpses.insert(harvest.corpseUID);
+        }
+    }
+
     // Собираем список трупов для очистки
     {
         std::unique_lock<std::shared_mutex> lock(corpsesMutex_);
@@ -333,6 +348,11 @@ HarvestManager::cleanupOldCorpses(int maxAgeSeconds)
         auto it = harvestableCorpses_.begin();
         while (it != harvestableCorpses_.end())
         {
+            if (protectedCorpses.count(it->first) != 0)
+            {
+                ++it;
+                continue;
+            }
             if (now - it->second.deathTime > maxAge)
             {
                 corpsesToCleanup.push_back(it->first);

@@ -973,8 +973,10 @@ VendorEventHandler::handleTradeAcceptEvent(const Event &event)
             return;
         }
 
-        // Create session: initiator=A, accepter=B
-        auto &session = gameServices_.getTradeSessionManager().createSession(
+        // Create session: initiator=A, accepter=B.
+        // Copy (not a reference): createSession owns the object inside its
+        // map and later inserts may invalidate references.
+        TradeSessionStruct session = gameServices_.getTradeSessionManager().createSession(
             initiatorChar.clientId, initiatorCharId, req.clientId, req.characterId);
 
         // Notify both

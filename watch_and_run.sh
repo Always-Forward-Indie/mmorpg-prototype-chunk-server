@@ -38,6 +38,7 @@ exec watchexec -r -e cpp,h,hpp \
     --ignore /usr/src/app/build/Makefile \
     --ignore /usr/src/app/build/*.cmake \
     --ignore /usr/src/app/build/install_manifest.txt \
+    --ignore /usr/src/app/tests \
     -- \
     bash -c "
         cd /usr/src/app/build && \

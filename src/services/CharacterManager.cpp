@@ -142,6 +142,11 @@ CharacterManager::loadCharacterData(CharacterDataStruct characterData)
             // Character not yet in map (race during login) — insert it
             if (characterData.joinTimestamp == std::chrono::steady_clock::time_point{})
                 characterData.joinTimestamp = std::chrono::steady_clock::now();
+            // Seed movement validation from the authoritative DB position.
+            // Without this, lastValidatedPosition stays (0,0,0) and the first
+            // legal move after join is falsely rejected as a teleport.
+            characterData.lastValidatedPosition = characterData.characterPosition;
+            characterData.lastMoveSrvMs = 0;
             charactersMap_[characterData.characterId] = characterData;
         }
     }
@@ -170,6 +175,13 @@ CharacterManager::addCharacter(const CharacterDataStruct &characterData)
     // Set join timestamp for ghost character detection if not already set
     if (charactersMap_[characterData.characterId].joinTimestamp == std::chrono::steady_clock::time_point{})
         charactersMap_[characterData.characterId].joinTimestamp = std::chrono::steady_clock::now();
+
+    // Seed movement validation from the authoritative position (see
+    // loadCharacterData above): first insert must not leave lastValidated
+    // at (0,0,0) or the first legal move is falsely rejected as teleport.
+    charactersMap_[characterData.characterId].lastValidatedPosition =
+        charactersMap_[characterData.characterId].characterPosition;
+    charactersMap_[characterData.characterId].lastMoveSrvMs = 0;
 
     log_->info("Character with ID " + std::to_string(characterData.characterId) + " added/updated.");
 }

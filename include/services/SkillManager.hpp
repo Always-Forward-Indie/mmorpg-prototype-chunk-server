@@ -3,30 +3,34 @@
 #include "data/CombatStructs.hpp"
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
+#include "services/CharacterManager.hpp"
 #include "services/CombatCalculator.hpp"
+#include "services/GameConfigService.hpp"
+#include "services/MobInstanceManager.hpp"
+#include "services/MobManager.hpp"
+#include "services/MobMovementManager.hpp"
+#include "utils/Logger.hpp"
 #include <chrono>
 #include <memory>
 #include <unordered_map>
 
 // Forward declarations
 namespace spdlog { class logger; }
-class GameServices;
 
 /**
- * @brief Менеджер для управления скилами персонажей и мобов
+ * @brief Менеджер для управления скилами персонажей и мобов.
+ * Explicit dependencies (no GameServices).
  */
 class SkillManager
 {
   public:
-    SkillManager();
-    SkillManager(GameServices *gameServices);
+    SkillManager(CharacterManager &characterManager,
+        MobManager &mobManager,
+        MobInstanceManager &mobInstanceManager,
+        MobMovementManager &mobMovementManager,
+        GameConfigService &gameConfigService,
+        Logger &logger);
     ~SkillManager() = default;
-
-    /**
-     * @brief Установить ссылку на GameServices
-     * @param gameServices Указатель на GameServices
-     */
-    void setGameServices(GameServices *gameServices);
 
     /**
      * @brief Использовать скил персонажа
@@ -125,7 +129,12 @@ class SkillManager
 
   private:
     std::unique_ptr<CombatCalculator> combatCalculator_;
-    GameServices *gameServices_;
+    CharacterManager &characterManager_;
+    MobManager &mobManager_;
+    MobInstanceManager &mobInstanceManager_;
+    MobMovementManager &mobMovementManager_;
+    GameConfigService &gameConfigService_;
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 
     // Кулдауны: characterId -> (skillSlug -> timepoint)

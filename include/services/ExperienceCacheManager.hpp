@@ -6,18 +6,18 @@
 #include <mutex>
 #include <shared_mutex>
 
-// Forward declarations
-class GameServices;
-class GameServerWorker;
+// Forward declarations (none needed: no external services).
 
 /**
  * @brief Менеджер кеша таблицы опыта
- * Загружает и кеширует таблицу опыта с гейм-сервера при инициализации
+ * Загружает и кеширует таблицу опыта с гейм-сервера при инициализации.
+ * Explicit dependencies (no GameServices): requests to the game-server are
+ * sent by the caller through GameServerWorker, never from here.
  */
 class ExperienceCacheManager
 {
   public:
-    ExperienceCacheManager(GameServices *gameServices);
+    explicit ExperienceCacheManager(Logger &logger);
 
     /**
      * @brief Инициализация менеджера - запрос таблицы опыта с гейм-сервера
@@ -65,7 +65,7 @@ class ExperienceCacheManager
     void clearCache();
 
   private:
-    GameServices *gameServices_;
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
     mutable std::shared_mutex mutex_;
     ExperienceLevelTable experienceTable_;

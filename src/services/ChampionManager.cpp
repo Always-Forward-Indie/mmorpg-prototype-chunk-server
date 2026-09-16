@@ -2,7 +2,6 @@
 #include "services/CharacterManager.hpp"
 #include "services/CharacterStatsNotificationService.hpp"
 #include "services/GameConfigService.hpp"
-#include "services/GameServices.hpp"
 #include "services/GameZoneManager.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
@@ -16,10 +15,24 @@
 #include <random>
 #include <spdlog/logger.h>
 
-ChampionManager::ChampionManager(GameServices *gs)
-    : gs_(gs)
+ChampionManager::ChampionManager(GameZoneManager &gameZones,
+    GameConfigService &gameConfig,
+    MobInstanceManager &mobInstances,
+    CharacterManager &characters,
+    MobManager &mobs,
+    SpawnZoneManager &spawnZones,
+    CharacterStatsNotificationService *statsNotify,
+    Logger &logger)
+    : gameZones_(gameZones),
+      gameConfig_(gameConfig),
+      mobInstances_(mobInstances),
+      characters_(characters),
+      mobs_(mobs),
+      spawnZones_(spawnZones),
+      statsNotify_(statsNotify),
+      logger_(logger)
 {
-    log_ = gs_->getLogger().getSystem("champion");
+    log_ = logger_.getSystem("champion");
 }
 
 void
@@ -48,7 +61,7 @@ ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId)
     auto &count = zoneKillCounters_[gameZoneId][mobTemplateId];
     ++count;
 
-    auto zones = gs_->getGameZoneManager().getAllZones();
+    auto zones = gameZones_.getAllZones();
     auto it = std::find_if(zones.begin(), zones.end(), [gameZoneId](const GameZoneStruct &z)
         { return z.id == gameZoneId; });
     if (it == zones.end())
@@ -88,7 +101,7 @@ ChampionManager::loadTimedChampions(const std::vector<TimedChampionTemplate> &te
 void
 ChampionManager::tickTimedChampions()
 {
-    const auto &cfg = gs_->getGameConfigService();
+    const auto &cfg = gameConfig_;
     const int preAnnounceSec = cfg.getInt("champion.pre_announce_sec", 300); // 5 min before
 
     const int64_t nowEpoch = static_cast<int64_t>(std::time(nullptr));
@@ -139,13 +152,13 @@ ChampionManager::tickTimedChampions()
 void
 ChampionManager::tickSurvivalEvolution()
 {
-    const auto &cfg = gs_->getGameConfigService();
+    const auto &cfg = gameConfig_;
     const int evolveHours = cfg.getInt("survival_champion.evolve_hours", 12);
     const int64_t evolveThresholdSec = static_cast<int64_t>(evolveHours) * 3600;
 
     const int64_t nowEpoch = static_cast<int64_t>(std::time(nullptr));
 
-    auto living = gs_->getMobInstanceManager().getAllLivingInstances();
+    auto living = mobInstances_.getAllLivingInstances();
     for (const auto &mob : living)
     {
         if (!mob.canEvolve || mob.hasEvolved || mob.spawnEpochSec == 0)
@@ -187,7 +200,7 @@ ChampionManager::onChampionKilled(int champUid, int killerCharId, const std::str
     }
 
     // Announce to zone
-    auto killerData = gs_->getCharacterManager().getCharacterData(killerCharId);
+    auto killerData = characters_.getCharacterData(killerCharId);
     std::string killerName = (killerData.characterId != 0) ? killerData.characterName : "кто-то";
 
     broadcastToGameZone(gameZoneId, "champion_killed", nlohmann::json{{"killerCharId", killerCharId}, {"killerName", killerName}});
@@ -221,11 +234,11 @@ ChampionManager::spawnChampion(int mobTemplateId,
     float lootMult,
     const std::string &slug)
 {
-    const auto &cfg = gs_->getGameConfigService();
+    const auto &cfg = gameConfig_;
     const float hpMult = cfg.getFloat("champion.hp_multiplier", 3.0f);
     const float dmgMult = cfg.getFloat("champion.damage_multiplier", 1.5f);
 
-    auto base = gs_->getMobManager().getMobById(mobTemplateId);
+    auto base = mobs_.getMobById(mobTemplateId);
     if (base.id == 0)
     {
         log_->warn("[Champion] Mob template {} not found", mobTemplateId);
@@ -255,7 +268,7 @@ ChampionManager::spawnChampion(int mobTemplateId,
 
     // Set zoneId to the first spawn zone inside the game zone for engine compatibility
     // (SpawnZoneManager looks up mobs by zoneId, not gameZoneId)
-    const auto spawnZones = gs_->getSpawnZoneManager().getMobSpawnZones();
+    const auto spawnZones = spawnZones_.getMobSpawnZones();
     for (const auto &[szId, sz] : spawnZones)
     {
         float cx = sz.centerX;
@@ -263,7 +276,7 @@ ChampionManager::spawnChampion(int mobTemplateId,
         PositionStruct c;
         c.positionX = cx;
         c.positionY = cy;
-        auto gz = gs_->getGameZoneManager().getZoneForPosition(c);
+        auto gz = gameZones_.getZoneForPosition(c);
         if (gz.has_value() && gz->id == gameZoneId)
             base.zoneId = sz.zoneId;
         break;
@@ -271,7 +284,7 @@ ChampionManager::spawnChampion(int mobTemplateId,
     if (base.zoneId == 0)
         base.zoneId = -1; // Fallback: not tracked by SpawnZoneManager
 
-    gs_->getMobInstanceManager().registerMobInstance(base);
+    mobInstances_.registerMobInstance(base);
 
     const int despawnMin = cfg.getInt("champion.despawn_minutes", 30);
     const auto now = std::chrono::steady_clock::now();
@@ -298,7 +311,7 @@ ChampionManager::checkDespawnedChampions()
     {
         if (now >= it->despawnAt)
         {
-            gs_->getMobInstanceManager().unregisterMobInstance(it->uid);
+            mobInstances_.unregisterMobInstance(it->uid);
             broadcastToGameZone(it->gameZoneId, "champion_despawned", nlohmann::json::object());
 
             // Halve the kill counter (Threshold champions)
@@ -306,7 +319,7 @@ ChampionManager::checkDespawnedChampions()
             {
                 std::lock_guard<std::mutex> ck(counterMutex_);
                 auto &cnt = zoneKillCounters_[it->gameZoneId][it->baseTemplateId];
-                auto zones = gs_->getGameZoneManager().getAllZones();
+                auto zones = gameZones_.getAllZones();
                 auto zit = std::find_if(zones.begin(), zones.end(), [&](const GameZoneStruct &z)
                     { return z.id == it->gameZoneId; });
                 if (zit != zones.end())
@@ -339,10 +352,10 @@ ChampionManager::checkDespawnedChampions()
 void
 ChampionManager::evolveSurvivalMob(int mobUid)
 {
-    const auto &cfg = gs_->getGameConfigService();
+    const auto &cfg = gameConfig_;
     const float hpBonusPct = cfg.getFloat("survival_champion.hp_bonus_pct", 0.5f);
 
-    auto mob = gs_->getMobInstanceManager().getMobInstance(mobUid);
+    auto mob = mobInstances_.getMobInstance(mobUid);
     if (mob.uid == 0 || mob.hasEvolved)
         return;
 
@@ -358,10 +371,10 @@ ChampionManager::evolveSurvivalMob(int mobUid)
     mob.hasEvolved = true;
     mob.isChampion = true;
     mob.lootMultiplier = 1.3f;
-    gs_->getMobInstanceManager().updateMobInstance(mob);
+    mobInstances_.updateMobInstance(mob);
 
     // Register as active champion (for kill tracking and despawn)
-    auto gameZone = gs_->getGameZoneManager().getZoneForPosition(mob.position);
+    auto gameZone = gameZones_.getZoneForPosition(mob.position);
     int gzId = gameZone.has_value() ? gameZone->id : 0;
     {
         std::lock_guard<std::mutex> lk(activeMutex_);
@@ -374,15 +387,15 @@ ChampionManager::evolveSurvivalMob(int mobUid)
     log_->info("[Survival] Mob uid={} '{}' evolved after {}h alive",
         mobUid,
         mob.name,
-        gs_->getGameConfigService().getInt("survival_champion.evolve_hours", 12));
+        gameConfig_.getInt("survival_champion.evolve_hours", 12));
 }
 
 PositionStruct
 ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
 {
     // Try to find a spawn zone whose centre lies within the game zone AABB
-    const auto spawnZones = gs_->getSpawnZoneManager().getMobSpawnZones();
-    const auto gameZones = gs_->getGameZoneManager().getAllZones();
+    const auto spawnZones = spawnZones_.getMobSpawnZones();
+    const auto gameZones = gameZones_.getAllZones();
 
     auto gzIt = std::find_if(gameZones.begin(), gameZones.end(), [gameZoneId](const GameZoneStruct &z)
         { return z.id == gameZoneId; });
@@ -471,7 +484,9 @@ ChampionManager::broadcastToGameZone(int gameZoneId,
     const std::string &priority,
     const std::string &channel)
 {
-    gs_->getStatsNotificationService().sendWorldNotificationToGameZone(gameZoneId, type, data, priority, channel);
+    if (!statsNotify_)
+        return;
+    statsNotify_->sendWorldNotificationToGameZone(gameZoneId, type, data, priority, channel);
 }
 
 void

@@ -9,6 +9,7 @@ services:
       - ./src:/usr/src/app/src  # ✅ Mount only the `src` folder
       - ./include:/usr/src/app/include  # ✅ Mount only the `include` folder
       - ./CMakeLists.txt:/usr/src/app/CMakeLists.txt  # ✅ Mount CMakeLists.txt so new source files are picked up without image rebuilds
+      - ./tests:/usr/src/app/tests  # ✅ Mount unit tests (watchexec ignores them, see watch_and_run.sh)
     env_file:
       - .env
     environment:

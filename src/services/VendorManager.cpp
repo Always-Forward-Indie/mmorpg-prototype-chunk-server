@@ -311,7 +311,12 @@ VendorManager::buyBatch(
             }
             if (!slot)
                 return {false, "item_not_sold_here", 0, {}};
-            if (slot->stockCurrent != -1 && slot->stockCurrent < entry.quantity)
+            // Aggregate duplicates: entries for the same item share one stock pile.
+            int alreadyNeeded = 0;
+            for (const auto &r : resultItems)
+                if (r.itemId == entry.itemId)
+                    alreadyNeeded += r.quantity;
+            if (slot->stockCurrent != -1 && slot->stockCurrent < alreadyNeeded + entry.quantity)
                 return {false, "insufficient_stock", 0, {}};
 
             const ItemDataStruct item = itemManager_.getItemById(entry.itemId);
@@ -425,7 +430,12 @@ VendorManager::sellBatch(
             return {false, "item_not_in_inventory", 0, {}};
         if (invSlot->isEquipped)
             return {false, "item_is_equipped", 0, {}};
-        if (invSlot->quantity < entry.quantity)
+        // Aggregate duplicates: entries for the same row share one quantity.
+        int alreadyNeeded = 0;
+        for (const auto &r : resultItems)
+            if (r.inventoryItemId == entry.inventoryItemId)
+                alreadyNeeded += r.quantity;
+        if (invSlot->quantity < alreadyNeeded + entry.quantity)
             return {false, "insufficient_quantity", 0, {}};
 
         const ItemDataStruct item = itemManager_.getItemById(invSlot->itemId);
@@ -437,8 +447,16 @@ VendorManager::sellBatch(
         resultItems.push_back({entry.inventoryItemId, entry.quantity, lineGold});
     }
 
-    // ── Phase 3: execute removes (fail-fast with gold rollback) ──────────────
+    // ── Phase 3: execute removes (fail-fast with full rollback) ─────────────
     int goldCredited = 0;
+    std::vector<std::pair<int, int>> removedItems; // (itemId, quantity) for rollback
+    auto rollback = [&]
+    {
+        if (goldCredited > 0)
+            inventoryMgr.removeItemFromInventory(characterId, goldItemId, goldCredited);
+        for (const auto &removed : removedItems)
+            inventoryMgr.addItemToInventory(characterId, removed.first, removed.second);
+    };
     for (int i = 0; i < static_cast<int>(resultItems.size()); ++i)
     {
         const auto &r = resultItems[i];
@@ -454,17 +472,16 @@ VendorManager::sellBatch(
         }
         if (!invSlot)
         {
-            // Inventory changed under us; rollback gold already credited
-            if (goldCredited > 0)
-                inventoryMgr.removeItemFromInventory(characterId, goldItemId, goldCredited);
+            // Inventory changed under us; rollback everything done so far
+            rollback();
             return {false, "item_not_in_inventory", 0, {}};
         }
         if (!inventoryMgr.removeItemFromInventory(characterId, invSlot->itemId, r.quantity))
         {
-            if (goldCredited > 0)
-                inventoryMgr.removeItemFromInventory(characterId, goldItemId, goldCredited);
+            rollback();
             return {false, "item_remove_failed", 0, {}};
         }
+        removedItems.emplace_back(invSlot->itemId, r.quantity);
         inventoryMgr.addItemToInventory(characterId, goldItemId, r.goldReceived);
         goldCredited += r.goldReceived;
     }

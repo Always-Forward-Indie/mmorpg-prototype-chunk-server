@@ -62,26 +62,49 @@ EmoteManager::isUnlocked(int characterId, const std::string &emoteSlug) const
 {
     std::shared_lock lk(mutex_);
     auto it = playerEmotes_.find(characterId);
-    if (it == playerEmotes_.end())
-        return false;
-    const auto &slugs = it->second;
-    return std::find(slugs.begin(), slugs.end(), emoteSlug) != slugs.end();
+    if (it != playerEmotes_.end())
+    {
+        const auto &slugs = it->second;
+        if (std::find(slugs.begin(), slugs.end(), emoteSlug) != slugs.end())
+            return true;
+    }
+    // Default emotes are granted automatically to every character.
+    auto defIt = definitions_.find(emoteSlug);
+    return defIt != definitions_.end() && defIt->second.isDefault;
 }
 
 std::vector<EmoteDefinitionStruct>
 EmoteManager::getPlayerEmotes(int characterId) const
 {
     std::shared_lock lk(mutex_);
-    auto it = playerEmotes_.find(characterId);
-    if (it == playerEmotes_.end())
-        return {};
     std::vector<EmoteDefinitionStruct> out;
-    out.reserve(it->second.size());
-    for (const auto &slug : it->second)
+    auto it = playerEmotes_.find(characterId);
+    if (it != playerEmotes_.end())
     {
-        auto defIt = definitions_.find(slug);
-        if (defIt != definitions_.end())
-            out.push_back(defIt->second);
+        out.reserve(it->second.size());
+        for (const auto &slug : it->second)
+        {
+            auto defIt = definitions_.find(slug);
+            if (defIt != definitions_.end())
+                out.push_back(defIt->second);
+        }
+    }
+    // Union with default emotes (dedupe by slug).
+    for (const auto &[slug, def] : definitions_)
+    {
+        if (!def.isDefault)
+            continue;
+        bool present = false;
+        for (const auto &e : out)
+        {
+            if (e.slug == slug)
+            {
+                present = true;
+                break;
+            }
+        }
+        if (!present)
+            out.push_back(def);
     }
     std::sort(out.begin(), out.end(), [](const EmoteDefinitionStruct &a, const EmoteDefinitionStruct &b)
         { return a.sortOrder < b.sortOrder; });

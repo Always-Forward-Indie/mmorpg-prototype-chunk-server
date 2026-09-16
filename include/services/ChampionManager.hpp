@@ -1,20 +1,27 @@
 #pragma once
 
 #include "data/DataStructs.hpp"
+#include "services/CharacterManager.hpp"
+#include "services/CharacterStatsNotificationService.hpp"
+#include "services/GameConfigService.hpp"
+#include "services/GameZoneManager.hpp"
+#include "services/MobInstanceManager.hpp"
+#include "services/MobManager.hpp"
+#include "services/SpawnZoneManager.hpp"
+#include "utils/Logger.hpp"
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 namespace spdlog
 {
 class logger;
 }
-class GameServices;
 
 /**
  * @brief Unified authority for all champion-type mob events (Stage 3).
@@ -37,7 +44,18 @@ class GameServices;
 class ChampionManager
 {
   public:
-    explicit ChampionManager(GameServices *gs);
+    /// Explicit dependencies (no GameServices). statsNotify is optional and
+    /// may be null (zone announcements are then skipped) — same pattern as
+    /// LootManager::gameServices_. Tests pass nullptr; production passes
+    /// &statsNotificationService_.
+    ChampionManager(GameZoneManager &gameZones,
+        GameConfigService &gameConfig,
+        MobInstanceManager &mobInstances,
+        CharacterManager &characters,
+        MobManager &mobs,
+        SpawnZoneManager &spawnZones,
+        CharacterStatsNotificationService *statsNotify,
+        Logger &logger);
 
     // ── Threshold Champion ───────────────────────────────────────────────────
 
@@ -122,7 +140,14 @@ class ChampionManager
         const std::string &slug = "");
 
   private:
-    GameServices *gs_;
+    GameZoneManager &gameZones_;
+    GameConfigService &gameConfig_;
+    MobInstanceManager &mobInstances_;
+    CharacterManager &characters_;
+    MobManager &mobs_;
+    SpawnZoneManager &spawnZones_;
+    CharacterStatsNotificationService *statsNotify_; // optional, may be null
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 
     // ── Threshold kill counters ───────────────────────────────────────────────

@@ -3,11 +3,16 @@
 #include <algorithm>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 TitleManager::TitleManager(GameServices *gs)
     : gs_(gs),
       log_(spdlog::get("chunk-server"))
 {
+    // No global logger outside the server process (unit tests): fall back
+    // instead of crashing on the first log_->... (nullptr deref).
+    if (!log_)
+        log_ = spdlog::stdout_color_mt("chunk-server");
 }
 
 // ── Static data ────────────────────────────────────────────────────────────────

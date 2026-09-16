@@ -28,14 +28,21 @@ RUN rustup update stable && rustup default stable
 # ✅ Install `watchexec` with `--locked`
 RUN cargo install watchexec-cli --locked
 
+# ✅ GTest for unit tests (own layer AFTER toolchain so rust/watchexec cache survives)
+RUN apt-get update && apt-get install -y --no-install-recommends libgtest-dev \
+    && mkdir -p /tmp/gtest-build && cd /tmp/gtest-build \
+    && cmake /usr/src/googletest -DCMAKE_BUILD_TYPE=Release && make -j8 && make install \
+    && rm -rf /tmp/gtest-build /var/lib/apt/lists/*
+
 # Set working directory
 WORKDIR /usr/src/app
 
 # ✅ Copy necessary project files
-COPY CMakeLists.txt ./  
-COPY src ./src  
-COPY include ./include  
-COPY config.json ./config.json  
+COPY CMakeLists.txt ./
+COPY src ./src
+COPY include ./include
+COPY tests ./tests
+COPY config.json ./config.json
 
 # Create build directory
 RUN mkdir -p build

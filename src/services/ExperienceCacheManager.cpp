@@ -4,10 +4,10 @@
 #include <chrono>
 #include <spdlog/logger.h>
 
-ExperienceCacheManager::ExperienceCacheManager(GameServices *gameServices)
-    : gameServices_(gameServices)
+ExperienceCacheManager::ExperienceCacheManager(Logger &logger)
+    : logger_(logger)
 {
-    log_ = gameServices_->getLogger().getSystem("experience");
+    log_ = logger_.getSystem("experience");
     initialize();
 }
 
@@ -35,7 +35,7 @@ ExperienceCacheManager::loadExperienceTableFromGameServer()
     }
     catch (const std::exception &e)
     {
-        gameServices_->getLogger().logError("Error in manual experience table reload: " + std::string(e.what()));
+        log_->error("Error in manual experience table reload: " + std::string(e.what()));
     }
 }
 
@@ -48,8 +48,8 @@ ExperienceCacheManager::setExperienceTable(const std::vector<ExperienceLevelEntr
     experienceTable_.isLoaded = true;
     experienceTable_.lastUpdated = std::chrono::system_clock::now();
 
-    gameServices_->getLogger().log("Experience table loaded successfully with " +
-                                       std::to_string(entries.size()) + " level entries",
+    logger_.log("Experience table loaded successfully with " +
+                    std::to_string(entries.size()) + " level entries",
         GREEN);
 
     // Логируем несколько первых записей для отладки
@@ -59,8 +59,8 @@ ExperienceCacheManager::setExperienceTable(const std::vector<ExperienceLevelEntr
         for (size_t i = 0; i < std::min(size_t(5), entries.size()); ++i)
         {
             const auto &entry = entries[i];
-            gameServices_->getLogger().log("  Level " + std::to_string(entry.level) +
-                                               ": " + std::to_string(entry.experiencePoints) + " exp",
+            logger_.log("  Level " + std::to_string(entry.level) +
+                            ": " + std::to_string(entry.experiencePoints) + " exp",
                 BLUE);
         }
     }

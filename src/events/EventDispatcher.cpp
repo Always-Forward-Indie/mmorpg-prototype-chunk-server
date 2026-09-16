@@ -229,7 +229,10 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     }
     else
     {
-        log_->error("Unknown event type: " + context.eventType);
+        // Tolerant reader: unknown types (e.g. from newer clients or the
+        // legacy getSpawnZones call) are logged and ignored — the session
+        // stays alive. Warn, not error: this is client drift, not a fault.
+        log_->warn("Unknown event type (ignored): " + context.eventType);
     }
 
     // Push the batch of events to the queue

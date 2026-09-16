@@ -7,6 +7,11 @@ ReputationManager::ReputationManager(Logger &logger)
     : logger_(logger),
       log_(spdlog::get("chunk-server"))
 {
+    // Standalone use (unit tests, tools) has no global "chunk-server" logger
+    // registered: spdlog::get returns nullptr and the first log_->... would
+    // segfault. Fall back to a per-system logger instead.
+    if (!log_)
+        log_ = logger_.getSystem("reputation");
 }
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────

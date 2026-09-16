@@ -108,7 +108,7 @@ class InventoryManager
     std::vector<PlayerInventoryItemStruct> getEquippedItems(int characterId) const;
 
     /**
-     * @brief Get the equipped weapon (equipSlotSlug == "weapon"), if any
+     * @brief Get the equipped weapon (equipSlotSlug == "main_hand" or "two_hand"), if any
      */
     std::optional<PlayerInventoryItemStruct> getEquippedWeapon(int characterId) const;
 
