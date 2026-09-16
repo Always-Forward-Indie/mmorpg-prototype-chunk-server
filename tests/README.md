@@ -1,31 +1,32 @@
-# Chunk unit tests (no gtest, no CMake changes)
+# Chunk unit tests (gtest)
 
-One file per manager (`test_<name>.cpp`), `main` returns 0/1, asserts with
-messages, deterministic, milliseconds. The toolchain (g++, spdlog, boost
-headers) lives in the dev container, so tests compile and run there.
+One file per manager (`test_<name>.cpp`). Toolchain (g++, gtest, spdlog,
+boost headers) lives in the dev container, so tests compile and run there.
 
-`tests/` is deliberately NOT mounted into the container
-(`docker-compose.dev.yml` mounts only `src/`, `include/`, `CMakeLists.txt`),
-so watchexec never rebuilds the server because of a test edit.
-
-## Run (from the WSL repo root)
+## Run (from inside any dev container)
 
 ```bash
-C=mmorpg-prototype-chunk-server-new-chunk-server-1
-docker cp mmorpg-prototype-chunk-server-new/tests/test_interest.cpp $C:/tmp/test_interest.cpp
-docker exec $C g++ -std=c++17 -I/usr/src/app/include \
-  /tmp/test_interest.cpp \
-  /usr/src/app/src/services/InterestManager.cpp \
-  /usr/src/app/src/utils/Logger.cpp \
-  -o /tmp/test_interest -lspdlog -lfmt -pthread \
-  && docker exec $C /tmp/test_interest
+ctest --test-dir /usr/src/app/build --output-on-failure
 ```
 
-Expected: `ALL OK`.
+The `unit_tests` binary is built by the normal server build
+(`cmake --build build` / watchexec `make -j8`); no separate steps.
 
-## Rules for new tests
+## Add a test
+
+1. Create `tests/test_<name>.cpp` with `TEST`/`TEST_F` cases.
+2. Append the file plus the needed `../src/**/*.cpp` to `tests/CMakeLists.txt`
+   (link only what the test needs; `Logger.cpp` is the usual companion).
+3. Reconfigure happens automatically via watchexec; for a manual check:
+   `cmake -S /usr/src/app -B /tmp/tbuild && cmake --build /tmp/tbuild --target unit_tests -j8`
+   (separate build dir — never run a second `make` inside `/usr/src/app/build`
+   while watchexec watches it).
+
+## Rules
 
 - Unit-test managers/services only (pure logic + Logger). Anything needing
-  asio sockets, DB, or game state belongs to contract tests (`Tests/Contract`)
-  or bots (`Tools/Bots`), not here.
-- No new third-party deps. No changes to the server build (no CMake edits).
+  asio sockets, DB, or live game state belongs to contract tests
+  (`Tests/Contract`) or bots (`Tools/Bots`), not here.
+- RNG rolls: assert ranges/invariants over many samples, never exact values.
+- `tests/` is mounted into the container but ignored by `watch_and_run.sh`,
+  so editing tests never restarts the server.

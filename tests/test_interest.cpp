@@ -1,26 +1,13 @@
 // Unit tests for InterestManager (spatial subscriptions, interest v2).
-//
-// See README.md in this directory for build & run. Exit code 0 = green.
-// Keep tests dependency-free (no gtest): one file per manager, asserts with
-// messages, deterministic, milliseconds.
+// Migrated from the hand-rolled CHECK-macro style to gtest; same 7 cases.
 #include "services/InterestManager.hpp"
 
-#include <cstdio>
-#include <string>
+#include <gtest/gtest.h>
 
-static int failures = 0;
+namespace
+{
 
-#define CHECK(cond, msg)                                                     \
-    do                                                                       \
-    {                                                                        \
-        if (!(cond))                                                         \
-        {                                                                    \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, (msg));      \
-            ++failures;                                                      \
-        }                                                                    \
-    } while (0)
-
-static bool hasCell(const std::vector<InterestManager::CellKey> &v, int cx, int cy)
+bool hasCell(const std::vector<InterestManager::CellKey> &v, int cx, int cy)
 {
     for (const auto &c : v)
         if (c.cx == cx && c.cy == cy)
@@ -28,40 +15,56 @@ static bool hasCell(const std::vector<InterestManager::CellKey> &v, int cx, int 
     return false;
 }
 
-int main()
+struct InterestFixture : ::testing::Test
 {
-    Logger logger("test");
-    InterestManager im(logger);
-    im.configure(1500.0f, 1, 0.15f, true);
+    Logger logger{"test"};
+    InterestManager im{logger};
 
+    void SetUp() override
+    {
+        im.configure(1500.0f, 1, 0.15f, true);
+    }
+};
+
+} // namespace
+
+// Sections 1-6 share one manager: the sequence is order-dependent
+// (first sighting -> jitter -> rehome -> teleport -> watch -> refcount).
+TEST_F(InterestFixture, SubscriptionLifecycle)
+{
     // 1. First sighting subscribes 3x3.
     {
         auto r = im.onPlayerMoved(5, 10, 0.0f, 0.0f);
-        CHECK(r.entered.size() == 9, "first sighting subscribes 3x3");
-        CHECK(r.left.empty(), "first sighting leaves nothing");
+        EXPECT_EQ(r.entered.size(), 9u);
+        EXPECT_TRUE(r.left.empty());
         auto snap = im.snapshot();
-        CHECK(snap.tracked.count(5) == 1, "client tracked");
-        CHECK(snap.members.size() == 9, "9 live cells");
+        EXPECT_EQ(snap.tracked.count(5), 1u);
+        EXPECT_EQ(snap.members.size(), 9u);
         auto cell = InterestManager::cellFor(-434.0f, -973.0f, 1500.0f);
-        CHECK(cell.cx == -1 && cell.cy == -1, "negative coords floor correctly");
-        CHECK(snap.members.find(cell) != snap.members.end(), "glade cell subscribed");
+        EXPECT_EQ(cell.cx, -1);
+        EXPECT_EQ(cell.cy, -1);
+        EXPECT_NE(snap.members.find(cell), snap.members.end());
     }
 
     // 2. Hysteresis: small step across the edge does NOT rehome.
     {
         // Anchor cell is (0,0): [0,1500)x[0,1500), margin 225.
         auto r = im.onPlayerMoved(5, 10, 1600.0f, 100.0f); // 100 past edge < margin
-        CHECK(r.entered.empty() && r.left.empty(), "margin absorbs edge jitter");
+        EXPECT_TRUE(r.entered.empty());
+        EXPECT_TRUE(r.left.empty());
         r = im.onPlayerMoved(5, 10, 2000.0f, 100.0f); // 500 past edge > margin
-        CHECK(r.entered.size() == 3 && r.left.size() == 3, "rehome swaps one column");
+        EXPECT_EQ(r.entered.size(), 3u);
+        EXPECT_EQ(r.left.size(), 3u);
         auto cells = im.getClientCells(5);
-        CHECK(hasCell(cells, 2, -1) && !hasCell(cells, -1, -1), "anchor moved to (1,0)");
+        EXPECT_TRUE(hasCell(cells, 2, -1));
+        EXPECT_FALSE(hasCell(cells, -1, -1));
     }
 
     // 3. Teleport resubscribes fully.
     {
         auto r = im.onPlayerMoved(5, 10, 20000.0f, 20000.0f);
-        CHECK(r.entered.size() == 9 && r.left.size() == 9, "teleport swaps all");
+        EXPECT_EQ(r.entered.size(), 9u);
+        EXPECT_EQ(r.left.size(), 9u);
     }
 
     // 4. Watchlist with TTL semantics.
@@ -70,9 +73,10 @@ int main()
         im.watch(5, 0);   // invalid uid ignored
         im.watch(0, 100); // invalid client ignored
         auto wi = im.watchIndex();
-        CHECK(wi.size() == 1 && wi[1000007].size() == 1, "watch registered");
+        ASSERT_EQ(wi.size(), 1u);
+        EXPECT_EQ(wi[1000007].size(), 1u);
         im.unwatch(5, 1000007);
-        CHECK(im.watchIndex().empty(), "unwatch removes");
+        EXPECT_TRUE(im.watchIndex().empty());
     }
 
     // 5. Second client shares cells (refcounted members).
@@ -81,49 +85,46 @@ int main()
         auto snap = im.snapshot();
         auto cell = InterestManager::cellFor(20000.0f, 20000.0f, 1500.0f);
         auto it = snap.members.find(cell);
-        CHECK(it != snap.members.end() && it->second.size() == 2, "cell shared");
+        ASSERT_NE(it, snap.members.end());
+        EXPECT_EQ(it->second.size(), 2u);
         im.removeClient(5);
         snap = im.snapshot();
         it = snap.members.find(cell);
-        CHECK(it != snap.members.end() && it->second.size() == 1, "remove keeps other");
-        CHECK(im.snapshot().tracked.count(5) == 0, "removed untracked");
+        ASSERT_NE(it, snap.members.end());
+        EXPECT_EQ(it->second.size(), 1u);
+        EXPECT_EQ(im.snapshot().tracked.count(5), 0u);
         im.removeClient(5); // idempotent
     }
 
     // 6. Disabled => empty snapshot, no tracking.
     {
         im.configure(1500.0f, 1, 0.15f, false);
-        CHECK(im.snapshot().members.empty(), "disabled snapshot empty");
+        EXPECT_TRUE(im.snapshot().members.empty());
         auto r = im.onPlayerMoved(7, 12, 0.0f, 0.0f);
-        CHECK(r.entered.empty(), "disabled tracks nothing");
+        EXPECT_TRUE(r.entered.empty());
         im.configure(1500.0f, 1, 0.15f, true);
     }
+}
 
+TEST_F(InterestFixture, RecipientsFailOpen)
+{
     // 7. recipientsFor: subscribers + fail-open (unready/untracked), exclude.
+    InterestManager im2(logger);
+    im2.configure(1500.0f, 1, 0.15f, true);
+    im2.onPlayerMoved(1, 1, 0.0f, 0.0f); // subscribes around origin
+    std::vector<std::pair<int, bool>> viewers = {{1, true}, {2, true}, {3, false}};
+    auto ids = im2.recipientsFor(100.0f, 100.0f, viewers, -1);
+    bool has1 = false, has2 = false, has3 = false;
+    for (int id : ids)
     {
-        InterestManager im2(logger);
-        im2.configure(1500.0f, 1, 0.15f, true);
-        im2.onPlayerMoved(1, 1, 0.0f, 0.0f);   // subscribes around origin
-        std::vector<std::pair<int, bool>> viewers = {{1, true}, {2, true}, {3, false}};
-        auto ids = im2.recipientsFor(100.0f, 100.0f, viewers, -1);
-        bool has1 = false, has2 = false, has3 = false;
-        for (int id : ids)
-        {
-            has1 = has1 || id == 1;
-            has2 = has2 || id == 2;
-            has3 = has3 || id == 3;
-        }
-        CHECK(has1, "subscriber included");
-        CHECK(has2, "untracked fail-open included");
-        CHECK(has3, "not-ready fail-open included");
-        auto ids2 = im2.recipientsFor(100.0f, 100.0f, viewers, 1);
-        for (int id : ids2)
-            CHECK(id != 1, "excluded id absent");
+        has1 = has1 || id == 1;
+        has2 = has2 || id == 2;
+        has3 = has3 || id == 3;
     }
-
-    if (failures == 0)
-        std::printf("ALL OK\n");
-    else
-        std::printf("%d FAILURES\n", failures);
-    return failures == 0 ? 0 : 1;
+    EXPECT_TRUE(has1); // subscriber included
+    EXPECT_TRUE(has2); // untracked fail-open included
+    EXPECT_TRUE(has3); // not-ready fail-open included
+    auto ids2 = im2.recipientsFor(100.0f, 100.0f, viewers, 1);
+    for (int id : ids2)
+        EXPECT_NE(id, 1);
 }

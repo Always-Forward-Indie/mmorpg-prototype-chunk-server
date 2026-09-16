@@ -1,0 +1,120 @@
+# Chunk-server unit tests (gtest). Run inside the dev container:
+#   ctest --test-dir /usr/src/app/build --output-on-failure
+# One file per manager (test_<name>.cpp). Unit-test managers/services only
+# (pure logic + Logger); anything needing asio sockets, DB, or live game
+# state belongs to contract tests (Tests/Contract) or bots (Tools/Bots).
+find_package(GTest QUIET)
+if(GTest_FOUND)
+    # Drop unreferenced sections: lets unit tests link service .cpps
+    # (e.g. ExperienceManager formulas) without dragging the whole world.
+    add_compile_options(-ffunction-sections -fdata-sections)
+    add_link_options(-Wl,--gc-sections)
+    add_executable(unit_tests
+        test_interest.cpp
+        test_event_queue.cpp
+        test_trade_session.cpp
+        test_combat_calculator.cpp
+        test_item_inventory.cpp
+        test_vendor.cpp
+        test_pity.cpp
+        test_experience.cpp
+        test_loot.cpp
+        test_harvest.cpp
+        test_config_templates.cpp
+        test_trainer.cpp
+        test_client_zones.cpp
+        test_reputation.cpp
+        test_mastery.cpp
+        test_title.cpp
+        test_zone_event.cpp
+        test_mobs.cpp
+        test_respawn_world.cpp
+        test_dialogue.cpp
+        test_emote_bestiary.cpp
+        test_character.cpp
+        test_equipment.cpp
+        test_skills.cpp
+        test_chunk_registry.cpp
+        test_utils.cpp
+        test_json_parser.cpp
+        test_scheduler_gen.cpp
+        test_mob_ai.cpp
+        test_combat_response.cpp
+        test_exp_cache.cpp
+        test_champion.cpp
+        test_regen.cpp
+        test_cooldown.cpp
+        test_stats_builder.cpp
+        test_dialogue_actions.cpp
+        test_durability.cpp
+        test_skill_initiation.cpp
+        test_mob_rewards.cpp
+        test_player_death.cpp
+        test_quest_store.cpp
+        test_quest_resolvers.cpp
+        stubs/QuestManagerStub.cpp
+        stubs/WorldStubs.cpp
+        ../src/services/InterestManager.cpp
+        ../src/services/TradeSessionManager.cpp
+        ../src/services/CombatCalculator.cpp
+        ../src/services/ItemManager.cpp
+        ../src/services/InventoryManager.cpp
+        ../src/services/VendorManager.cpp
+        ../src/services/PityManager.cpp
+        ../src/services/ExperienceManager.cpp
+        ../src/services/LootManager.cpp
+        ../src/services/HarvestManager.cpp
+        ../src/services/StatusEffectTemplateManager.cpp
+        ../src/services/TrainerManager.cpp
+        ../src/services/ClientManager.cpp
+        ../src/services/GameZoneManager.cpp
+        ../src/services/ReputationManager.cpp
+        ../src/services/MasteryManager.cpp
+        ../src/services/TitleManager.cpp
+        ../src/services/ZoneEventManager.cpp
+        ../src/services/NPCManager.cpp
+        ../src/services/MobManager.cpp
+        ../src/services/MobInstanceManager.cpp
+        ../src/services/SpawnZoneManager.cpp
+        ../src/services/CharacterManager.cpp
+        ../src/services/RespawnZoneManager.cpp
+        ../src/services/WorldObjectManager.cpp
+        ../src/services/AmbientSpeechManager.cpp
+        ../src/services/DialogueConditionEvaluator.cpp
+        ../src/services/DialogueManager.cpp
+        ../src/services/DialogueSessionManager.cpp
+        ../src/services/EmoteManager.cpp
+        ../src/services/BestiaryManager.cpp
+        ../src/services/EquipmentManager.cpp
+        ../src/services/SkillManager.cpp
+        ../src/services/MobManager.cpp
+        ../src/services/MobMovementManager.cpp
+        ../src/services/ChunkManager.cpp
+        ../src/services/MobAIController.cpp
+        ../src/services/MobMovementManager.cpp
+        ../src/services/CombatResponseBuilder.cpp
+        ../src/services/ExperienceCacheManager.cpp
+        ../src/services/ChampionManager.cpp
+        ../src/services/RegenManager.cpp
+        ../src/services/CooldownService.cpp
+        ../src/services/StatsPacketBuilder.cpp
+        ../src/services/DurabilityService.cpp
+        ../src/services/MobKillRewardPipeline.cpp
+        ../src/services/PlayerDeathPipeline.cpp
+        ../src/services/QuestStore.cpp
+        ../src/utils/ThreadPool.cpp
+        ../src/utils/TimestampUtils.cpp
+        ../src/utils/JSONParser.cpp
+        ../src/utils/Scheduler.cpp
+        ../src/utils/TimeUtils.cpp
+        ../src/utils/Generators.cpp
+        ../src/services/GameConfigService.cpp
+        ../src/events/Event.cpp
+        ../src/events/EventQueue.cpp
+        ../src/utils/Logger.cpp
+    )
+    target_link_libraries(unit_tests PRIVATE GTest::gtest_main spdlog::spdlog_header_only)
+    add_test(NAME unit COMMAND unit_tests)
+else()
+    message(WARNING "GTest not found - unit tests skipped (install libgtest-dev, build & install)")
+endif()
