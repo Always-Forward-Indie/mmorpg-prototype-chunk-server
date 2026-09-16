@@ -99,6 +99,57 @@ TEST_F(AiFixture, ExpiredChaseDropsFarTarget)
     EXPECT_EQ(d.targetPlayerId, 0);
 }
 
+TEST_F(AiFixture, LowHpTriggersFlee)
+{
+    MobDataStruct mob = makeMob();
+    mob.fleeHpThreshold = 0.5f;
+    mob.maxHealth = 100;
+    mob.currentHealth = 10;
+    mob.aggroRange = 2000.0f;
+    mob.chaseMultiplier = 1.0f;
+    ASSERT_TRUE(instances.registerMobInstance(mob));
+    MobMovementData d = chasingData();
+    ai.updateMobCombatState(mob, d, 1000.0f);
+    EXPECT_EQ(d.combatState, MobCombatState::FLEEING);
+    EXPECT_TRUE(d.isFleeing);
+}
+
+TEST_F(AiFixture, HandleMobAttackedSetsThreatTarget)
+{
+    MobDataStruct mob = makeMob();
+    ASSERT_TRUE(instances.registerMobInstance(mob));
+    ai.handleMobAttacked(9001, 1, 10);
+    auto md = movement.getMobMovementData(9001);
+    EXPECT_EQ(md.targetPlayerId, 1);
+    EXPECT_GT(md.threatTable[1], 0);
+}
+
+TEST_F(AiFixture, LateWireSettersAreNullSafe)
+{
+    // Production order: ChunkServer wires these after construction.
+    ai.setEventQueue(nullptr);
+    ai.setCombatSystem(nullptr);
+    MobDataStruct mob = makeMob();
+    MobMovementData d = chasingData();
+    ai.updateMobCombatState(mob, d, 1000.0f); // must not crash
+    SUCCEED();
+}
+
+TEST_F(AiFixture, HandlePlayerAggroAcquiresNearbyTarget)
+{
+    MobDataStruct mob = makeMob();
+    mob.isAggressive = true;
+    SpawnZoneStruct zone;
+    zone.zoneId = 7;
+    zone.minX = -1000.0f;
+    zone.maxX = 1000.0f;
+    zone.minY = -1000.0f;
+    zone.maxY = 1000.0f;
+    MobMovementData d; // PATROLLING, no target
+    ai.handlePlayerAggro(mob, zone, d);
+    EXPECT_EQ(d.targetPlayerId, 1); // char 1 at (50,0), in aggro range
+}
+
 namespace
 {
 

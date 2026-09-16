@@ -48,7 +48,12 @@ QuestManager::QuestManager(GameServices *services, Logger &logger)
 void
 QuestManager::setGameServerWorker(GameServerWorker *worker)
 {
-    store_.setGameServerWorker(worker);
+    store_.setSendToGameServerCallback(
+        [worker](const std::string &packet)
+        {
+            if (worker)
+                worker->sendDataToGameServer(packet);
+        });
 }
 
 void

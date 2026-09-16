@@ -85,6 +85,13 @@ TEST_F(CooldownFixture, RestoreSemantics)
     EXPECT_TRUE(cd.isOnCooldown(1, "fireball"));
 }
 
+TEST_F(CooldownFixture, GCDProbeWithoutGCDEntry)
+{
+    cd.setCooldown(1, "fireball", 60000); // skill entry, no GCD entry
+    EXPECT_FALSE(cd.isGCDActive(1));      // entries present, __gcd__ missing
+    EXPECT_TRUE(cd.isOnCooldown(1, "fireball"));
+}
+
 TEST_F(CooldownFixture, UpdateCooldownsCollectsExpired)
 {
     cd.setCooldown(1, "instant", 0); // already expired

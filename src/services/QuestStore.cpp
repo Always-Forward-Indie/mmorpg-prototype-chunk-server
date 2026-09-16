@@ -1,5 +1,4 @@
 #include "services/QuestStore.hpp"
-#include "network/GameServerWorker.hpp"
 #include "utils/Logger.hpp"
 #include <chrono>
 #include <cmath>
@@ -12,9 +11,9 @@ QuestStore::QuestStore(Logger &logger, QuestStoreSeams seams)
 }
 
 void
-QuestStore::setGameServerWorker(GameServerWorker *worker)
+QuestStore::setSendToGameServerCallback(SendToGameServerFn callback)
 {
-    gameServerWorker_ = worker;
+    sendToGameServer_ = std::move(callback);
 }
 
 // =============================================================================
@@ -730,15 +729,15 @@ QuestStore::flushDirtyProgress()
             packet["body"]["currentStep"] = pq.currentStep;
             packet["body"]["progress"] = pq.progress;
 
-            if (gameServerWorker_)
-                gameServerWorker_->sendDataToGameServer(packet.dump() + "\n");
+            if (sendToGameServer_)
+                sendToGameServer_(packet.dump() + "\n");
 
             pq.isDirty = false;
         }
     }
 
     // Flush pending flag updates
-    if (gameServerWorker_)
+    if (sendToGameServer_)
     {
         for (const auto &fu : pendingFlagUpdates_)
         {
@@ -751,7 +750,7 @@ QuestStore::flushDirtyProgress()
             if (fu.intValue.has_value())
                 packet["body"]["intValue"] = fu.intValue.value();
 
-            gameServerWorker_->sendDataToGameServer(packet.dump() + "\n");
+            sendToGameServer_(packet.dump() + "\n");
         }
     }
     pendingFlagUpdates_.clear();
@@ -777,8 +776,8 @@ QuestStore::flushAllProgress(int characterId)
         packet["body"]["currentStep"] = pq.currentStep;
         packet["body"]["progress"] = pq.progress;
 
-        if (gameServerWorker_)
-            gameServerWorker_->sendDataToGameServer(packet.dump() + "\n");
+        if (sendToGameServer_)
+            sendToGameServer_(packet.dump() + "\n");
         pq.isDirty = false;
     }
 }
@@ -787,7 +786,7 @@ void
 QuestStore::flushPendingFlags()
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (gameServerWorker_)
+    if (sendToGameServer_)
     {
         for (const auto &fu : pendingFlagUpdates_)
         {
@@ -800,7 +799,7 @@ QuestStore::flushPendingFlags()
             if (fu.intValue.has_value())
                 packet["body"]["intValue"] = fu.intValue.value();
 
-            gameServerWorker_->sendDataToGameServer(packet.dump() + "\n");
+            sendToGameServer_(packet.dump() + "\n");
         }
     }
     pendingFlagUpdates_.clear();

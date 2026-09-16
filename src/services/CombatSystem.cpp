@@ -118,7 +118,6 @@ CombatSystem::setupExperienceCallbacks()
     {
         auto &experienceManager = gameServices_->getExperienceManager();
         experienceManager.setExperiencePacketCallback(broadcastCallback_);
-        experienceManager.setStatsUpdatePacketCallback(broadcastCallback_);
 
         auto &statsService = gameServices_->getStatsNotificationService();
         statsService.setStatsUpdateCallback(broadcastCallback_);

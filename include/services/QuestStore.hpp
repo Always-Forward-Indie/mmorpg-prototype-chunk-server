@@ -10,8 +10,8 @@
 #include <unordered_set>
 #include <vector>
 
-// Forward declarations
-class GameServerWorker;
+// Forward declarations (none needed: the store is network-agnostic;
+// game-server persistence arrives as a std::function seam).
 
 /**
  * @brief External seams for QuestStore transitions (Increment 11).
@@ -95,7 +95,10 @@ class QuestStore
     void markFlagsLoaded(int characterId);
     bool areFlagsLoaded(int characterId) const;
     void clearFlagsLoaded(int characterId);
-    void setGameServerWorker(GameServerWorker *worker);
+    /// Game-server persistence sender (updatePlayerQuestProgress/updatePlayerFlag
+    /// JSON strings). Unset in unit tests — flushes then only mark records clean.
+    using SendToGameServerFn = std::function<void(const std::string &)>;
+    void setSendToGameServerCallback(SendToGameServerFn callback);
 
   private:
     void checkStepCompletion(int characterId, PlayerQuestProgressStruct &pq);
@@ -118,8 +121,8 @@ class QuestStore
 
     bool loaded_ = false;
 
-    GameServerWorker *gameServerWorker_ = nullptr;
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
     QuestStoreSeams seams_;
+    SendToGameServerFn sendToGameServer_;
 };

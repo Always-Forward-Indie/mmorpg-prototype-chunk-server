@@ -3,6 +3,7 @@
 #include "data/CombatStructs.hpp"
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
+#include "services/CombatCalculator.hpp"
 #include "utils/Logger.hpp"
 #include <functional>
 #include <memory>
@@ -19,7 +20,6 @@ class MobInstanceManager;
 class MobManager;
 class MobMovementManager;
 class CooldownService;
-class CombatCalculator;
 
 /**
  * @brief Единая система управления скилами для всех сущностей (игроки, мобы)

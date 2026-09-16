@@ -106,12 +106,6 @@ class ExperienceManager
     void setExperiencePacketCallback(std::function<void(const nlohmann::json &)> callback);
 
     /**
-     * @brief Установить callback для отправки пакетов обновления статов
-     * @param callback Функция для отправки пакетов
-     */
-    void setStatsUpdatePacketCallback(std::function<void(const nlohmann::json &)> callback);
-
-    /**
      * @brief Установить callback для немедленного сохранения exp/level на гейм-сервере
      * @param callback Функция отправки данных на гейм-сервер (принимает строку)
      */
@@ -125,7 +119,6 @@ class ExperienceManager
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
     std::function<void(const nlohmann::json &)> experiencePacketCallback_;
-    std::function<void(const nlohmann::json &)> statsUpdatePacketCallback_;
     std::function<void(const std::string &)> saveProgressCallback_;
 
     /**
@@ -135,25 +128,11 @@ class ExperienceManager
     void sendExperiencePacket(const ExperienceEventStruct &experienceEvent);
 
     /**
-     * @brief Отправить пакет обновления статов
-     * @param characterId ID персонажа
-     */
-    void sendStatsUpdatePacket(int characterId);
-
-    /**
      * @brief Построить JSON пакет с данными об опыте
      * @param experienceEvent Событие изменения опыта
      * @return JSON пакет
      */
     nlohmann::json buildExperiencePacket(const ExperienceEventStruct &experienceEvent);
-
-    /**
-     * @brief Построить JSON пакет обновления статов
-     * @param characterData Данные персонажа
-     * @param requestId ID запроса
-     * @return JSON пакет
-     */
-    nlohmann::json buildStatsUpdatePacket(const CharacterDataStruct &characterData, const std::string &requestId);
 
     /**
      * @brief Отправить saveCharacterProgress на гейм-сервер для немедленной записи в БД

@@ -281,3 +281,81 @@ TEST_F(StoreFixture, FillContextAndFlagsLoaded)
     store->clearFlagsLoaded(1);
     EXPECT_FALSE(store->areFlagsLoaded(1));
 }
+
+TEST_F(StoreFixture, LifecycleAndLookups)
+{
+    EXPECT_TRUE(store->isLoaded());
+    EXPECT_NE(store->getQuestById(1), nullptr);
+    EXPECT_EQ(store->getQuestById(424242), nullptr);
+    std::vector<std::string> persisted;
+    store->setSendToGameServerCallback(
+        [&](const std::string &pkt) { persisted.push_back(pkt); });
+
+    // load/unload roundtrip with journal send loop
+    PlayerQuestProgressStruct pq;
+    pq.characterId = 1;
+    pq.questId = 1;
+    pq.questSlug = "kill_foxes";
+    pq.state = "active";
+    store->loadPlayerQuests(1, {pq});
+    EXPECT_EQ(stateOf(1, "kill_foxes"), "active");
+    EXPECT_FALSE(sent.empty());
+    store->unloadPlayerQuests(1);
+    EXPECT_EQ(stateOf(1, "kill_foxes"), "");
+
+    // unknown char / unknown quest lookups
+    EXPECT_EQ(stateOf(99, "kill_foxes"), "");
+    PlayerContextStruct ctx;
+    store->fillQuestContext(99, ctx); // no progress -> no-op
+    EXPECT_TRUE(ctx.questStates.empty());
+
+    // empty runtime slug falls back to static data
+    PlayerQuestProgressStruct noslug = pq;
+    noslug.questSlug = "";
+    store->loadPlayerQuests(1, {noslug});
+    PlayerContextStruct ctx2;
+    store->fillQuestContext(1, ctx2);
+    EXPECT_EQ(ctx2.questStates["kill_foxes"], "active");
+
+    ASSERT_TRUE(store->offerQuest(1, "talk_bob")); // marks progress dirty
+    store->flushDirtyProgress();                    // -> updatePlayerQuestProgress
+    ASSERT_EQ(persisted.size(), 1u);
+    EXPECT_NE(persisted[0].find("updatePlayerQuestProgress"), std::string::npos);
+    UpdatePlayerFlagStruct fu;
+    fu.characterId = 1;
+    fu.flagKey = "met_bob";
+    fu.boolValue = true;
+    store->queueFlagUpdate(fu);
+    store->flushPendingFlags(); // -> updatePlayerFlag
+    ASSERT_EQ(persisted.size(), 2u);
+    EXPECT_NE(persisted[1].find("updatePlayerFlag"), std::string::npos);
+    store->flushAllProgress(1);
+    store->flushAllProgress(99); // unknown char -> no-op
+    SUCCEED();
+}
+
+TEST_F(StoreFixture, UnknownSlugsAndChars)
+{
+    PlayerQuestProgressStruct pq;
+    QuestStruct qs;
+    EXPECT_FALSE(store->beginTurnIn(1, "nope", pq, qs));
+    EXPECT_FALSE(store->failQuest(1, "nope"));
+    store->advanceQuestStepBySlug(1, "nope"); // unknown -> no-op
+    // triggers with no progress at all
+    store->onMobKilled(99, 7);
+    store->onItemObtained(99, 46, 1);
+    store->onNPCTalked(99, 11);
+    store->onPositionReached(99, 0.0f, 0.0f);
+    store->onWorldObjectInteracted(99, 9);
+    // triggers with progress but mismatched ids
+    ASSERT_TRUE(store->offerQuest(1, "kill_foxes"));
+    store->onItemObtained(1, 46, 1); // kill quest ignores collect
+    store->onNPCTalked(1, 11);       // ... talk
+    store->onPositionReached(1, 0.0f, 0.0f);
+    store->onWorldObjectInteracted(1, 9);
+    EXPECT_EQ(stateOf(1, "kill_foxes"), "active");
+    // non-existent progress for advance
+    store->advanceQuestStepBySlug(1, "collect_hides"); // no progress -> no-op
+    store->advanceQuestStepBySlug(99, "kill_foxes");   // unknown char -> no-op
+    SUCCEED();
+}

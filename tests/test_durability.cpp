@@ -71,6 +71,8 @@ struct DurFixture : ::testing::Test
         bread.id = 202;
         bread.slug = "bread";
         bread.stackMax = 10;
+        bread.isEquippable = true; // equipped as main_hand but NOT durable
+        bread.equipSlotSlug = "main_hand";
         items.setItemsList({sword, chest, bread});
     }
 
@@ -174,7 +176,8 @@ TEST_F(DurFixture, DeathPenaltyAllEquipped)
 
 TEST_F(DurFixture, NonDurableSkipped)
 {
-    equip(1, 202, 13); // bread: not durable
+    equip(1, 202, 13); // bread as main_hand: found as weapon but not durable
+    dur.applyWeaponHitWear(1);
     dur.applyDeathPenalty(1);
     dur.applyArmorHitWear(1);
     EXPECT_TRUE(saved.empty());

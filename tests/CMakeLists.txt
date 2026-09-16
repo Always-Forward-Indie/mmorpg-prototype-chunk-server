@@ -48,6 +48,7 @@ if(GTest_FOUND)
         test_dialogue_actions.cpp
         test_durability.cpp
         test_skill_initiation.cpp
+        test_skillsystem.cpp
         test_mob_rewards.cpp
         test_player_death.cpp
         test_quest_store.cpp
@@ -87,6 +88,7 @@ if(GTest_FOUND)
         ../src/services/BestiaryManager.cpp
         ../src/services/EquipmentManager.cpp
         ../src/services/SkillManager.cpp
+        ../src/services/SkillSystem.cpp
         ../src/services/MobManager.cpp
         ../src/services/MobMovementManager.cpp
         ../src/services/ChunkManager.cpp

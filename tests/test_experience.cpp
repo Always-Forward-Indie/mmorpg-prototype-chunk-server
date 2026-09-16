@@ -212,3 +212,73 @@ TEST_F(ExpFixture, MaxLevelCap)
     EXPECT_EQ(r.experienceEvent.newLevel, 100);
     EXPECT_EQ(chars.getCharacterData(1).characterLevel, 100);
 }
+
+TEST_F(ExpFixture, LevelUpRestoresMaxFromAttributes)
+{
+    // Struct max values missing (<= 0) -> seeded from attribute list, 1-1.
+    auto c = baseChar(1);
+    c.characterMaxHealth = 0;
+    c.characterMaxMana = 0;
+    c.attributes.push_back(CharacterAttributeStruct{});
+    c.attributes.back().slug = "max_health";
+    c.attributes.back().name = "Maximum Health";
+    c.attributes.back().value = 120;
+    c.attributes.push_back(CharacterAttributeStruct{});
+    c.attributes.back().slug = "max_mana";
+    c.attributes.back().name = "Maximum Mana";
+    c.attributes.back().value = 60;
+    chars.addCharacter(c);
+    auto r = exp.grantExperience(1, 150, "mob_kill");
+    EXPECT_TRUE(r.levelUp);
+    auto got = chars.getCharacterData(1);
+    EXPECT_EQ(got.characterMaxHealth, 130); // 120 + 10 per level
+    EXPECT_EQ(got.characterCurrentHealth, 130);
+}
+
+TEST_F(ExpFixture, LevelUpRestoreCappedByDebuff)
+{
+    auto c = baseChar(1);
+    ActiveEffectStruct sickness;
+    sickness.effectSlug = "resurrection_sickness";
+    sickness.effectTypeSlug = "debuff";
+    sickness.attributeSlug = "max_health";
+    sickness.value = -30.0f;
+    sickness.expiresAt = 0;
+    c.activeEffects.push_back(sickness);
+    ActiveEffectStruct dot;
+    dot.effectSlug = "poison";
+    dot.effectTypeSlug = "dot";
+    dot.attributeSlug = "max_health";
+    dot.value = -1000.0f;
+    dot.expiresAt = 0;
+    c.activeEffects.push_back(dot); // dot/hot skipped in cap math, 1-1
+    chars.addCharacter(c);
+    auto r = exp.grantExperience(1, 150, "mob_kill");
+    EXPECT_TRUE(r.levelUp);
+    // base 100 + 10 - 30 debuff = 80 (dot ignored)
+    EXPECT_EQ(chars.getCharacterData(1).characterCurrentHealth, 80);
+}
+
+TEST_F(ExpFixture, DebtChangeEmitsSavePacket)
+{
+    std::vector<std::string> saved;
+    exp.setSaveProgressCallback([&](const std::string &pkt) { saved.push_back(pkt); });
+    auto c = baseChar(1);
+    chars.addCharacter(c);
+    chars.addExperienceDebt(1, 100);
+    auto r = exp.grantExperience(1, 150, "mob_kill");
+    EXPECT_TRUE(r.success);
+    ASSERT_EQ(saved.size(), 2u); // saveCharacterProgress + saveExperienceDebt
+    EXPECT_NE(saved[0].find("saveCharacterProgress"), std::string::npos);
+    auto debt = nlohmann::json::parse(saved[1]);
+    EXPECT_EQ(debt["header"]["eventType"], "saveExperienceDebt");
+    EXPECT_EQ(debt["body"]["experienceDebt"], 0);
+}
+
+TEST_F(ExpFixture, GetExperienceForNextLevel)
+{
+    EXPECT_EQ(exp.getExperienceForNextLevel(1), 100); // fallback curve
+    cache.setExperienceTable({entry(1, 0), entry(2, 100), entry(3, 300)});
+    EXPECT_EQ(exp.getExperienceForNextLevel(1), 100); // cache
+    EXPECT_EQ(exp.getExperienceForNextLevel(100), exp.getExperienceForLevelFromGameServer(100));
+}

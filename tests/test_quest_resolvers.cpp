@@ -137,6 +137,12 @@ TEST(QuestResolvers, RewardsClassAndHidden)
     auto unfiltered = resolvers.resolveRewardsForClient(rewards, false, 0);
     EXPECT_EQ(unfiltered.size(), 2u);
 
+    // matching class keeps the restricted reward
+    auto matched = resolvers.resolveRewardsForClient(rewards, false, 2);
+    ASSERT_EQ(matched.size(), 2u);
+    EXPECT_EQ(matched[0]["rewardType"], "item");
+    EXPECT_EQ(matched[0]["item_slug"], "sword");
+
     // hidden without reveal -> type + isHidden only
     auto hidden = resolvers.resolveRewardsForClient({itemReward(5, 2, true)}, false, 0);
     ASSERT_EQ(hidden.size(), 1u);

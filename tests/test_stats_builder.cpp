@@ -166,3 +166,30 @@ TEST(StatsPacketBuilder, EffectiveMaxRounding)
     // 50 + 0.5 = 50.5 -> round half away from zero -> 51
     EXPECT_EQ(pkt["body"]["mana"]["max"], 51);
 }
+
+TEST(StatsPacketBuilder, EffectOnlySlugNameFallback)
+{
+    auto in = baseInput();
+    // effect introduces a slug with no base attr and no equip name:
+    // display name falls back to the slug itself.
+    in.character.activeEffects = {effect("lucky_aura", 4.0f)};
+    auto pkt = StatsPacketBuilder::build(in);
+    const auto *aura = findAttr(pkt["body"]["attributes"], "lucky_aura");
+    ASSERT_NE(aura, nullptr);
+    EXPECT_EQ((*aura)["base"], 0);
+    EXPECT_EQ((*aura)["effective"], 4);
+    EXPECT_EQ((*aura)["name"], "lucky_aura");
+}
+
+TEST(StatsPacketBuilder, SoulNameFallbackToSlug)
+{
+    auto in = baseInput();
+    in.soulAttrSlug = "mystic_power";
+    in.soulAttrName = ""; // unknown display name -> slug fallback
+    in.soulBonusFlat = 2;
+    auto pkt = StatsPacketBuilder::build(in);
+    const auto *mp = findAttr(pkt["body"]["attributes"], "mystic_power");
+    ASSERT_NE(mp, nullptr);
+    EXPECT_EQ((*mp)["effective"], 2);
+    EXPECT_EQ((*mp)["name"], "mystic_power");
+}

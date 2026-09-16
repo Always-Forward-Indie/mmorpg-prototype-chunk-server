@@ -21,7 +21,6 @@ ExperienceManager::ExperienceManager(CharacterManager &characters,
       statsNotify_(statsNotify),
       logger_(logger),
       experiencePacketCallback_(nullptr),
-      statsUpdatePacketCallback_(nullptr),
       saveProgressCallback_(nullptr)
 {
     log_ = logger_.getSystem("experience");
@@ -439,12 +438,6 @@ ExperienceManager::getExperienceForLevelFromGameServer(int level)
 }
 
 void
-ExperienceManager::setStatsUpdatePacketCallback(std::function<void(const nlohmann::json &)> callback)
-{
-    statsUpdatePacketCallback_ = callback;
-}
-
-void
 ExperienceManager::setSaveProgressCallback(std::function<void(const std::string &)> callback)
 {
     saveProgressCallback_ = callback;
@@ -467,37 +460,4 @@ ExperienceManager::sendSaveProgressToGameServer(int characterId, int experience,
     packet["body"]["characters"] = nlohmann::json::array({entry});
 
     saveProgressCallback_(packet.dump() + "\n");
-}
-
-void
-ExperienceManager::sendStatsUpdatePacket(int characterId)
-{
-    if (statsUpdatePacketCallback_)
-    {
-        auto characterData = characters_.getCharacterData(characterId);
-        std::string requestId = "stats_update_" + std::to_string(characterId);
-        auto packet = buildStatsUpdatePacket(characterData, requestId);
-        statsUpdatePacketCallback_(packet);
-    }
-}
-
-nlohmann::json
-ExperienceManager::buildStatsUpdatePacket(const CharacterDataStruct &characterData, const std::string &requestId)
-{
-    ResponseBuilder builder;
-
-    TimestampStruct timestamps = TimestampUtils::createReceiveTimestamp(0, requestId);
-
-    builder.setHeader("eventType", "stats_update")
-        .setHeader("status", "success")
-        .setHeader("requestId", requestId)
-        .setTimestamps(timestamps);
-
-    builder.setBody("characterId", characterData.characterId)
-        .setBody("level", characterData.characterLevel)
-        .setBody("experience", nlohmann::json{{"current", characterData.characterExperiencePoints}, {"nextLevel", characterData.expForNextLevel}})
-        .setBody("health", nlohmann::json{{"current", characterData.characterCurrentHealth}, {"max", characterData.characterMaxHealth}})
-        .setBody("mana", nlohmann::json{{"current", characterData.characterCurrentMana}, {"max", characterData.characterMaxMana}});
-
-    return builder.build();
 }
