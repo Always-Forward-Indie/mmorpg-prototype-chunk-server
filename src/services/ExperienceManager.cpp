@@ -1,17 +1,30 @@
 #include "services/ExperienceManager.hpp"
 #include "services/CharacterManager.hpp"
-#include "services/GameServices.hpp"
+#include "services/ExperienceCacheManager.hpp"
+#include "services/IStatsNotifier.hpp"
+#include "services/TitleManager.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <spdlog/logger.h>
 
-ExperienceManager::ExperienceManager(GameServices *gameServices)
-    : gameServices_(gameServices), experiencePacketCallback_(nullptr), statsUpdatePacketCallback_(nullptr),
+ExperienceManager::ExperienceManager(CharacterManager &characters,
+    ExperienceCacheManager &expCache,
+    TitleManager *titles,
+    IStatsNotifier *statsNotify,
+    Logger &logger)
+    : characters_(characters),
+      expCache_(expCache),
+      titles_(titles),
+      statsNotify_(statsNotify),
+      logger_(logger),
+      experiencePacketCallback_(nullptr),
+      statsUpdatePacketCallback_(nullptr),
       saveProgressCallback_(nullptr)
 {
-    log_ = gameServices_->getLogger().getSystem("experience");
+    log_ = logger_.getSystem("experience");
 }
 
 ExperienceGrantResult
@@ -23,7 +36,7 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
     try
     {
         // Получаем данные персонажа
-        auto characterData = gameServices_->getCharacterManager().getCharacterData(characterId);
+        auto characterData = characters_.getCharacterData(characterId);
 
         // Сохраняем старые значения
         int oldExperience = characterData.characterExperiencePoints;
@@ -80,8 +93,8 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         // Тестируем новый метод получения опыта из гейм-сервера
         log_->info("Testing getExperienceForLevelFromGameServer for level " + std::to_string(newLevel + 1));
         int expFromGameServer = getExperienceForLevelFromGameServer(newLevel + 1);
-        gameServices_->getLogger().log("Experience for level " + std::to_string(newLevel + 1) +
-                                           " from game server: " + std::to_string(expFromGameServer),
+        logger_.log("Experience for level " + std::to_string(newLevel + 1) +
+                        " from game server: " + std::to_string(expFromGameServer),
             GREEN);
 
         // Если произошло повышение уровня, обновляем статы
@@ -152,7 +165,7 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         }
 
         // Сохраняем обновленные данные персонажа
-        gameServices_->getCharacterManager().loadCharacterData(characterData);
+        characters_.loadCharacterData(characterData);
 
         // Немедленно сохраняем exp/level на гейм-сервере
         sendSaveProgressToGameServer(characterId, newExperience, newLevel);
@@ -173,30 +186,30 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         sendExperiencePacket(result.experienceEvent);
 
         // Если произошло повышение уровня, отправляем дополнительные пакеты
-        if (result.levelUp)
+        if (result.levelUp && statsNotify_ != nullptr)
         {
-            gameServices_->getStatsNotificationService().sendStatsUpdate(characterId);
+            statsNotify_->sendStatsUpdate(characterId);
         }
 
         result.success = true;
 
-        gameServices_->getLogger().log("Granted " + std::to_string(experienceAmount) +
-                                           " experience to character " + std::to_string(characterId) +
-                                           " (reason: " + reason + ")",
+        logger_.log("Granted " + std::to_string(experienceAmount) +
+                        " experience to character " + std::to_string(characterId) +
+                        " (reason: " + reason + ")",
             GREEN);
 
         if (result.levelUp)
         {
-            gameServices_->getLogger().log("Character " + std::to_string(characterId) +
-                                               " leveled up from " + std::to_string(oldLevel) +
-                                               " to " + std::to_string(newLevel),
+            logger_.log("Character " + std::to_string(characterId) +
+                            " leveled up from " + std::to_string(oldLevel) +
+                            " to " + std::to_string(newLevel),
                 CYAN);
         }
     }
     catch (const std::exception &e)
     {
         result.errorMessage = "Error granting experience: " + std::string(e.what());
-        gameServices_->getLogger().logError("ExperienceManager::grantExperience error: " + std::string(e.what()));
+        logger_.logError("ExperienceManager::grantExperience error: " + std::string(e.what()));
     }
 
     return result;
@@ -245,17 +258,17 @@ ExperienceManager::calculateMobExperience(int mobLevel, int characterLevel, int 
         modifier = 2.0;
     }
 
-    return static_cast<int>(baseExp * modifier);
+    return static_cast<int>(std::lround(baseExp * modifier));
 }
 
 int
-ExperienceManager::calculateDeathPenalty(int characterLevel, int currentExperience)
+ExperienceManager::calculateDeathPenalty(int characterLevel, int currentExperience, int expForCurrentLevel)
 {
+    (void)characterLevel; // kept for call-site readability; the floor is fully described by expForCurrentLevel
     // Штраф составляет 10% от текущего опыта, но не меньше 0
-    int penalty = static_cast<int>(currentExperience * DEATH_PENALTY_PERCENT);
+    int penalty = static_cast<int>(std::lround(currentExperience * DEATH_PENALTY_PERCENT));
 
     // Но не забираем опыт ниже начала текущего уровня
-    int expForCurrentLevel = (characterLevel > 1) ? getExperienceForLevelFromGameServer(characterLevel - 1) : 0;
     int maxPenalty = currentExperience - expForCurrentLevel;
 
     return std::min(penalty, maxPenalty);
@@ -271,7 +284,7 @@ ExperienceManager::getExperienceForLevel(int level)
     for (int i = 2; i <= level; i++)
     {
         // Экспоненциальный рост: baseExp * (multiplier ^ (level-2))
-        totalExp += static_cast<int>(BASE_EXP_PER_LEVEL * std::pow(EXP_MULTIPLIER, i - 2));
+        totalExp += static_cast<int>(std::lround(BASE_EXP_PER_LEVEL * std::pow(EXP_MULTIPLIER, i - 2)));
     }
 
     return totalExp;
@@ -284,17 +297,15 @@ ExperienceManager::getLevelFromExperience(int experience)
         return 1;
 
     // Используем кешированные данные если доступны
-    auto &cacheManager = gameServices_->getExperienceCacheManager();
-
-    if (cacheManager.isTableLoaded())
+    if (expCache_.isTableLoaded())
     {
         // Ищем подходящий уровень в кешированных данных
         int level = 1;
-        int maxLevel = cacheManager.getMaxLevel();
+        int maxLevel = expCache_.getMaxLevel();
 
         for (int i = 1; i <= maxLevel; i++)
         {
-            int expRequired = cacheManager.getExperienceForLevel(i);
+            int expRequired = expCache_.getExperienceForLevel(i);
             if (experience < expRequired)
             {
                 break;
@@ -302,8 +313,8 @@ ExperienceManager::getLevelFromExperience(int experience)
             level = i;
         }
 
-        gameServices_->getLogger().log("Level calculation from cache: " + std::to_string(experience) +
-                                           " exp = level " + std::to_string(level),
+        logger_.log("Level calculation from cache: " + std::to_string(experience) +
+                        " exp = level " + std::to_string(level),
             GREEN);
         return level;
     }
@@ -379,9 +390,9 @@ ExperienceManager::buildExperiencePacket(const ExperienceEventStruct &experience
 void
 ExperienceManager::handleLevelUp(int characterId, int oldLevel, int newLevel, ExperienceGrantResult &result)
 {
-    gameServices_->getLogger().log("Handling level up for character " + std::to_string(characterId) +
-                                       " from level " + std::to_string(oldLevel) +
-                                       " to level " + std::to_string(newLevel),
+    logger_.log("Handling level up for character " + std::to_string(characterId) +
+                    " from level " + std::to_string(oldLevel) +
+                    " to level " + std::to_string(newLevel),
         CYAN);
 
     // Здесь можно добавить логику для получения новых способностей
@@ -389,8 +400,11 @@ ExperienceManager::handleLevelUp(int characterId, int oldLevel, int newLevel, Ex
     for (int level = oldLevel + 1; level <= newLevel; level++)
     {
         // Check for level-based title grants on every new level reached.
-        gameServices_->getTitleManager().checkAndGrantTitles(characterId, "level",
-            nlohmann::json{{"level", level}});
+        if (titles_ != nullptr)
+        {
+            titles_->checkAndGrantTitles(characterId, "level",
+                nlohmann::json{{"level", level}});
+        }
 
         if (level % 5 == 0)
         {
@@ -406,14 +420,12 @@ int
 ExperienceManager::getExperienceForLevelFromGameServer(int level)
 {
     // Проверяем, загружена ли таблица опыта в кеше
-    auto &cacheManager = gameServices_->getExperienceCacheManager();
-
-    if (cacheManager.isTableLoaded())
+    if (expCache_.isTableLoaded())
     {
         // Используем кешированные данные
-        int cachedExp = cacheManager.getExperienceForLevel(level);
-        gameServices_->getLogger().log("Retrieved experience for level " + std::to_string(level) +
-                                           " from cache: " + std::to_string(cachedExp),
+        int cachedExp = expCache_.getExperienceForLevel(level);
+        logger_.log("Retrieved experience for level " + std::to_string(level) +
+                        " from cache: " + std::to_string(cachedExp),
             GREEN);
         return cachedExp;
     }
@@ -462,7 +474,7 @@ ExperienceManager::sendStatsUpdatePacket(int characterId)
 {
     if (statsUpdatePacketCallback_)
     {
-        auto characterData = gameServices_->getCharacterManager().getCharacterData(characterId);
+        auto characterData = characters_.getCharacterData(characterId);
         std::string requestId = "stats_update_" + std::to_string(characterId);
         auto packet = buildStatsUpdatePacket(characterData, requestId);
         statsUpdatePacketCallback_(packet);

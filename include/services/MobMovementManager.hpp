@@ -29,12 +29,16 @@ class GameServices;
 class MobMovementManager
 {
   public:
-    MobMovementManager(Logger &logger);
+    /// Movement-owned registries are required (ctor-injected) and forwarded
+    /// to the owned MobAIController; zone/event/combat stay late-wire setters.
+    MobMovementManager(CharacterManager &characters,
+        MobInstanceManager &mobInstances,
+        MobManager &mobs,
+        Logger &logger);
 
     /**
      * @brief Set dependencies
      */
-    void setMobInstanceManager(MobInstanceManager *mobInstanceManager);
     void setSpawnZoneManager(SpawnZoneManager *spawnZoneManager);
 
     /**
@@ -63,24 +67,14 @@ class MobMovementManager
     void setZoneMovementParams(int zoneId, const MobMovementParams &params);
 
     /**
-     * @brief Set reference to CharacterManager for player tracking
-     */
-    void setCharacterManager(class CharacterManager *characterManager);
-
-    /**
-     * @brief Set reference to EventQueue for combat events
+     * @brief Set reference to EventQueue for combat events (also late-wires the AI controller)
      */
     void setEventQueue(class EventQueue *eventQueue);
 
     /**
-     * @brief Set reference to CombatSystem for new combat integration
+     * @brief Set reference to CombatSystem for new combat integration (also late-wires the AI controller)
      */
     void setCombatSystem(class CombatSystem *combatSystem);
-
-    /**
-     * @brief Set reference to MobManager for skill template lookups (plan §2.1)
-     */
-    void setMobManager(MobManager *mobManager);
 
     /**
      * @brief Set reference to GameServices for zone-event speed multipliers

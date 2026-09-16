@@ -6,6 +6,7 @@
 #include "services/CharacterStatsNotificationService.hpp"
 #include "services/ChunkManager.hpp"
 #include "services/ClientManager.hpp"
+#include "services/CooldownService.hpp"
 #include "services/DialogueConditionEvaluator.hpp"
 #include "services/DialogueManager.hpp"
 #include "services/DialogueSessionManager.hpp"
@@ -51,12 +52,15 @@ class GameServices
     // Initializes all managers with the logger
     GameServices(Logger &logger)
         : logger_(logger),
+          gameConfigService_(logger_),
           mobManager_(logger_),
           itemManager_(logger_),
           mobInstanceManager_(logger_),
-          mobMovementManager_(logger_),
-          spawnZoneManager_(mobManager_, logger_),
+          // characterManager_ before mobMovementManager_: movement (and its
+          // owned AI controller) take characters by ref at construction.
           characterManager_(logger_),
+          mobMovementManager_(characterManager_, mobInstanceManager_, mobManager_, logger_),
+          spawnZoneManager_(mobManager_, logger_),
           clientManager_(logger_),
           chunkManager_(logger_),
           lootManager_(itemManager_, logger_),
@@ -67,11 +71,13 @@ class GameServices
           dialogueManager_(logger_),
           dialogueSessionManager_(logger_),
           questManager_(this, logger_),
-          skillManager_(this),
-          experienceManager_(this),
-          experienceCacheManager_(this),
+          skillManager_(characterManager_, mobManager_, mobInstanceManager_,
+              mobMovementManager_, gameConfigService_, logger_),
+          cooldownService_(logger_),
+          experienceManager_(characterManager_, experienceCacheManager_, &titleManager_,
+              &statsNotificationService_, logger_),
+          experienceCacheManager_(logger_),
           statsNotificationService_(this),
-          gameConfigService_(logger_),
           vendorManager_(itemManager_, logger_),
           trainerManager_(itemManager_, logger_),
           tradeSessionManager_(logger_),
@@ -79,10 +85,13 @@ class GameServices
           respawnZoneManager_(logger_),
           gameZoneManager_(logger_),
           statusEffectTemplateManager_(logger_),
-          regenManager_(this),
+          regenManager_(characterManager_, gameConfigService_, &statsNotificationService_,
+              equipmentManager_, itemManager_, logger_),
           pityManager_(logger_),
           bestiaryManager_(logger_),
-          championManager_(this),
+          championManager_(gameZoneManager_, gameConfigService_, mobInstanceManager_,
+              characterManager_, mobManager_, spawnZoneManager_,
+              &statsNotificationService_, logger_),
           reputationManager_(logger_),
           masteryManager_(this),
           titleManager_(this),
@@ -93,9 +102,7 @@ class GameServices
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
-        mobMovementManager_.setMobInstanceManager(&mobInstanceManager_);
         mobMovementManager_.setSpawnZoneManager(&spawnZoneManager_);
-        mobMovementManager_.setCharacterManager(&characterManager_);
 
         // Set up harvest manager dependencies
         harvestManager_.setInventoryManager(&inventoryManager_);
@@ -163,6 +170,10 @@ class GameServices
     SkillManager &getSkillManager()
     {
         return skillManager_;
+    }
+    CooldownService &getCooldownService()
+    {
+        return cooldownService_;
     }
     ExperienceManager &getExperienceManager()
     {
@@ -311,9 +322,9 @@ class GameServices
     MobManager mobManager_;
     ItemManager itemManager_;
     MobInstanceManager mobInstanceManager_;
+    CharacterManager characterManager_;
     MobMovementManager mobMovementManager_;
     SpawnZoneManager spawnZoneManager_;
-    CharacterManager characterManager_;
     ClientManager clientManager_;
     ChunkManager chunkManager_;
     LootManager lootManager_;
@@ -325,6 +336,7 @@ class GameServices
     DialogueSessionManager dialogueSessionManager_;
     QuestManager questManager_;
     SkillManager skillManager_;
+    CooldownService cooldownService_;
     ExperienceManager experienceManager_;
     ExperienceCacheManager experienceCacheManager_;
     CharacterStatsNotificationService statsNotificationService_;

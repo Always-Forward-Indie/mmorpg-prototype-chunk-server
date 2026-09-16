@@ -3,6 +3,10 @@
 #include "data/CombatStructs.hpp"
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
+#include "services/CharacterManager.hpp"
+#include "services/MobInstanceManager.hpp"
+#include "utils/Logger.hpp"
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -11,7 +15,6 @@ namespace spdlog
 {
 class logger;
 }
-class GameServices;
 
 /**
  * @brief Результат инициации использования скила
@@ -104,7 +107,11 @@ struct AoESkillExecutionResult
 class CombatResponseBuilder
 {
   public:
-    CombatResponseBuilder(GameServices *gameServices);
+    /// Explicit dependencies (no GameServices): pure JSON building plus
+    /// caster-type resolution via the character/mob registries.
+    CombatResponseBuilder(CharacterManager &characterManager,
+        MobInstanceManager &mobInstanceManager,
+        Logger &logger);
 
     /**
      * @brief Создать ответ об инициации использования скила (транслируется всем)
@@ -134,7 +141,9 @@ class CombatResponseBuilder
     nlohmann::json buildEffectTickBroadcast(const EffectTickResult &tick);
 
   private:
-    GameServices *gameServices_;
+    CharacterManager &characterManager_;
+    MobInstanceManager &mobInstanceManager_;
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 
     /**

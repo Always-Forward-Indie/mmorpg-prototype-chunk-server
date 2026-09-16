@@ -6,6 +6,8 @@
 #include <nlohmann/json.hpp>
 #include <string>
 
+#include "services/IStatsNotifier.hpp"
+
 // Forward declarations
 namespace spdlog
 {
@@ -20,7 +22,7 @@ class GameServices;
  * statistics (health, mana, experience, etc.) change. It can be used by any
  * system that needs to notify clients about stat changes.
  */
-class CharacterStatsNotificationService
+class CharacterStatsNotificationService : public IStatsNotifier
 {
   public:
     explicit CharacterStatsNotificationService(GameServices *gameServices);
@@ -30,14 +32,14 @@ class CharacterStatsNotificationService
      * @brief Send a stats update packet for the specified character
      * @param characterId The ID of the character whose stats changed
      */
-    void sendStatsUpdate(int characterId);
+    void sendStatsUpdate(int characterId) override;
 
         /**
      * @brief Send a stats update packet with an optional source tag.
      * @param characterId The ID of the character whose stats changed
      * @param source      Free-form string identifying the cause (e.g. "regen")
      */
-    void sendStatsUpdate(int characterId, const std::string &source);
+    void sendStatsUpdate(int characterId, const std::string &source) override;
 
     /**
      * @brief Send a world notification to a specific character.

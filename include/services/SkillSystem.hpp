@@ -3,12 +3,10 @@
 #include "data/CombatStructs.hpp"
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
-#include <chrono>
+#include "utils/Logger.hpp"
 #include <functional>
 #include <memory>
 #include <optional>
-#include <shared_mutex>
-#include <unordered_map>
 #include <vector>
 
 // Forward declarations
@@ -16,16 +14,31 @@ namespace spdlog
 {
 class logger;
 }
-class GameServices;
+class CharacterManager;
+class MobInstanceManager;
+class MobManager;
+class MobMovementManager;
+class CooldownService;
 class CombatCalculator;
 
 /**
  * @brief Единая система управления скилами для всех сущностей (игроки, мобы)
+ *
+ * Skill resolution (lookup, range, target, mana, damage pipeline) with
+ * explicit dependencies. Cooldown storage lives in the shared CooldownService
+ * (one instance per server, owned by GameServices) — the 7 cooldown methods
+ * below are thin forwards so existing callers are untouched.
  */
 class SkillSystem
 {
   public:
-    SkillSystem(GameServices *gameServices);
+    /// Explicit dependencies (no GameServices).
+    SkillSystem(CharacterManager &characters,
+        MobInstanceManager &mobInstances,
+        MobManager &mobs,
+        MobMovementManager &mobMovement,
+        CooldownService &cooldowns,
+        Logger &logger);
     ~SkillSystem() = default;
 
     /**
@@ -42,7 +55,7 @@ class SkillSystem
     SkillUsageResult useSkill(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, bool cooldownAlreadySet = false);
 
     /**
-     * @brief Проверить доступность скила
+     * @brief Проверить доступность скила (forward → CooldownService).
      */
     bool isSkillAvailable(int casterId, const std::string &skillSlug);
 
@@ -57,39 +70,29 @@ class SkillSystem
     std::optional<SkillStruct> getMobSkill(int mobId, const std::string &skillSlug);
 
     /**
-     * @brief Установить кулдаун
+     * @brief Установить кулдаун (forward → CooldownService).
      */
     void setCooldown(int casterId, const std::string &skillSlug, int cooldownMs);
 
     /**
-     * @brief Проверить кулдаун
+     * @brief Проверить кулдаун (forward → CooldownService).
      */
     bool isOnCooldown(int casterId, const std::string &skillSlug);
 
     /**
      * @brief Проверить, активен ли Global Cooldown для кастера (реад-онли, без потребления).
+     *        Forward → CooldownService.
      */
     bool isGCDActive(int casterId);
 
     /**
      * @brief HIGH-1 fix: Atomically check that the skill is NOT on cooldown and
-     *        immediately set it if so.  Returns true (cooldown set, proceed with
-     *        skill execution) or false (already on cooldown, reject).  Both
-     *        check and set happen under the same unique_lock, eliminating the
-     *        TOCTOU window between isSkillAvailable() and setCooldown().
-     *
-     * @param gcdMs   If > 0, also checks the per-caster Global Cooldown (stored
-     *                under the internal "__gcd__" key) and sets it atomically
-     *                alongside the per-skill cooldown.  Pass 0 to skip GCD.
-     * @param outOnGCD  Set to true when the rejection reason is GCD (vs per-skill
-     *                  cooldown), so callers can send the right error message.
+     *        immediately set it if so (forward → CooldownService).
      */
     bool trySetCooldown(int casterId, const std::string &skillSlug, int cooldownMs, int gcdMs = 0, bool *outOnGCD = nullptr);
 
     /**
-     * @brief Restore a cooldown from a persisted remaining duration (e.g. on login).
-     *        Always sets the entry, regardless of whether one exists already.
-     *        No-op when remainingMs <= 0.
+     * @brief Restore a cooldown from a persisted remaining duration (forward → CooldownService).
      */
     void restoreCooldown(int casterId, const std::string &skillSlug, int64_t remainingMs);
 
@@ -101,7 +104,7 @@ class SkillSystem
         float distance);
 
     /**
-     * @brief Обновить кулдауны
+     * @brief Обновить кулдауны (forward → CooldownService).
      */
     void updateCooldowns();
 
@@ -114,13 +117,14 @@ class SkillSystem
     }
 
   private:
-    GameServices *gameServices_;
+    CharacterManager &characters_;
+    MobInstanceManager &mobInstances_;
+    MobManager &mobs_;
+    MobMovementManager &mobMovement_;
+    CooldownService &cooldowns_;
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
     std::unique_ptr<CombatCalculator> combatCalculator_;
-
-    // Кулдауны: entityId -> (skillSlug -> timepoint)
-    std::unordered_map<int, std::unordered_map<std::string, std::chrono::steady_clock::time_point>> cooldowns_;
-    mutable std::shared_mutex cooldownsMutex_; // protects cooldowns_
 
     /**
      * @brief Определить тип кастера (игрок или моб)

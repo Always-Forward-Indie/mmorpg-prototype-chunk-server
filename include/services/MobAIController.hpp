@@ -21,6 +21,13 @@ class MobManager;
  * AI/combat logic. Interacts with MobMovementManager for shared state
  * (movement data map) via its public accessor methods.
  *
+ * Dependencies: the four registry/movement refs are required (ctor-injected);
+ * EventQueue and CombatSystem are late-wired by ChunkServer (nullable) and
+ * null-guarded at every use site.
+ *
+ * Pure math (skill selection, flee vector, threat decay, melee capacity)
+ * lives in MobAIFormulas.hpp — this class only fetches live data.
+ *
  * Responsible for:
  *   - Aggro detection and target management (handlePlayerAggro)
  *   - Combat state machine transitions (updateMobCombatState)
@@ -30,15 +37,17 @@ class MobManager;
 class MobAIController
 {
   public:
-    explicit MobAIController(Logger &logger);
+    MobAIController(CharacterManager &characters,
+        MobInstanceManager &mobInstances,
+        MobManager &mobs,
+        MobMovementManager &mobMovement,
+        EventQueue *eventQueue,
+        CombatSystem *combatSystem,
+        Logger &logger);
 
-    // ---- dependency injection ----
-    void setMobMovementManager(MobMovementManager *mm);
-    void setCharacterManager(CharacterManager *cm);
+    // Late-wire for ChunkServer-assembled dependencies (nullable, guarded).
     void setEventQueue(EventQueue *eq);
     void setCombatSystem(CombatSystem *cs);
-    void setMobInstanceManager(MobInstanceManager *mi);
-    void setMobManager(MobManager *mm);
 
     // ---- public interface called from MobMovementManager ----
 
@@ -59,13 +68,13 @@ class MobAIController
     void updateMobCombatState(MobDataStruct &mob, MobMovementData &movementData, float currentTime);
 
   private:
+    CharacterManager &characters_;
+    MobInstanceManager &mobInstances_;
+    MobManager &mobs_;
+    MobMovementManager &mobMovement_; // back-pointer to owner, never null
+    EventQueue *eventQueue_;          // late-wire, may be null
+    CombatSystem *combatSystem_;      // late-wire, may be null
     Logger &logger_;
-    MobMovementManager *mobMovementManager_;
-    CharacterManager *characterManager_;
-    EventQueue *eventQueue_;
-    CombatSystem *combatSystem_;
-    MobInstanceManager *mobInstanceManager_;
-    MobManager *mobManager_;
 
     // ---- private helpers ----
 
@@ -88,8 +97,8 @@ class MobAIController
     /**
      * @brief Select the best skill for the mob to use against the target.
      *        Returns nullptr if no suitable skill is available (use base attack).
-     *        Filters by maxRange, per-skill cooldown.
-     *        Prefers skills with cooldownMs > 0 over basic attacks.
+     *        Scoring (range filter, per-skill cooldown, ability-first) is the
+     *        pure MobAIFormulas::selectMobSkillIndex; this fetches the template.
      */
     std::optional<SkillStruct> selectAttackSkill(const MobDataStruct &mob,
         const MobMovementData &movementData,

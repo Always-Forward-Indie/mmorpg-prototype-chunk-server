@@ -67,9 +67,6 @@ ChunkServer::ChunkServer(GameServices &gameServices,
         gameServices_.getGameConfigService().getBool("interest.snapshots", true),
         gameServices_.getGameConfigService().getInt("interest.snapshot_cooldown_ms", 2000));
 
-    // Set MobManager so MobAIController can look up skill templates (plan §2.1)
-    gameServices_.getMobMovementManager().setMobManager(&gameServices_.getMobManager());
-
     // Wire up QuestManager → GameServerWorker for persistence
     gameServices_.getQuestManager().setGameServerWorker(&gameServerWorker_);
 
@@ -408,7 +405,9 @@ ChunkServer::mainEventLoopCH()
         auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
         if (spawnZones.empty())
         {
-            log_->error("No spawn zones found for initial spawn!");
+            // Zones arrive from game-server seconds after boot; the 30s respawn
+            // task backfills mobs, so this is a warn, not an error.
+            log_->warn("No spawn zones yet for initial spawn (game-server push pending)!");
         }
         else
         {

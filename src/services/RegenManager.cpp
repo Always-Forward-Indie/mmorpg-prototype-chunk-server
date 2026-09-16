@@ -1,8 +1,9 @@
 #include "services/RegenManager.hpp"
 #include "services/CharacterManager.hpp"
-#include "services/CharacterStatsNotificationService.hpp"
+#include "services/EquipmentManager.hpp"
 #include "services/GameConfigService.hpp"
-#include "services/GameServices.hpp"
+#include "services/IStatsNotifier.hpp"
+#include "services/ItemManager.hpp"
 #include "utils/Logger.hpp"
 #include <algorithm>
 #include <chrono>
@@ -10,10 +11,20 @@
 #include <ctime>
 #include <spdlog/logger.h>
 
-RegenManager::RegenManager(GameServices *gameServices)
-    : gameServices_(gameServices)
+RegenManager::RegenManager(CharacterManager &characters,
+    GameConfigService &gameConfig,
+    IStatsNotifier *statsNotify,
+    EquipmentManager &equipment,
+    ItemManager &items,
+    Logger &logger)
+    : characters_(characters),
+      gameConfig_(gameConfig),
+      statsNotify_(statsNotify),
+      equipment_(equipment),
+      items_(items),
+      logger_(logger)
 {
-    log_ = gameServices_->getLogger().getSystem("regen");
+    log_ = logger_.getSystem("regen");
 }
 
 /// Returns the base value of a named attribute from a pre-built attribute list.
@@ -30,21 +41,17 @@ void
 RegenManager::tickRegen()
 {
     // ── Read config (shared_lock inside getFloat/getInt – cheap) ──────────────
-    auto &cfg = gameServices_->getGameConfigService();
-    const int baseHpRegen = cfg.getInt("regen.baseHpRegen", 2);
-    const int baseMpRegen = cfg.getInt("regen.baseMpRegen", 1);
-    const float hpRegenConCoeff = cfg.getFloat("regen.hpRegenConCoeff", 0.3f);
-    const float mpRegenWisCoeff = cfg.getFloat("regen.mpRegenWisCoeff", 0.5f);
-    const int disableInCombatMs = cfg.getInt("regen.disableInCombatMs", 8000);
-
-    auto &charMgr = gameServices_->getCharacterManager();
-    auto &statsNotif = gameServices_->getStatsNotificationService();
+    const int baseHpRegen = gameConfig_.getInt("regen.baseHpRegen", 2);
+    const int baseMpRegen = gameConfig_.getInt("regen.baseMpRegen", 1);
+    const float hpRegenConCoeff = gameConfig_.getFloat("regen.hpRegenConCoeff", 0.3f);
+    const float mpRegenWisCoeff = gameConfig_.getFloat("regen.mpRegenWisCoeff", 0.5f);
+    const int disableInCombatMs = gameConfig_.getInt("regen.disableInCombatMs", 8000);
 
     const auto now = std::chrono::steady_clock::now();
     const int64_t nowSec = static_cast<int64_t>(std::time(nullptr));
 
     // Snapshot the character list (returns copies – no lock held during iteration)
-    auto characters = charMgr.getCharactersList();
+    auto characters = characters_.getCharactersList();
 
     for (const auto &ch : characters)
     {
@@ -59,7 +66,7 @@ RegenManager::tickRegen()
         // ── Skip characters in combat window ─────────────────────────────────
         const auto msSinceLastCombat = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - ch.lastInCombatAt)
-                                           .count();
+                                            .count();
 
         if (ch.lastInCombatAt.time_since_epoch().count() != 0 &&
             msSinceLastCombat < disableInCombatMs)
@@ -102,14 +109,12 @@ RegenManager::tickRegen()
         // Layer equipped-item bonuses (apply_on == "equip")
         try
         {
-            const auto equipState =
-                gameServices_->getEquipmentManager().getEquipmentState(cid);
+            const auto equipState = equipment_.getEquipmentState(cid);
             for (const auto &[slotSlug, slot] : equipState.slots)
             {
                 if (slot.inventoryItemId == 0)
                     continue;
-                const auto item =
-                    gameServices_->getItemManager().getItemById(slot.itemId);
+                const auto item = items_.getItemById(slot.itemId);
                 for (const auto &attr : item.attributes)
                 {
                     if (attr.apply_on != "equip")
@@ -139,7 +144,7 @@ RegenManager::tickRegen()
         const int mpFromStats = baseMpRegen + std::max(0, static_cast<int>(wisValue * mpRegenWisCoeff));
 
         const float tickSec = static_cast<float>(disableInCombatMs > 0
-                                                     ? cfg.getInt("regen.tickIntervalMs", 4000)
+                                                     ? gameConfig_.getInt("regen.tickIntervalMs", 4000)
                                                      : 4000) /
                               1000.0f;
         const int hpGain = std::max(hpFromStats,
@@ -160,7 +165,7 @@ RegenManager::tickRegen()
         if (ch.characterCurrentHealth < effectiveMaxHp && hpGain > 0)
         {
             const int newHp = std::min(ch.characterCurrentHealth + hpGain, effectiveMaxHp);
-            charMgr.updateCharacterHealth(cid, newHp);
+            characters_.updateCharacterHealth(cid, newHp);
             changed = true;
         }
 
@@ -168,14 +173,14 @@ RegenManager::tickRegen()
         if (ch.characterCurrentMana < effectiveMaxMp && mpGain > 0)
         {
             const int newMp = std::min(ch.characterCurrentMana + mpGain, effectiveMaxMp);
-            charMgr.updateCharacterMana(cid, newMp);
+            characters_.updateCharacterMana(cid, newMp);
             changed = true;
         }
 
         // ── Notify client if anything changed ────────────────────────────────
-        if (changed)
+        if (changed && statsNotify_ != nullptr)
         {
-            statsNotif.sendStatsUpdate(cid, "regen");
+            statsNotify_->sendStatsUpdate(cid, "regen");
         }
     }
 }

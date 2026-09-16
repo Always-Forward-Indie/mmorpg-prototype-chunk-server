@@ -18,40 +18,27 @@
 #include <spdlog/logger.h>
 #include <unordered_set>
 
-MobMovementManager::MobMovementManager(Logger &logger)
+MobMovementManager::MobMovementManager(CharacterManager &characters,
+    MobInstanceManager &mobInstances,
+    MobManager &mobs,
+    Logger &logger)
     : logger_(logger),
-      mobInstanceManager_(nullptr),
+      mobInstanceManager_(&mobInstances),
       spawnZoneManager_(nullptr),
-      characterManager_(nullptr),
+      characterManager_(&characters),
       eventQueue_(nullptr),
       combatSystem_(nullptr),
       rng_(std::random_device{}()),
-      mobAIController_(logger)
+      mobAIController_(characters, mobInstances, mobs, *this, nullptr, nullptr, logger)
 {
     log_ = logger.getSystem("mob");
-    // Wire back-pointer so AI controller can call our public helpers.
-    mobAIController_.setMobMovementManager(this);
     log_->info("[INFO] MobMovementManager initialized with default AI configuration");
-}
-
-void
-MobMovementManager::setMobInstanceManager(MobInstanceManager *mobInstanceManager)
-{
-    mobInstanceManager_ = mobInstanceManager;
-    mobAIController_.setMobInstanceManager(mobInstanceManager);
 }
 
 void
 MobMovementManager::setSpawnZoneManager(SpawnZoneManager *spawnZoneManager)
 {
     spawnZoneManager_ = spawnZoneManager;
-}
-
-void
-MobMovementManager::setCharacterManager(CharacterManager *characterManager)
-{
-    characterManager_ = characterManager;
-    mobAIController_.setCharacterManager(characterManager);
 }
 
 void
@@ -66,12 +53,6 @@ MobMovementManager::setCombatSystem(CombatSystem *combatSystem)
 {
     combatSystem_ = combatSystem;
     mobAIController_.setCombatSystem(combatSystem);
-}
-
-void
-MobMovementManager::setMobManager(MobManager *mobManager)
-{
-    mobAIController_.setMobManager(mobManager);
 }
 
 void

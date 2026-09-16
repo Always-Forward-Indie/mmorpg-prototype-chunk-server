@@ -6,8 +6,11 @@
 #include <functional>
 #include <vector>
 
-// Forward declaration
-class GameServices;
+// Forward declarations
+class CharacterManager;
+class ExperienceCacheManager;
+class TitleManager;
+class IStatsNotifier;
 
 /**
  * @brief Менеджер опыта, отвечающий за начисление/снятие опыта и управление уровнями
@@ -15,8 +18,17 @@ class GameServices;
 class ExperienceManager
 {
   public:
-    // Constructor
-    ExperienceManager(GameServices *gameServices);
+    /// Explicit dependencies (no GameServices). titles and statsNotify are
+    /// optional and may be null (level-up titles / stats_update then skipped)
+    /// — same pattern as ChampionManager::statsNotify_. Tests pass nullptr;
+    /// production passes &titleManager_ / &statsNotificationService_.
+    /// Packet/save callbacks stay std::function setters (wired by CombatSystem
+    /// and ChunkServer, null-guarded).
+    ExperienceManager(CharacterManager &characters,
+        ExperienceCacheManager &expCache,
+        TitleManager *titles,
+        IStatsNotifier *statsNotify,
+        Logger &logger);
 
     /**
      * @brief Начислить опыт персонажу
@@ -39,27 +51,32 @@ class ExperienceManager
 
     /**
      * @brief Вычислить количество опыта за убийство моба
+     * Static/pure: зависит только от аргументов (можно тестировать без мира).
      * @param mobLevel Уровень моба
      * @param characterLevel Уровень персонажа
      * @param baseExperience Базовый опыт моба
      * @return Количество опыта
      */
-    int calculateMobExperience(int mobLevel, int characterLevel, int baseExperience);
+    static int calculateMobExperience(int mobLevel, int characterLevel, int baseExperience);
 
     /**
      * @brief Вычислить штраф опыта при смерти
+     * Static/pure: 10% от текущего опыта, но не ниже начала текущего уровня
+     * (можно тестировать без мира — expForCurrentLevel инжектится).
      * @param characterLevel Уровень персонажа
      * @param currentExperience Текущий опыт персонажа
+     * @param expForCurrentLevel Опыт начала текущего уровня
      * @return Количество опыта к снятию
      */
-    int calculateDeathPenalty(int characterLevel, int currentExperience);
+    static int calculateDeathPenalty(int characterLevel, int currentExperience, int expForCurrentLevel);
 
     /**
      * @brief Получить количество опыта, требуемое для достижения определенного уровня
+     * Static/pure: BASE_EXP_PER_LEVEL=100, EXP_MULTIPLIER=1.2 (можно тестировать без мира).
      * @param level Целевой уровень
      * @return Общее количество опыта для достижения уровня
      */
-    int getExperienceForLevel(int level);
+    static int getExperienceForLevel(int level);
 
     /**
      * @brief Запросить опыт для уровня с гейм-сервера
@@ -101,7 +118,11 @@ class ExperienceManager
     void setSaveProgressCallback(std::function<void(const std::string &)> callback);
 
   private:
-    GameServices *gameServices_;
+    CharacterManager &characters_;
+    ExperienceCacheManager &expCache_;
+    TitleManager *titles_; // optional, may be null
+    IStatsNotifier *statsNotify_; // optional, may be null
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
     std::function<void(const nlohmann::json &)> experiencePacketCallback_;
     std::function<void(const nlohmann::json &)> statsUpdatePacketCallback_;

@@ -1,13 +1,11 @@
 #pragma once
 #include "data/DataStructs.hpp"
+#include "services/QuestResolvers.hpp"
+#include "services/QuestStore.hpp"
 #include "utils/Logger.hpp"
 #include <functional>
-#include <mutex>
 #include <nlohmann/json.hpp>
-#include <optional>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 // Forward declare to break circular dependency
@@ -16,21 +14,19 @@ class GameServerWorker;
 class NetworkManager;
 
 /**
- * @brief Central manager for quest static data and per-character runtime progress.
+ * @brief Thin quest orchestrator (Increment 11).
  *
- * Responsibilities:
- *  - Cache static quest definitions (set once at startup)
- *  - Cache per-character quest progress (populated on join, discarded on leave)
- *  - Expose trigger hooks called by other systems (CombatSystem, InventoryManager, etc.)
- *  - Persist dirty progress to game-server via callback (Scheduler every 5s + on disconnect)
- *  - Track pending flag updates for persistence
+ * Owns QuestStore (static data + progress + transitions under its mutex) and
+ * QuestResolvers (ID → slug JSON enrichment). Holds services_/networkManager_
+ * for offer/turnIn/fail side effects (rewards, reputation, packets) and binds
+ * the store seams. Public API is unchanged from the pre-split QuestManager.
  */
 class QuestManager
 {
   public:
     QuestManager(GameServices *services, Logger &logger);
 
-    // === Static data (set at startup) ===
+    // === Static data (set at startup, delegated to store) ===
 
     /**
      * @brief Load all quest static definitions from game-server.
@@ -47,7 +43,7 @@ class QuestManager
      */
     const QuestStruct *getQuestById(int id) const;
 
-    // === Player quest progress (per character) ===
+    // === Player quest progress (per character, delegated to store) ===
 
     /**
      * @brief Load active quest progress for a character (called on join).
@@ -91,7 +87,7 @@ class QuestManager
      */
     void advanceQuestStepBySlug(int characterId, const std::string &questSlug);
 
-    // === Trigger hooks ===
+    // === Trigger hooks (delegated to store) ===
 
     void onMobKilled(int characterId, int mobId);
     void onItemObtained(int characterId, int itemId, int quantity);
@@ -119,7 +115,7 @@ class QuestManager
      */
     void setFlagInt(int characterId, const std::string &key, int value);
 
-    // === Persistence ===
+    // === Persistence (delegated to store) ===
 
     /**
      * @brief Queue a flag update for async persistence to game-server.
@@ -180,46 +176,26 @@ class QuestManager
 
     /**
      * @brief Resolve a quest step to a client-ready JSON object (IDs → slugs).
-     * Must NOT be called while mutex_ is held by the same thread.
+     * Must NOT be called while the store mutex is held by the same thread.
      */
     nlohmann::json resolveStepForClient(const QuestStepStruct &step) const;
 
     /**
      * @brief Resolve quest rewards to a client-ready JSON array respecting isHidden.
      * @param revealHidden  If true (used in quest_turned_in), all rewards are fully disclosed.
-     * Must NOT be called while mutex_ is held by the same thread.
+     * Must NOT be called while the store mutex is held by the same thread.
      */
     nlohmann::json resolveRewardsForClient(const std::vector<QuestRewardStruct> &rewards, bool revealHidden = false, int classId = 0) const;
 
   private:
-    void checkStepCompletion(int characterId, PlayerQuestProgressStruct &pq);
-    void advanceStep(int characterId, PlayerQuestProgressStruct &pq);
-    void completeQuest(int characterId, PlayerQuestProgressStruct &pq);
-    void grantRewards(int characterId, const QuestStruct &quest, int clientId);
-    bool isQuestCompletable(int characterId, const QuestStruct &quest) const;
-
     /// Send QUEST_UPDATE packet to the character's client
     void sendQuestUpdate(int characterId, const PlayerQuestProgressStruct &pq, const QuestStruct &quest);
 
-    mutable std::mutex mutex_;
-
-    std::unordered_map<std::string, QuestStruct> questsBySlug_;
-    std::unordered_map<int, QuestStruct *> questsById_; ///< Points into questsBySlug_ values
-
-    /// characterId → (questId → progress)
-    std::unordered_map<int, std::unordered_map<int, PlayerQuestProgressStruct>> playerProgress_;
-
-    /// Pending flag updates waiting for transmission to game-server
-    std::vector<UpdatePlayerFlagStruct> pendingFlagUpdates_;
-
-    /// Characters whose persisted flags have been fully loaded from game-server
-    std::unordered_set<int> flagsLoadedCharacters_;
-
-    bool loaded_ = false;
-
     GameServices *services_;
-    GameServerWorker *gameServerWorker_ = nullptr;
     NetworkManager *networkManager_ = nullptr;
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
+
+    QuestStore store_;
+    QuestResolvers resolvers_;
 };

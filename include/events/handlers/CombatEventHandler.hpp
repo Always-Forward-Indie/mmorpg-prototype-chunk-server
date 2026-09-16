@@ -10,7 +10,6 @@
 
 // Forward declarations
 class CombatSystem;
-class SkillSystem;
 class CombatResponseBuilder;
 struct SkillInitiationResult;
 struct SkillExecutionResult;
@@ -109,7 +108,6 @@ class CombatEventHandler : public BaseEventHandler
 
   private:
     std::unique_ptr<CombatSystem> combatSystem_;
-    std::unique_ptr<SkillSystem> skillSystem_;
     std::unique_ptr<CombatResponseBuilder> responseBuilder_;
 
     /// ARCH-2/3: per-client rate limiting for combat requests.

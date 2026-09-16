@@ -4,6 +4,10 @@
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
 #include "services/CombatResponseBuilder.hpp"
+#include "services/DurabilityService.hpp"
+#include "services/MobKillRewardPipeline.hpp"
+#include "services/PlayerDeathPipeline.hpp"
+#include "services/SkillSystem.hpp"
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -14,7 +18,6 @@ namespace spdlog
 class logger;
 }
 class GameServices;
-class SkillSystem;
 class CombatResponseBuilder;
 
 /**
@@ -113,6 +116,9 @@ class CombatSystem
     std::shared_ptr<spdlog::logger> log_;
     std::unique_ptr<SkillSystem> skillSystem_;
     std::unique_ptr<CombatResponseBuilder> responseBuilder_;
+    DurabilityService durability_;
+    MobKillRewardPipeline rewardPipeline_;
+    PlayerDeathPipeline deathPipeline_;
 
     // Ongoing actions: casterId -> action data
     std::unordered_map<int, std::shared_ptr<CombatActionStruct>> ongoingActions_;
@@ -121,17 +127,8 @@ class CombatSystem
     // Callback для отправки broadcast пакетов
     std::function<void(const nlohmann::json &)> broadcastCallback_;
 
-    // Callback for persisting durability changes to game server
-    std::function<void(const std::string &)> saveDurabilityCallback_;
-
-    // Callback for triggering attribute refresh when durability crosses warning threshold
-    std::function<void(int)> refreshAttributesCallback_;
-
     // Callback for persisting Item Soul kill_count to game server
     std::function<void(const std::string &)> saveItemKillCountCallback_;
-
-    /** Fire refreshAttributesCallback_ if durability just crossed the warning threshold. */
-    void checkAndTriggerDurabilityWarning(int characterId, int oldDur, int newDur, int maxDur);
 
     /**
      * @brief Применить эффекты скила.
@@ -159,11 +156,6 @@ class CombatSystem
      *  применить урон, отправить broadcast на каждую цель.
      */
     bool executeAoESkillUsage(int casterId, const std::string &skillSlug, bool cooldownAlreadySet = false);
-
-    /**
-     * @brief Send a durability change to the game server for persistence.
-     */
-    void saveDurabilityChange(int characterId, int inventoryItemId, int durabilityCurrent);
 
     /**
      * @brief Send an Item Soul kill_count change to the game server for persistence.

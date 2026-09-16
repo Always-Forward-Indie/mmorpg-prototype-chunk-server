@@ -1,12 +1,17 @@
 #pragma once
 
+#include "utils/Logger.hpp"
 #include <memory>
 
 namespace spdlog
 {
 class logger;
 }
-class GameServices;
+class CharacterManager;
+class GameConfigService;
+class IStatsNotifier;
+class EquipmentManager;
+class ItemManager;
 
 /**
  * @brief Manages automatic HP and MP regeneration for all active characters.
@@ -32,7 +37,15 @@ class GameServices;
 class RegenManager
 {
   public:
-    explicit RegenManager(GameServices *gameServices);
+    /// Explicit dependencies (no GameServices). statsNotify is optional and
+    /// may be null (regen still applies, notification skipped) — same pattern
+    /// as ChampionManager::statsNotify_.
+    RegenManager(CharacterManager &characters,
+        GameConfigService &gameConfig,
+        IStatsNotifier *statsNotify,
+        EquipmentManager &equipment,
+        ItemManager &items,
+        Logger &logger);
 
     /**
      * @brief Tick regen for every loaded character.
@@ -49,6 +62,11 @@ class RegenManager
     void tickRegen();
 
   private:
-    GameServices *gameServices_;
+    CharacterManager &characters_;
+    GameConfigService &gameConfig_;
+    IStatsNotifier *statsNotify_; // optional, may be null
+    EquipmentManager &equipment_;
+    ItemManager &items_;
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 };

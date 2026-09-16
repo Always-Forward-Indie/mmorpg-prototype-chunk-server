@@ -1,9 +1,12 @@
 #include "services/DialogueActionExecutor.hpp"
+#include "services/DialogueEnvelopeParser.hpp"
+#include "services/DialogueNotificationBuilders.hpp"
 #include "services/GameServices.hpp"
 #include "services/ItemManager.hpp"
+#include "services/LearnSkillValidator.hpp"
 #include "services/QuestManager.hpp"
+#include "services/RepairCostCalculator.hpp"
 #include "services/TrainerManager.hpp"
-#include <cmath>
 #include <spdlog/logger.h>
 
 DialogueActionExecutor::DialogueActionExecutor(GameServices &services, Logger &logger)
@@ -20,34 +23,8 @@ DialogueActionExecutor::execute(const nlohmann::json &actionGroup,
 {
     ActionResult result;
 
-    if (actionGroup.is_null() || actionGroup.empty())
-        return result;
-
-    // Support both {"actions":[...]} envelope and a flat array
-    const nlohmann::json *actionsArray = nullptr;
-    if (actionGroup.is_array())
-    {
-        actionsArray = &actionGroup;
-    }
-    else if (actionGroup.contains("actions") && actionGroup["actions"].is_array())
-    {
-        actionsArray = &actionGroup["actions"];
-    }
-    else
-    {
-        // Single action object
-        std::string type = actionGroup.value("type", "");
-        executeDispatch(actionGroup, type, characterId, clientId, ctx, result);
-        return result;
-    }
-
-    for (const auto &action : *actionsArray)
-    {
-        if (!action.contains("type"))
-            continue;
-        const std::string type = action["type"].get<std::string>();
-        executeDispatch(action, type, characterId, clientId, ctx, result);
-    }
+    for (const auto &parsed : parseDialogueActionGroup(actionGroup))
+        executeDispatch(parsed.action, parsed.type, characterId, clientId, ctx, result);
 
     return result;
 }
@@ -162,21 +139,22 @@ DialogueActionExecutor::executeOfferQuest(const nlohmann::json &action,
         const QuestStruct *quest = questManager.getQuestBySlug(slug);
         if (quest)
         {
-            nlohmann::json notification;
-            notification["type"] = "quest_offered";
-            notification["questId"] = quest->id;
-            notification["clientQuestKey"] = quest->clientQuestKey;
-
             // Enrich: first step with resolved slugs + rewards
+            nlohmann::json firstStep;
+            bool hasStep = false;
             if (!quest->steps.empty())
             {
-                nlohmann::json firstStep = questManager.resolveStepForClient(quest->steps[0]);
+                firstStep = questManager.resolveStepForClient(quest->steps[0]);
                 firstStep["current"] = 0;
-                notification["currentStep"] = std::move(firstStep);
+                hasStep = true;
             }
-            notification["rewards"] = questManager.resolveRewardsForClient(quest->rewards);
 
-            result.clientNotifications.push_back(std::move(notification));
+            result.clientNotifications.push_back(DialogueNotificationBuilders::questOffered(
+                quest->id,
+                quest->clientQuestKey,
+                firstStep,
+                hasStep,
+                questManager.resolveRewardsForClient(quest->rewards)));
         }
 
         log_->info("[DialogueAction] Offered quest '" + slug + "' to character " +
@@ -250,21 +228,15 @@ DialogueActionExecutor::executeFailQuest(const nlohmann::json &action,
         const QuestStruct *quest = questManager.getQuestBySlug(slug);
         if (quest)
         {
-            nlohmann::json notification;
-            notification["type"] = "quest_failed";
-            notification["questId"] = quest->id;
-            notification["clientQuestKey"] = quest->clientQuestKey;
-            result.clientNotifications.push_back(std::move(notification));
+            result.clientNotifications.push_back(
+                DialogueNotificationBuilders::questFailed(quest->id, quest->clientQuestKey));
 
             // Notify client of reputation change if the quest has auto-rep on fail
             // (the actual rep change was already applied inside QuestManager::failQuest)
             if (!quest->reputationFactionSlug.empty() && quest->reputationOnFail != 0)
             {
-                nlohmann::json repNotif;
-                repNotif["type"] = "reputationChanged";
-                repNotif["faction"] = quest->reputationFactionSlug;
-                repNotif["delta"] = quest->reputationOnFail;
-                result.clientNotifications.push_back(std::move(repNotif));
+                result.clientNotifications.push_back(DialogueNotificationBuilders::reputationChanged(
+                    quest->reputationFactionSlug, quest->reputationOnFail));
             }
         }
 
@@ -310,12 +282,8 @@ DialogueActionExecutor::executeGiveItem(const nlohmann::json &action,
     if (ok)
     {
         ItemDataStruct item = services_.getItemManager().getItemById(itemId);
-        nlohmann::json notification;
-        notification["type"] = "item_received";
-        notification["itemId"] = itemId;
-        notification["item_slug"] = item.slug;
-        notification["quantity"] = quantity;
-        result.clientNotifications.push_back(std::move(notification));
+        result.clientNotifications.push_back(
+            DialogueNotificationBuilders::itemReceived(itemId, item.slug, quantity));
 
         // Analytics: item_acquired
         try
@@ -355,10 +323,7 @@ DialogueActionExecutor::executeGiveExp(const nlohmann::json &action,
 
     if (expResult.success)
     {
-        nlohmann::json notification;
-        notification["type"] = "exp_received";
-        notification["amount"] = amount;
-        result.clientNotifications.push_back(std::move(notification));
+        result.clientNotifications.push_back(DialogueNotificationBuilders::expReceived(amount));
     }
 }
 
@@ -388,10 +353,7 @@ DialogueActionExecutor::executeGiveGold(const nlohmann::json &action,
 
     if (ok)
     {
-        nlohmann::json notification;
-        notification["type"] = "gold_received";
-        notification["amount"] = amount;
-        result.clientNotifications.push_back(std::move(notification));
+        result.clientNotifications.push_back(DialogueNotificationBuilders::goldReceived(amount));
 
         // Analytics: gold_change
         try
@@ -444,13 +406,8 @@ DialogueActionExecutor::executeOpenVendorShop(const nlohmann::json &action,
 
     const auto &npc = services_.getNPCManager().getNPCById(npcId);
 
-    nlohmann::json notification;
-    notification["type"] = "openVendorShop";
-    notification["mode"] = action.value("mode", "shop");
-    notification["npcId"] = npcId;
-    notification["npcSlug"] = npc.slug;
-    notification["items"] = std::move(shopData);
-    result.clientNotifications.push_back(std::move(notification));
+    result.clientNotifications.push_back(DialogueNotificationBuilders::openVendorShop(
+        action.value("mode", "shop"), npcId, npc.slug, std::move(shopData)));
 }
 
 void
@@ -470,38 +427,39 @@ DialogueActionExecutor::executeOpenRepairShop(const nlohmann::json &action,
     // Collect ALL durable items (equipped and non-equipped) with repair cost
     auto inventory = services_.getInventoryManager().getPlayerInventory(characterId);
 
-    nlohmann::json items = nlohmann::json::array();
+    std::vector<RepairCostInput> repairInputs;
+    repairInputs.reserve(inventory.size());
     for (const auto &invSlot : inventory)
     {
         const auto &iData = services_.getItemManager().getItemById(invSlot.itemId);
-        if (!iData.isDurable || iData.durabilityMax <= 0)
-            continue;
-
-        int durCurrent = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : iData.durabilityMax;
-        int missing = iData.durabilityMax - durCurrent;
-        if (missing <= 0)
-            continue;
-
-        // Cost proportional to missing durability
-        int repairCost = static_cast<int>(
-            std::ceil(static_cast<float>(iData.vendorPriceBuy) * (static_cast<float>(missing) / iData.durabilityMax)));
-
-        nlohmann::json entry;
-        entry["inventoryItemId"] = invSlot.id;
-        entry["itemId"] = invSlot.itemId;
-        entry["itemName"] = iData.slug;
-        entry["durabilityCurrent"] = durCurrent;
-        entry["durabilityMax"] = iData.durabilityMax;
-        entry["repairCost"] = repairCost;
-        items.push_back(std::move(entry));
+        RepairCostInput in;
+        in.inventoryItemId = invSlot.id;
+        in.itemId = invSlot.itemId;
+        in.itemSlug = iData.slug;
+        in.durabilityCurrent = invSlot.durabilityCurrent;
+        in.isDurable = iData.isDurable;
+        in.durabilityMax = iData.durabilityMax;
+        in.vendorPriceBuy = iData.vendorPriceBuy;
+        repairInputs.push_back(std::move(in));
     }
 
-    nlohmann::json notification;
-    notification["type"] = "openRepairShop";
-    notification["npcId"] = session->npcId;
-    notification["playerGold"] = services_.getInventoryManager().getGoldAmount(characterId);
-    notification["items"] = std::move(items);
-    result.clientNotifications.push_back(std::move(notification));
+    nlohmann::json items = nlohmann::json::array();
+    for (const auto &entry : computeRepairEntries(repairInputs))
+    {
+        nlohmann::json jsonEntry;
+        jsonEntry["inventoryItemId"] = entry.inventoryItemId;
+        jsonEntry["itemId"] = entry.itemId;
+        jsonEntry["itemName"] = entry.itemName;
+        jsonEntry["durabilityCurrent"] = entry.durabilityCurrent;
+        jsonEntry["durabilityMax"] = entry.durabilityMax;
+        jsonEntry["repairCost"] = entry.repairCost;
+        items.push_back(std::move(jsonEntry));
+    }
+
+    result.clientNotifications.push_back(DialogueNotificationBuilders::openRepairShop(
+        session->npcId,
+        services_.getInventoryManager().getGoldAmount(characterId),
+        std::move(items)));
 }
 
 // ── change_reputation ──────────────────────────────────────────────────────
@@ -526,11 +484,7 @@ DialogueActionExecutor::executeChangeReputation(const nlohmann::json &action,
     log_->info("[DialogueAction] change_reputation: char=" + std::to_string(characterId) +
                " faction=" + faction + " delta=" + std::to_string(delta));
 
-    nlohmann::json notification;
-    notification["type"] = "reputationChanged";
-    notification["faction"] = faction;
-    notification["delta"] = delta;
-    result.clientNotifications.push_back(std::move(notification));
+    result.clientNotifications.push_back(DialogueNotificationBuilders::reputationChanged(faction, delta));
 }
 
 // ── open_skill_shop ───────────────────────────────────────────────────────
@@ -567,14 +521,11 @@ DialogueActionExecutor::executeOpenSkillShop(const nlohmann::json & /*action*/,
 
     const auto &npc = services_.getNPCManager().getNPCById(npcId);
 
-    nlohmann::json notification;
-    notification["type"] = "openSkillShop";
-    notification["npcId"] = npcId;
-    notification["npcSlug"] = npc.slug;
-    notification["freeSkillPoints"] = ctx.freeSkillPoints;
-    notification["goldBalance"] = services_.getInventoryManager().getGoldAmount(characterId);
-    notification["skills"] = std::move(skillsJson);
-    result.clientNotifications.push_back(std::move(notification));
+    result.clientNotifications.push_back(DialogueNotificationBuilders::openSkillShop(npcId,
+        npc.slug,
+        ctx.freeSkillPoints,
+        services_.getInventoryManager().getGoldAmount(characterId),
+        std::move(skillsJson)));
 
     log_->info("[DialogueAction] open_skill_shop: char={} npc={}", characterId, npcId);
 }
@@ -589,42 +540,20 @@ DialogueActionExecutor::executeLearnSkill(const nlohmann::json &action,
     PlayerContextStruct &ctx,
     ActionResult &result)
 {
-    const std::string skillSlug = action.value("skill_slug", "");
-    if (skillSlug.empty())
+    LearnSkillRequest req;
+    if (!parseLearnSkillRequest(action, req))
     {
         log_->error("[DialogueAction] learn_skill: missing skill_slug");
         return;
     }
+    const std::string &skillSlug = req.skillSlug;
 
-    int spCost = action.value("sp_cost", 1);
-    int goldCost = action.value("gold_cost", 0);
-    bool requiresBook = action.value("requires_book", false);
-    int bookItemId = action.value("book_item_id", 0);
-
-    // Guard: already learned
-    if (ctx.learnedSkillSlugs.count(skillSlug) > 0)
-    {
-        nlohmann::json notif;
-        notif["type"] = "learn_skill_failed";
-        notif["reason"] = "already_learned";
-        notif["skillSlug"] = skillSlug;
-        result.clientNotifications.push_back(std::move(notif));
-        return;
-    }
-
-    // Guard: SP
-    if (ctx.freeSkillPoints < spCost)
-    {
-        nlohmann::json notif;
-        notif["type"] = "learn_skill_failed";
-        notif["reason"] = "insufficient_sp";
-        notif["skillSlug"] = skillSlug;
-        result.clientNotifications.push_back(std::move(notif));
-        return;
-    }
-
-    // Guard: gold
-    if (goldCost > 0)
+    // Resolve validator state from managers + ctx
+    LearnSkillState st;
+    st.learnedSlugs = ctx.learnedSkillSlugs;
+    st.freeSkillPoints = ctx.freeSkillPoints;
+    const auto &inv = services_.getInventoryManager().getPlayerInventory(characterId);
+    if (req.goldCost > 0)
     {
         const ItemDataStruct *goldItem = services_.getItemManager().getItemBySlug("gold_coin");
         if (!goldItem)
@@ -632,61 +561,45 @@ DialogueActionExecutor::executeLearnSkill(const nlohmann::json &action,
             log_->error("[DialogueAction] learn_skill: gold_coin item not found");
             return;
         }
-        const auto &inv = services_.getInventoryManager().getPlayerInventory(characterId);
-        int totalGold = 0;
+        st.goldItemKnown = true;
+        st.goldItemId = goldItem->id;
         for (const auto &slot : inv)
             if (slot.itemId == goldItem->id)
-                totalGold += slot.quantity;
-        if (totalGold < goldCost)
-        {
-            nlohmann::json notif;
-            notif["type"] = "learn_skill_failed";
-            notif["reason"] = "insufficient_gold";
-            notif["skillSlug"] = skillSlug;
-            result.clientNotifications.push_back(std::move(notif));
-            return;
-        }
+                st.totalGold += slot.quantity;
     }
-
-    // Guard: skill book
-    if (requiresBook && bookItemId > 0)
+    if (req.requiresBook && req.bookItemId > 0)
     {
-        const auto &inv = services_.getInventoryManager().getPlayerInventory(characterId);
-        bool hasBook = false;
         for (const auto &slot : inv)
-            if (slot.itemId == bookItemId && slot.quantity > 0)
+            if (slot.itemId == req.bookItemId && slot.quantity > 0)
             {
-                hasBook = true;
+                st.hasBook = true;
                 break;
             }
-        if (!hasBook)
-        {
-            nlohmann::json notif;
-            notif["type"] = "learn_skill_failed";
-            notif["reason"] = "missing_skill_book";
-            notif["skillSlug"] = skillSlug;
-            result.clientNotifications.push_back(std::move(notif));
-            return;
-        }
+    }
+
+    const LearnSkillError validationError = validateLearnSkill(req, st);
+    if (validationError != LearnSkillError::None)
+    {
+        result.clientNotifications.push_back(DialogueNotificationBuilders::learnSkillFailed(
+            learnSkillErrorReason(validationError), skillSlug));
+        return;
     }
 
     // Consume skill book
-    if (requiresBook && bookItemId > 0)
+    if (req.requiresBook && req.bookItemId > 0)
     {
-        services_.getInventoryManager().removeItemFromInventory(characterId, bookItemId, 1);
+        services_.getInventoryManager().removeItemFromInventory(characterId, req.bookItemId, 1);
     }
 
     // Consume gold
-    if (goldCost > 0)
+    if (req.goldCost > 0)
     {
-        const ItemDataStruct *goldItem = services_.getItemManager().getItemBySlug("gold_coin");
-        if (goldItem)
-            services_.getInventoryManager().removeItemFromInventory(characterId, goldItem->id, goldCost);
+        services_.getInventoryManager().removeItemFromInventory(characterId, st.goldItemId, req.goldCost);
     }
 
     // Deduct SP in-memory
-    services_.getCharacterManager().modifyFreeSkillPoints(characterId, -spCost);
-    ctx.freeSkillPoints -= spCost;
+    services_.getCharacterManager().modifyFreeSkillPoints(characterId, -req.spCost);
+    ctx.freeSkillPoints -= req.spCost;
     if (ctx.freeSkillPoints < 0)
         ctx.freeSkillPoints = 0;
 
@@ -706,8 +619,8 @@ DialogueActionExecutor::executeLearnSkill(const nlohmann::json &action,
     log_->info("[DialogueAction] learn_skill: char={} skill={} sp={} gold={}",
         characterId,
         skillSlug,
-        spCost,
-        goldCost);
+        req.spCost,
+        req.goldCost);
 }
 
 void

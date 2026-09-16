@@ -4,7 +4,6 @@
 #include "services/CombatResponseBuilder.hpp"
 #include "services/CombatSystem.hpp"
 #include "services/GameServices.hpp"
-#include "services/SkillSystem.hpp"
 #include "utils/Logger.hpp"
 #include <nlohmann/json.hpp>
 #include <spdlog/logger.h>
@@ -17,8 +16,11 @@ CombatEventHandler::CombatEventHandler(
 {
     log_ = gameServices_.getLogger().getSystem("combat");
     combatSystem_ = std::make_unique<CombatSystem>(&gameServices);
-    skillSystem_ = std::make_unique<SkillSystem>(&gameServices);
-    responseBuilder_ = std::make_unique<CombatResponseBuilder>(&gameServices);
+    // NOTE: no local SkillSystem here — the single shared instance lives in
+    // CombatSystem and all cooldowns go through GameServices::getCooldownService().
+    responseBuilder_ = std::make_unique<CombatResponseBuilder>(gameServices.getCharacterManager(),
+        gameServices.getMobInstanceManager(),
+        gameServices.getLogger());
 
     // Устанавливаем callback для отправки broadcast пакетов
     combatSystem_->setBroadcastCallback([this](const nlohmann::json &packet)

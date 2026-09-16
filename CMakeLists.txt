@@ -29,8 +29,12 @@ set(SOURCE_FILES
     src/services/CombatCalculator.cpp
     src/services/SkillManager.cpp
     src/services/SkillSystem.cpp
+    src/services/CooldownService.cpp
     src/services/CombatSystem.cpp
     src/services/CombatResponseBuilder.cpp
+    src/services/DurabilityService.cpp
+    src/services/MobKillRewardPipeline.cpp
+    src/services/PlayerDeathPipeline.cpp
     src/services/ItemManager.cpp
     src/services/LootManager.cpp
     src/services/InventoryManager.cpp
@@ -38,11 +42,13 @@ set(SOURCE_FILES
     src/services/InterestManager.cpp
     src/services/ExperienceManager.cpp
     src/services/CharacterStatsNotificationService.cpp
+    src/services/StatsPacketBuilder.cpp
     src/services/DialogueManager.cpp
     src/services/DialogueSessionManager.cpp
     src/services/DialogueConditionEvaluator.cpp
     src/services/DialogueActionExecutor.cpp
     src/services/QuestManager.cpp
+    src/services/QuestStore.cpp
     src/services/ExperienceCacheManager.cpp
     src/services/ClientManager.cpp
     src/services/GameConfigService.cpp
@@ -109,17 +115,32 @@ set(HEADER_FILES
     include/chunk_server/ChunkServer.hpp
     include/services/ChunkManager.hpp
     include/services/CharacterManager.hpp
+    include/services/CharacterStatsNotificationService.hpp
+    include/services/StatsPacketBuilder.hpp
+    include/services/DialogueEnvelopeParser.hpp
+    include/services/LearnSkillValidator.hpp
+    include/services/RepairCostCalculator.hpp
+    include/services/DialogueNotificationBuilders.hpp
+    include/services/IStatsNotifier.hpp
+    include/services/RegenManager.hpp
     include/services/SpawnZoneManager.hpp
     include/services/SpawnManager.hpp
     include/services/MobManager.hpp
     include/services/NPCManager.hpp
     include/services/MobInstanceManager.hpp
     include/services/MobMovementManager.hpp
+    include/services/MobAIController.hpp
+    include/services/MobAIFormulas.hpp
     include/services/CombatCalculator.hpp
     include/services/SkillManager.hpp
     include/services/SkillSystem.hpp
+    include/services/CooldownService.hpp
     include/services/CombatSystem.hpp
     include/services/CombatResponseBuilder.hpp
+    include/services/DurabilityService.hpp
+    include/services/MobKillRewardPipeline.hpp
+    include/services/PlayerDeathPipeline.hpp
+    include/services/SkillInitiationValidator.hpp
     include/services/ItemManager.hpp
     include/services/LootManager.hpp
     include/services/InventoryManager.hpp
@@ -132,6 +153,8 @@ set(HEADER_FILES
     include/services/DialogueConditionEvaluator.hpp
     include/services/DialogueActionExecutor.hpp
     include/services/QuestManager.hpp
+    include/services/QuestStore.hpp
+    include/services/QuestResolvers.hpp
     include/services/VendorManager.hpp
     include/services/TrainerManager.hpp
     include/services/TradeSessionManager.hpp
@@ -189,3 +212,8 @@ find_package(spdlog REQUIRED)
 add_executable(${PROJECT_NAME} ${SOURCE_FILES} ${HEADER_FILES})
 
 target_link_libraries(${PROJECT_NAME} spdlog::spdlog_header_only)
+
+# Unit tests (gtest). tests/CMakeLists.txt skips gracefully when GTest is
+# absent (e.g. prod image without libgtest-dev).
+enable_testing()
+add_subdirectory(tests)
