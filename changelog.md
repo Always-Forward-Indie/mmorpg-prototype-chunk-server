@@ -1,3 +1,28 @@
+v0.2.43
+17.09.2026
+================
+
+New:
+
+**A2 — DialogueActionExecutor coverage (test-only, no product change).**
+- Executor: +9 pins covering every previously untested action type —
+  `advance_quest_step` (manual step completes), `turn_in_quest` (completed
+  turns in with notifications; active-only sends nothing per the
+  BeginTurnIn contract), `open_vendor_shop` (no-session silent, then
+  openVendorShop with npc/slug), `open_repair_shop` (damaged durables only,
+  repairCost formula path), `open_skill_shop` (non-trainer silent, then
+  openSkillShop), `learn_skill` (already_learned fails loud without consume,
+  missing slug silent, success consumes SP/gold/book + queues
+  saveLearnedSkill + updates ctx), `set_object_state` (broadcast queued +
+  wio_state_N flag encoding, unknown-state and missing-id edges).
+- Evaluator: +2 pins — item/quest_step/class_ids/level operator variants
+  and the `wio_state_N` code table shared with the executor (agreement
+  pinned on both sides).
+- Verified: 377/377 unit green; TSan 377 pass, same 9-warning Scheduler
+  fingerprint, zero new shapes.
+
+---
+
 v0.2.42
 17.09.2026
 ================

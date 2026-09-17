@@ -102,6 +102,71 @@ TEST(Conditions, ReputationMasterySkills)
         nlohmann::json{{"type", "skill_not_learned"}, {"slug", "meteor"}}, ctx));
 }
 
+TEST(Conditions, ItemQuestStepClassLevelVariants)
+{
+    PlayerContextStruct ctx = makeCtx();
+    // item_N quantities arrive via flagsInt (buildPlayerContext, B1).
+    ctx.flagsInt["item_46"] = 6;
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "item"}, {"item_id", 46}, {"gte", 6}}, ctx));
+    EXPECT_FALSE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "item"}, {"item_id", 46}, {"gte", 7}}, ctx));
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "item"}, {"item_id", 47}, {"gte", 0}}, ctx));
+    EXPECT_FALSE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "item"}, {"item_id", 47}, {"gte", 1}}, ctx));
+    // quest_step comparisons (fixture: q1 at step 2).
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "quest_step"}, {"slug", "q1"}, {"gte", 2}}, ctx));
+    EXPECT_FALSE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "quest_step"}, {"slug", "q1"}, {"gte", 3}}, ctx));
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "quest_step"}, {"slug", "q1"}, {"lte", 2}}, ctx));
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "quest_step"}, {"slug", "q1"}, {"gt", 1}}, ctx));
+    EXPECT_FALSE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "quest_step"}, {"slug", "q1"}, {"lt", 2}}, ctx));
+    // class_ids[] (fixture classId 2).
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "class"}, {"class_ids", {1, 2}}}, ctx));
+    EXPECT_FALSE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "class"}, {"class_ids", {1, 3}}}, ctx));
+    // level operator variants (fixture level 10).
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(nlohmann::json{{"type", "level"}, {"lte", 10}}, ctx));
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(nlohmann::json{{"type", "level"}, {"gt", 9}}, ctx));
+    EXPECT_FALSE(DialogueConditionEvaluator::evaluate(nlohmann::json{{"type", "level"}, {"lt", 10}}, ctx));
+}
+
+TEST(Conditions, ObjectStateFlagEncoding)
+{
+    // Mirrors the executor's wio_state_<id> encoding (0=active, 1=depleted,
+    // 2=disabled) written by set_object_state — evaluator and executor must
+    // agree on the codes; pinned on both sides.
+    PlayerContextStruct ctx = makeCtx();
+    // No flag data: permissive.
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "object_state"}, {"object_id", 9}, {"state", "depleted"}}, ctx));
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "object_state"}, {"object_id", 0}, {"state", "depleted"}}, ctx));
+
+    ctx.flagsInt["wio_state_9"] = 1; // depleted, as the executor writes it
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "object_state"}, {"object_id", 9}, {"state", "depleted"}}, ctx));
+    EXPECT_FALSE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "object_state"}, {"object_id", 9}, {"state", "active"}}, ctx));
+    EXPECT_FALSE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "object_state"}, {"object_id", 9}, {"state", "disabled"}}, ctx));
+
+    ctx.flagsInt["wio_state_9"] = 2; // disabled
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "object_state"}, {"object_id", 9}, {"state", "disabled"}}, ctx));
+
+    // Unknown state string maps to code 0 (active), same as the executor.
+    ctx.flagsInt["wio_state_9"] = 0;
+    EXPECT_TRUE(DialogueConditionEvaluator::evaluate(
+        nlohmann::json{{"type", "object_state"}, {"object_id", 9}, {"state", "weird"}}, ctx));
+}
+
 TEST(DialogueManager, LoadLookupSelect)
 {
     Logger logger{"test"};
