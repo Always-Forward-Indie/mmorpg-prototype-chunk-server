@@ -13,7 +13,9 @@ namespace spdlog
 {
 class logger;
 }
-class GameServices;
+class ReputationManager;
+class CharacterManager;
+class IStatsNotifier;
 
 /**
  * @brief TitleManager — player title collection and equip/unequip logic.
@@ -35,7 +37,13 @@ class GameServices;
 class TitleManager
 {
   public:
-    explicit TitleManager(GameServices *gs);
+    /// Explicit dependencies (no GameServices). statsNotify is optional and
+    /// may be null (stats_update skipped) — same pattern as
+    /// ChampionManager::statsNotify_.
+    explicit TitleManager(ReputationManager &reputation,
+        CharacterManager &characters,
+        IStatsNotifier *statsNotify,
+        Logger &logger);
     ~TitleManager() = default;
 
     // ── Static data ───────────────────────────────────────────────────────────
@@ -117,7 +125,10 @@ class TitleManager
     void removeTitleBonuses(int characterId, const std::string &titleSlug);
     void persist(int characterId, const std::string &equippedSlug, const std::vector<std::string> &earned);
 
-    GameServices *gs_;
+    ReputationManager &reputation_;
+    CharacterManager &characters_;
+    IStatsNotifier *statsNotify_; // optional, may be null
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 
     // Static: slug → definition

@@ -7,7 +7,6 @@
 #include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <random>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -17,7 +16,7 @@ namespace spdlog
 {
 class logger;
 }
-class GameServices;
+class IStatsNotifier;
 
 /**
  * @brief ZoneEventManager — temporary world events that modify zone behaviour.
@@ -41,7 +40,9 @@ class GameServices;
 class ZoneEventManager
 {
   public:
-    explicit ZoneEventManager(GameServices *gs);
+    /// statsNotify is optional and may be null (zone announcements skipped) —
+    /// same pattern as ChampionManager::statsNotify_.
+    explicit ZoneEventManager(IStatsNotifier *statsNotify, Logger &logger);
     ~ZoneEventManager() = default;
 
     // ── Template management ────────────────────────────────────────────────
@@ -118,8 +119,8 @@ class ZoneEventManager
 
     // Scheduler last-trigger timestamps: slug → time_point
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> lastTriggerTime_;
-    std::mt19937 rng_{std::random_device{}()};
 
-    GameServices *gs_;
+    IStatsNotifier *statsNotify_; // optional, may be null
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 };

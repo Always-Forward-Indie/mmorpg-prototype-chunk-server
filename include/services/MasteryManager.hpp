@@ -13,7 +13,10 @@ namespace spdlog
 {
 class logger;
 }
-class GameServices;
+class CharacterManager;
+class GameConfigService;
+class TitleManager;
+class IStatsNotifier;
 
 /**
  * @brief MasteryManager — use-based weapon/skill mastery progression.
@@ -36,7 +39,14 @@ class GameServices;
 class MasteryManager
 {
   public:
-    explicit MasteryManager(GameServices *gs);
+    /// Explicit dependencies (no GameServices). titles/statsNotify are optional
+    /// and may be null (milestone title/notify hooks skipped) — same pattern
+    /// as ChampionManager::statsNotify_.
+    explicit MasteryManager(CharacterManager &characters,
+        GameConfigService &gameConfig,
+        TitleManager *titles,
+        IStatsNotifier *statsNotify,
+        Logger &logger);
     ~MasteryManager() = default;
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
@@ -107,7 +117,11 @@ class MasteryManager
     /// Returns "physical_attack" if the definitions haven't been loaded yet (safe default).
     std::string getTargetAttribute(const std::string &masterySlug) const;
 
-    GameServices *gs_;
+    CharacterManager &characters_;
+    GameConfigService &gameConfig_;
+    TitleManager *titles_; // optional, may be null
+    IStatsNotifier *statsNotify_; // optional, may be null
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 
     // mastery_slug → static definition (loaded once from game-server)

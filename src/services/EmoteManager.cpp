@@ -1,9 +1,9 @@
 #include "services/EmoteManager.hpp"
-#include "services/GameServices.hpp"
+#include "utils/Logger.hpp"
 #include <algorithm>
 
-EmoteManager::EmoteManager(GameServices *gs)
-    : gs_(gs)
+EmoteManager::EmoteManager(Logger &logger)
+    : logger_(logger)
 {
 }
 

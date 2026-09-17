@@ -1,5 +1,8 @@
-// Unit tests for MasteryManager (nullptr GameServices: pure paths only).
+// Unit tests for MasteryManager (explicit DI).
 #include "services/MasteryManager.hpp"
+#include "services/CharacterManager.hpp"
+#include "services/GameConfigService.hpp"
+#include "services/IStatsNotifier.hpp"
 
 #include <gtest/gtest.h>
 #include <string>
@@ -8,9 +11,43 @@
 namespace
 {
 
+struct MasteryNotifier : IStatsNotifier
+{
+    int statsUpdates = 0;
+    int worldNotes = 0;
+    void sendStatsUpdate(int) override
+    {
+        ++statsUpdates;
+    }
+    void sendStatsUpdate(int, const std::string &) override
+    {
+        ++statsUpdates;
+    }
+    void sendWorldNotification(int, const std::string &, const nlohmann::json &, const std::string &, const std::string &) override
+    {
+        ++worldNotes;
+    }
+    void sendWorldNotificationToGameZone(int, const std::string &, const nlohmann::json &, const std::string &, const std::string &) override
+    {
+    }
+};
+
 struct MasteryFixture : ::testing::Test
 {
-    MasteryManager mastery{nullptr};
+    Logger logger{"test"};
+    CharacterManager chars{logger};
+    GameConfigService config{logger};
+    MasteryNotifier notifier;
+    // titles=nullptr: milestone title hook skipped (covered by TitleManager tests)
+    MasteryManager mastery{chars, config, nullptr, &notifier, logger};
+
+    void SetUp() override
+    {
+        CharacterDataStruct c;
+        c.characterId = 1;
+        c.characterLevel = 10;
+        chars.addCharacter(c);
+    }
 };
 
 } // namespace
@@ -75,5 +112,33 @@ TEST_F(MasteryFixture, DefinitionsLoad)
     d.maxValue = 100.0;
     mastery.loadMasteryDefinitions({d});
     // No crash; definitions gate milestone effects server-side.
+    SUCCEED();
+}
+
+TEST_F(MasteryFixture, MilestoneCrossingAppliesEffectAndNotifies)
+{
+    mastery.loadCharacterMasteries(1, {});
+    for (int i = 0; i < 40; ++i) // 40 x 0.5 = 20 -> crosses t1
+        mastery.onPlayerAttack(1, "sword", 10, 10);
+    EXPECT_FLOAT_EQ(mastery.getMasteryValue(1, "sword"), 20.0f);
+    bool found = false;
+    for (const auto &e : chars.getCharacterData(1).activeEffects)
+        if (e.effectSlug == "sword_t1_damage")
+            found = true;
+    EXPECT_TRUE(found);
+    EXPECT_GT(notifier.statsUpdates, 0);
+    EXPECT_GT(notifier.worldNotes, 0);
+}
+
+TEST_F(MasteryFixture, ReapplyMilestoneEffects)
+{
+    mastery.loadCharacterMasteries(1, {{"sword", 55.0f}});
+    mastery.reapplyMilestoneEffects(1);
+    int count = 0;
+    for (const auto &e : chars.getCharacterData(1).activeEffects)
+        if (e.sourceType == "mastery")
+            ++count;
+    EXPECT_EQ(count, 2); // t1 + t2 buffs
+    mastery.reapplyMilestoneEffects(99); // unknown char -> no-op
     SUCCEED();
 }

@@ -1,7 +1,9 @@
-// Unit tests for ZoneEventManager (nullptr GameServices: template paths).
+// Unit tests for ZoneEventManager (explicit DI: nullable notifier + Logger).
+#include "services/IStatsNotifier.hpp"
 #include "services/ZoneEventManager.hpp"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -22,9 +24,38 @@ ZoneEventManager::ZoneEventTemplate makeEvent(
     return t;
 }
 
+struct ZoneNotifier : IStatsNotifier
+{
+    struct Record
+    {
+        int zone;
+        std::string type;
+    };
+    std::vector<Record> zoneNotes;
+    void sendStatsUpdate(int) override
+    {
+    }
+    void sendStatsUpdate(int, const std::string &) override
+    {
+    }
+    void sendWorldNotification(int, const std::string &, const nlohmann::json &, const std::string &, const std::string &) override
+    {
+    }
+    void sendWorldNotificationToGameZone(int zone,
+        const std::string &type,
+        const nlohmann::json &,
+        const std::string &,
+        const std::string &) override
+    {
+        zoneNotes.push_back({zone, type});
+    }
+};
+
 struct ZoneEventFixture : ::testing::Test
 {
-    ZoneEventManager mgr{nullptr};
+    Logger logger{"test"};
+    ZoneNotifier notifier;
+    ZoneEventManager mgr{&notifier, logger};
 };
 
 } // namespace
@@ -57,4 +88,26 @@ TEST_F(ZoneEventFixture, UnknownEventIsNoOp)
     mgr.startEvent("nope");
     EXPECT_FALSE(mgr.hasActiveEvent(7));
     mgr.endEvent("nope"); // must not crash
+}
+
+TEST_F(ZoneEventFixture, StartEndBroadcastsToZone)
+{
+    mgr.loadTemplates({makeEvent("feast", 7, 2.0f, 1.5f, 1.25f)});
+    mgr.startEvent("feast");
+    ASSERT_EQ(notifier.zoneNotes.size(), 1u);
+    EXPECT_EQ(notifier.zoneNotes[0].zone, 7);
+    EXPECT_EQ(notifier.zoneNotes[0].type, "zone_event_start");
+    mgr.endEvent("feast");
+    ASSERT_EQ(notifier.zoneNotes.size(), 2u);
+    EXPECT_EQ(notifier.zoneNotes[1].type, "zone_event_end");
+}
+
+TEST_F(ZoneEventFixture, NullNotifierSkipsBroadcast)
+{
+    ZoneEventManager silent{nullptr, logger};
+    silent.loadTemplates({makeEvent("feast", 7, 2.0f, 1.5f, 1.25f)});
+    silent.startEvent("feast"); // must not crash
+    EXPECT_TRUE(silent.hasActiveEvent(7));
+    silent.endEvent("feast");
+    EXPECT_FALSE(silent.hasActiveEvent(7));
 }

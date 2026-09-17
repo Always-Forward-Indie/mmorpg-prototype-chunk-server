@@ -1,20 +1,27 @@
 #include "services/MasteryManager.hpp"
 #include "data/DataStructs.hpp"
-#include "services/GameServices.hpp"
+#include "services/CharacterManager.hpp"
+#include "services/GameConfigService.hpp"
+#include "services/IStatsNotifier.hpp"
+#include "services/TitleManager.hpp"
+#include "utils/Logger.hpp"
 #include <algorithm>
 #include <cmath>
 #include <nlohmann/json.hpp>
-#include <spdlog/spdlog.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/logger.h>
 
-MasteryManager::MasteryManager(GameServices *gs)
-    : gs_(gs),
-      log_(spdlog::get("chunk-server"))
+MasteryManager::MasteryManager(CharacterManager &characters,
+    GameConfigService &gameConfig,
+    TitleManager *titles,
+    IStatsNotifier *statsNotify,
+    Logger &logger)
+    : characters_(characters),
+      gameConfig_(gameConfig),
+      titles_(titles),
+      statsNotify_(statsNotify),
+      logger_(logger)
 {
-    // No global logger outside the server process (unit tests): fall back
-    // instead of crashing on the first log_->... (nullptr deref).
-    if (!log_)
-        log_ = spdlog::stdout_color_mt("chunk-server");
+    log_ = logger_.getSystem("mastery");
 }
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -58,9 +65,6 @@ MasteryManager::getTargetAttribute(const std::string &masterySlug) const
 void
 MasteryManager::reapplyMilestoneEffects(int characterId)
 {
-    if (!gs_)
-        return;
-
     // Snapshot mastery data under lock, then apply effects outside.
     std::unordered_map<std::string, float> snapshot;
     {
@@ -71,11 +75,10 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
         snapshot = cit->second;
     }
 
-    auto &cfg = gs_->getGameConfigService();
-    const float t1 = cfg.getFloat("mastery.tier1_value", 20.f);
-    const float t2 = cfg.getFloat("mastery.tier2_value", 50.f);
-    const float t3 = cfg.getFloat("mastery.tier3_value", 80.f);
-    const float t4 = cfg.getFloat("mastery.tier4_value", 100.f);
+    const float t1 = gameConfig_.getFloat("mastery.tier1_value", 20.f);
+    const float t2 = gameConfig_.getFloat("mastery.tier2_value", 50.f);
+    const float t3 = gameConfig_.getFloat("mastery.tier3_value", 80.f);
+    const float t4 = gameConfig_.getFloat("mastery.tier4_value", 100.f);
 
     for (const auto &[masterySlug, value] : snapshot)
     {
@@ -89,7 +92,7 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
             eff.sourceType = "mastery";
             eff.expiresAt = 0;
             eff.tickMs = 0;
-            gs_->getCharacterManager().addActiveEffect(characterId, eff);
+            characters_.addActiveEffect(characterId, eff);
         }
         if (value >= t2)
         {
@@ -101,7 +104,7 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
             eff.sourceType = "mastery";
             eff.expiresAt = 0;
             eff.tickMs = 0;
-            gs_->getCharacterManager().addActiveEffect(characterId, eff);
+            characters_.addActiveEffect(characterId, eff);
         }
         if (value >= t3)
         {
@@ -113,7 +116,7 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
             eff.sourceType = "mastery";
             eff.expiresAt = 0;
             eff.tickMs = 0;
-            gs_->getCharacterManager().addActiveEffect(characterId, eff);
+            characters_.addActiveEffect(characterId, eff);
         }
         if (value >= t4)
         {
@@ -125,7 +128,7 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
             eff.sourceType = "mastery";
             eff.expiresAt = 0;
             eff.tickMs = 0;
-            gs_->getCharacterManager().addActiveEffect(characterId, eff);
+            characters_.addActiveEffect(characterId, eff);
         }
     }
 
@@ -172,9 +175,7 @@ MasteryManager::fillMasteryContext(int characterId,
 float
 MasteryManager::calculateDelta(float currentValue, int charLevel, int targetLevel) const
 {
-    const float base = (gs_)
-                           ? gs_->getGameConfigService().getFloat("mastery.base_delta", 0.5f)
-                           : 0.5f;
+    const float base = gameConfig_.getFloat("mastery.base_delta", 0.5f);
 
     int diff = targetLevel - charLevel;
 
@@ -221,15 +222,13 @@ MasteryManager::onPlayerAttack(int characterId,
         auto &counter = hitCounters_[characterId][masterySlug];
         ++counter;
 
-        const int flushEvery = (gs_)
-                                   ? gs_->getGameConfigService().getInt("mastery.db_flush_every_hits", 10)
-                                   : 10;
+        const int flushEvery = gameConfig_.getInt("mastery.db_flush_every_hits", 10);
 
         // Check tier boundaries outside the integer modulo to handle rounding
-        const float t1 = (gs_) ? gs_->getGameConfigService().getFloat("mastery.tier1_value", 20.f) : 20.f;
-        const float t2 = (gs_) ? gs_->getGameConfigService().getFloat("mastery.tier2_value", 50.f) : 50.f;
-        const float t3 = (gs_) ? gs_->getGameConfigService().getFloat("mastery.tier3_value", 80.f) : 80.f;
-        const float t4 = (gs_) ? gs_->getGameConfigService().getFloat("mastery.tier4_value", 100.f) : 100.f;
+        const float t1 = gameConfig_.getFloat("mastery.tier1_value", 20.f);
+        const float t2 = gameConfig_.getFloat("mastery.tier2_value", 50.f);
+        const float t3 = gameConfig_.getFloat("mastery.tier3_value", 80.f);
+        const float t4 = gameConfig_.getFloat("mastery.tier4_value", 100.f);
 
         bool tierCrossed = (oldValue < t1 && newValue >= t1) || (oldValue < t2 && newValue >= t2) || (oldValue < t3 && newValue >= t3) || (oldValue < t4 && newValue >= t4);
 
@@ -249,14 +248,10 @@ MasteryManager::checkAndApplyMilestone(int characterId,
     float oldValue,
     float newValue)
 {
-    if (!gs_)
-        return;
-
-    auto &cfg = gs_->getGameConfigService();
-    const float t1 = cfg.getFloat("mastery.tier1_value", 20.f);
-    const float t2 = cfg.getFloat("mastery.tier2_value", 50.f);
-    const float t3 = cfg.getFloat("mastery.tier3_value", 80.f);
-    const float t4 = cfg.getFloat("mastery.tier4_value", 100.f);
+    const float t1 = gameConfig_.getFloat("mastery.tier1_value", 20.f);
+    const float t2 = gameConfig_.getFloat("mastery.tier2_value", 50.f);
+    const float t3 = gameConfig_.getFloat("mastery.tier3_value", 80.f);
+    const float t4 = gameConfig_.getFloat("mastery.tier4_value", 100.f);
 
     auto applyEffect = [&](const std::string &effectSlug,
                            const std::string &attrSlug,
@@ -273,16 +268,21 @@ MasteryManager::checkAndApplyMilestone(int characterId,
         eff.tickMs = 0;    // stat modifier, not DoT
         try
         {
-            gs_->getCharacterManager().addActiveEffect(characterId, eff);
-            gs_->getStatsNotificationService().sendStatsUpdate(characterId);
-            gs_->getStatsNotificationService().sendWorldNotification(
-                characterId, "mastery_tier_up", nlohmann::json{{"masterySlug", masterySlug}, {"tier", effectSlug}});
+            characters_.addActiveEffect(characterId, eff);
+            if (statsNotify_ != nullptr)
+                statsNotify_->sendStatsUpdate(characterId);
+            if (statsNotify_ != nullptr)
+                statsNotify_->sendWorldNotification(
+                    characterId, "mastery_tier_up", nlohmann::json{{"masterySlug", masterySlug}, {"tier", effectSlug}});
 
             // Title auto-grant: check mastery conditions
-            nlohmann::json titleEvent;
-            titleEvent["masterySlug"] = masterySlug;
-            titleEvent["tierIndex"] = tierIndex;
-            gs_->getTitleManager().checkAndGrantTitles(characterId, "mastery", titleEvent);
+            if (titles_ != nullptr)
+            {
+                nlohmann::json titleEvent;
+                titleEvent["masterySlug"] = masterySlug;
+                titleEvent["tierIndex"] = tierIndex;
+                titles_->checkAndGrantTitles(characterId, "mastery", titleEvent);
+            }
         }
         catch (...)
         {

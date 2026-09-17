@@ -1,18 +1,22 @@
 #include "services/TitleManager.hpp"
-#include "services/GameServices.hpp"
+#include "services/CharacterManager.hpp"
+#include "services/IStatsNotifier.hpp"
+#include "services/ReputationManager.hpp"
+#include "utils/Logger.hpp"
 #include <algorithm>
 #include <nlohmann/json.hpp>
-#include <spdlog/spdlog.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/logger.h>
 
-TitleManager::TitleManager(GameServices *gs)
-    : gs_(gs),
-      log_(spdlog::get("chunk-server"))
+TitleManager::TitleManager(ReputationManager &reputation,
+    CharacterManager &characters,
+    IStatsNotifier *statsNotify,
+    Logger &logger)
+    : reputation_(reputation),
+      characters_(characters),
+      statsNotify_(statsNotify),
+      logger_(logger)
 {
-    // No global logger outside the server process (unit tests): fall back
-    // instead of crashing on the first log_->... (nullptr deref).
-    if (!log_)
-        log_ = spdlog::stdout_color_mt("chunk-server");
+    log_ = logger_.getSystem("title");
 }
 
 // ── Static data ────────────────────────────────────────────────────────────────
@@ -38,8 +42,8 @@ TitleManager::loadTitleDefinitions(const std::vector<TitleDefinitionStruct> &def
     for (const auto &[charId, slug] : toReapply)
     {
         applyTitleBonuses(charId, slug);
-        if (gs_)
-            gs_->getStatsNotificationService().sendStatsUpdate(charId);
+        if (statsNotify_ != nullptr)
+            statsNotify_->sendStatsUpdate(charId);
     }
     log_->info("[Title] Loaded {} title definitions", definitions.size());
 }
@@ -76,12 +80,12 @@ TitleManager::loadPlayerTitles(int characterId, const PlayerTitleStateStruct &st
     if (!state.equippedSlug.empty())
     {
         applyTitleBonuses(characterId, state.equippedSlug);
-        // CRITICAL: SET_PLAYER_TITLES is requested last in the login sequence, so it arrives
-        // after SET_PLAYER_ACTIVE_EFFECTS. The stats_update from SET_PLAYER_ACTIVE_EFFECTS does
-        // not include title bonuses (title data not loaded yet at that point). We must push a
-        // fresh stats_update here so the client HUD reflects title bonuses on every login.
-        if (gs_)
-            gs_->getStatsNotificationService().sendStatsUpdate(characterId);
+    // CRITICAL: SET_PLAYER_TITLES is requested last in the login sequence, so it arrives
+    // after SET_PLAYER_ACTIVE_EFFECTS. The stats_update from SET_PLAYER_ACTIVE_EFFECTS does
+    // not include title bonuses (title data not loaded yet at that point). We must push a
+    // fresh stats_update here so the client HUD reflects title bonuses on every login.
+    if (statsNotify_ != nullptr)
+        statsNotify_->sendStatsUpdate(characterId);
     }
 
     // Push current title state to client so they see earned/equipped titles immediately on login
@@ -205,11 +209,11 @@ TitleManager::checkAndGrantTitles(int characterId,
                 // reputation jumps across multiple boundaries in a single action.
                 matches = p.contains("factionSlug") && p.contains("minTierName") &&
                           eventData.value("factionSlug", "") == p["factionSlug"].get<std::string>();
-                if (matches && gs_)
+                if (matches)
                 {
-                    int currentOrdinal = gs_->getReputationManager().getTierOrdinal(
+                    int currentOrdinal = reputation_.getTierOrdinal(
                         eventData.value("tierName", ""));
-                    int minOrdinal = gs_->getReputationManager().getTierOrdinal(
+                    int minOrdinal = reputation_.getTierOrdinal(
                         p["minTierName"].get<std::string>());
                     matches = (currentOrdinal >= minOrdinal);
                 }
@@ -271,8 +275,8 @@ TitleManager::equipTitle(int characterId, const std::string &titleSlug)
     persist(characterId, titleSlug, earned);
     sendTitleUpdateToClient(characterId);
 
-    if (gs_)
-        gs_->getStatsNotificationService().sendStatsUpdate(characterId);
+    if (statsNotify_ != nullptr)
+        statsNotify_->sendStatsUpdate(characterId);
 
     log_->info("[Title] char={} equipped '{}' (was '{}')", characterId, titleSlug, oldSlug);
     return true;
@@ -283,8 +287,6 @@ TitleManager::equipTitle(int characterId, const std::string &titleSlug)
 void
 TitleManager::applyTitleBonuses(int characterId, const std::string &titleSlug)
 {
-    if (!gs_)
-        return;
     TitleDefinitionStruct def = getTitleDefinition(titleSlug);
     if (def.id == 0 || def.bonuses.empty())
         return;
@@ -301,7 +303,7 @@ TitleManager::applyTitleBonuses(int characterId, const std::string &titleSlug)
         eff.tickMs = 0;    // stat modifier, not DoT
         try
         {
-            gs_->getCharacterManager().addActiveEffect(characterId, eff);
+            characters_.addActiveEffect(characterId, eff);
         }
         catch (const std::exception &e)
         {
@@ -313,8 +315,6 @@ TitleManager::applyTitleBonuses(int characterId, const std::string &titleSlug)
 void
 TitleManager::removeTitleBonuses(int characterId, const std::string &titleSlug)
 {
-    if (!gs_)
-        return;
     TitleDefinitionStruct def = getTitleDefinition(titleSlug);
     if (def.id == 0 || def.bonuses.empty())
         return;
@@ -324,7 +324,7 @@ TitleManager::removeTitleBonuses(int characterId, const std::string &titleSlug)
         const std::string effectSlug = "title_" + titleSlug + "_" + bonus.attributeSlug;
         try
         {
-            gs_->getCharacterManager().removeActiveEffectBySlug(characterId, effectSlug);
+            characters_.removeActiveEffectBySlug(characterId, effectSlug);
         }
         catch (const std::exception &e)
         {

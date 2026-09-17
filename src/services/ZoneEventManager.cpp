@@ -1,21 +1,17 @@
 #include "services/ZoneEventManager.hpp"
-#include "services/GameServices.hpp"
+#include "services/IStatsNotifier.hpp"
+#include "utils/Logger.hpp"
 #include <algorithm>
 #include <chrono>
 #include <random>
-#include <spdlog/spdlog.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/logger.h>
 
 using SteadyClock = std::chrono::steady_clock;
 
-ZoneEventManager::ZoneEventManager(GameServices *gs)
-    : gs_(gs),
-      log_(spdlog::get("chunk-server"))
+ZoneEventManager::ZoneEventManager(IStatsNotifier *statsNotify, Logger &logger)
+    : statsNotify_(statsNotify), logger_(logger)
 {
-    // No global logger outside the server process (unit tests): fall back
-    // instead of crashing on the first log_->... (nullptr deref).
-    if (!log_)
-        log_ = spdlog::stdout_color_mt("chunk-server");
+    log_ = logger_.getSystem("zone_event");
     // Initialise with an empty snapshot
     std::atomic_store(&snapshot_, std::make_shared<const EventSnapshot>());
 }
@@ -64,13 +60,13 @@ ZoneEventManager::startEvent(const std::string &slug, int overrideGameZoneId)
     rebuildSnapshot();
 
     // Broadcast to zone
-    if (gs_)
+    if (statsNotify_ != nullptr)
     {
         nlohmann::json data;
         data["eventSlug"] = slug;
         data["durationSec"] = tmpl.durationSec;
         data["gameZoneId"] = zoneId;
-        gs_->getStatsNotificationService().sendWorldNotificationToGameZone(
+        statsNotify_->sendWorldNotificationToGameZone(
             zoneId, "zone_event_start", data, "high", "screen_center");
     }
 
@@ -101,9 +97,9 @@ ZoneEventManager::endEventInternal(const std::string &slug)
 
     rebuildSnapshot();
 
-    if (gs_ && zoneId >= 0)
+    if (statsNotify_ != nullptr && zoneId >= 0)
     {
-        gs_->getStatsNotificationService().sendWorldNotificationToGameZone(
+        statsNotify_->sendWorldNotificationToGameZone(
             zoneId, "zone_event_end", nlohmann::json{{"eventSlug", slug}}, "medium", "toast");
     }
 
@@ -152,9 +148,11 @@ ZoneEventManager::tickEventScheduler()
         }
         else if (tmpl.triggerType == "random" && tmpl.randomChancePerHour > 0.0f)
         {
-            // Tick runs every 30 s → 120 ticks/hour
+            // Tick runs every 30 s → 120 ticks/hour. Thread-local engine:
+            // the shared mt19937 raced the same way CombatCalculator's did.
+            thread_local std::mt19937 rng{std::random_device{}()};
             float tickChance = tmpl.randomChancePerHour / 120.0f;
-            if (dist(rng_) < tickChance)
+            if (dist(rng) < tickChance)
                 startEvent(tmpl.slug);
         }
     }

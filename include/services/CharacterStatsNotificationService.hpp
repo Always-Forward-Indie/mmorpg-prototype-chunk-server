@@ -7,13 +7,20 @@
 #include <string>
 
 #include "services/IStatsNotifier.hpp"
+#include "utils/Logger.hpp"
 
 // Forward declarations
 namespace spdlog
 {
 class logger;
 }
-class GameServices;
+class CharacterManager;
+class ExperienceManager;
+class InventoryManager;
+class EquipmentManager;
+class ItemManager;
+class GameConfigService;
+class GameZoneManager;
 
 /**
  * @brief Service responsible for sending character stats update notifications
@@ -25,7 +32,16 @@ class GameServices;
 class CharacterStatsNotificationService : public IStatsNotifier
 {
   public:
-    explicit CharacterStatsNotificationService(GameServices *gameServices);
+    /// Explicit fetch dependencies (no GameServices). All are required refs;
+    /// client delivery stays std::function seams (wired by CombatSystem/ChunkServer).
+    explicit CharacterStatsNotificationService(CharacterManager &characters,
+        ExperienceManager &experience,
+        InventoryManager &inventory,
+        EquipmentManager &equipment,
+        ItemManager &items,
+        GameConfigService &gameConfig,
+        GameZoneManager &gameZones,
+        Logger &logger);
     ~CharacterStatsNotificationService() = default;
 
     /**
@@ -58,7 +74,7 @@ class CharacterStatsNotificationService : public IStatsNotifier
         const std::string &notificationType,
         const nlohmann::json &data = nlohmann::json::object(),
         const std::string &priority = "medium",
-        const std::string &channel = "toast");
+        const std::string &channel = "toast") override;
 
     /**
      * @brief Send a world notification to all players currently inside a game zone.
@@ -77,7 +93,7 @@ class CharacterStatsNotificationService : public IStatsNotifier
         const std::string &notificationType,
         const nlohmann::json &data = nlohmann::json::object(),
         const std::string &priority = "medium",
-        const std::string &channel = "toast");
+        const std::string &channel = "toast") override;
 
     /**
      * @brief Set the callback function for sending stats update packets
@@ -96,7 +112,14 @@ class CharacterStatsNotificationService : public IStatsNotifier
     void setDirectSendCallback(std::function<void(int, const nlohmann::json &)> callback);
 
   private:
-    GameServices *gameServices_;
+    CharacterManager &characters_;
+    ExperienceManager &experience_;
+    InventoryManager &inventory_;
+    EquipmentManager &equipment_;
+    ItemManager &items_;
+    GameConfigService &gameConfig_;
+    GameZoneManager &gameZones_;
+    Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
     std::function<void(const nlohmann::json &)> statsUpdateCallback_;
     std::function<void(int, const nlohmann::json &)> directSendCallback_;

@@ -1,17 +1,35 @@
 #include "services/CharacterStatsNotificationService.hpp"
 #include "services/CharacterManager.hpp"
-#include "services/GameServices.hpp"
+#include "services/EquipmentManager.hpp"
+#include "services/ExperienceManager.hpp"
+#include "services/GameConfigService.hpp"
 #include "services/GameZoneManager.hpp"
+#include "services/InventoryManager.hpp"
+#include "services/ItemManager.hpp"
 #include "services/StatsPacketBuilder.hpp"
 #include "utils/Logger.hpp"
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include <spdlog/logger.h>
 
-CharacterStatsNotificationService::CharacterStatsNotificationService(GameServices *gameServices)
-    : gameServices_(gameServices)
+CharacterStatsNotificationService::CharacterStatsNotificationService(CharacterManager &characters,
+    ExperienceManager &experience,
+    InventoryManager &inventory,
+    EquipmentManager &equipment,
+    ItemManager &items,
+    GameConfigService &gameConfig,
+    GameZoneManager &gameZones,
+    Logger &logger)
+    : characters_(characters),
+      experience_(experience),
+      inventory_(inventory),
+      equipment_(equipment),
+      items_(items),
+      gameConfig_(gameConfig),
+      gameZones_(gameZones),
+      logger_(logger)
 {
-    log_ = gameServices_->getLogger().getSystem("character");
+    log_ = logger_.getSystem("character");
 }
 
 void
@@ -26,8 +44,8 @@ CharacterStatsNotificationService::sendStatsUpdate(int characterId)
         }
         catch (const std::exception &e)
         {
-            gameServices_->getLogger().logError("Failed to send stats update for character " +
-                                                std::to_string(characterId) + ": " + e.what());
+            logger_.logError("Failed to send stats update for character " +
+                             std::to_string(characterId) + ": " + e.what());
         }
     }
 }
@@ -46,8 +64,8 @@ CharacterStatsNotificationService::sendStatsUpdate(int characterId, const std::s
         }
         catch (const std::exception &e)
         {
-            gameServices_->getLogger().logError("Failed to send stats update for character " +
-                                                std::to_string(characterId) + ": " + e.what());
+            logger_.logError("Failed to send stats update for character " +
+                             std::to_string(characterId) + ": " + e.what());
         }
     }
 }
@@ -80,7 +98,7 @@ CharacterStatsNotificationService::sendWorldNotification(int characterId,
     }
     catch (const std::exception &e)
     {
-        gameServices_->getLogger().logError("sendWorldNotification error: " + std::string(e.what()));
+        logger_.logError("sendWorldNotification error: " + std::string(e.what()));
     }
 }
 
@@ -109,13 +127,13 @@ CharacterStatsNotificationService::sendWorldNotificationToGameZone(int gameZoneI
     try
     {
         // Retrieve all character IDs currently connected
-        auto allChars = gameServices_->getCharacterManager().getCharactersList();
+        auto allChars = characters_.getCharactersList();
         for (const auto &charData : allChars)
         {
             if (charData.characterId == 0)
                 continue;
 
-            auto zone = gameServices_->getGameZoneManager().getZoneForPosition(charData.characterPosition);
+            auto zone = gameZones_.getZoneForPosition(charData.characterPosition);
             if (!zone.has_value() || zone->id != gameZoneId)
                 continue;
 
@@ -124,33 +142,33 @@ CharacterStatsNotificationService::sendWorldNotificationToGameZone(int gameZoneI
     }
     catch (const std::exception &e)
     {
-        gameServices_->getLogger().logError("sendWorldNotificationToGameZone error: " + std::string(e.what()));
+        logger_.logError("sendWorldNotificationToGameZone error: " + std::string(e.what()));
     }
 }
 
 nlohmann::json
 CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
 {
-    const auto characterData = gameServices_->getCharacterManager().getCharacterData(characterId);
+    const auto characterData = characters_.getCharacterData(characterId);
 
     StatsPacketBuilderInput in;
     in.character = characterData;
 
     // ── Experience level thresholds ───────────────────────────────────────────
-    in.levelStart = gameServices_->getExperienceManager().getExperienceForLevelFromGameServer(
+    in.levelStart = experience_.getExperienceForLevelFromGameServer(
         characterData.characterLevel);
 
     // ── Weight ────────────────────────────────────────────────────────────────
-    in.currentWeight = gameServices_->getInventoryManager().getTotalWeight(characterId);
-    in.weightLimit = gameServices_->getEquipmentManager().getCarryWeightLimit(characterId);
+    in.currentWeight = inventory_.getTotalWeight(characterId);
+    in.weightLimit = equipment_.getCarryWeightLimit(characterId);
 
     // ── Resolve equipped-item bonuses (apply_on == "equip") ──────────────────
-    const auto equipState = gameServices_->getEquipmentManager().getEquipmentState(characterId);
+    const auto equipState = equipment_.getEquipmentState(characterId);
     for (const auto &[slotSlug, slot] : equipState.slots)
     {
         if (slot.inventoryItemId == 0)
             continue;
-        const auto item = gameServices_->getItemManager().getItemById(slot.itemId);
+        const auto item = items_.getItemById(slot.itemId);
         if (item.id == 0)
             continue;
         for (const auto &attr : item.attributes)
@@ -170,10 +188,10 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
     // Item Soul: resolve kill-count tier bonus to the equipped weapon's primary attribute
     try
     {
-        auto weaponOpt = gameServices_->getInventoryManager().getEquippedWeapon(characterId);
+        auto weaponOpt = inventory_.getEquippedWeapon(characterId);
         if (weaponOpt.has_value())
         {
-            const auto &cfg = gameServices_->getGameConfigService();
+            const auto &cfg = gameConfig_;
             const int kc = weaponOpt->killCount;
             const int t1 = cfg.getInt("item_soul.tier1_kills", 50);
             const int t2 = cfg.getInt("item_soul.tier2_kills", 200);
@@ -184,7 +202,7 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
                                                : 0;
             if (soulBonus > 0)
             {
-                const auto &wItem = gameServices_->getItemManager().getItemById(weaponOpt->itemId);
+                const auto &wItem = items_.getItemById(weaponOpt->itemId);
                 for (const auto &attr : wItem.attributes)
                 {
                     if (attr.apply_on == "equip" && !attr.slug.empty())

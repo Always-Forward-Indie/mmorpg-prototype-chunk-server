@@ -1,19 +1,49 @@
 #include "services/LootManager.hpp"
 #include "events/Event.hpp"
 #include "events/EventQueue.hpp"
-#include "services/GameServices.hpp"
+#include "services/GameConfigService.hpp"
+#include "services/GameZoneManager.hpp"
+#include "services/IStatsNotifier.hpp"
 #include "services/InventoryManager.hpp"
+#include "services/MobInstanceManager.hpp"
 #include "services/PityManager.hpp"
+#include "services/ZoneEventManager.hpp"
+#include "utils/Logger.hpp"
 #include <algorithm>
 #include <cmath>
 #include <nlohmann/json.hpp>
+#include <random>
 #include <spdlog/logger.h>
 
 // Static member initialization
-int LootManager::nextDroppedItemUID_ = 1;
+std::atomic<int> LootManager::nextDroppedItemUID_{1};
 
-LootManager::LootManager(ItemManager &itemManager, Logger &logger)
-    : itemManager_(itemManager), logger_(logger), eventQueue_(nullptr), inventoryManager_(nullptr), randomGenerator_(randomDevice_())
+namespace
+{
+// Thread-local drop-roll engine (see header note).
+std::mt19937 &dropRng()
+{
+    thread_local std::mt19937 gen{std::random_device{}()};
+    return gen;
+}
+} // namespace
+
+LootManager::LootManager(ItemManager &itemManager,
+    MobInstanceManager &mobInstances,
+    GameZoneManager &gameZones,
+    ZoneEventManager &zoneEvents,
+    GameConfigService &gameConfig,
+    IStatsNotifier *statsNotify,
+    Logger &logger)
+    : itemManager_(itemManager),
+      mobInstances_(mobInstances),
+      gameZones_(gameZones),
+      zoneEvents_(zoneEvents),
+      gameConfig_(gameConfig),
+      statsNotify_(statsNotify),
+      logger_(logger),
+      eventQueue_(nullptr),
+      inventoryManager_(nullptr)
 {
     log_ = logger.getSystem("item");
 }
@@ -34,12 +64,6 @@ void
 LootManager::setPityManager(PityManager *pityManager)
 {
     pityManager_ = pityManager;
-}
-
-void
-LootManager::setGameServices(GameServices *gameServices)
-{
-    gameServices_ = gameServices;
 }
 
 void
@@ -67,19 +91,18 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
 
     // Resolve champion/rare loot multiplier from the mob instance (Stage 3)
     float lootMultiplier = 1.0f;
-    if (gameServices_ && mobUID > 0)
+    if (mobUID > 0)
     {
-        auto inst = gameServices_->getMobInstanceManager().getMobInstance(mobUID);
+        auto inst = mobInstances_.getMobInstance(mobUID);
         if (inst.uid != 0)
             lootMultiplier = inst.lootMultiplier;
     }
 
     // Zone event loot multiplier (Stage 4)
-    if (gameServices_)
     {
-        auto gameZone = gameServices_->getGameZoneManager().getZoneForPosition(position);
+        auto gameZone = gameZones_.getZoneForPosition(position);
         if (gameZone.has_value())
-            lootMultiplier *= gameServices_->getZoneEventManager().getLootMultiplier(gameZone->id);
+            lootMultiplier *= zoneEvents_.getLootMultiplier(gameZone->id);
     }
 
     try
@@ -104,13 +127,11 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
         int hardPityKills = 800;
         float softBonusPerKill = 0.00005f;
         int hintThreshold = 500;
-        if (gameServices_)
         {
-            const auto &cfg = gameServices_->getGameConfigService();
-            softPityKills = cfg.getInt("pity.soft_pity_kills", 300);
-            hardPityKills = cfg.getInt("pity.hard_pity_kills", 800);
-            softBonusPerKill = cfg.getFloat("pity.soft_bonus_per_kill", 0.00005f);
-            hintThreshold = cfg.getInt("pity.hint_threshold_kills", 500);
+            softPityKills = gameConfig_.getInt("pity.soft_pity_kills", 300);
+            hardPityKills = gameConfig_.getInt("pity.hard_pity_kills", 800);
+            softBonusPerKill = gameConfig_.getFloat("pity.soft_bonus_per_kill", 0.00005f);
+            hintThreshold = gameConfig_.getInt("pity.hint_threshold_kills", 500);
         }
 
         for (const auto &lootEntry : lootTable)
@@ -150,7 +171,7 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
             }
             // ──────────────────────────────────────────────────────────────────
 
-            float randomRoll = distribution(randomGenerator_);
+            float randomRoll = distribution(dropRng());
 
             logger_.log("[LOOT] Item " + std::to_string(lootEntry.itemId) +
                         " - Roll: " + std::to_string(randomRoll) +
@@ -170,7 +191,7 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
                 if (lootEntry.maxQuantity > lootEntry.minQuantity)
                 {
                     std::uniform_int_distribution<int> qtyDist(lootEntry.minQuantity, lootEntry.maxQuantity);
-                    droppedItem.quantity = qtyDist(randomGenerator_);
+                    droppedItem.quantity = qtyDist(dropRng());
                 }
                 else
                 {
@@ -183,8 +204,8 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
                 std::uniform_real_distribution<float> radiusDist(15.0f, MAX_DROP_RADIUS);
                 std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * M_PI);
 
-                float dropRadius = radiusDist(randomGenerator_);
-                float dropAngle = angleDist(randomGenerator_);
+                float dropRadius = radiusDist(dropRng());
+                float dropAngle = angleDist(dropRng());
 
                 // Calculate offset using polar coordinates for more natural distribution
                 float offsetX = dropRadius * std::cos(dropAngle);
@@ -223,14 +244,13 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
                     pityManager_->incrementCounter(
                         cid, iid, hintThreshold, [this, cid, iid]()
                         {
-                            if (gameServices_)
+                            if (statsNotify_ != nullptr)
                             {
-                                gameServices_->getStatsNotificationService()
-                                    .sendWorldNotification(
-                                        cid, "pity_hint",
-                                        nlohmann::json::object(),
-                                        "ambient",
-                                        "atmosphere");
+                                statsNotify_->sendWorldNotification(
+                                    cid, "pity_hint",
+                                    nlohmann::json::object(),
+                                    "ambient",
+                                    "atmosphere");
                             } });
                 }
             }

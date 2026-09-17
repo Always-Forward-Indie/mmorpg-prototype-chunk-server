@@ -63,7 +63,13 @@ class GameServices
           spawnZoneManager_(mobManager_, logger_),
           clientManager_(logger_),
           chunkManager_(logger_),
-          lootManager_(itemManager_, logger_),
+          lootManager_(itemManager_,
+              mobInstanceManager_,
+              gameZoneManager_,
+              zoneEventManager_,
+              gameConfigService_,
+              &statsNotificationService_,
+              logger_),
           inventoryManager_(itemManager_, logger_),
           harvestManager_(itemManager_, logger_),
           interestManager_(logger_),
@@ -77,13 +83,22 @@ class GameServices
           experienceManager_(characterManager_, experienceCacheManager_, &titleManager_,
               &statsNotificationService_, logger_),
           experienceCacheManager_(logger_),
-          statsNotificationService_(this),
           vendorManager_(itemManager_, logger_),
           trainerManager_(itemManager_, logger_),
           tradeSessionManager_(logger_),
           equipmentManager_(inventoryManager_, itemManager_, characterManager_, logger_),
           respawnZoneManager_(logger_),
           gameZoneManager_(logger_),
+          // statsNotificationService_ after ALL its fetch deps (char/exp/inv/
+          // equip/item/config/zones) so it takes plain refs, no forward refs.
+          statsNotificationService_(characterManager_,
+              experienceManager_,
+              inventoryManager_,
+              equipmentManager_,
+              itemManager_,
+              gameConfigService_,
+              gameZoneManager_,
+              logger_),
           statusEffectTemplateManager_(logger_),
           regenManager_(characterManager_, gameConfigService_, &statsNotificationService_,
               equipmentManager_, itemManager_, logger_),
@@ -93,16 +108,19 @@ class GameServices
               characterManager_, mobManager_, spawnZoneManager_,
               &statsNotificationService_, logger_),
           reputationManager_(logger_),
-          masteryManager_(this),
-          titleManager_(this),
-          zoneEventManager_(this),
-          emoteManager_(this),
+          masteryManager_(characterManager_, gameConfigService_, &titleManager_, &statsNotificationService_, logger_),
+          titleManager_(reputationManager_, characterManager_, &statsNotificationService_, logger_),
+          zoneEventManager_(&statsNotificationService_, logger_),
+          emoteManager_(logger_),
           ambientSpeechManager_(),
           worldObjectManager_(logger_)
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
         mobMovementManager_.setSpawnZoneManager(&spawnZoneManager_);
+        // Activate zone-event mob speed multipliers (intended design; the
+        // setter existed but was never wired, so multipliers never applied).
+        mobMovementManager_.setGameServices(this);
 
         // Set up harvest manager dependencies
         harvestManager_.setInventoryManager(&inventoryManager_);
@@ -112,7 +130,6 @@ class GameServices
 
         // Wire loot manager dependencies (pity)
         lootManager_.setPityManager(&pityManager_);
-        lootManager_.setGameServices(this);
     }
 
     Logger &getLogger()
@@ -339,13 +356,13 @@ class GameServices
     CooldownService cooldownService_;
     ExperienceManager experienceManager_;
     ExperienceCacheManager experienceCacheManager_;
-    CharacterStatsNotificationService statsNotificationService_;
     VendorManager vendorManager_;
     TrainerManager trainerManager_;
     TradeSessionManager tradeSessionManager_;
     EquipmentManager equipmentManager_;
     RespawnZoneManager respawnZoneManager_;
     GameZoneManager gameZoneManager_;
+    CharacterStatsNotificationService statsNotificationService_;
     StatusEffectTemplateManager statusEffectTemplateManager_;
     RegenManager regenManager_;
     PityManager pityManager_;

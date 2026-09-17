@@ -1,13 +1,12 @@
 #pragma once
 
 #include "data/DataStructs.hpp"
+#include "utils/Logger.hpp"
 #include <algorithm>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-class GameServices;
 
 /**
  * @brief Manages the emote/animation system.
@@ -21,7 +20,7 @@ class GameServices;
 class EmoteManager
 {
   public:
-    explicit EmoteManager(GameServices *gs);
+    explicit EmoteManager(Logger &logger);
 
     // ── Static definitions ─────────────────────────────────────────────────
     void loadEmoteDefinitions(const std::vector<EmoteDefinitionStruct> &defs);
@@ -43,7 +42,7 @@ class EmoteManager
     std::vector<EmoteDefinitionStruct> getPlayerEmotes(int characterId) const;
 
   private:
-    GameServices *gs_;
+    Logger &logger_;
     mutable std::shared_mutex mutex_;
     std::unordered_map<std::string, EmoteDefinitionStruct> definitions_; ///< slug → def
     std::unordered_map<int, std::vector<std::string>> playerEmotes_;     ///< characterId → unlocked slugs

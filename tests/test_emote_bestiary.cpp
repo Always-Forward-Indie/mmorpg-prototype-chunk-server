@@ -1,4 +1,4 @@
-// Unit tests for EmoteManager (nullptr GameServices) + BestiaryManager (Logger).
+// Unit tests for EmoteManager (Logger-only DI) + BestiaryManager (Logger).
 #include "services/BestiaryManager.hpp"
 #include "services/EmoteManager.hpp"
 
@@ -23,7 +23,8 @@ EmoteDefinitionStruct makeEmote(const std::string &slug, int order, bool def = f
 
 TEST(Emotes, DefinitionsSortedAndDefault)
 {
-    EmoteManager mgr(nullptr);
+    Logger logger{"test"};
+    EmoteManager mgr{logger};
     mgr.loadEmoteDefinitions({makeEmote("dance", 2), makeEmote("wave", 1), makeEmote("sit", 0, true)});
     auto all = mgr.getAllDefinitions();
     ASSERT_EQ(all.size(), 3u);
@@ -36,7 +37,8 @@ TEST(Emotes, DefinitionsSortedAndDefault)
 
 TEST(Emotes, PlayerUnlocksWithDefaults)
 {
-    EmoteManager mgr(nullptr);
+    Logger logger{"test"};
+    EmoteManager mgr{logger};
     mgr.loadEmoteDefinitions({makeEmote("dance", 2), makeEmote("sit", 0, true)});
     mgr.loadPlayerEmotes(1, {"dance"});
     EXPECT_TRUE(mgr.isUnlocked(1, "dance"));

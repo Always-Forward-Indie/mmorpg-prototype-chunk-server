@@ -2,20 +2,33 @@
 #include "data/DataStructs.hpp"
 #include "services/ItemManager.hpp"
 #include "utils/Logger.hpp"
+#include <atomic>
 #include <map>
-#include <random>
 #include <shared_mutex>
 
 // Forward declarations
 class EventQueue;
 class InventoryManager;
 class PityManager;
-class GameServices;
+class MobInstanceManager;
+class GameZoneManager;
+class ZoneEventManager;
+class GameConfigService;
+class IStatsNotifier;
 
 class LootManager
 {
   public:
-    LootManager(ItemManager &itemManager, Logger &logger);
+    /// Explicit dependencies (no GameServices). statsNotify is optional and
+    /// may be null (pity_hint skipped) — same pattern as
+    /// ChampionManager::statsNotify_.
+    LootManager(ItemManager &itemManager,
+        MobInstanceManager &mobInstances,
+        GameZoneManager &gameZones,
+        ZoneEventManager &zoneEvents,
+        GameConfigService &gameConfig,
+        IStatsNotifier *statsNotify,
+        Logger &logger);
 
     /**
      * @brief Set event queue for sending loot events to clients
@@ -51,11 +64,6 @@ class LootManager
      * @brief Set PityManager reference (enables pity-based drop chance modification).
      */
     void setPityManager(PityManager *pityManager);
-
-    /**
-     * @brief Set GameServices pointer (used to read config and send notifications).
-     */
-    void setGameServices(GameServices *gameServices);
 
     /**
      * @brief Generate loot when a mob dies.
@@ -120,6 +128,11 @@ class LootManager
 
   private:
     ItemManager &itemManager_;
+    MobInstanceManager &mobInstances_;
+    GameZoneManager &gameZones_;
+    ZoneEventManager &zoneEvents_;
+    GameConfigService &gameConfig_;
+    IStatsNotifier *statsNotify_; // optional, may be null
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 
@@ -132,9 +145,6 @@ class LootManager
     // Optional: Pity manager for modified rare-drop chances
     PityManager *pityManager_ = nullptr;
 
-    // Optional: GameServices for reading config and sending notifications
-    GameServices *gameServices_ = nullptr;
-
     // Callbacks for game-server persistence of item-instance ownership
     std::function<void(const std::string &)> nullifyItemOwnerCallback_;
     std::function<void(const std::string &)> deleteInventoryItemCallback_;
@@ -146,13 +156,13 @@ class LootManager
     // Thread safety
     mutable std::shared_mutex droppedItemsMutex_;
 
-    // Random number generation for loot drops
-    std::random_device randomDevice_;
-    mutable std::mt19937 randomGenerator_;
+    // Random number generation for loot drops (thread-local engine: the old
+    // shared mt19937 raced across ThreadPool workers, same class as the
+    // CombatCalculator fix).
 
     // Generate unique UID for dropped items
     int generateDroppedItemUID();
-    static int nextDroppedItemUID_;
+    static std::atomic<int> nextDroppedItemUID_;
 
     /**
      * @brief Calculate distance between two positions

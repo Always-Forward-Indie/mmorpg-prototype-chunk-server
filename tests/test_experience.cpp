@@ -25,6 +25,12 @@ struct FakeNotifier : IStatsNotifier
     {
         ++calls;
     }
+    void sendWorldNotification(int, const std::string &, const nlohmann::json &, const std::string &, const std::string &) override
+    {
+    }
+    void sendWorldNotificationToGameZone(int, const std::string &, const nlohmann::json &, const std::string &, const std::string &) override
+    {
+    }
 };
 
 ExperienceLevelEntry entry(int level, int xp)

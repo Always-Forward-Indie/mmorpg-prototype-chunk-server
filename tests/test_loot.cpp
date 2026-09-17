@@ -1,7 +1,12 @@
-// Unit tests for LootManager (ItemManager + Logger only, no world).
+// Unit tests for LootManager (explicit DI, no world).
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
 #include "services/LootManager.hpp"
+#include "services/GameConfigService.hpp"
+#include "services/GameZoneManager.hpp"
+#include "services/IStatsNotifier.hpp"
+#include "services/MobInstanceManager.hpp"
+#include "services/ZoneEventManager.hpp"
 
 #include <gtest/gtest.h>
 
@@ -28,12 +33,33 @@ MobLootInfoStruct lootEntry(int mobId, int itemId, float chance, int qty = 1)
     return e;
 }
 
+struct LootNotifier : IStatsNotifier
+{
+    void sendStatsUpdate(int) override
+    {
+    }
+    void sendStatsUpdate(int, const std::string &) override
+    {
+    }
+    void sendWorldNotification(int, const std::string &, const nlohmann::json &, const std::string &, const std::string &) override
+    {
+    }
+    void sendWorldNotificationToGameZone(int, const std::string &, const nlohmann::json &, const std::string &, const std::string &) override
+    {
+    }
+};
+
 struct LootFixture : ::testing::Test
 {
     Logger logger{"test"};
     ItemManager items{logger};
     InventoryManager inv{items, logger};
-    LootManager loot{items, logger};
+    MobInstanceManager instances{logger};
+    GameZoneManager gameZones{logger};
+    GameConfigService config{logger};
+    LootNotifier notifier;
+    ZoneEventManager zoneEvents{&notifier, logger};
+    LootManager loot{items, instances, gameZones, zoneEvents, config, &notifier, logger};
 
     void SetUp() override
     {

@@ -15,7 +15,6 @@
 // stub here (ClientManager/GameZoneManager/InterestManager already link
 // the real thing, so they must never reappear here).
 #include "network/NetworkManager.hpp"
-#include "services/CharacterStatsNotificationService.hpp"
 #include "services/ClientManager.hpp"
 #include "services/CombatSystem.hpp"
 #include "services/GameZoneManager.hpp"
@@ -29,30 +28,6 @@ void CombatSystem::processAIAttack(int /*mobId*/, int /*targetPlayerId*/,
 
 void CombatSystem::broadcastMobSkillInitiation(int /*mobId*/, int /*targetPlayerId*/,
     const SkillStruct & /*skill*/)
-{
-}
-
-void CharacterStatsNotificationService::sendWorldNotification(int /*characterId*/,
-    const std::string & /*notificationType*/,
-    const nlohmann::json & /*data*/,
-    const std::string & /*priority*/,
-    const std::string & /*channel*/)
-{
-}
-
-void CharacterStatsNotificationService::sendStatsUpdate(int /*characterId*/)
-{
-}
-
-void CharacterStatsNotificationService::sendStatsUpdate(int /*characterId*/, const std::string & /*source*/)
-{
-}
-
-void CharacterStatsNotificationService::sendWorldNotificationToGameZone(int /*gameZoneId*/,
-    const std::string & /*notificationType*/,
-    const nlohmann::json & /*data*/,
-    const std::string & /*priority*/,
-    const std::string & /*channel*/)
 {
 }
 

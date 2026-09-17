@@ -45,6 +45,7 @@ if(GTest_FOUND)
         test_regen.cpp
         test_cooldown.cpp
         test_stats_builder.cpp
+        test_stats_notify.cpp
         test_dialogue_actions.cpp
         test_durability.cpp
         test_skill_initiation.cpp
@@ -100,6 +101,7 @@ if(GTest_FOUND)
         ../src/services/RegenManager.cpp
         ../src/services/CooldownService.cpp
         ../src/services/StatsPacketBuilder.cpp
+        ../src/services/CharacterStatsNotificationService.cpp
         ../src/services/DurabilityService.cpp
         ../src/services/MobKillRewardPipeline.cpp
         ../src/services/PlayerDeathPipeline.cpp
