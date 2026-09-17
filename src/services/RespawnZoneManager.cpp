@@ -1,7 +1,9 @@
 #include "services/RespawnZoneManager.hpp"
 #include "utils/RandomUtils.hpp"
+#include "utils/SpawnGeometry.hpp"
 #include <limits>
 #include <spdlog/logger.h>
+#include <tuple>
 
 RespawnZoneManager::RespawnZoneManager(Logger &logger)
     : logger_(logger)
@@ -59,8 +61,8 @@ RespawnZoneManager::getRandomPointInZone(const RespawnZoneStruct &zone) const
     if (!zone.isAreaDefined())
         return zone.position;
 
-    // RNG: RandomUtils (one thread_local engine per thread; distributions are
-    // function-local, never shared — see RandomUtils.hpp).
+    // Sampling math lives in SpawnGeometry (single source with mob spawn
+    // and champion placement); only the Z blend stays local.
     float x = 0.0f;
     float y = 0.0f;
     float z = 0.0f;
@@ -69,27 +71,19 @@ RespawnZoneManager::getRandomPointInZone(const RespawnZoneStruct &zone) const
     {
     case ZoneShape::CIRCLE:
     {
-        float angle = RandomUtils::angle();
-        float r = zone.outerRadius * std::sqrt(RandomUtils::uniform01());
-        x = zone.centerX + r * std::cos(angle);
-        y = zone.centerY + r * std::sin(angle);
+        std::tie(x, y) = SpawnGeometry::sampleCircle(zone.centerX, zone.centerY, zone.outerRadius);
         break;
     }
     case ZoneShape::ANNULUS:
     {
-        float angle = RandomUtils::angle();
-        float r2in = zone.innerRadius * zone.innerRadius;
-        float r2out = zone.outerRadius * zone.outerRadius;
-        float r = std::sqrt(r2in + RandomUtils::uniform01() * (r2out - r2in));
-        x = zone.centerX + r * std::cos(angle);
-        y = zone.centerY + r * std::sin(angle);
+        std::tie(x, y) =
+            SpawnGeometry::sampleAnnulus(zone.centerX, zone.centerY, zone.innerRadius, zone.outerRadius);
         break;
     }
     case ZoneShape::RECT:
     default:
     {
-        x = zone.minX + RandomUtils::uniform01() * (zone.maxX - zone.minX);
-        y = zone.minY + RandomUtils::uniform01() * (zone.maxY - zone.minY);
+        std::tie(x, y) = SpawnGeometry::sampleRect(zone.minX, zone.maxX, zone.minY, zone.maxY);
         break;
     }
     }

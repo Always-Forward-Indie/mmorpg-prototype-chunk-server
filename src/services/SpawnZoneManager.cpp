@@ -2,6 +2,7 @@
 #include "services/MobInstanceManager.hpp"
 #include "utils/Generators.hpp"
 #include "utils/RandomUtils.hpp"
+#include "utils/SpawnGeometry.hpp"
 #include <algorithm>
 #include <ctime>
 #include <spdlog/logger.h>
@@ -247,32 +248,22 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             occupiedPositions.push_back(ep.second);
     }
 
-    // Lambdas for shape-aware random point generation.
+    // Lambdas for shape-aware random point generation (thin wrappers over
+    // SpawnGeometry reading this zone's config; sampling math lives there).
     auto sampleRect = [&]() -> std::pair<float, float>
     {
-        float x = zone->second.minX + RandomUtils::uniform01() * (zone->second.maxX - zone->second.minX);
-        float y = zone->second.minY + RandomUtils::uniform01() * (zone->second.maxY - zone->second.minY);
-        return {x, y};
+        return SpawnGeometry::sampleRect(zone->second.minX, zone->second.maxX, zone->second.minY, zone->second.maxY);
     };
 
     auto sampleCircle = [&]() -> std::pair<float, float>
     {
-        // Uniform distribution over disc: r = R * sqrt(u)
-        float angle = RandomUtils::angle();
-        float r = zone->second.outerRadius * std::sqrt(RandomUtils::uniform01());
-        return {zone->second.centerX + r * std::cos(angle),
-            zone->second.centerY + r * std::sin(angle)};
+        return SpawnGeometry::sampleCircle(zone->second.centerX, zone->second.centerY, zone->second.outerRadius);
     };
 
     auto sampleAnnulus = [&]() -> std::pair<float, float>
     {
-        // Equal-area sampling in annulus: r = sqrt(r_in^2 + u*(r_out^2 - r_in^2))
-        float angle = RandomUtils::angle();
-        float r2in = zone->second.innerRadius * zone->second.innerRadius;
-        float r2out = zone->second.outerRadius * zone->second.outerRadius;
-        float r = std::sqrt(r2in + RandomUtils::uniform01() * (r2out - r2in));
-        return {zone->second.centerX + r * std::cos(angle),
-            zone->second.centerY + r * std::sin(angle)};
+        return SpawnGeometry::sampleAnnulus(
+            zone->second.centerX, zone->second.centerY, zone->second.innerRadius, zone->second.outerRadius);
     };
 
     // Stratified angular sampling: divides the ring into totalSlots equal sectors
@@ -280,14 +271,12 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     // and prevents visual clumping that pure random produces in narrow rings.
     auto sampleAnnulusStratified = [&](int slotIdx, int totalSlots) -> std::pair<float, float>
     {
-        float sectorSize = 2.0f * static_cast<float>(M_PI) / static_cast<float>(totalSlots);
-        float sectorStart = static_cast<float>(slotIdx) * sectorSize;
-        float angle = sectorStart + RandomUtils::range(0.0f, sectorSize);
-        float r2in = zone->second.innerRadius * zone->second.innerRadius;
-        float r2out = zone->second.outerRadius * zone->second.outerRadius;
-        float r = std::sqrt(r2in + RandomUtils::uniform01() * (r2out - r2in));
-        return {zone->second.centerX + r * std::cos(angle),
-            zone->second.centerY + r * std::sin(angle)};
+        return SpawnGeometry::sampleAnnulusSector(zone->second.centerX,
+            zone->second.centerY,
+            zone->second.innerRadius,
+            zone->second.outerRadius,
+            slotIdx,
+            totalSlots);
     };
 
     // Process each mob-type entry independently.

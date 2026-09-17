@@ -9,10 +9,12 @@
 #include "utils/Generators.hpp"
 #include "utils/Logger.hpp"
 #include "utils/RandomUtils.hpp"
+#include "utils/SpawnGeometry.hpp"
 #include <algorithm>
 #include <cmath>
 #include <ctime>
 #include <nlohmann/json.hpp>
+#include <tuple>
 #include <spdlog/logger.h>
 
 ChampionManager::ChampionManager(GameZoneManager &gameZones,
@@ -426,27 +428,22 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
         PositionStruct p;
         p.positionZ = (chosen.minZ + chosen.maxZ) * 0.5f;
 
+        // Sampling math lives in SpawnGeometry (single source with mob
+        // spawn and respawn points).
         if (chosen.shape == ZoneShape::ANNULUS)
         {
-            // Equal-area annulus sampling
-            float r2in = chosen.innerRadius * chosen.innerRadius;
-            float r2out = chosen.outerRadius * chosen.outerRadius;
-            float r = std::sqrt(r2in + RandomUtils::uniform01() * (r2out - r2in));
-            float angle = RandomUtils::angle();
-            p.positionX = chosen.centerX + r * std::cos(angle);
-            p.positionY = chosen.centerY + r * std::sin(angle);
+            std::tie(p.positionX, p.positionY) = SpawnGeometry::sampleAnnulus(
+                chosen.centerX, chosen.centerY, chosen.innerRadius, chosen.outerRadius);
         }
         else if (chosen.shape == ZoneShape::CIRCLE)
         {
-            float r = chosen.outerRadius * std::sqrt(RandomUtils::uniform01());
-            float angle = RandomUtils::angle();
-            p.positionX = chosen.centerX + r * std::cos(angle);
-            p.positionY = chosen.centerY + r * std::sin(angle);
+            std::tie(p.positionX, p.positionY) =
+                SpawnGeometry::sampleCircle(chosen.centerX, chosen.centerY, chosen.outerRadius);
         }
         else
         {
-            p.positionX = RandomUtils::range(chosen.minX, chosen.maxX);
-            p.positionY = RandomUtils::range(chosen.minY, chosen.maxY);
+            std::tie(p.positionX, p.positionY) =
+                SpawnGeometry::sampleRect(chosen.minX, chosen.maxX, chosen.minY, chosen.maxY);
         }
         return p;
     }

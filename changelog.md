@@ -1,3 +1,29 @@
+v0.2.42
+17.09.2026
+================
+
+New:
+
+**A1 — SpawnGeometry single source of truth.**
+- New header-only `utils/SpawnGeometry.hpp`: `sampleRect / sampleCircle /
+  sampleAnnulus / sampleAnnulusSector` on `RandomUtils`. The same formulas
+  lived in three places (`SpawnZoneManager` spawn lambdas,
+  `RespawnZoneManager::getRandomPointInZone`,
+  `ChampionManager::resolveChampionSpawnPoint`); all delegate now.
+- Deliberate deviation (documented in header): degenerate annulus
+  (out<=in) returns the centre instead of sampling a zero-width ring
+  (the old math could sqrt a negative); matches `isAreaDefined` semantics.
+- Pin tests `tests/test_spawn_geometry.cpp` (9 cases: bounds, disc
+  containment, annulus hole, sector spread over 4 quadrants, degenerate
+  anchors, uniformity coverage). Wired into `tests/CMakeLists.txt`, which
+  also loses its harmless duplicate entries (quest_orchestrator,
+  dialogue_executor, combat_system, MobManager/MobMovementManager ×2).
+- Verified: 366/366 unit green; TSan 366 pass, same 9-warning Scheduler
+  fingerprint, zero new shapes. Non-degenerate sampling sequences are
+  draw-identical (the seeded spawn-determinism pin still passes unchanged).
+
+---
+
 v0.2.41
 17.09.2026
 ================

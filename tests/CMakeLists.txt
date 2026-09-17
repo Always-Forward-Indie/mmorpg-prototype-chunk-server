@@ -59,9 +59,7 @@ if(GTest_FOUND)
         test_quest_orchestrator.cpp
         test_dialogue_executor.cpp
         test_combat_system.cpp
-        test_quest_orchestrator.cpp
-        test_dialogue_executor.cpp
-        test_combat_system.cpp
+        test_spawn_geometry.cpp
         stubs/WorldStubs.cpp
         ../src/services/InterestManager.cpp
         ../src/services/TradeSessionManager.cpp
@@ -97,11 +95,9 @@ if(GTest_FOUND)
         ../src/services/EquipmentManager.cpp
         ../src/services/SkillManager.cpp
         ../src/services/SkillSystem.cpp
-        ../src/services/MobManager.cpp
         ../src/services/MobMovementManager.cpp
         ../src/services/ChunkManager.cpp
         ../src/services/MobAIController.cpp
-        ../src/services/MobMovementManager.cpp
         ../src/services/CombatResponseBuilder.cpp
         ../src/services/ExperienceCacheManager.cpp
         ../src/services/ChampionManager.cpp
