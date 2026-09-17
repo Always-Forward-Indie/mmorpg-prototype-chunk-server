@@ -59,6 +59,8 @@ if(GTest_FOUND)
         test_quest_orchestrator.cpp
         test_dialogue_executor.cpp
         test_combat_system.cpp
+        test_target_resolver.cpp
+        test_ongoing_actions.cpp
         test_spawn_geometry.cpp
         stubs/WorldStubs.cpp
         ../src/services/InterestManager.cpp

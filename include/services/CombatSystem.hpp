@@ -4,8 +4,10 @@
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
 #include "services/CombatResponseBuilder.hpp"
+#include "services/CombatTargetResolver.hpp"
 #include "services/DurabilityService.hpp"
 #include "services/MobKillRewardPipeline.hpp"
+#include "services/OngoingActionStore.hpp"
 #include "services/PlayerDeathPipeline.hpp"
 #include "services/SkillSystem.hpp"
 #include <functional>
@@ -120,9 +122,8 @@ class CombatSystem
     MobKillRewardPipeline rewardPipeline_;
     PlayerDeathPipeline deathPipeline_;
 
-    // Ongoing actions: casterId -> action data
-    std::unordered_map<int, std::shared_ptr<CombatActionStruct>> ongoingActions_;
-    mutable std::mutex actionsMutex_; // protects ongoingActions_
+    // Ongoing actions registry (map + mutex live in the store).
+    OngoingActionStore ongoingActions_;
 
     // Callback для отправки broadcast пакетов
     std::function<void(const nlohmann::json &)> broadcastCallback_;

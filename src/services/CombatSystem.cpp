@@ -190,17 +190,12 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         check.targetType = targetType;
         check.isSelfTarget = (targetId == casterId);
         std::string ongoingSkillSlug;
-
-        // Проверяем, что у кастера нет активного каста — во время каста нельзя использовать
-        // ни другой каст, ни мгновенный скил.
+        // Ongoing-cast guard lives in OngoingActionStore (1-1 with the
+        // inline map lookup this replaces).
+        if (auto casting = ongoingActions_.castingSlug(casterId); casting.has_value())
         {
-            std::lock_guard<std::mutex> lock(actionsMutex_);
-            auto it = ongoingActions_.find(casterId);
-            if (it != ongoingActions_.end() && it->second->state == CombatActionState::CASTING)
-            {
-                check.alreadyCasting = true;
-                ongoingSkillSlug = it->second->skillSlug;
-            }
+            check.alreadyCasting = true;
+            ongoingSkillSlug = *casting;
         }
 
         // HIGH-8: mana check without exceptions — must happen before cooldown is set
@@ -222,62 +217,35 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
 
         // Range check: reject before creating the ongoing action so that
         // combatInitiation is never sent as "success" when the target is out
-        // of reach.  Mirrors the identical logic in SkillSystem::isInRange.
-        if (targetType != CombatTargetType::AREA && targetType != CombatTargetType::NONE)
+        // of reach.  Position rules live in CombatTargetResolver (1-1 with
+        // the inline block this replaces); here only manager lookups.
         {
-            PositionStruct casterPos{}, targetPos{};
-            bool posValid = true;
-
-            // Caster position
+            CombatTargetResolver::PosLookup charPos = [&](int id) -> std::optional<PositionStruct>
             {
-                auto characterData = gameServices_->getCharacterManager().getCharacterData(casterId);
-                if (characterData.characterId != 0)
-                    casterPos = characterData.characterPosition;
-                else
-                {
-                    auto mobData = gameServices_->getMobInstanceManager().getMobInstance(casterId);
-                    if (mobData.uid != 0)
-                        casterPos = mobData.position;
-                    else
-                        posValid = false;
-                }
-            }
-
-            // Target position
-            if (posValid)
+                auto d = gameServices_->getCharacterManager().getCharacterData(id);
+                if (d.characterId != 0)
+                    return d.characterPosition;
+                return std::nullopt;
+            };
+            CombatTargetResolver::PosLookup mobSentPos = [&](int uid) -> std::optional<PositionStruct>
             {
-                if (targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF)
-                {
-                    auto targetData = gameServices_->getCharacterManager().getCharacterData(targetId);
-                    if (targetData.characterId != 0)
-                        targetPos = targetData.characterPosition;
-                    else
-                        posValid = false;
-                }
-                else if (targetType == CombatTargetType::MOB)
-                {
-                    auto mobMoveData = gameServices_->getMobMovementManager().getMobMovementData(targetId);
-                    const PositionStruct &lastSent = mobMoveData.lastSentPosition;
-                    if (lastSent.positionX != 0.0f || lastSent.positionY != 0.0f)
-                        targetPos = lastSent;
-                    else
-                    {
-                        auto mobData = gameServices_->getMobInstanceManager().getMobInstance(targetId);
-                        if (mobData.uid != 0)
-                            targetPos = mobData.position;
-                        else
-                            posValid = false;
-                    }
-                }
-            }
-
-            if (posValid)
+                const PositionStruct &lastSent =
+                    gameServices_->getMobMovementManager().getMobMovementData(uid).lastSentPosition;
+                if (lastSent.positionX != 0.0f || lastSent.positionY != 0.0f)
+                    return lastSent;
+                return std::nullopt;
+            };
+            CombatTargetResolver::PosLookup mobPos = [&](int uid) -> std::optional<PositionStruct>
             {
-                float dx = casterPos.positionX - targetPos.positionX;
-                float dy = casterPos.positionY - targetPos.positionY;
-                check.checkRange = true;
-                check.distance = std::sqrt(dx * dx + dy * dy);
-            }
+                auto m = gameServices_->getMobInstanceManager().getMobInstance(uid);
+                if (m.uid != 0)
+                    return m.position;
+                return std::nullopt;
+            };
+            const auto resolved =
+                CombatTargetResolver::resolveRange(casterId, targetId, targetType, charPos, mobSentPos, mobPos);
+            check.checkRange = resolved.checkRange;
+            check.distance = resolved.distance;
         }
 
         // Target alive check: reject initiation if target is dead.
@@ -469,10 +437,7 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         action->endTime = action->startTime + std::chrono::milliseconds(effectiveCastMs - effectiveSwingMs);
 
         // Сохраняем ongoing action
-        {
-            std::lock_guard<std::mutex> lock(actionsMutex_);
-            ongoingActions_[casterId] = action;
-        }
+        ongoingActions_.put(casterId, action);
 
         result.success = true;
         result.castTime = action->castTime;
@@ -898,44 +863,19 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
 void
 CombatSystem::clearOngoingAction(int casterId)
 {
-    std::lock_guard<std::mutex> lock(actionsMutex_);
     ongoingActions_.erase(casterId);
 }
 
 std::vector<SkillExecutionResult>
 CombatSystem::updateOngoingActions()
 {
-    auto now = std::chrono::steady_clock::now();
-
     // Snapshot actions that are ready to execute, erase them under lock,
     // then execute outside the lock to avoid holding it during heavy work.
-    std::vector<std::tuple<int, std::string, int, CombatTargetType, std::string, bool>> toExecute;
-    {
-        std::lock_guard<std::mutex> lock(actionsMutex_);
-        for (auto it = ongoingActions_.begin(); it != ongoingActions_.end();)
-        {
-            auto &action = it->second;
-            if (action->state == CombatActionState::CASTING && now >= action->endTime)
-            {
-                action->state = CombatActionState::EXECUTING;
-                toExecute.emplace_back(action->casterId, action->skillSlug, action->targetId, action->targetType, action->actionName, action->cooldownPreset);
-                it = ongoingActions_.erase(it);
-            }
-            else if (action->state == CombatActionState::EXECUTING)
-            {
-                // Instant skills (castMs=0) are executed synchronously in dispatchSkillAction
-                // and leave a stale EXECUTING entry. Clean it up here.
-                it = ongoingActions_.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
-        }
-    }
+    // Sweep semantics live in OngoingActionStore (1-1 with the inline loop).
+    const std::vector<OngoingActionStore::DueItem> toExecute = ongoingActions_.takeDueAndSweep();
 
     std::vector<SkillExecutionResult> results;
-    for (auto &[casterId, skillSlug, targetId, targetType, actionName, cooldownPreset] : toExecute)
+    for (const auto &[casterId, skillSlug, targetId, targetType, actionName, cooldownPreset] : toExecute)
     {
         auto result = executeSkillUsage(casterId, skillSlug, targetId, targetType, cooldownPreset);
 
@@ -1104,40 +1044,11 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug, b
             if (target.characterId == casterId)
                 continue;
 
-            // PvP guard: AoE damage cannot hit other players (consistent with direct-target guard)
+            // PvP guard: AoE damage cannot hit other players (consistent with direct-target guard).
+            // NOTE: no player-damage path exists below by design — an old unreachable
+            // damage block was deleted (it sat after an unconditional continue).
             log_->warn("[COMBAT] PvP AoE damage blocked: caster {} -> player {}", casterId, target.characterId);
             continue;
-
-            auto dmgResult = calc->calculateSkillDamage(skill, casterData, target);
-            if (dmgResult.isMissed)
-                continue;
-
-            auto hpAoE = gameServices_->getCharacterManager().applyDamageToCharacter(
-                target.characterId, dmgResult.totalDamage);
-
-            // Suppress regen for AoE targets
-            gameServices_->getCharacterManager().markCharacterInCombat(target.characterId);
-
-            AoETargetResultEntry entry;
-            entry.targetId = target.characterId;
-            entry.targetType = CombatTargetType::PLAYER;
-            entry.damage = dmgResult.totalDamage;
-            entry.isCritical = dmgResult.isCritical;
-            entry.isBlocked = dmgResult.isBlocked;
-            entry.isMissed = false; // already filtered above
-            entry.targetDied = hpAoE.died;
-            entry.finalTargetHealth = hpAoE.newHealth;
-            batchResult.targets.push_back(entry);
-
-            if (hpAoE.died)
-            {
-                handleTargetDeath(target.characterId, CombatTargetType::PLAYER);
-            }
-            else
-            {
-                // Apply DoT/debuff effects on surviving player targets (AoE — no persistence handle needed)
-                applySkillEffects(skillResult, casterId, skillSlug, target.characterId, CombatTargetType::PLAYER, nullptr);
-            }
 
             ++hitCount;
         }

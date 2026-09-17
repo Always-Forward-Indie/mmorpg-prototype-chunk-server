@@ -126,6 +126,38 @@ TEST_F(CombatFixture, DeadMobTargetRejected)
     EXPECT_EQ(init.errorMessage, "Target is dead");
 }
 
+TEST_F(CombatFixture, InitiateRejectsOutOfRangeTarget)
+{
+    // End-to-end pin for the CombatTargetResolver wiring: maxRange 10 DMS
+    // units = 1000 cm; teleport the mob beyond and initiation must refuse
+    // before any cooldown/mana is spent.
+    MobDataStruct far = gs.getMobInstanceManager().getMobInstance(9001);
+    far.position.positionX = 50000.0f;
+    gs.getMobInstanceManager().unregisterMobInstance(9001);
+    ASSERT_TRUE(gs.getMobInstanceManager().registerMobInstance(far));
+    auto init = combat->initiateSkillUsage(1, "strike", 9001, CombatTargetType::MOB);
+    EXPECT_FALSE(init.success);
+    EXPECT_EQ(init.errorMessage, "Target is out of range");
+}
+
+TEST_F(CombatFixture, AoEHitsMobsButSparesPlayers)
+{
+    // AoE mob path uses the simplified pipeline (base damage + crit, no
+    // miss roll — deterministic); the player branch is guard-only (the old
+    // unreachable damage block after `continue` was deleted).
+    SkillStruct aoe = makeSkill("shockwave");
+    aoe.areaRadius = 500.0f;
+    aoe.costMp = 5;
+    CharacterDataStruct c = gs.getCharacterManager().getCharacterData(1);
+    c.skills.push_back(aoe);
+    gs.getCharacterManager().loadCharacterData(c);
+
+    auto exec = combat->executeSkillUsage(1, "shockwave", 0, CombatTargetType::AREA, false);
+    EXPECT_TRUE(exec.success) << exec.errorMessage;
+    EXPECT_LT(gs.getMobInstanceManager().getMobInstance(9001).currentHealth, 200);
+    EXPECT_EQ(gs.getCharacterManager().getCharacterData(2).characterCurrentHealth, 100);
+}
+
 TEST_F(CombatFixture, PvpDamageBlocked)
 {
     // The PvP guard lives in the execution path (initiation only resolves

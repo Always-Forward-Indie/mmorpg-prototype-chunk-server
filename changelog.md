@@ -1,3 +1,32 @@
+v0.2.45
+17.09.2026
+================
+
+New:
+
+**A4 — CombatSystem extracts (TargetResolver + OngoingActionStore).**
+- New header-only `services/CombatTargetResolver.hpp`: initiation
+  range-resolution (character-first caster, PLAYER/SELF direct, MOB
+  last-sent-preferred with instance fallback, AREA/NONE skip, XY distance)
+  with manager access as lookup lambdas; `initiateSkillUsage` delegates 1-1
+  (validator defaults verified identical).
+- New header-only `services/OngoingActionStore.hpp`: ongoing-action
+  map+mutex (casting-slug guard read, put/erase, due-sweep with stale
+  EXECUTING reap); `initiateSkillUsage`, `clearOngoingAction` and
+  `updateOngoingActions` delegate 1-1.
+- Deleted provably unreachable AoE player-damage block (sat after an
+  unconditional PvP `continue`); the guard-only contract is now pinned.
+- DamageApplier/AoE-executor NOT extracted deliberately: they are thin
+  orchestration over managers (moving them would add indirection without
+  testability); covered by CombatFixture pins instead.
+- Pin tests: `test_target_resolver.cpp` (9 rules), `test_ongoing_actions.cpp`
+  (guard/put/sweep + threaded smoke), CombatFixture range wiring + AoE
+  mob-hit/player-spared pins.
+- Verified: 398/398 unit green; TSan 398 pass (incl. the store thread test),
+  same 9-warning Scheduler fingerprint, zero new shapes.
+
+---
+
 v0.2.44
 17.09.2026
 ================
