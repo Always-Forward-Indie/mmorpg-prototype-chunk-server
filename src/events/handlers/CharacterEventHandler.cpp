@@ -6,7 +6,9 @@
 #include "events/handlers/MobEventHandler.hpp"
 #include "events/handlers/NPCEventHandler.hpp"
 #include "events/handlers/WorldObjectEventHandler.hpp"
+#include "services/JoinFlushPolicy.hpp"
 #include "services/MovementValidation.hpp"
+#include "services/RespawnResolver.hpp"
 #include "utils/MovementUnits.hpp"
 #include "utils/TimestampUtils.hpp"
 #include "utils/TimeUtils.hpp"
@@ -158,7 +160,16 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
 {
     // Check whether the character is actually loaded (stale session present)
     CharacterDataStruct staleChar = gameServices_.getCharacterManager().getCharacterData(characterId);
-    if (staleChar.characterId == 0)
+
+    // Resolve the old clientId owning this character (pure read — hoisted so
+    // the JoinFlushPolicy decision table below sees all inputs at once).
+    ClientDataStruct staleClient = gameServices_.getClientManager().getClientDataByCharacterId(characterId);
+    int staleClientId = staleClient.clientId;
+
+    // Gate order is load-bearing (first match wins) — see JoinFlushPolicy.
+    const JoinEvictDecision evictDecision =
+        JoinFlushPolicy::decide(staleChar.characterId != 0, staleClientId, newClientId);
+    if (evictDecision == JoinEvictDecision::NothingToEvict)
     {
         return; // Nothing to evict
     }
@@ -166,15 +177,11 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
     log_->warn("[EVICT] Stale session detected for characterId: " + std::to_string(characterId) +
                " (reconnected as clientId: " + std::to_string(newClientId) + "). Evicting.");
 
-    // Resolve the old clientId owning this character
-    ClientDataStruct staleClient = gameServices_.getClientManager().getClientDataByCharacterId(characterId);
-    int staleClientId = staleClient.clientId;
-
     // If no client is currently mapped to this character, the CharacterManager entry was
     // pre-loaded by the game server's async response to joinGameClient (event type 5) before
     // joinGameCharacter arrived. This is NOT a stale session — removing it would break the
     // join flow. Let the normal pending-request path use the pre-loaded data.
-    if (staleClientId == 0)
+    if (evictDecision == JoinEvictDecision::PreloadedSkip)
     {
         log_->info("[EVICT] Skipping eviction for characterId: " + std::to_string(characterId) +
                    " — no client mapped (pre-loaded data, not a stale session)");
@@ -184,7 +191,7 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
     // If the stale session belongs to the SAME client that is now reconnecting, this is a
     // duplicate joinGameCharacter packet (common UE behaviour). Do NOT evict — the session
     // is still valid and the socket is still the same.
-    if (staleClientId == newClientId)
+    if (evictDecision == JoinEvictDecision::DuplicateSkip)
     {
         log_->info("[EVICT] Skipping eviction for characterId: " + std::to_string(characterId) +
                    " — duplicate joinGameCharacter from the same clientId: " + std::to_string(newClientId));
@@ -1557,20 +1564,22 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
         RespawnZoneStruct zone = gameServices_.getRespawnZoneManager().findNearest(deathPos);
 
         PositionStruct respawnPos;
-        if (charData.respawnPosition.positionX != 0.0f || charData.respawnPosition.positionY != 0.0f)
         {
-            // Player has a custom respawn bind point (e.g. set via a shrine)
-            respawnPos = charData.respawnPosition;
-        }
-        else if (zone.id > 0)
-        {
-            respawnPos = gameServices_.getRespawnZoneManager().getRandomPointInZone(zone);
-        }
-        else
-        {
-            // No zones loaded — keep them at death position (will be fixed when zones are loaded)
-            respawnPos = deathPos;
-            log_->error("[RESPAWN] No respawn zones available for character {}", characterId);
+            // Destination rules live in RespawnResolver (1-1 with the inline
+            // branches); sampling stays lazy so the RNG draw order is unchanged.
+            const bool hasBind = charData.respawnPosition.positionX != 0.0f ||
+                                 charData.respawnPosition.positionY != 0.0f;
+            PositionStruct sampled{};
+            if (!hasBind && zone.id > 0)
+                sampled = gameServices_.getRespawnZoneManager().getRandomPointInZone(zone);
+            const auto resolved = RespawnResolver::resolvePosition(
+                charData.respawnPosition, zone.id, sampled, deathPos);
+            respawnPos = resolved.pos;
+            if (resolved.source == RespawnResolver::PositionSource::DeathFallback)
+            {
+                // No zones loaded — keep them at death position (will be fixed when zones are loaded)
+                log_->error("[RESPAWN] No respawn zones available for character {}", characterId);
+            }
         }
 
         // ── Apply Resurrection Sickness FIRST so effective max is known before HP is set ──
@@ -1658,27 +1667,22 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
         // This must happen AFTER building currentEffects so the debuff values are known.
         // newHp/newMana are derived from effective max (not base max) so that
         // current HP never exceeds effectiveMaxHealth on the client HUD.
-        int effectiveMaxHealth = charData.characterMaxHealth;
-        int effectiveMaxMana = charData.characterMaxMana;
-        for (const auto &eff : currentEffects)
-        {
-            if (eff.expiresAt != 0 && eff.expiresAt <= nowSec)
-                continue;
-            if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
-                continue;
-            if (eff.attributeSlug == "max_health")
-                effectiveMaxHealth += static_cast<int>(std::round(eff.value));
-            else if (eff.attributeSlug == "max_mana")
-                effectiveMaxMana += static_cast<int>(std::round(eff.value));
-        }
-        effectiveMaxHealth = std::max(1, effectiveMaxHealth);
-        effectiveMaxMana = std::max(0, effectiveMaxMana);
-
-        // ── Restore HP/Mana to a configurable % of the (penalized) effective max ──
+        // Math lives in RespawnResolver::computeVitals (1-1 with the inline
+        // loop); config reads are hoisted above it (pure reads).
         const float respawnHpPct = gameServices_.getGameConfigService().getFloat("respawn.hp_pct", 0.30f);
         const float respawnMpPct = gameServices_.getGameConfigService().getFloat("respawn.mp_pct", 0.30f);
-        const int newHp = std::max(1, static_cast<int>(effectiveMaxHealth * respawnHpPct));
-        const int newMana = std::max(0, static_cast<int>(effectiveMaxMana * respawnMpPct));
+        const auto vitals = RespawnResolver::computeVitals(charData.characterMaxHealth,
+            charData.characterMaxMana,
+            currentEffects,
+            nowSec,
+            respawnHpPct,
+            respawnMpPct);
+        const int effectiveMaxHealth = vitals.effectiveMaxHealth;
+        const int effectiveMaxMana = vitals.effectiveMaxMana;
+
+        // ── Restore HP/Mana to a configurable % of the (penalized) effective max ──
+        const int newHp = vitals.newHp;
+        const int newMana = vitals.newMana;
 
         charMgr.updateCharacterHealth(characterId, newHp);
         charMgr.updateCharacterMana(characterId, newMana);

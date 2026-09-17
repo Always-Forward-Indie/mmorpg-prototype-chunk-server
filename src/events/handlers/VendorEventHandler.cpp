@@ -7,6 +7,7 @@
 #include "services/TradeOfferValidator.hpp"
 #include "services/TradeRequestValidator.hpp"
 #include "services/TradeSessionManager.hpp"
+#include "services/VendorDiscountPolicy.hpp"
 #include "services/VendorManager.hpp"
 #include "utils/DistanceUtils.hpp"
 #include "utils/ResponseBuilder.hpp"
@@ -51,9 +52,10 @@ VendorEventHandler::getReputationDiscountPct(int characterId, const std::string 
         return 0.0f;
     const int threshold = gameServices_.getGameConfigService().getInt("reputation.vendor_discount_threshold", 200);
     const int rep = gameServices_.getReputationManager().getReputation(characterId, factionSlug);
-    if (rep < threshold)
-        return 0.0f;
-    return gameServices_.getGameConfigService().getFloat("reputation.vendor_discount_pct", 0.05f);
+    const float pct =
+        gameServices_.getGameConfigService().getFloat("reputation.vendor_discount_pct", 0.05f);
+    // Threshold math lives in VendorDiscountPolicy (1-1 with the inline gate).
+    return VendorDiscountPolicy::resolvePct(rep, threshold, pct);
 }
 
 void
@@ -267,7 +269,7 @@ VendorEventHandler::handleOpenVendorShopEvent(const Event &event)
         }
 
         float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
-        markup -= getReputationDiscountPct(req.characterId, npc.factionSlug);
+        markup = VendorDiscountPolicy::applyToMarkup(markup, getReputationDiscountPct(req.characterId, npc.factionSlug));
         nlohmann::json shopJson = gameServices_.getVendorManager().buildShopJson(req.npcId, markup);
         if (shopJson.is_null())
         {
@@ -320,7 +322,7 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
         }
 
         float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
-        markup -= getReputationDiscountPct(req.characterId, npc.factionSlug);
+        markup = VendorDiscountPolicy::applyToMarkup(markup, getReputationDiscountPct(req.characterId, npc.factionSlug));
         auto result = gameServices_.getVendorManager().buyItem(
             req.characterId, req.npcId, req.itemId, req.quantity, goldItem->id, gameServices_.getInventoryManager(), markup);
 
@@ -431,7 +433,7 @@ VendorEventHandler::handleSellItemEvent(const Event &event)
         }
 
         float tax = gameServices_.getGameConfigService().getFloat("economy.vendor_sell_tax_pct", 0.0f);
-        tax = std::max(0.0f, tax - getReputationDiscountPct(req.characterId, npc.factionSlug));
+        tax = VendorDiscountPolicy::applyToTax(tax, getReputationDiscountPct(req.characterId, npc.factionSlug));
         auto result = gameServices_.getVendorManager().sellItem(
             req.characterId, req.npcId, req.inventoryItemId, req.quantity, goldItem->id, gameServices_.getInventoryManager(), tax);
 
@@ -491,7 +493,7 @@ VendorEventHandler::handleBuyItemBatchEvent(const Event &event)
         }
 
         float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
-        markup -= getReputationDiscountPct(req.characterId, npc.factionSlug);
+        markup = VendorDiscountPolicy::applyToMarkup(markup, getReputationDiscountPct(req.characterId, npc.factionSlug));
         auto result = gameServices_.getVendorManager().buyBatch(
             req.characterId, req.npcId, req.items, goldItem->id, gameServices_.getInventoryManager(), markup);
 
@@ -566,7 +568,7 @@ VendorEventHandler::handleSellItemBatchEvent(const Event &event)
         }
 
         float tax = gameServices_.getGameConfigService().getFloat("economy.vendor_sell_tax_pct", 0.0f);
-        tax = std::max(0.0f, tax - getReputationDiscountPct(req.characterId, npc.factionSlug));
+        tax = VendorDiscountPolicy::applyToTax(tax, getReputationDiscountPct(req.characterId, npc.factionSlug));
         auto result = gameServices_.getVendorManager().sellBatch(
             req.characterId, req.npcId, req.items, goldItem->id, gameServices_.getInventoryManager(), tax);
 

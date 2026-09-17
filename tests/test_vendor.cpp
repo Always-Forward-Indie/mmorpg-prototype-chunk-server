@@ -4,6 +4,7 @@
 #include "services/ItemManager.hpp"
 #include "services/TradeOfferValidator.hpp"
 #include "services/TradeRequestValidator.hpp"
+#include "services/VendorDiscountPolicy.hpp"
 #include "services/VendorManager.hpp"
 
 #include <gtest/gtest.h>
@@ -335,6 +336,20 @@ TEST(TradeRequestValidator, EachGateFiresItsCode)
     in = allClearRequest();
     in.targetOnline = false;
     EXPECT_EQ(TradeRequestValidator::validate(in), "target_offline");
+}
+
+TEST(VendorDiscountPolicy, ThresholdGateAndApplication)
+{
+    // Below threshold: no discount; at/above: configured pct.
+    EXPECT_FLOAT_EQ(VendorDiscountPolicy::resolvePct(199, 200, 0.05f), 0.0f);
+    EXPECT_FLOAT_EQ(VendorDiscountPolicy::resolvePct(200, 200, 0.05f), 0.05f);
+    EXPECT_FLOAT_EQ(VendorDiscountPolicy::resolvePct(9999, 200, 0.05f), 0.05f);
+    // Buy side: straight subtraction (markup may go negative — handler's
+    // existing behavior, pinned 1-1, not "fixed" here).
+    EXPECT_FLOAT_EQ(VendorDiscountPolicy::applyToMarkup(0.10f, 0.05f), 0.05f);
+    // Sell side: tax floored at zero.
+    EXPECT_FLOAT_EQ(VendorDiscountPolicy::applyToTax(0.10f, 0.05f), 0.05f);
+    EXPECT_FLOAT_EQ(VendorDiscountPolicy::applyToTax(0.02f, 0.05f), 0.0f);
 }
 
 TEST(TradeRequestValidator, FirstMatchWinsInHandlerOrder)

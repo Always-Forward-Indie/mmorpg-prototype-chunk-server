@@ -1,3 +1,29 @@
+v0.2.47
+17.09.2026
+================
+
+New:
+
+**B1+B2 — VendorDiscountPolicy + Join/Respawn extracts.**
+- New header-only `services/VendorDiscountPolicy.hpp`: threshold gate +
+  markup/tax application (zero floor on tax). All five handler sites
+  delegate 1-1 (buys subtract from markup, sells from tax). Pin:
+  `VendorDiscountPolicy.ThresholdGateAndApplication`.
+- New header-only `services/JoinFlushPolicy.hpp`: the 4-gate evict truth
+  table (nothing-loaded / preload / duplicate / full-evict, order
+  load-bearing). `evictStaleSession` hoists the side-effect-free client
+  lookup and delegates; emitted logs identical in all paths. Pin: all 4.
+- New header-only `services/RespawnResolver.hpp`: destination priority
+  (bind → zone sample → death fallback, lazy sampling preserves RNG draw
+  order) + post-sickness vitals (rounded non-expired non-periodic
+  max_health/max_mana, floors 1/0, pct restore). Handler delegates 1-1.
+  Pins: source priority (incl. partial bind), vitals plain/penalized/
+  expired/dot-ignored/floors.
+- Verified: 412/412 unit green; full MMOChunkServer build green; TSan 412
+  pass, same 9-warning Scheduler fingerprint, zero new shapes.
+
+---
+
 v0.2.46
 17.09.2026
 ================
