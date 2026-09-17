@@ -1,3 +1,20 @@
+v0.2.44
+17.09.2026
+================
+
+New:
+
+**A3 — QuestManager orchestrator delegates (test-only, no product change).**
+- +6 pins proving the thin shell delegates: manual-step advance wiring,
+  load/unload lifecycle, fillQuestContext, resolveStep/Rewards JSON shapes,
+  flush paths reaching the game-server seam (dirty + flags + disconnect),
+  getById/Slug lookups + isLoaded (incl. a fresh manager). Transitions
+  themselves stay pinned in QuestStore (phase 2).
+- Verified: 383/383 unit green; TSan 383 pass, same 9-warning Scheduler
+  fingerprint, zero new shapes.
+
+---
+
 v0.2.43
 17.09.2026
 ================

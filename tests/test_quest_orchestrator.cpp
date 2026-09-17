@@ -160,3 +160,100 @@ TEST_F(OrchestratorFixture, TurnInCompletedQuestNotifies)
     EXPECT_FALSE(notes.empty());
     EXPECT_EQ(gs.getQuestManager().getQuestStateBySlug(1, "kill_foxes"), "turned_in");
 }
+
+// ── A3: thin-delegate wiring (transitions live in QuestStore, pinned in
+// phase 2; here we pin that the orchestrator actually delegates) ─────────
+
+namespace
+{
+
+QuestStruct makeManualQuest()
+{
+    QuestStruct q;
+    q.id = 3;
+    q.slug = "manual_escort";
+    q.minLevel = 1;
+    q.clientQuestKey = "key_manual_escort";
+    QuestStepStruct step;
+    step.stepType = "talk";
+    step.completionMode = "manual";
+    step.clientStepKey = "talk_key";
+    step.params = {{"npc_id", 11}};
+    q.steps = {step};
+    return q;
+}
+
+} // namespace
+
+TEST_F(OrchestratorFixture, AdvanceQuestStepBySlugWiring)
+{
+    gs.getQuestManager().setQuests({makeQuest(1, "kill_foxes"), makeManualQuest()});
+    EXPECT_TRUE(gs.getQuestManager().offerQuest(1, "manual_escort"));
+    gs.getQuestManager().advanceQuestStepBySlug(1, "manual_escort");
+    EXPECT_EQ(gs.getQuestManager().getQuestStateBySlug(1, "manual_escort"), "completed");
+    // Unknown slug: safe no-op, nothing created.
+    gs.getQuestManager().advanceQuestStepBySlug(1, "nope");
+    EXPECT_EQ(gs.getQuestManager().getQuestStateBySlug(1, "nope"), "");
+}
+
+TEST_F(OrchestratorFixture, LoadUnloadLifecycle)
+{
+    PlayerQuestProgressStruct pq;
+    pq.characterId = 1;
+    pq.questId = 1;
+    pq.questSlug = "kill_foxes";
+    pq.state = "active";
+    gs.getQuestManager().loadPlayerQuests(1, {pq});
+    ASSERT_EQ(gs.getQuestManager().getQuestStateBySlug(1, "kill_foxes"), "active");
+    gs.getQuestManager().unloadPlayerQuests(1);
+    EXPECT_EQ(gs.getQuestManager().getQuestStateBySlug(1, "kill_foxes"), "");
+}
+
+TEST_F(OrchestratorFixture, FillQuestContextWiring)
+{
+    EXPECT_TRUE(gs.getQuestManager().offerQuest(1, "kill_foxes"));
+    PlayerContextStruct ctx;
+    gs.getQuestManager().fillQuestContext(1, ctx);
+    EXPECT_EQ(ctx.questStates["kill_foxes"], "active");
+}
+
+TEST_F(OrchestratorFixture, ResolveDelegatesReturnClientJson)
+{
+    QuestStepStruct step = killStep(7, 2);
+    const nlohmann::json stepJson = gs.getQuestManager().resolveStepForClient(step);
+    EXPECT_TRUE(stepJson.is_object());
+    QuestRewardStruct rw;
+    rw.rewardType = "gold";
+    rw.amount = 50;
+    const nlohmann::json rwJson = gs.getQuestManager().resolveRewardsForClient({rw});
+    EXPECT_TRUE(rwJson.is_array());
+    ASSERT_EQ(rwJson.size(), 1u);
+}
+
+TEST_F(OrchestratorFixture, FlushPathsReachGameServerSeam)
+{
+    EXPECT_TRUE(gs.getQuestManager().offerQuest(1, "kill_foxes"));
+    gs.getQuestManager().setFlagBool(1, "met_bob", true);
+    gs.getQuestManager().flushDirtyProgress();
+    gs.getQuestManager().flushPendingFlags();
+    EXPECT_FALSE(persisted.empty()); // offer + flag update persisted
+    gs.getQuestManager().flushAllProgress(1);
+    // Disconnect flush then unload: no crash, state gone.
+    gs.getQuestManager().unloadPlayerQuests(1);
+    EXPECT_EQ(gs.getQuestManager().getQuestStateBySlug(1, "kill_foxes"), "");
+}
+
+TEST_F(OrchestratorFixture, GetByIdSlugIsLoaded)
+{
+    EXPECT_TRUE(gs.getQuestManager().isLoaded());
+    ASSERT_NE(gs.getQuestManager().getQuestBySlug("kill_foxes"), nullptr);
+    EXPECT_EQ(gs.getQuestManager().getQuestBySlug("kill_foxes")->id, 1);
+    ASSERT_NE(gs.getQuestManager().getQuestById(2), nullptr);
+    EXPECT_EQ(gs.getQuestManager().getQuestById(2)->slug, "hard");
+    EXPECT_EQ(gs.getQuestManager().getQuestBySlug("nope"), nullptr);
+    EXPECT_EQ(gs.getQuestManager().getQuestById(424242), nullptr);
+
+    QuestManager fresh(&gs, logger);
+    EXPECT_FALSE(fresh.isLoaded());
+    EXPECT_EQ(fresh.getQuestBySlug("kill_foxes"), nullptr);
+}
