@@ -3,13 +3,13 @@
 //
 // Five identical 2D copies lived in MobMovementManager / LootManager /
 // CharacterManager / MobAIController / HarvestManager plus one 3D copy in
-// AttackSystem. Identical today, but any tuning (e.g. 2D-vs-3D, fixed-point)
-// would previously have to touch six places and could diverge silently.
-// All copies now delegate here; behavior is 1-1.
+// the deleted AttackSystem class. Identical today, but any tuning (e.g.
+// 2D-vs-3D, fixed-point) would previously have to touch six places and
+// could diverge silently. All copies now delegate here; behavior is 1-1.
 //
-// NOTE: AttackSystem call sites intentionally use dist3D (they always did —
-// the member they called was 3D). Whether hit-chance should be 3D is game
-// design, not this refactor; do not "fix" it here.
+// NOTE: the deleted AttackSystem's call sites intentionally used dist3D
+// (their member was 3D). Whether hit-chance should be 3D is game design,
+// not this refactor; do not "fix" it here.
 #include "data/DataStructs.hpp"
 
 #include <cmath>
@@ -26,7 +26,7 @@ class DistanceUtils
     }
 
     // Full 3D distance. Only for call sites that historically used it
-    // (AttackSystem hit-chance / line-of-sight).
+    // (deleted-AttackSystem hit-chance / line-of-sight semantics).
     static float dist3D(const PositionStruct &a, const PositionStruct &b)
     {
         const float dx = a.positionX - b.positionX;

@@ -1,3 +1,33 @@
+v0.2.46
+17.09.2026
+================
+
+New:
+
+**A5 — MobMovementMath extract + AttackSystem delete + SkillManager verdict.**
+- New header-only `services/MobMovementMath.hpp`: `isValidPosition`,
+  `isValidPositionForChase`, `canPerformAction`, `shouldReturnToSpawn`,
+  `shouldStopChasing`, `canSearchNewTargets`, `calculateNextMoveTime`,
+  `pickReturnDestination` (nullopt = spawn fallback; logging stays at the
+  call site 1-1). `MobMovementManager` delegates with thresholds from its
+  const `aiConfig_`.
+- Deleted the never-instantiated `AttackSystem` class + .cpp (zero
+  production/test call sites; only `EventData.hpp` needed 4 DTOs — kept
+  verbatim in new `data/AttackTypes.hpp`). Root `CMakeLists.txt` entries
+  removed; stale AttackSystem comments in `DistanceUtils`/`CombatCalculator`
+  updated. Full-server build proves DTO integrity.
+- Verdict: `SkillManager` kept but marked LEGACY in `GameServices.hpp`
+  (live path is SkillSystem + CooldownService; zero production callers,
+  only its own suite). Deletion needs a product decision + test port —
+  recorded follow-up, not this wave.
+- Pin tests: `test_mob_movement.cpp` (8 cases: containment/separation,
+  radius-vs-fallback, chase rules, full action-state table, leash
+  predicates, timing bounds, return sampling + fallback).
+- Verified: 406/406 unit green; TSan 406 pass, same 9-warning Scheduler
+  fingerprint, zero new shapes. All behavior 1-1.
+
+---
+
 v0.2.45
 17.09.2026
 ================

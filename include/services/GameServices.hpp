@@ -184,6 +184,11 @@ class GameServices
     {
         return interestManager_;
     }
+    /// LEGACY (A5 verdict, do not extend): the live combat path runs on
+    /// SkillSystem + CooldownService (see CombatSystem); SkillManager has
+    /// zero production call sites — only its own unit suite exercises it.
+    /// Kept (not deleted) until a product decision names the canonical
+    /// skill path and its tests are ported. New code must use SkillSystem.
     SkillManager &getSkillManager()
     {
         return skillManager_;

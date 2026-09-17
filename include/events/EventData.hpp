@@ -1,5 +1,5 @@
 #pragma once
-#include "data/AttackSystem.hpp"
+#include "data/AttackTypes.hpp"
 #include "data/CombatStructs.hpp"
 #include "data/DataStructs.hpp"
 #include <nlohmann/json.hpp>

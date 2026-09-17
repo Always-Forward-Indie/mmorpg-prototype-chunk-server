@@ -162,9 +162,9 @@ class CombatCalculator
 
     // Single source of truth for variance fallbacks (Wave 2.3). Live values
     // come from game_config (combat.damage_variance / combat.heal_variance);
-    // these apply when config is absent. NOTE: AttackSystem has its own
-    // per-action damageVariance field, but that class is never instantiated
-    // (dead code, smells like a legacy prototype) — deliberately untouched.
+    // these apply when config is absent. NOTE: the deleted AttackSystem had
+    // its own per-action damageVariance field, but that class was never
+    // instantiated (dead code) — deliberately untouched while it lived.
     static constexpr float kDefaultDamageVariance = 0.12f;
     static constexpr float kDefaultHealVariance = 0.10f;
 

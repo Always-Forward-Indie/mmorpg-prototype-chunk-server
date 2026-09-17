@@ -8,6 +8,7 @@
 #include "services/GameServices.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
+#include "services/MobMovementMath.hpp"
 #include "services/SpawnZoneManager.hpp"
 #include "utils/DistanceUtils.hpp"
 #include "utils/MovementUnits.hpp"
@@ -787,50 +788,18 @@ bool
 MobMovementManager::isValidPosition(
     float x, float y, const SpawnZoneStruct &zone, const std::vector<std::pair<int, PositionStruct>> &otherMobs, const MobDataStruct &currentMob, const MobMovementParams &params)
 {
-    // Shape-aware containment check (RECT / CIRCLE / ANNULUS)
-    if (!ZoneBounds::contains(zone, x, y))
-        return false;
-
-    // Derive minimum separation from mob's own collision radius.
-    const float mobRadius = (currentMob.radius > 0) ? static_cast<float>(currentMob.radius) : 0.0f;
-    const float minSep = (mobRadius > 0.0f) ? (mobRadius * 2.0f) : params.minSeparationDistance;
-
-    for (const auto &otherMob : otherMobs)
-    {
-        if (otherMob.first == currentMob.uid)
-            continue;
-
-        float dx = x - otherMob.second.positionX;
-        float dy = y - otherMob.second.positionY;
-        if (dx * dx + dy * dy < minSep * minSep)
-            return false;
-    }
-
-    return true;
+    // Math lives in MobMovementMath (1-1 with the inline block).
+    return MobMovementMath::isValidPosition(
+        x, y, zone, otherMobs, currentMob.uid, static_cast<float>(currentMob.radius), params.minSeparationDistance);
 }
 
 bool
 MobMovementManager::isValidPositionForChase(
     float x, float y, const std::vector<std::pair<int, PositionStruct>> &otherMobs, const MobDataStruct &currentMob, const MobMovementParams &params)
 {
-    // Same radius-based separation as isValidPosition.
-    const float mobRadius = (currentMob.radius > 0) ? static_cast<float>(currentMob.radius) : 0.0f;
-    const float minSep = (mobRadius > 0.0f) ? (mobRadius * 2.0f) : params.minSeparationDistance;
-
-    for (const auto &otherMob : otherMobs)
-    {
-        if (otherMob.first == currentMob.uid)
-            continue;
-
-        float dx = x - otherMob.second.positionX;
-        float dy = y - otherMob.second.positionY;
-        if (dx * dx + dy * dy < minSep * minSep)
-        {
-            return false;
-        }
-    }
-
-    return true;
+    // Same radius-based separation as isValidPosition, no zone boundaries.
+    return MobMovementMath::isValidPositionForChase(
+        x, y, otherMobs, currentMob.uid, static_cast<float>(currentMob.radius), params.minSeparationDistance);
 }
 
 MobMovementParams
@@ -1307,29 +1276,13 @@ MobMovementManager::calculateReturnToSpawnMovement(
 PositionStruct
 MobMovementManager::pickReturnDestination(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {
-    // Try up to 20 random candidates within maxReturnWalkDistance of the mob.
-    // Return the first one inside the zone; fall back to the original spawn.
-    constexpr float maxReturnWalkDistance = 400.0f;
-    constexpr int maxAttempts = 20;
-
-    std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * static_cast<float>(M_PI));
-    std::uniform_real_distribution<float> distDist(50.0f, maxReturnWalkDistance);
-
-    for (int i = 0; i < maxAttempts; ++i)
+    // Sampling math lives in MobMovementMath; logging stays here 1-1.
+    if (auto dest = MobMovementMath::pickReturnDestination(mobPos, zone); dest.has_value())
     {
-        float angle = angleDist(RandomUtils::engine());
-        float dist = distDist(RandomUtils::engine());
-        PositionStruct candidate;
-        candidate.positionX = mobPos.positionX + std::cos(angle) * dist;
-        candidate.positionY = mobPos.positionY + std::sin(angle) * dist;
-
-        if (ZoneBounds::contains(zone, candidate))
-        {
-            log_->info("Picked return destination for mob in zone " + std::to_string(zone.zoneId) +
-                       " at (" + std::to_string(candidate.positionX) + "," +
-                       std::to_string(candidate.positionY) + ")");
-            return candidate;
-        }
+        log_->info("Picked return destination for mob in zone " + std::to_string(zone.zoneId) +
+                   " at (" + std::to_string(dest->positionX) + "," +
+                   std::to_string(dest->positionY) + ")");
+        return *dest;
     }
 
     // No valid point found — fall back to the original spawn position.
@@ -1389,22 +1342,9 @@ MobMovementManager::initializeMobMovementData(int mobUID)
 bool
 MobMovementManager::canPerformAction(const MobMovementData &movementData, float currentTime) const
 {
-    // Only allow movement during certain states
-    switch (movementData.combatState)
-    {
-    case MobCombatState::PATROLLING:
-    case MobCombatState::CHASING:
-    case MobCombatState::RETURNING:
-    case MobCombatState::FLEEING: // Flee movement is handled via isFleeing flag path
-        return true;
-
-    case MobCombatState::PREPARING_ATTACK:
-    case MobCombatState::ATTACKING:
-    case MobCombatState::ATTACK_COOLDOWN:
-    case MobCombatState::EVADING:
-        return false; // No movement during attack phases or evade window
-    }
-    return false;
+    (void)currentTime;
+    // State table lives in MobMovementMath (1-1 with the inline switch).
+    return MobMovementMath::canPerformAction(movementData.combatState);
 }
 
 float
@@ -1416,19 +1356,14 @@ MobMovementManager::calculateDistanceFromZone(const PositionStruct &mobPos, cons
 bool
 MobMovementManager::shouldReturnToSpawn(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {
-    float distanceFromZoneEdge = ZoneBounds::distanceToZone(mobPos, zone);
-
-    // If mob is outside zone by more than allowed distance, return to spawn
-    return distanceFromZoneEdge > aiConfig_.returnToSpawnZoneDistance;
+    // Predicate lives in MobMovementMath; threshold from const aiConfig_.
+    return MobMovementMath::shouldReturnToSpawn(mobPos, zone, aiConfig_.returnToSpawnZoneDistance);
 }
 
 bool
 MobMovementManager::canSearchNewTargets(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {
-    float distanceFromZoneEdge = ZoneBounds::distanceToZone(mobPos, zone);
-
-    // Can search for targets if close enough to zone
-    return distanceFromZoneEdge <= aiConfig_.newTargetZoneDistance;
+    return MobMovementMath::canSearchNewTargets(mobPos, zone, aiConfig_.newTargetZoneDistance);
 }
 
 float
@@ -1437,25 +1372,13 @@ MobMovementManager::calculateNextMoveTime(float currentTime,
     const MobMovementData &movementData,
     const MobMovementParams &params)
 {
-    std::uniform_real_distribution<float> speedTime(params.speedTimeMin, params.speedTimeMax);
-    float patrolSpeedFactor = (mob.patrolSpeed > 0.01f) ? mob.patrolSpeed : movementData.speedMultiplier;
-    float nextTime = currentTime + std::max(speedTime(RandomUtils::engine()) / patrolSpeedFactor, 2.0f);
-
-    // Optional random cooldown pause to add unpredictability
-    std::uniform_real_distribution<float> randFactor(0.85f, 1.2f);
-    if (randFactor(RandomUtils::engine()) > 1.15f)
-    {
-        std::uniform_real_distribution<float> cooldown(params.cooldownMin, params.cooldownMax);
-        nextTime += cooldown(RandomUtils::engine()) * 0.5f;
-    }
-    return nextTime;
+    // Timing math lives in MobMovementMath (1-1 with the inline block).
+    return MobMovementMath::calculateNextMoveTime(
+        currentTime, mob.patrolSpeed, movementData.speedMultiplier, params);
 }
 
 bool
 MobMovementManager::shouldStopChasing(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {
-    float distanceFromZoneEdge = ZoneBounds::distanceToZone(mobPos, zone);
-
-    // Stop chasing if too far from zone edge
-    return distanceFromZoneEdge > aiConfig_.maxChaseFromZoneEdge;
+    return MobMovementMath::shouldStopChasing(mobPos, zone, aiConfig_.maxChaseFromZoneEdge);
 }
