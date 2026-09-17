@@ -1,6 +1,7 @@
 #pragma once
 #include "events/handlers/BaseEventHandler.hpp"
 #include "services/GameServices.hpp"
+#include "services/ItemCooldownStore.hpp"
 #include <chrono>
 #include <mutex>
 #include <unordered_map>
@@ -135,12 +136,10 @@ class ItemEventHandler : public BaseEventHandler
     GameServices &gameServices_;
     std::shared_ptr<spdlog::logger> log_;
 
-    // Per-character item-use cooldown tracker.
-    // Key: characterId → (itemId → time when cooldown expires)
-    // Protected by itemCooldownMutex_ — handleUseItemEvent may be called
-    // from concurrent event-processing threads.
-    mutable std::mutex itemCooldownMutex_;
-    std::unordered_map<int, std::unordered_map<int, std::chrono::steady_clock::time_point>> itemCooldowns_;
+    // Per-character item-use cooldown tracker (map+mutex live in the
+    // store; handleUseItemEvent may be called from concurrent
+    // event-processing threads).
+    ItemCooldownStore itemCooldowns_;
 
     // Per-character last position where loot snapshot was sent (for movement throttling)
     static constexpr float LOOT_RADIUS = 5000.0f;
@@ -154,7 +153,8 @@ class ItemEventHandler : public BaseEventHandler
     void broadcastToNearbyClients(const std::string &responseData, const PositionStruct &center, float radius = LOOT_RADIUS);
 
     /**
-     * @brief Check and set item use cooldown atomically.
+     * @brief Check and set item use cooldown atomically (delegates to
+     *        ItemCooldownStore 1-1 with the inline map this replaced).
      * @return true if the item can be used (cooldown set), false if still on cooldown.
      */
     bool trySetItemCooldown(int characterId, int itemId, int cooldownSeconds);

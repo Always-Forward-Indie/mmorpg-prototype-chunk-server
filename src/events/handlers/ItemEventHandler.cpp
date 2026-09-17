@@ -932,15 +932,7 @@ ItemEventHandler::handleItemRemoveEvent(const Event &event)
 bool
 ItemEventHandler::trySetItemCooldown(int characterId, int itemId, int cooldownSeconds)
 {
-    if (cooldownSeconds <= 0)
-        return true; // no cooldown defined — always allow
-    const auto now = std::chrono::steady_clock::now();
-    std::lock_guard<std::mutex> lock(itemCooldownMutex_);
-    auto &entry = itemCooldowns_[characterId][itemId];
-    if (now < entry)
-        return false; // still on cooldown
-    entry = now + std::chrono::seconds(cooldownSeconds);
-    return true;
+    return itemCooldowns_.tryAcquire(characterId, itemId, cooldownSeconds);
 }
 
 void

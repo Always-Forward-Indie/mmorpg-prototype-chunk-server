@@ -243,6 +243,30 @@ TEST_F(OrchestratorFixture, FlushPathsReachGameServerSeam)
     EXPECT_EQ(gs.getQuestManager().getQuestStateBySlug(1, "kill_foxes"), "");
 }
 
+TEST_F(OrchestratorFixture, FlagsIntAndLoadedLifecycle)
+{
+    // B3: int-flag roundtrip through the character record + queued
+    // persistence reaching the game-server seam on flush.
+    gs.getQuestManager().setFlagInt(1, "wolves_slain", 7);
+    bool found = false;
+    for (const auto &f : gs.getCharacterManager().getCharacterData(1).flags)
+    {
+        if (f.flagKey == "wolves_slain" && f.intValue.has_value() && f.intValue.value() == 7)
+            found = true;
+    }
+    EXPECT_TRUE(found);
+    const size_t before = persisted.size();
+    gs.getQuestManager().flushPendingFlags();
+    EXPECT_GT(persisted.size(), before);
+
+    // Flags-loaded guard lifecycle (exploration-XP gate).
+    EXPECT_FALSE(gs.getQuestManager().areFlagsLoaded(1));
+    gs.getQuestManager().markFlagsLoaded(1);
+    EXPECT_TRUE(gs.getQuestManager().areFlagsLoaded(1));
+    gs.getQuestManager().clearFlagsLoaded(1);
+    EXPECT_FALSE(gs.getQuestManager().areFlagsLoaded(1));
+}
+
 TEST_F(OrchestratorFixture, GetByIdSlugIsLoaded)
 {
     EXPECT_TRUE(gs.getQuestManager().isLoaded());

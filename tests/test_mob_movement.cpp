@@ -7,6 +7,13 @@
 #include "services/MobMovementMath.hpp"
 #include "utils/RandomUtils.hpp"
 
+#include "services/CharacterManager.hpp"
+#include "services/MobInstanceManager.hpp"
+#include "services/MobManager.hpp"
+#include "services/MobMovementManager.hpp"
+#include "services/SpawnZoneManager.hpp"
+#include "utils/TimeUtils.hpp"
+
 #include <gtest/gtest.h>
 
 #include <utility>
@@ -141,6 +148,68 @@ TEST(MobMovementMath, PickReturnDestinationStaysInZone)
         const float dy = dest->positionY - 500.0f;
         EXPECT_LE(dx * dx + dy * dy, 400.0f * 400.0f + 1.0f);
     }
+}
+
+TEST(MobTickWiring, DuePatrolTickMovesAndPersists)
+{
+    // B3: end-to-end wiring through runMobTick (calculate → targeted field
+    // write → instance position persist). Deterministic under seed; asserts
+    // movement happened and state was stored, not exact coordinates.
+    Logger logger{"test"};
+    CharacterManager chars(logger);
+    MobInstanceManager instances(logger);
+    MobManager mobs(logger);
+    MobMovementManager move(chars, instances, mobs, logger);
+    SpawnZoneManager zones(mobs, logger);
+    move.setSpawnZoneManager(&zones);
+
+    MobDataStruct tpl;
+    tpl.id = 1;
+    tpl.slug = "wolf";
+    tpl.name = "Wolf";
+    tpl.level = 5;
+    tpl.maxHealth = 100;
+    tpl.currentHealth = 100;
+    tpl.isAggressive = false;
+    mobs.setListOfMobs({tpl});
+
+    SpawnZoneStruct z;
+    z.zoneId = 7;
+    z.minX = 0;
+    z.maxX = 1000;
+    z.minY = 0;
+    z.maxY = 1000;
+    zones.loadMobSpawnZones({z});
+
+    MobDataStruct inst = tpl;
+    inst.uid = 9401;
+    inst.zoneId = 7;
+    inst.position.positionX = 500.0f;
+    inst.position.positionY = 500.0f;
+    ASSERT_TRUE(instances.registerMobInstance(inst));
+
+    // Movement due long ago (process-relative game clock, seconds).
+    // Patrol steps below minMoveDistance are legitimately skipped, so re-arm
+    // for a few rounds: the seeded draw sequence is fixed, and at least one
+    // round must produce a real step (a dead pipeline never would).
+    RandomUtils::seedForTests(11u);
+    bool moved = false;
+    for (int round = 0; round < 5 && !moved; ++round)
+    {
+        MobMovementData md = move.getMobMovementData(9401);
+        md.nextMoveTime = getCurrentGameTime() - 10.0f;
+        move.updateMobMovementData(9401, md);
+        if (move.moveMobsInZone(7))
+        {
+            const auto after = instances.getMobInstance(9401);
+            const float dx = after.position.positionX - 500.0f;
+            const float dy = after.position.positionY - 500.0f;
+            moved = (dx * dx + dy * dy) > 0.0f;
+        }
+    }
+    EXPECT_TRUE(moved); // instance position persisted
+    // Tick rescheduled itself into the future.
+    EXPECT_GT(move.getMobMovementData(9401).nextMoveTime, getCurrentGameTime());
 }
 
 TEST(MobMovementMath, PickReturnDestinationFallsBackOutside)

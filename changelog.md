@@ -1,3 +1,29 @@
+v0.2.48
+17.09.2026
+================
+
+New:
+
+**B3 — ItemCooldownStore + flags/mob-tick pins.**
+- New header-only `services/ItemCooldownStore.hpp`: consumable-reuse
+  throttle (per character+item, second granularity) extracted from
+  `ItemEventHandler`; `trySetItemCooldown` delegates 1-1. Pins: zero
+  cooldown passthrough, first-claim-wins, per-id isolation, 8-thread
+  single-winner race (TSan).
+- Quest flags: int-flag record roundtrip + queued persistence reaching the
+  seam on flush + flags-loaded guard lifecycle (exploration-XP gate).
+- Mob tick wiring: seeded `moveMobsInZone` patrol round-trips through
+  `runMobTick` (calculate → targeted write → instance persist +
+  reschedule); re-arms across rounds since sub-minMoveDistance steps are
+  legitimately skipped.
+- EventDispatcher: deliberately NOT refactored — handlers are uniform
+  3-line guard/parse/push boilerplate; a 65-touch churn adds risk without
+  testability gain. Parser-level coverage arrives via L3 reg_* (A6).
+- Verified: 418/418 unit green; full MMOChunkServer build green; TSan 418
+  pass (incl. all threaded suites), same 9-warning Scheduler fingerprint.
+
+---
+
 v0.2.47
 17.09.2026
 ================

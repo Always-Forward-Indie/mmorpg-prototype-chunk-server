@@ -62,6 +62,7 @@ if(GTest_FOUND)
         test_target_resolver.cpp
         test_ongoing_actions.cpp
         test_mob_movement.cpp
+        test_item_cooldowns.cpp
         test_join_respawn.cpp
         test_spawn_geometry.cpp
         stubs/WorldStubs.cpp
