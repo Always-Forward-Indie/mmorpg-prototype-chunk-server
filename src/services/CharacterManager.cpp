@@ -1,4 +1,5 @@
 #include "services/CharacterManager.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
 #include <chrono>
@@ -441,7 +442,7 @@ CharacterManager::getCharactersInZone(float centerX, float centerY, float radius
 
     for (const auto &[id, character] : charactersMap_)
     {
-        float distance = calculateDistance(
+        float distance = DistanceUtils::dist2D(
             {centerX, centerY, 0.0f, 0.0f},
             character.characterPosition);
 
@@ -462,14 +463,6 @@ CharacterManager::getCharacterById(int characterID)
     if (it != charactersMap_.end())
         return it->second;
     return CharacterDataStruct{};
-}
-
-float
-CharacterManager::calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2)
-{
-    float dx = pos1.positionX - pos2.positionX;
-    float dy = pos1.positionY - pos2.positionY;
-    return std::sqrt(dx * dx + dy * dy);
 }
 
 void

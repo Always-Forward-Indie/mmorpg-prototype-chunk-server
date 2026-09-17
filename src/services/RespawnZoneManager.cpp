@@ -1,6 +1,6 @@
 #include "services/RespawnZoneManager.hpp"
+#include "utils/RandomUtils.hpp"
 #include <limits>
-#include <random>
 #include <spdlog/logger.h>
 
 RespawnZoneManager::RespawnZoneManager(Logger &logger)
@@ -62,11 +62,8 @@ RespawnZoneManager::getRandomPointInZone(const RespawnZoneStruct &zone) const
     if (!zone.isAreaDefined())
         return zone.position;
 
-    static std::mt19937 rng(std::chrono::steady_clock::now().time_since_epoch().count());
-    static std::uniform_real_distribution<float> unit(0.0f, 1.0f);
-    static std::uniform_real_distribution<float> angleDist(0.0f,
-        static_cast<float>(2.0 * M_PI));
-
+    // RNG: RandomUtils (one thread_local engine per thread; distributions are
+    // function-local, never shared — see RandomUtils.hpp).
     float x = 0.0f;
     float y = 0.0f;
     float z = 0.0f;
@@ -75,18 +72,18 @@ RespawnZoneManager::getRandomPointInZone(const RespawnZoneStruct &zone) const
     {
     case ZoneShape::CIRCLE:
     {
-        float angle = angleDist(rng);
-        float r = zone.outerRadius * std::sqrt(unit(rng));
+        float angle = RandomUtils::angle();
+        float r = zone.outerRadius * std::sqrt(RandomUtils::uniform01());
         x = zone.centerX + r * std::cos(angle);
         y = zone.centerY + r * std::sin(angle);
         break;
     }
     case ZoneShape::ANNULUS:
     {
-        float angle = angleDist(rng);
+        float angle = RandomUtils::angle();
         float r2in = zone.innerRadius * zone.innerRadius;
         float r2out = zone.outerRadius * zone.outerRadius;
-        float r = std::sqrt(r2in + unit(rng) * (r2out - r2in));
+        float r = std::sqrt(r2in + RandomUtils::uniform01() * (r2out - r2in));
         x = zone.centerX + r * std::cos(angle);
         y = zone.centerY + r * std::sin(angle);
         break;
@@ -94,13 +91,13 @@ RespawnZoneManager::getRandomPointInZone(const RespawnZoneStruct &zone) const
     case ZoneShape::RECT:
     default:
     {
-        x = zone.minX + unit(rng) * (zone.maxX - zone.minX);
-        y = zone.minY + unit(rng) * (zone.maxY - zone.minY);
+        x = zone.minX + RandomUtils::uniform01() * (zone.maxX - zone.minX);
+        y = zone.minY + RandomUtils::uniform01() * (zone.maxY - zone.minY);
         break;
     }
     }
 
-    z = zone.minZ + unit(rng) * (zone.maxZ - zone.minZ);
+    z = zone.minZ + RandomUtils::uniform01() * (zone.maxZ - zone.minZ);
 
     PositionStruct pos;
     pos.positionX = x;

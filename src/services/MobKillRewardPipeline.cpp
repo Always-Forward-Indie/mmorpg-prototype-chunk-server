@@ -8,6 +8,7 @@
 #include "services/GameZoneManager.hpp"
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
+#include "services/ItemSoulTiers.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "services/MobMovementManager.hpp"
 #include "services/ReputationManager.hpp"
@@ -323,12 +324,10 @@ MobKillRewardPipeline::trackItemSoul(int killerId)
 
                 // Debounce: only flush to DB at tier boundaries or every N kills to
                 // avoid hammering the game-server on every mob death.
-                const int flushEvery = gameConfig_.getInt("item_soul.db_flush_every_kills", 5);
-                const int t1 = gameConfig_.getInt("item_soul.tier1_kills", 50);
-                const int t2 = gameConfig_.getInt("item_soul.tier2_kills", 200);
-                const int t3 = gameConfig_.getInt("item_soul.tier3_kills", 500);
-                const bool tierCrossed = (newKillCount == t1 || newKillCount == t2 || newKillCount == t3);
-                if ((newKillCount % flushEvery == 0 || tierCrossed) && saveKillCountCallback_)
+                // Tiers from ItemSoulTiers (single source of truth, Wave 2.4).
+                const ItemSoulTiers::Table soulTiers = ItemSoulTiers::Table::load(gameConfig_);
+                const bool tierCrossed = ItemSoulTiers::isTierBoundary(soulTiers, newKillCount);
+                if ((newKillCount % soulTiers.dbFlushEveryKills == 0 || tierCrossed) && saveKillCountCallback_)
                     saveKillCountCallback_(killerId, weapon->id, newKillCount);
 
                 // Notify the killer's client immediately so the weapon tooltip stays in sync.
@@ -362,11 +361,18 @@ MobKillRewardPipeline::fireKillHooks(int mobId, int killerId)
 {
     auto mobData = mobInstances_.getMobInstance(mobId);
 
-    // Quest trigger: notify QuestManager that the mob was killed
+    // Quest trigger: notify QuestManager that the mob was killed.
+    // Best-effort (a failing quest hook must not fail the kill rewards);
+    // warn-level like the neighboring hooks (bestiary/champion/reputation).
     try
     {
         if (questHook_)
             questHook_(killerId, mobData.id);
+    }
+    catch (const std::exception &e)
+    {
+        log_->warn("[Quest] Error on mob kill hook for char={} ({}), rewards kept",
+            killerId, e.what());
     }
     catch (...)
     {
@@ -424,7 +430,7 @@ MobKillRewardPipeline::fireKillHooks(int mobId, int killerId)
         log_->warn("[Reputation] Error on mob kill: " + std::string(e.what()));
     }
 
-    // Analytics: mob_killed
+    // Analytics: mob_killed (best-effort, never fails kill rewards)
     try
     {
         auto killerData = characters_.getCharacterData(killerId);
@@ -445,6 +451,10 @@ MobKillRewardPipeline::fireKillHooks(int mobId, int killerId)
             if (analyticsCallback_)
                 analyticsCallback_(ap.dump() + "\n");
         }
+    }
+    catch (const std::exception &e)
+    {
+        log_->debug("[Analytics] mob_killed for char={} skipped ({})", killerId, e.what());
     }
     catch (...)
     {
@@ -474,6 +484,10 @@ MobKillRewardPipeline::sendLevelUpAnalytics(int characterId, int newLevel, int o
             if (analyticsCallback_)
                 analyticsCallback_(ap.dump() + "\n");
         }
+    }
+    catch (const std::exception &e)
+    {
+        log_->debug("[Analytics] level_up for char={} skipped ({})", characterId, e.what());
     }
     catch (...)
     {

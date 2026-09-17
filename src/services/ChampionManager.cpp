@@ -8,11 +8,11 @@
 #include "services/SpawnZoneManager.hpp"
 #include "utils/Generators.hpp"
 #include "utils/Logger.hpp"
+#include "utils/RandomUtils.hpp"
 #include <algorithm>
 #include <cmath>
 #include <ctime>
 #include <nlohmann/json.hpp>
-#include <random>
 #include <spdlog/logger.h>
 
 ChampionManager::ChampionManager(GameZoneManager &gameZones,
@@ -152,8 +152,7 @@ ChampionManager::tickTimedChampions()
 void
 ChampionManager::tickSurvivalEvolution()
 {
-    const auto &cfg = gameConfig_;
-    const int evolveHours = cfg.getInt("survival_champion.evolve_hours", 12);
+    const int evolveHours = this->evolveHours();
     const int64_t evolveThresholdSec = static_cast<int64_t>(evolveHours) * 3600;
 
     const int64_t nowEpoch = static_cast<int64_t>(std::time(nullptr));
@@ -387,7 +386,7 @@ ChampionManager::evolveSurvivalMob(int mobUid)
     log_->info("[Survival] Mob uid={} '{}' evolved after {}h alive",
         mobUid,
         mob.name,
-        gameConfig_.getInt("survival_champion.evolve_hours", 12));
+        evolveHours());
 }
 
 PositionStruct
@@ -418,10 +417,10 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
 
     if (!candidates.empty())
     {
-        // Pick a random spawn zone and a random point within it
-        static thread_local std::mt19937 rng(std::random_device{}());
-        std::uniform_int_distribution<int> pick(0, static_cast<int>(candidates.size()) - 1);
-        const SpawnZoneStruct &chosen = *candidates[pick(rng)];
+        // Pick a random spawn zone and a random point within it.
+        // RNG: RandomUtils (one thread_local engine per thread — see RandomUtils.hpp).
+        const SpawnZoneStruct &chosen =
+            *candidates[RandomUtils::rangeInt(0, static_cast<int>(candidates.size()) - 1)];
 
         PositionStruct p;
         p.positionZ = (chosen.minZ + chosen.maxZ) * 0.5f;
@@ -429,30 +428,24 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
         if (chosen.shape == ZoneShape::ANNULUS)
         {
             // Equal-area annulus sampling
-            std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
-            std::uniform_real_distribution<float> angleDist(0.0f, static_cast<float>(2.0 * M_PI));
             float r2in = chosen.innerRadius * chosen.innerRadius;
             float r2out = chosen.outerRadius * chosen.outerRadius;
-            float r = std::sqrt(r2in + unitDist(rng) * (r2out - r2in));
-            float angle = angleDist(rng);
+            float r = std::sqrt(r2in + RandomUtils::uniform01() * (r2out - r2in));
+            float angle = RandomUtils::angle();
             p.positionX = chosen.centerX + r * std::cos(angle);
             p.positionY = chosen.centerY + r * std::sin(angle);
         }
         else if (chosen.shape == ZoneShape::CIRCLE)
         {
-            std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
-            std::uniform_real_distribution<float> angleDist(0.0f, static_cast<float>(2.0 * M_PI));
-            float r = chosen.outerRadius * std::sqrt(unitDist(rng));
-            float angle = angleDist(rng);
+            float r = chosen.outerRadius * std::sqrt(RandomUtils::uniform01());
+            float angle = RandomUtils::angle();
             p.positionX = chosen.centerX + r * std::cos(angle);
             p.positionY = chosen.centerY + r * std::sin(angle);
         }
         else
         {
-            std::uniform_real_distribution<float> distX(chosen.minX, chosen.maxX);
-            std::uniform_real_distribution<float> distY(chosen.minY, chosen.maxY);
-            p.positionX = distX(rng);
-            p.positionY = distY(rng);
+            p.positionX = RandomUtils::range(chosen.minX, chosen.maxX);
+            p.positionY = RandomUtils::range(chosen.minY, chosen.maxY);
         }
         return p;
     }

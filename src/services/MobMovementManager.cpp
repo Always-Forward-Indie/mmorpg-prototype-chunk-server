@@ -9,6 +9,9 @@
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/SpawnZoneManager.hpp"
+#include "utils/DistanceUtils.hpp"
+#include "utils/MovementUnits.hpp"
+#include "utils/RandomUtils.hpp"
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
 #include <chrono>
@@ -28,7 +31,6 @@ MobMovementManager::MobMovementManager(CharacterManager &characters,
       characterManager_(&characters),
       eventQueue_(nullptr),
       combatSystem_(nullptr),
-      rng_(std::random_device{}()),
       mobAIController_(characters, mobInstances, mobs, *this, nullptr, nullptr, logger)
 {
     log_ = logger.getSystem("mob");
@@ -61,13 +63,6 @@ MobMovementManager::setGameServices(GameServices *gs)
     gameServices_ = gs;
 }
 
-void
-MobMovementManager::setZoneMovementParams(int zoneId, const MobMovementParams &params)
-{
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    zoneMovementParams_[zoneId] = params;
-}
-
 bool
 MobMovementManager::moveMobsInZone(int zoneId)
 {
@@ -92,16 +87,9 @@ MobMovementManager::moveMobsInZone(int zoneId)
         return false; // No mobs to move
     }
 
-    // Get movement parameters for zone (fetched once per tick)
+    // Movement parameters: always the defaults (per-zone overrides were dead
+    // code — setZoneMovementParams had zero callers — so the map was removed).
     auto params = getDefaultMovementParams();
-    {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        auto paramIt = zoneMovementParams_.find(zoneId);
-        if (paramIt != zoneMovementParams_.end())
-        {
-            params = paramIt->second;
-        }
-    }
 
     // Zone event mob speed multiplier (Stage 4)
     if (gameServices_)
@@ -158,14 +146,8 @@ MobMovementManager::moveSingleMob(int mobUID, int zoneId)
     // Get lightweight {uid,position} pairs for collision detection (4.1 optimization)
     auto mobPositions = mobInstanceManager_->getMobPositionsInZone(zoneId);
 
-    // Fetch movement params once for the whole function (4.2 optimization)
+    // Movement parameters: always the defaults (see moveMobsInZone).
     auto params = getDefaultMovementParams();
-    {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        auto paramIt = zoneMovementParams_.find(zoneId);
-        if (paramIt != zoneMovementParams_.end())
-            params = paramIt->second;
-    }
 
     // Delegate to the shared per-mob AI+movement tick.
     return runMobTick(mob, zone, params, mobPositions, getCurrentGameTime());
@@ -204,7 +186,7 @@ MobMovementManager::runMobTick(
         if (movementData.nextMoveTime == 0.0f)
         {
             std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
-            movementData.nextMoveTime = currentTime + moveTime(rng_);
+            movementData.nextMoveTime = currentTime + moveTime(RandomUtils::engine());
             updateMobMovementData(mob.uid, movementData);
             log_->info("[DEBUG] Fixed non-aggressive mob UID: " + std::to_string(mob.uid) + " movement timing");
         }
@@ -221,7 +203,7 @@ MobMovementManager::runMobTick(
     {
         std::uniform_real_distribution<float> initialDelay(0.0f, params.initialDelayMax);
         std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
-        movementData.nextMoveTime = currentTime + initialDelay(rng_) + moveTime(rng_);
+        movementData.nextMoveTime = currentTime + initialDelay(RandomUtils::engine()) + moveTime(RandomUtils::engine());
         updateMobMovementData(mob.uid, movementData);
     }
 
@@ -362,7 +344,7 @@ MobMovementManager::runMobTick(
         if (stuckData.combatState == MobCombatState::PATROLLING)
         {
             std::uniform_real_distribution<float> waitTime(params.moveTimeMin, params.moveTimeMax);
-            stuckData.nextMoveTime = currentTime + waitTime(rng_);
+            stuckData.nextMoveTime = currentTime + waitTime(RandomUtils::engine());
             stuckData.movementDirectionX = 0.0f;
             stuckData.movementDirectionY = 0.0f;
             stuckData.hasPatrolTarget = false; // force a new waypoint on next attempt
@@ -381,10 +363,10 @@ MobMovementManager::runMobTick(
                     if (zone.shape == ZoneShape::CIRCLE || zone.shape == ZoneShape::ANNULUS)
                     {
                         std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * M_PI);
-                        float angle = angleDist(rng_);
+                        float angle = angleDist(RandomUtils::engine());
                         float rMin = (zone.shape == ZoneShape::ANNULUS) ? zone.innerRadius : 0.0f;
                         std::uniform_real_distribution<float> radiusDist(rMin, zone.outerRadius);
-                        float radius = radiusDist(rng_);
+                        float radius = radiusDist(RandomUtils::engine());
                         randPos.positionX = zone.centerX + radius * std::cos(angle);
                         randPos.positionY = zone.centerY + radius * std::sin(angle);
                     }
@@ -392,8 +374,8 @@ MobMovementManager::runMobTick(
                     {
                         std::uniform_real_distribution<float> dxDist(zone.minX, zone.maxX);
                         std::uniform_real_distribution<float> dyDist(zone.minY, zone.maxY);
-                        randPos.positionX = dxDist(rng_);
-                        randPos.positionY = dyDist(rng_);
+                        randPos.positionX = dxDist(RandomUtils::engine());
+                        randPos.positionY = dyDist(RandomUtils::engine());
                     }
 
                     if (ZoneBounds::contains(zone, randPos))
@@ -488,7 +470,7 @@ MobMovementManager::calculateNewPosition(
     if (movementData.stepMultiplier == 0.0f)
     {
         std::uniform_real_distribution<float> stepMultiplier(params.stepMultiplierMin, params.stepMultiplierMax);
-        movementData.stepMultiplier = stepMultiplier(rng_);
+        movementData.stepMultiplier = stepMultiplier(RandomUtils::engine());
         // Сохраняем обновленный stepMultiplier
         updateMobMovementData(mob.uid, movementData);
 
@@ -500,7 +482,7 @@ MobMovementManager::calculateNewPosition(
     std::uniform_real_distribution<float> baseSpeed(params.baseSpeedMin, params.baseSpeedMax);
     std::uniform_real_distribution<float> randFactor(0.85f, 1.2f);
     float maxStepSize = std::min(((maxX - minX) + (maxY - minY)) * params.maxStepSizePercent, params.maxStepSizeAbsolute);
-    float stepSize = std::clamp(baseSpeed(rng_) * movementData.stepMultiplier * randFactor(rng_),
+    float stepSize = std::clamp(baseSpeed(RandomUtils::engine()) * movementData.stepMultiplier * randFactor(RandomUtils::engine()),
         params.minMoveDistance * 0.75f,
         maxStepSize);
 
@@ -547,7 +529,7 @@ MobMovementManager::calculateNewPosition(
                     centerX - mob.position.positionX);
             }
             std::uniform_real_distribution<float> borderAngle(params.borderAngleMin, params.borderAngleMax);
-            newAngle = angleToEscape + (borderAngle(rng_) * (M_PI / 180.0f));
+            newAngle = angleToEscape + (borderAngle(RandomUtils::engine()) * (M_PI / 180.0f));
         }
         else
         {
@@ -567,8 +549,8 @@ MobMovementManager::calculateNewPosition(
                     {
                         std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * static_cast<float>(M_PI));
                         std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
-                        float angle = angleDist(rng_);
-                        float r = safeRadius * std::sqrt(unitDist(rng_));
+                        float angle = angleDist(RandomUtils::engine());
+                        float r = safeRadius * std::sqrt(unitDist(RandomUtils::engine()));
                         movementData.patrolTargetPoint.positionX = zone.centerX + r * std::cos(angle);
                         movementData.patrolTargetPoint.positionY = zone.centerY + r * std::sin(angle);
                         waypointSet = true;
@@ -589,10 +571,10 @@ MobMovementManager::calculateNewPosition(
                             -static_cast<float>(M_PI) * 0.5f,
                             static_cast<float>(M_PI) * 0.5f);
                         std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
-                        float angle = mobAngle + arcDist(rng_);
+                        float angle = mobAngle + arcDist(RandomUtils::engine());
                         float r2in = safeInner * safeInner;
                         float r2out = safeOuter * safeOuter;
-                        float r = std::sqrt(r2in + unitDist(rng_) * (r2out - r2in));
+                        float r = std::sqrt(r2in + unitDist(RandomUtils::engine()) * (r2out - r2in));
                         movementData.patrolTargetPoint.positionX = zone.centerX + r * std::cos(angle);
                         movementData.patrolTargetPoint.positionY = zone.centerY + r * std::sin(angle);
                         waypointSet = true;
@@ -608,8 +590,8 @@ MobMovementManager::calculateNewPosition(
                     {
                         std::uniform_real_distribution<float> ptX(innerMinX, innerMaxX);
                         std::uniform_real_distribution<float> ptY(innerMinY, innerMaxY);
-                        movementData.patrolTargetPoint.positionX = ptX(rng_);
-                        movementData.patrolTargetPoint.positionY = ptY(rng_);
+                        movementData.patrolTargetPoint.positionX = ptX(RandomUtils::engine());
+                        movementData.patrolTargetPoint.positionY = ptY(RandomUtils::engine());
                         waypointSet = true;
                     }
                 }
@@ -644,19 +626,19 @@ MobMovementManager::calculateNewPosition(
                                movementData.movementDirectionY != 0.0f);
             std::uniform_real_distribution<float> coinFlip(0.0f, 1.0f);
             const float inertiaProbability = (zone.shape == ZoneShape::ANNULUS) ? 0.40f : 0.70f;
-            if (hasPrevDir && coinFlip(rng_) < inertiaProbability)
+            if (hasPrevDir && coinFlip(RandomUtils::engine()) < inertiaProbability)
             {
                 float prevAngle = std::atan2(movementData.movementDirectionY,
                     movementData.movementDirectionX);
                 // Blend ±30° (π/6) around previous heading
                 std::uniform_real_distribution<float> inertiaAngle(-M_PI / 6.0f, M_PI / 6.0f);
-                newAngle = prevAngle + inertiaAngle(rng_);
+                newAngle = prevAngle + inertiaAngle(RandomUtils::engine());
             }
             else
             {
                 // Re-align to waypoint with a small random scatter (±15°)
                 std::uniform_real_distribution<float> scatter(-M_PI / 12.0f, M_PI / 12.0f);
-                newAngle = angleToWaypoint + scatter(rng_);
+                newAngle = angleToWaypoint + scatter(RandomUtils::engine());
             }
         }
 
@@ -722,7 +704,7 @@ MobMovementManager::calculateNewPosition(
         {
             // Blend with previous heading for interior mobs.
             std::uniform_real_distribution<float> directionAdjust(params.directionAdjustMin, params.directionAdjustMax);
-            float adjustFactor = directionAdjust(rng_);
+            float adjustFactor = directionAdjust(RandomUtils::engine());
             newDirectionX = (newDirectionX * adjustFactor) + (movementData.movementDirectionX * (1.0f - adjustFactor));
             newDirectionY = (newDirectionY * adjustFactor) + (movementData.movementDirectionY * (1.0f - adjustFactor));
         }
@@ -786,7 +768,7 @@ MobMovementManager::calculateNewPosition(
 
     // Calculate rotation
     std::uniform_real_distribution<float> rotationJitter(params.rotationJitterMin, params.rotationJitterMax);
-    result.newPosition.rotationZ = atan2(newDirectionY, newDirectionX) * (180.0f / M_PI) + rotationJitter(rng_);
+    result.newPosition.rotationZ = atan2(newDirectionY, newDirectionX) * (180.0f / M_PI) + rotationJitter(RandomUtils::engine());
 
     result.newDirectionX = newDirectionX;
     result.newDirectionY = newDirectionY;
@@ -882,7 +864,7 @@ MobMovementManager::shouldSendMobUpdate(int mobUID, const PositionStruct &curren
             // Skip the distance check if a forced update is pending.
             if (!it->second.forceNextUpdate)
             {
-                float distance = calculateDistance(currentPosition, it->second.lastSentPosition);
+                float distance = DistanceUtils::dist2D(currentPosition, it->second.lastSentPosition);
                 if (distance < aiConfig_.minimumMoveDistance)
                     return false; // No write needed — bail out without exclusive lock
             }
@@ -902,7 +884,7 @@ MobMovementManager::shouldSendMobUpdate(int mobUID, const PositionStruct &curren
         return true;
     }
 
-    float distance = calculateDistance(currentPosition, it->second.lastSentPosition);
+    float distance = DistanceUtils::dist2D(currentPosition, it->second.lastSentPosition);
     if (!it->second.forceNextUpdate && distance < aiConfig_.minimumMoveDistance)
         return false; // Another thread may have already updated lastSentPosition
 
@@ -1181,13 +1163,13 @@ MobMovementManager::calculateChaseMovement(
 
     // ---- 10. Speed calculation ----
     // Read mob's move_speed attribute; fallback to global config.
-    static constexpr float MOVE_SPEED_SCALE = 40.0f;
+    // Scale from MovementUnits (single source; must match the UE client).
     float mobChaseSpeed = aiConfig_.chaseSpeedUnitsPerSec;
     for (const auto &attr : mob.attributes)
     {
         if (attr.slug == "move_speed" && attr.value > 0)
         {
-            mobChaseSpeed = static_cast<float>(attr.value) * MOVE_SPEED_SCALE;
+            mobChaseSpeed = static_cast<float>(attr.value) * MovementUnits::kMoveSpeedScale;
             break;
         }
     }
@@ -1268,7 +1250,7 @@ MobMovementManager::calculateReturnToSpawnMovement(
         // Инициализируем время следующего движения для нормального патруля
         float currentTime = getCurrentGameTime();
         std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
-        md.nextMoveTime = currentTime + moveTime(rng_);
+        md.nextMoveTime = currentTime + moveTime(RandomUtils::engine());
 
         md.stepMultiplier = 0.0f; // Будет переинициализирован при следующем движении
         md.movementDirectionX = 0.0f;
@@ -1335,8 +1317,8 @@ MobMovementManager::pickReturnDestination(const PositionStruct &mobPos, const Sp
 
     for (int i = 0; i < maxAttempts; ++i)
     {
-        float angle = angleDist(rng_);
-        float dist = distDist(rng_);
+        float angle = angleDist(RandomUtils::engine());
+        float dist = distDist(RandomUtils::engine());
         PositionStruct candidate;
         candidate.positionX = mobPos.positionX + std::cos(angle) * dist;
         candidate.positionY = mobPos.positionY + std::sin(angle) * dist;
@@ -1386,22 +1368,6 @@ MobMovementManager::sendMobTargetLost(const MobDataStruct &mob, int lostTargetPl
                 std::to_string(lostTargetPlayerId) + " - target lost event sent");
 }
 
-float
-MobMovementManager::calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2)
-{
-    float dx = pos1.positionX - pos2.positionX;
-    float dy = pos1.positionY - pos2.positionY;
-    return std::sqrt(dx * dx + dy * dy);
-}
-
-void
-MobMovementManager::setAIConfig(const MobAIConfig &config)
-{
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    aiConfig_ = config;
-    log_->info("[INFO] MobMovementManager: AI configuration updated");
-}
-
 void
 MobMovementManager::initializeMobMovementData(int mobUID)
 {
@@ -1441,13 +1407,6 @@ MobMovementManager::canPerformAction(const MobMovementData &movementData, float 
     return false;
 }
 
-const MobAIConfig &
-MobMovementManager::getAIConfig() const
-{
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    return aiConfig_;
-}
-
 float
 MobMovementManager::calculateDistanceFromZone(const PositionStruct &mobPos, const SpawnZoneStruct &zone)
 {
@@ -1480,14 +1439,14 @@ MobMovementManager::calculateNextMoveTime(float currentTime,
 {
     std::uniform_real_distribution<float> speedTime(params.speedTimeMin, params.speedTimeMax);
     float patrolSpeedFactor = (mob.patrolSpeed > 0.01f) ? mob.patrolSpeed : movementData.speedMultiplier;
-    float nextTime = currentTime + std::max(speedTime(rng_) / patrolSpeedFactor, 2.0f);
+    float nextTime = currentTime + std::max(speedTime(RandomUtils::engine()) / patrolSpeedFactor, 2.0f);
 
     // Optional random cooldown pause to add unpredictability
     std::uniform_real_distribution<float> randFactor(0.85f, 1.2f);
-    if (randFactor(rng_) > 1.15f)
+    if (randFactor(RandomUtils::engine()) > 1.15f)
     {
         std::uniform_real_distribution<float> cooldown(params.cooldownMin, params.cooldownMax);
-        nextTime += cooldown(rng_) * 0.5f;
+        nextTime += cooldown(RandomUtils::engine()) * 0.5f;
     }
     return nextTime;
 }

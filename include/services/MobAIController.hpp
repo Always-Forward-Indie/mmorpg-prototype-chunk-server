@@ -83,10 +83,9 @@ class MobAIController
      */
     bool isTargetAlive(int targetPlayerId);
 
-    /**
-     * @brief Return true if mob is within attack range AND cooldown has elapsed.
-     */
-    bool canAttackPlayer(const MobDataStruct &mob, int targetPlayerId, const MobMovementData &movementData);
+    // NOTE (Wave 4.1): canAttackPlayer was deleted — zero callers anywhere
+    // (verified by grep over src/include/tests). Range gating lives in
+    // SkillSystem::isInRange and the ATTACK_COOLDOWN state machine.
 
     /**
      * @brief Fire the actual attack via CombatSystem, update lastAttackTime.
@@ -104,10 +103,8 @@ class MobAIController
         const MobMovementData &movementData,
         float distanceToTarget);
 
-    /**
-     * @brief Euclidean distance between two positions.
-     */
-    static float calculateDistance(const PositionStruct &a, const PositionStruct &b);
+    // NOTE: planar distance now lives in utils/DistanceUtils (dist2D) — the
+    // per-class copy was removed (Wave 2.1).
 
     /**
      * @brief Check if the mob should enter FLEEING state (HP < fleeHpThreshold).

@@ -130,12 +130,18 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
     // Holding the exclusive lock here would cause a same-thread deadlock.
     lock.unlock();
 
-    // Quest trigger: item obtained
+    // Quest trigger: item obtained. Best-effort by design (see the unlock
+    // above): a failing quest hook must never fail the pickup itself.
     if (questManager_)
     {
         try
         {
             questManager_->onItemObtained(characterId, itemId, quantity);
+        }
+        catch (const std::exception &e)
+        {
+            log_->debug("[INVENTORY] onItemObtained hook failed for char={} item={} ({}), pickup kept",
+                characterId, itemId, e.what());
         }
         catch (...)
         {
@@ -381,21 +387,6 @@ std::vector<PlayerInventoryItemStruct>::iterator
 InventoryManager::findInventoryItem(int characterId, int itemId)
 {
     auto &inventory = playerInventories_[characterId];
-    return std::find_if(inventory.begin(), inventory.end(), [itemId](const PlayerInventoryItemStruct &item)
-        { return item.itemId == itemId; });
-}
-
-std::vector<PlayerInventoryItemStruct>::const_iterator
-InventoryManager::findInventoryItem(int characterId, int itemId) const
-{
-    auto it = playerInventories_.find(characterId);
-    if (it == playerInventories_.end())
-    {
-        static std::vector<PlayerInventoryItemStruct> empty;
-        return empty.end();
-    }
-
-    const auto &inventory = it->second;
     return std::find_if(inventory.begin(), inventory.end(), [itemId](const PlayerInventoryItemStruct &item)
         { return item.itemId == itemId; });
 }

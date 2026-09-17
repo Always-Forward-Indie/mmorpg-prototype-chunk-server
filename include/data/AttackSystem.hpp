@@ -260,8 +260,8 @@ class AttackSystem
         const CharacterDataStruct &attacker,
         const CharacterDataStruct &target);
 
-    // Utility functions
-    float calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2);
+    // Utility functions (planar/3D distance now lives in
+    // utils/DistanceUtils — the per-class copy was removed, Wave 2.1).
     bool hasLineOfSight(const PositionStruct &pos1, const PositionStruct &pos2);
     float calculateThreatLevel(const CharacterDataStruct &character);
     CombatRole determineCombatRole(const CharacterDataStruct &character);

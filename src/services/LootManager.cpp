@@ -8,7 +8,9 @@
 #include "services/MobInstanceManager.hpp"
 #include "services/PityManager.hpp"
 #include "services/ZoneEventManager.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/Logger.hpp"
+#include "utils/RandomUtils.hpp"
 #include <algorithm>
 #include <cmath>
 #include <nlohmann/json.hpp>
@@ -20,11 +22,11 @@ std::atomic<int> LootManager::nextDroppedItemUID_{1};
 
 namespace
 {
-// Thread-local drop-roll engine (see header note).
+// Drop rolls use the single per-thread engine (see RandomUtils.hpp).
+// Kept as a named accessor so existing call sites are untouched.
 std::mt19937 &dropRng()
 {
-    thread_local std::mt19937 gen{std::random_device{}()};
-    return gen;
+    return RandomUtils::engine();
 }
 } // namespace
 
@@ -300,7 +302,7 @@ LootManager::getDroppedItemsNearPosition(const PositionStruct &position, float r
     {
         if (item.second.canBePickedUp)
         {
-            float distance = calculateDistance(position, item.second.position);
+            float distance = DistanceUtils::dist2D(position, item.second.position);
             if (distance <= radius)
             {
                 nearbyItems.push_back(item.second);
@@ -311,8 +313,8 @@ LootManager::getDroppedItemsNearPosition(const PositionStruct &position, float r
     // Sort by distance (closest first)
     std::sort(nearbyItems.begin(), nearbyItems.end(), [&position, this](const DroppedItemStruct &a, const DroppedItemStruct &b)
         {
-                  float distA = calculateDistance(position, a.position);
-                  float distB = calculateDistance(position, b.position);
+                  float distA = DistanceUtils::dist2D(position, a.position);
+                  float distB = DistanceUtils::dist2D(position, b.position);
                   return distA < distB; });
 
     return nearbyItems;
@@ -359,7 +361,7 @@ LootManager::pickupDroppedItem(int itemUID, int characterId, const PositionStruc
 
     // Validate distance - player must be within pickup range (no locks needed)
     const float MAX_PICKUP_DISTANCE = 300.0f; // Maximum distance for item pickup
-    float distance = calculateDistance(playerPosition, droppedItem.position);
+    float distance = DistanceUtils::dist2D(playerPosition, droppedItem.position);
 
     if (distance > MAX_PICKUP_DISTANCE)
     {
@@ -589,13 +591,4 @@ int
 LootManager::generateDroppedItemUID()
 {
     return nextDroppedItemUID_++;
-}
-
-float
-LootManager::calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2) const
-{
-    float dx = pos1.positionX - pos2.positionX;
-    float dy = pos1.positionY - pos2.positionY;
-
-    return std::sqrt(dx * dx + dy * dy);
 }

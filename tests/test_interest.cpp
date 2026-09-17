@@ -22,11 +22,28 @@ struct InterestFixture : ::testing::Test
 
     void SetUp() override
     {
-        im.configure(1500.0f, 1, 0.15f, true);
+        im.configure(InterestManager::kDefaultCellSize,
+            InterestManager::kDefaultViewRadius,
+            InterestManager::kDefaultRehomeMarginFrac,
+            InterestManager::kDefaultEnabled);
     }
 };
 
 } // namespace
+
+TEST(InterestDefaults, DesignValuesAreSingleSourced)
+{
+    // Wave 2.2 pin: the ChunkServer configure() fallbacks, the member
+    // initializers and the fixture above all read kDefault* — a tuning change
+    // touches exactly one place and this still passes.
+    Logger logger{"test"};
+    InterestManager fresh{logger};
+    EXPECT_FLOAT_EQ(fresh.cellSize(), InterestManager::kDefaultCellSize);
+    EXPECT_TRUE(fresh.isEnabled());
+    EXPECT_FLOAT_EQ(InterestManager::kDefaultCellSize, 1500.0f);
+    EXPECT_EQ(InterestManager::kDefaultViewRadius, 1);
+    EXPECT_FLOAT_EQ(InterestManager::kDefaultRehomeMarginFrac, 0.15f);
+}
 
 // Sections 1-6 share one manager: the sequence is order-dependent
 // (first sighting -> jitter -> rehome -> teleport -> watch -> refcount).

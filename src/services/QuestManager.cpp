@@ -1,6 +1,4 @@
 #include "services/QuestManager.hpp"
-#include "network/GameServerWorker.hpp"
-#include "network/NetworkManager.hpp"
 #include "services/GameServices.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <spdlog/logger.h>
@@ -46,20 +44,15 @@ QuestManager::QuestManager(GameServices *services, Logger &logger)
 }
 
 void
-QuestManager::setGameServerWorker(GameServerWorker *worker)
+QuestManager::setSendToGameServerCallback(QuestStore::SendToGameServerFn fn)
 {
-    store_.setSendToGameServerCallback(
-        [worker](const std::string &packet)
-        {
-            if (worker)
-                worker->sendDataToGameServer(packet);
-        });
+    store_.setSendToGameServerCallback(std::move(fn));
 }
 
 void
-QuestManager::setNetworkManager(NetworkManager *nm)
+QuestManager::setQuestUpdateSender(QuestUpdateSender fn)
 {
-    networkManager_ = nm;
+    questUpdateSender_ = std::move(fn);
 }
 
 // =============================================================================
@@ -476,8 +469,18 @@ QuestManager::sendQuestUpdate(int characterId,
         auto charData = services_->getCharacterManager().getCharacterData(characterId);
         clientId = charData.clientId;
     }
+    catch (const std::exception &e)
+    {
+        // Offline/unknown character: no one to notify (normal, not an error).
+        // Debug-level: keeps quest-flow traceability without spamming.
+        log_->debug("[QuestManager] sendQuestUpdate: no character data for char={} ({}), update skipped",
+            characterId, e.what());
+        return;
+    }
     catch (...)
     {
+        log_->debug("[QuestManager] sendQuestUpdate: no character data for char={} (unknown), update skipped",
+            characterId);
         return;
     }
 
@@ -526,13 +529,11 @@ QuestManager::sendQuestUpdate(int characterId,
                                 .build();
     packet["body"] = body;
 
-    if (!networkManager_)
+    if (!questUpdateSender_)
     {
-        log_->error("[QuestManager] sendQuestUpdate: networkManager_ not set");
+        log_->error("[QuestManager] sendQuestUpdate: sender not set");
         return;
     }
 
-    networkManager_->sendResponse(
-        clientSocket,
-        networkManager_->generateResponseMessage("success", packet));
+    questUpdateSender_(clientSocket, packet);
 }

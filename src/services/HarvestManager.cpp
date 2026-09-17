@@ -5,6 +5,8 @@
 #include "services/ClientManager.hpp"
 #include "services/InterestManager.hpp"
 #include "services/InventoryManager.hpp"
+#include "utils/DistanceUtils.hpp"
+#include "utils/RandomUtils.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <algorithm>
 #include <nlohmann/json.hpp>
@@ -13,7 +15,7 @@
 
 HarvestManager::HarvestManager(ItemManager &itemManager, Logger &logger)
     : itemManager_(itemManager), logger_(logger), eventQueue_(nullptr),
-      inventoryManager_(nullptr), clientManager_(nullptr), networkManager_(nullptr), randomGenerator_(randomDevice_())
+      inventoryManager_(nullptr), clientManager_(nullptr), networkManager_(nullptr)
 {
     log_ = logger.getSystem("harvest");
 }
@@ -303,7 +305,7 @@ HarvestManager::getHarvestableCorpsesNearPosition(
     for (const auto &[uid, corpse] : harvestableCorpses_)
     {
         if (!corpse.hasBeenHarvested &&
-            calculateDistance(position, corpse.position) <= radius)
+            DistanceUtils::dist2D(position, corpse.position) <= radius)
         {
             nearbyCorpses.push_back(corpse);
         }
@@ -425,7 +427,7 @@ HarvestManager::validateHarvest(
     }
 
     // Check distance
-    float distance = calculateDistance(playerPosition, corpse.position);
+    float distance = DistanceUtils::dist2D(playerPosition, corpse.position);
     if (distance > corpse.interactionRadius)
     {
         result.failureReason = "Too far from corpse (distance: " +
@@ -455,9 +457,10 @@ HarvestManager::generateHarvestLoot(int mobId)
         if (!itemInfo.isHarvest)
             continue;
 
-        // Roll for drop chance using the item's specific drop chance
-        std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-        float roll = dis(randomGenerator_);
+        // Roll for drop chance using the item's specific drop chance.
+        // RNG: RandomUtils (one thread_local engine per thread; the old
+        // shared member mt19937 raced across ThreadPool workers).
+        float roll = RandomUtils::uniform01();
 
         if (roll <= lootInfo.dropChance)
         {
@@ -465,8 +468,7 @@ HarvestManager::generateHarvestLoot(int mobId)
             int quantity = lootInfo.minQuantity;
             if (lootInfo.maxQuantity > lootInfo.minQuantity)
             {
-                std::uniform_int_distribution<int> qtyDist(lootInfo.minQuantity, lootInfo.maxQuantity);
-                quantity = qtyDist(randomGenerator_);
+                quantity = RandomUtils::rangeInt(lootInfo.minQuantity, lootInfo.maxQuantity);
             }
             loot.emplace_back(lootInfo.itemId, quantity);
 
@@ -622,7 +624,7 @@ HarvestManager::pickupCorpseLoot(int characterId, int corpseUID, const std::vect
     }
 
     // Проверяем дистанцию
-    float distance = calculateDistance(playerPosition, corpse.position);
+    float distance = DistanceUtils::dist2D(playerPosition, corpse.position);
     if (distance > corpse.interactionRadius)
     {
         logger_.logError("[HARVEST] Player too far from corpse for loot pickup: " +
@@ -992,10 +994,5 @@ HarvestManager::broadcastCorpseRemoved(int corpseUID)
     }
 }
 
-float
-HarvestManager::calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2) const
-{
-    float dx = pos1.positionX - pos2.positionX;
-    float dy = pos1.positionY - pos2.positionY;
-    return std::sqrt(dx * dx + dy * dy);
-}
+// NOTE: planar distance now lives in utils/DistanceUtils (dist2D) — the
+// per-class copy was removed (Wave 2.1).

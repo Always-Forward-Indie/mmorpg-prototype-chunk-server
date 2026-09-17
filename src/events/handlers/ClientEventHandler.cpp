@@ -209,6 +209,8 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
             {
                 auto liveSocket = gameServices_.getClientManager().getClientSocket(passedClientData.clientId);
                 bool live = false;
+                // is_open() is noexcept in practice; the guard defends the
+                // fail-closed direction (a throwing probe must read as dead).
                 try { live = liveSocket && liveSocket->is_open(); } catch (...) {}
                 if (live)
                 {
@@ -333,7 +335,8 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 CharacterDataStruct existingChar = gameServices_.getCharacterManager().getCharacterData(passedClientData.characterId);
                 if (existingChar.characterId > 0)
                 {
-                    // Analytics: session_end
+                    // Analytics: session_end. Best-effort: must never fail the
+                    // disconnect teardown below.
                     if (!existingChar.sessionId.empty())
                     {
                         try
@@ -351,6 +354,11 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                             ap["body"]["zoneId"] = zoneId;
                             ap["body"]["payload"] = nlohmann::json::object();
                             gameServerWorker_.sendDataToGameServer(ap.dump() + "\n");
+                        }
+                        catch (const std::exception &e)
+                        {
+                            log_->debug("session_end analytics for char={} skipped ({})",
+                                existingChar.characterId, e.what());
                         }
                         catch (...)
                         {

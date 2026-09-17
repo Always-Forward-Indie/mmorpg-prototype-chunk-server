@@ -21,6 +21,9 @@ BaseEventHandler::BaseEventHandler(
 bool
 BaseEventHandler::isPlayerAlive(int characterId)
 {
+    // Probe with safe default: unknown character counts as not-alive.
+    // Deliberately silent — called on hot paths, and "missing" is routine
+    // (offline chars), not an error.
     try
     {
         const auto &charData = gameServices_.getCharacterManager().getCharacterData(characterId);
@@ -266,6 +269,8 @@ BaseEventHandler::broadcastToClientIds(
 bool
 BaseEventHandler::charPos(int characterId, float &x, float &y)
 {
+    // Probe with safe default (see isPlayerAlive): false routes the caller to
+    // fail-open broadcast, so silence here is correct, not a lost error.
     if (characterId <= 0)
         return false;
     try
@@ -286,6 +291,7 @@ BaseEventHandler::charPos(int characterId, float &x, float &y)
 bool
 BaseEventHandler::mobPos(int mobUid, float &x, float &y)
 {
+    // Probe with safe default (see isPlayerAlive).
     if (mobUid <= 0)
         return false;
     try
@@ -306,6 +312,7 @@ BaseEventHandler::mobPos(int mobUid, float &x, float &y)
 int
 BaseEventHandler::clientForCharacter(int characterId)
 {
+    // Probe with safe default (see isPlayerAlive): 0 = no participant.
     if (characterId <= 0)
         return 0;
     try
@@ -394,6 +401,8 @@ BaseEventHandler::broadcastPositional(const std::string &status, const nlohmann:
 // Resolve (x, y, participants) from a broadcast packet body. Returns false
 // when the shape is unknown or the position unresolvable => caller fails
 // open to legacy broadcast-all. ECasterType::MOB == 3 (shared convention).
+// The catch below is the fail-open itself: an unparsable packet routes to
+// broadcast-all, which is always safe — hence silent by design.
 bool
 BaseEventHandler::resolveRoute(BaseEventHandler &h, const nlohmann::json &packet,
     float &x, float &y, std::vector<int> &participants)

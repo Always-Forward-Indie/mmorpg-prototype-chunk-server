@@ -1,7 +1,7 @@
 #include "services/CombatCalculator.hpp"
+#include "utils/RandomUtils.hpp"
 #include <algorithm>
 #include <cmath>
-#include <random>
 
 CombatCalculator::CombatCalculator(GameConfigService *configService)
     : gameConfig_(configService)
@@ -11,9 +11,9 @@ CombatCalculator::CombatCalculator(GameConfigService *configService)
 float
 CombatCalculator::rollUniform01()
 {
-    thread_local std::mt19937 gen{std::random_device{}()};
-    thread_local std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-    return dis(gen);
+    // Single source of truth: one thread_local engine per thread (see RandomUtils.hpp).
+    // Kept as a member so existing call sites and tests are untouched.
+    return RandomUtils::uniform01();
 }
 
 void
@@ -239,7 +239,7 @@ CombatCalculator::calculateHealAmount(
     int rawHeal = static_cast<int>(std::lround(skill.flatAdd + (scaleStat * skill.coeff)));
     rawHeal = std::max(1, rawHeal);
 
-    const float variance = cfg("combat.heal_variance", 0.10f);
+    const float variance = cfg("combat.heal_variance", kDefaultHealVariance);
     float factor = 1.0f + (rollUniform01() * 2.0f - 1.0f) * variance;
     return std::max(1, static_cast<int>(std::lround(rawHeal * factor)));
 }
@@ -254,7 +254,7 @@ CombatCalculator::calculateBaseDamage(
     rawDamage = std::max(1, rawDamage);
 
     // Разброс урона ±N%: каждый удар не должен быть детерминированным числом
-    const float variance = cfg("combat.damage_variance", 0.12f);
+    const float variance = cfg("combat.damage_variance", kDefaultDamageVariance);
     float factor = 1.0f + (rollUniform01() * 2.0f - 1.0f) * variance; // [1-v, 1+v]
     return std::max(1, static_cast<int>(std::lround(rawDamage * factor)));
 }
@@ -268,7 +268,7 @@ CombatCalculator::calculateBaseDamage(
     int rawDamage = static_cast<int>(std::lround(skill.flatAdd + (scaleStatValue * skill.coeff)));
     rawDamage = std::max(1, rawDamage);
 
-    const float variance = cfg("combat.damage_variance", 0.12f);
+    const float variance = cfg("combat.damage_variance", kDefaultDamageVariance);
     float factor = 1.0f + (rollUniform01() * 2.0f - 1.0f) * variance;
     return std::max(1, static_cast<int>(std::lround(rawDamage * factor)));
 }

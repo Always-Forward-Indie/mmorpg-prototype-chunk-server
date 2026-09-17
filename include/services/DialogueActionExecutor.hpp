@@ -150,6 +150,12 @@ class DialogueActionExecutor
         PlayerContextStruct &ctx,
         ActionResult &result);
 
+    /// Best-effort analytics emit: failures are debug-logged, never thrown.
+    /// (One helper replaced five identical silent try/catch blocks, Wave 1.3.)
+    void sendDialogueAnalytics(const std::string &analyticsType,
+        int characterId,
+        const nlohmann::json &payload);
+
     GameServices &services_;
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;

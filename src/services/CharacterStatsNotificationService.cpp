@@ -6,6 +6,7 @@
 #include "services/GameZoneManager.hpp"
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
+#include "services/ItemSoulTiers.hpp"
 #include "services/StatsPacketBuilder.hpp"
 #include "utils/Logger.hpp"
 #include <chrono>
@@ -185,21 +186,18 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
         std::chrono::system_clock::now().time_since_epoch())
                     .count();
 
-    // Item Soul: resolve kill-count tier bonus to the equipped weapon's primary attribute
+    // Item Soul: resolve kill-count tier bonus to the equipped weapon's primary attribute.
+    // Best-effort: a broken lookup must not fail the whole stats packet
+    // (bonus silently missing is still better than no stats at all, and the
+    // debug line below keeps the "invisible generosity" traceable).
+    // Tiers from ItemSoulTiers (single source of truth, Wave 2.4).
     try
     {
         auto weaponOpt = inventory_.getEquippedWeapon(characterId);
         if (weaponOpt.has_value())
         {
-            const auto &cfg = gameConfig_;
-            const int kc = weaponOpt->killCount;
-            const int t1 = cfg.getInt("item_soul.tier1_kills", 50);
-            const int t2 = cfg.getInt("item_soul.tier2_kills", 200);
-            const int t3 = cfg.getInt("item_soul.tier3_kills", 500);
-            const int soulBonus = (kc >= t3)   ? cfg.getInt("item_soul.tier3_bonus_flat", 3)
-                                  : (kc >= t2) ? cfg.getInt("item_soul.tier2_bonus_flat", 2)
-                                  : (kc >= t1) ? cfg.getInt("item_soul.tier1_bonus_flat", 1)
-                                               : 0;
+            const ItemSoulTiers::Table soulTiers = ItemSoulTiers::Table::load(gameConfig_);
+            const int soulBonus = ItemSoulTiers::bonusForKills(soulTiers, weaponOpt->killCount);
             if (soulBonus > 0)
             {
                 const auto &wItem = items_.getItemById(weaponOpt->itemId);
@@ -215,6 +213,11 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
                 }
             }
         }
+    }
+    catch (const std::exception &e)
+    {
+        log_->debug("Item Soul tier bonus skipped for char={} ({}), stats sent without it",
+            characterId, e.what());
     }
     catch (...)
     {

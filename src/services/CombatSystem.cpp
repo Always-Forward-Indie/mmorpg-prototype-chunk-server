@@ -624,8 +624,17 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
                     result.finalTargetMana = targetData.characterCurrentMana;
                     result.healthPopulated = true;
                 }
+                catch (const std::exception &e)
+                {
+                    // Best-effort HP echo for the PvP-block error result; the
+                    // target may be offline. Debug-level, keeps combat trace.
+                    log_->debug("[COMBAT] PvP-block HP echo: no data for player {} ({}), leaving unpopulated",
+                        targetId, e.what());
+                }
                 catch (...)
                 {
+                    log_->debug("[COMBAT] PvP-block HP echo: no data for player {} (unknown), leaving unpopulated",
+                        targetId);
                 }
                 return result;
             }

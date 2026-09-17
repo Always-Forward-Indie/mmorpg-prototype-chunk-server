@@ -402,6 +402,8 @@ CombatEventHandler::parsePlayerAttackRequest(const nlohmann::json &requestData,
     }
     catch (...)
     {
+        // Malformed request JSON: false makes the caller reject with an error
+        // response, so the reason is reported upstream, not lost here.
         return false;
     }
 }
@@ -456,6 +458,8 @@ CombatEventHandler::parseSkillUsageRequest(const nlohmann::json &requestData,
     }
     catch (...)
     {
+        // Malformed request JSON: false makes the caller reject with an error
+        // response, so the reason is reported upstream, not lost here.
         return false;
     }
 }

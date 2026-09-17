@@ -156,16 +156,14 @@ class LootManager
     // Thread safety
     mutable std::shared_mutex droppedItemsMutex_;
 
-    // Random number generation for loot drops (thread-local engine: the old
-    // shared mt19937 raced across ThreadPool workers, same class as the
-    // CombatCalculator fix).
+    // Random number generation for loot drops uses RandomUtils (one
+    // thread_local engine per thread; the old shared mt19937 raced across
+    // ThreadPool workers, same class as the CombatCalculator fix).
 
     // Generate unique UID for dropped items
     int generateDroppedItemUID();
     static std::atomic<int> nextDroppedItemUID_;
 
-    /**
-     * @brief Calculate distance between two positions
-     */
-    float calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2) const;
+    // NOTE: planar distance now lives in utils/DistanceUtils (dist2D) — the
+    // per-class copy was removed (Wave 2.1).
 };

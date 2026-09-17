@@ -75,14 +75,11 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
         snapshot = cit->second;
     }
 
-    const float t1 = gameConfig_.getFloat("mastery.tier1_value", 20.f);
-    const float t2 = gameConfig_.getFloat("mastery.tier2_value", 50.f);
-    const float t3 = gameConfig_.getFloat("mastery.tier3_value", 80.f);
-    const float t4 = gameConfig_.getFloat("mastery.tier4_value", 100.f);
+    const MasteryTiers tiers = this->tiers();
 
     for (const auto &[masterySlug, value] : snapshot)
     {
-        if (value >= t1)
+        if (value >= tiers.t1)
         {
             ActiveEffectStruct eff;
             eff.effectSlug = masterySlug + "_t1_damage";
@@ -94,7 +91,7 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
             eff.tickMs = 0;
             characters_.addActiveEffect(characterId, eff);
         }
-        if (value >= t2)
+        if (value >= tiers.t2)
         {
             ActiveEffectStruct eff;
             eff.effectSlug = masterySlug + "_t2_damage";
@@ -106,7 +103,7 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
             eff.tickMs = 0;
             characters_.addActiveEffect(characterId, eff);
         }
-        if (value >= t3)
+        if (value >= tiers.t3)
         {
             ActiveEffectStruct eff;
             eff.effectSlug = masterySlug + "_t3_crit";
@@ -118,7 +115,7 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
             eff.tickMs = 0;
             characters_.addActiveEffect(characterId, eff);
         }
-        if (value >= t4)
+        if (value >= tiers.t4)
         {
             ActiveEffectStruct eff;
             eff.effectSlug = masterySlug + "_t4_parry";
@@ -171,6 +168,17 @@ MasteryManager::fillMasteryContext(int characterId,
 }
 
 // ── Progression ────────────────────────────────────────────────────────────
+
+MasteryManager::MasteryTiers
+MasteryManager::tiers() const
+{
+    MasteryTiers t;
+    t.t1 = gameConfig_.getFloat("mastery.tier1_value", t.t1);
+    t.t2 = gameConfig_.getFloat("mastery.tier2_value", t.t2);
+    t.t3 = gameConfig_.getFloat("mastery.tier3_value", t.t3);
+    t.t4 = gameConfig_.getFloat("mastery.tier4_value", t.t4);
+    return t;
+}
 
 float
 MasteryManager::calculateDelta(float currentValue, int charLevel, int targetLevel) const
@@ -225,12 +233,9 @@ MasteryManager::onPlayerAttack(int characterId,
         const int flushEvery = gameConfig_.getInt("mastery.db_flush_every_hits", 10);
 
         // Check tier boundaries outside the integer modulo to handle rounding
-        const float t1 = gameConfig_.getFloat("mastery.tier1_value", 20.f);
-        const float t2 = gameConfig_.getFloat("mastery.tier2_value", 50.f);
-        const float t3 = gameConfig_.getFloat("mastery.tier3_value", 80.f);
-        const float t4 = gameConfig_.getFloat("mastery.tier4_value", 100.f);
+        const MasteryTiers tiers = this->tiers();
 
-        bool tierCrossed = (oldValue < t1 && newValue >= t1) || (oldValue < t2 && newValue >= t2) || (oldValue < t3 && newValue >= t3) || (oldValue < t4 && newValue >= t4);
+        bool tierCrossed = (oldValue < tiers.t1 && newValue >= tiers.t1) || (oldValue < tiers.t2 && newValue >= tiers.t2) || (oldValue < tiers.t3 && newValue >= tiers.t3) || (oldValue < tiers.t4 && newValue >= tiers.t4);
 
         shouldFlush = (counter % flushEvery == 0) || tierCrossed;
     }
@@ -248,10 +253,7 @@ MasteryManager::checkAndApplyMilestone(int characterId,
     float oldValue,
     float newValue)
 {
-    const float t1 = gameConfig_.getFloat("mastery.tier1_value", 20.f);
-    const float t2 = gameConfig_.getFloat("mastery.tier2_value", 50.f);
-    const float t3 = gameConfig_.getFloat("mastery.tier3_value", 80.f);
-    const float t4 = gameConfig_.getFloat("mastery.tier4_value", 100.f);
+    const MasteryTiers tiers = this->tiers();
 
     auto applyEffect = [&](const std::string &effectSlug,
                            const std::string &attrSlug,
@@ -284,18 +286,27 @@ MasteryManager::checkAndApplyMilestone(int characterId,
                 titles_->checkAndGrantTitles(characterId, "mastery", titleEvent);
             }
         }
+        catch (const std::exception &e)
+        {
+            // Warn, not debug: the tier bonus may be partially applied
+            // (effect without notify/title). Needs eyes, keeps running.
+            log_->warn("[Mastery] milestone side-effects failed for char={} mastery={} tier={} ({}), bonus may be partial",
+                characterId, masterySlug, effectSlug, e.what());
+        }
         catch (...)
         {
+            log_->warn("[Mastery] milestone side-effects failed for char={} mastery={} tier={} (unknown), bonus may be partial",
+                characterId, masterySlug, effectSlug);
         }
     };
 
-    if (oldValue < t1 && newValue >= t1)
+    if (oldValue < tiers.t1 && newValue >= tiers.t1)
         applyEffect(masterySlug + "_t1_damage", getTargetAttribute(masterySlug), 1.0f, 1);
-    if (oldValue < t2 && newValue >= t2)
+    if (oldValue < tiers.t2 && newValue >= tiers.t2)
         applyEffect(masterySlug + "_t2_damage", getTargetAttribute(masterySlug), 4.0f, 2); // additive +4 (total +5)
-    if (oldValue < t3 && newValue >= t3)
+    if (oldValue < tiers.t3 && newValue >= tiers.t3)
         applyEffect(masterySlug + "_t3_crit", "crit_chance", 3.0f, 3);
-    if (oldValue < t4 && newValue >= t4)
+    if (oldValue < tiers.t4 && newValue >= tiers.t4)
         applyEffect(masterySlug + "_t4_parry", "parry_chance", 2.0f, 4);
 }
 

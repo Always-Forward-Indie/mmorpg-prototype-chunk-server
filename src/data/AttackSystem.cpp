@@ -1,4 +1,5 @@
 #include "data/AttackSystem.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/Logger.hpp"
 #include <algorithm>
 #include <cmath>
@@ -165,7 +166,7 @@ AttackSystem::findPotentialTargets(
         candidate.targetId = target.characterId;
         candidate.position = target.characterPosition;
         candidate.data = const_cast<CharacterDataStruct *>(&target);
-        candidate.distance = calculateDistance(attackerPos, target.characterPosition);
+        candidate.distance = DistanceUtils::dist3D(attackerPos, target.characterPosition);
         candidate.healthPercent = static_cast<float>(target.characterCurrentHealth) / target.characterMaxHealth;
         candidate.threatLevel = calculateThreatLevel(target);
         candidate.role = determineCombatRole(target);
@@ -560,7 +561,7 @@ AttackSystem::calculateHitChance(
     float hitChance = baseHitChance + (accuracy - evasion) * 0.01f;
 
     // Apply range penalty for long-range attacks
-    float distance = calculateDistance(attacker.characterPosition, target.characterPosition);
+    float distance = DistanceUtils::dist3D(attacker.characterPosition, target.characterPosition);
     if (distance > action.maxRange * 0.8f)
     {
         float rangePenalty = (distance - action.maxRange * 0.8f) / (action.maxRange * 0.2f);
@@ -570,22 +571,13 @@ AttackSystem::calculateHitChance(
     return std::clamp(hitChance, 0.05f, 0.95f); // Clamp between 5% and 95%
 }
 
-float
-AttackSystem::calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2)
-{
-    float dx = pos1.positionX - pos2.positionX;
-    float dy = pos1.positionY - pos2.positionY;
-    float dz = pos1.positionZ - pos2.positionZ;
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
-}
-
 bool
 AttackSystem::hasLineOfSight(const PositionStruct &pos1, const PositionStruct &pos2)
 {
     // Simplified line of sight check
     // In a real implementation, this would check for obstacles, terrain, etc.
 
-    float distance = calculateDistance(pos1, pos2);
+    float distance = DistanceUtils::dist3D(pos1, pos2);
 
     // For now, assume line of sight exists if distance is reasonable
     return distance <= 100.0f; // Maximum line of sight distance

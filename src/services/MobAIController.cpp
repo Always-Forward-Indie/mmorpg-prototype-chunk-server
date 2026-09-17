@@ -8,6 +8,7 @@
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
 #include <cmath>
@@ -107,16 +108,9 @@ MobAIController::setCombatSystem(CombatSystem *cs)
 }
 
 // ---------------------------------------------------------------------------
-// Private helpers
+// Private helpers (planar distance now lives in utils/DistanceUtils — the
+// per-class copy was removed, Wave 2.1).
 // ---------------------------------------------------------------------------
-
-float
-MobAIController::calculateDistance(const PositionStruct &a, const PositionStruct &b)
-{
-    float dx = a.positionX - b.positionX;
-    float dy = a.positionY - b.positionY;
-    return std::sqrt(dx * dx + dy * dy);
-}
 
 // ---------------------------------------------------------------------------
 // selectAttackSkill — pick skill before entering PREPARING_ATTACK (plan §2.1)
@@ -169,43 +163,21 @@ MobAIController::countMobsEngagingTarget(int targetPlayerId, int excludeUID, flo
         target.characterPosition.positionY,
         range);
 
-    int count = 0;
+    // Counting kernel lives in MobAIFormulas (pure, unit-tested); here only
+    // data fetching + attack-state mapping.
+    std::vector<MobAIFormulas::MeleeOccupant> occupants;
+    occupants.reserve(nearbyMobs.size());
     for (const auto &nearMob : nearbyMobs)
     {
-        if (nearMob.uid == excludeUID || nearMob.isDead)
-            continue;
-
-        auto md = mobMovement_.getMobMovementData(nearMob.uid);
-        if (md.targetPlayerId != targetPlayerId)
-            continue;
-
-        if (md.combatState == MobCombatState::PREPARING_ATTACK ||
-            md.combatState == MobCombatState::ATTACKING ||
-            md.combatState == MobCombatState::ATTACK_COOLDOWN)
-        {
-            ++count;
-        }
+        const auto md = mobMovement_.getMobMovementData(nearMob.uid);
+        occupants.push_back({nearMob.uid,
+            nearMob.isDead,
+            md.targetPlayerId,
+            md.combatState == MobCombatState::PREPARING_ATTACK ||
+                md.combatState == MobCombatState::ATTACKING ||
+                md.combatState == MobCombatState::ATTACK_COOLDOWN});
     }
-    return count;
-}
-
-bool
-MobAIController::canAttackPlayer(const MobDataStruct &mob, int targetPlayerId, const MobMovementData &movementData)
-{
-    // NOTE: attack cooldown timing is already gated by the ATTACK_COOLDOWN combat state;
-    // checking lastAttackTime here would conflict with postAttackCooldown and cause the
-    // mob to spin between CHASING and PREPARING_ATTACK without ever landing a hit.
-
-    // Check player existence + life
-    auto targetPlayer = characters_.getCharacterById(targetPlayerId);
-    if (targetPlayer.characterId == 0)
-        return false;
-
-    if (!isTargetAlive(targetPlayerId))
-        return false;
-
-    float distance = calculateDistance(mob.position, targetPlayer.characterPosition);
-    return distance <= mob.attackRange;
+    return MobAIFormulas::countMeleeOccupants(occupants, targetPlayerId, excludeUID);
 }
 
 void
@@ -378,7 +350,7 @@ MobAIController::handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct &zo
                 if (!isTargetAlive(player.characterId))
                     continue;
 
-                float d = calculateDistance(mob.position, player.characterPosition);
+                float d = DistanceUtils::dist2D(mob.position, player.characterPosition);
 
                 // Track closest as fallback
                 if (d < closestDistance)
@@ -420,7 +392,7 @@ MobAIController::handlePlayerAggro(MobDataStruct &mob, const SpawnZoneStruct &zo
         auto target = characters_.getCharacterById(movementData.targetPlayerId);
         if (target.characterId > 0 && isTargetAlive(movementData.targetPlayerId))
         {
-            float dist = calculateDistance(mob.position, target.characterPosition);
+            float dist = DistanceUtils::dist2D(mob.position, target.characterPosition);
             const float kCasterMinRange = mob.attackRange * 0.5f;
             const float kCasterPrefRange = mob.attackRange * 1.8f;
 
@@ -583,7 +555,7 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
                         auto player = characters_.getCharacterById(it->first);
                         if (player.characterId > 0)
                         {
-                            float d = calculateDistance(mob.position, player.characterPosition);
+                            float d = DistanceUtils::dist2D(mob.position, player.characterPosition);
                             if (d > mob.aggroRange)
                             {
                                 it->second = MobAIFormulas::applyThreatDecay(it->second, decayFactor);
@@ -621,7 +593,7 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
 
                 float timeSinceChasing = currentTime - movementData.stateChangeTime;
                 const float maxChaseTime = mob.chaseDuration; // per-mob value (plan §4.2)
-                float distance = calculateDistance(mob.position, targetPlayer.characterPosition);
+                float distance = DistanceUtils::dist2D(mob.position, targetPlayer.characterPosition);
                 // Chase timeout governs PURSUIT, not in-range combat: a live
                 // target standing inside attackRange keeps the fight (attack
                 // cooldowns already gate DPS). Without this, mobs drop every

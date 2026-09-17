@@ -11,6 +11,7 @@
 #include "services/GameZoneManager.hpp"
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
+#include "services/ItemSoulTiers.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
@@ -264,4 +265,55 @@ TEST_F(RewardFixture, ReputationHook)
     ASSERT_TRUE(instances.registerMobInstance(m));
     rewards.execute(9001, 1);
     EXPECT_EQ(reputation.getReputation(1, "wolves"), 5);
+}
+
+TEST(ItemSoulTiers, DefaultsMatchLegacyValues)
+{
+    // Wave 2.4 pin: the table both consumers previously hand-synced.
+    EXPECT_EQ(ItemSoulTiers::kDefaultTier1Kills, 50);
+    EXPECT_EQ(ItemSoulTiers::kDefaultTier2Kills, 200);
+    EXPECT_EQ(ItemSoulTiers::kDefaultTier3Kills, 500);
+    EXPECT_EQ(ItemSoulTiers::kDefaultTier1BonusFlat, 1);
+    EXPECT_EQ(ItemSoulTiers::kDefaultTier2BonusFlat, 2);
+    EXPECT_EQ(ItemSoulTiers::kDefaultTier3BonusFlat, 3);
+}
+
+TEST(ItemSoulTiers, BonusMappingAndBoundaries)
+{
+    Logger logger{"test"};
+    GameConfigService cfg{logger}; // empty: all defaults
+    const auto t = ItemSoulTiers::Table::load(cfg);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 0), 0);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 49), 0);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 50), 1);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 199), 1);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 200), 2);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 499), 2);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 500), 3);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 100000), 3);
+    EXPECT_TRUE(ItemSoulTiers::isTierBoundary(t, 50));
+    EXPECT_TRUE(ItemSoulTiers::isTierBoundary(t, 200));
+    EXPECT_TRUE(ItemSoulTiers::isTierBoundary(t, 500));
+    EXPECT_FALSE(ItemSoulTiers::isTierBoundary(t, 51));
+    EXPECT_FALSE(ItemSoulTiers::isTierBoundary(t, 0));
+}
+
+TEST(ItemSoulTiers, CustomConfigRespected)
+{
+    // A live-tuned table moves both consumers together (the old desync mode).
+    Logger logger{"test"};
+    GameConfigService cfg{logger};
+    cfg.setConfig({{"item_soul.tier1_kills", "10"},
+        {"item_soul.tier2_kills", "20"},
+        {"item_soul.tier3_kills", "30"},
+        {"item_soul.tier1_bonus_flat", "5"},
+        {"item_soul.tier2_bonus_flat", "6"},
+        {"item_soul.tier3_bonus_flat", "7"}});
+    const auto t = ItemSoulTiers::Table::load(cfg);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 9), 0);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 10), 5);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 25), 6);
+    EXPECT_EQ(ItemSoulTiers::bonusForKills(t, 30), 7);
+    EXPECT_TRUE(ItemSoulTiers::isTierBoundary(t, 10));
+    EXPECT_FALSE(ItemSoulTiers::isTierBoundary(t, 50));
 }

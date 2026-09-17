@@ -6,6 +6,8 @@
 #include "events/handlers/MobEventHandler.hpp"
 #include "events/handlers/NPCEventHandler.hpp"
 #include "events/handlers/WorldObjectEventHandler.hpp"
+#include "services/MovementValidation.hpp"
+#include "utils/MovementUnits.hpp"
 #include "utils/TimestampUtils.hpp"
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
@@ -519,7 +521,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
             {
                 int cid = characterData.characterId;
 
-                // Analytics: session_start
+                // Analytics: session_start (zone lookup is best-effort, 0 = unknown)
                 {
                     int zoneId = 0;
                     try
@@ -527,6 +529,11 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                         auto zoneOpt = gameServices_.getGameZoneManager().getZoneForPosition(characterData.characterPosition);
                         if (zoneOpt.has_value())
                             zoneId = zoneOpt->id;
+                    }
+                    catch (const std::exception &e)
+                    {
+                        log_->debug("session_start analytics: zone lookup failed for char={} ({}), zoneId=0",
+                            cid, e.what());
                     }
                     catch (...)
                     {
@@ -643,6 +650,8 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
             }
 
             // ── Server-authoritative movement speed validation ────────────────────
+            // Math lives in MovementValidation (pure, unit-tested); here only
+            // lookups, logging, correction responses and state writes.
             {
                 CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(movementData.characterId);
                 // Use wall-clock time NOW instead of packet's serverRecvMs.
@@ -656,91 +665,50 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                 {
                     const float deltaMs = static_cast<float>(srvNowMs - charData.lastMoveSrvMs);
 
-                    // When packets are processed in a rapid burst (same event batch),
-                    // deltaMs can still be small. Use a minimum plausible frame interval
-                    // (16ms ≈ 60fps) so the client is never penalised for server-side batching.
-                    static constexpr float MIN_DELTA_MS = 16.0f;
-                    const float effectiveDelta = (deltaMs < MIN_DELTA_MS) ? MIN_DELTA_MS : deltaMs;
-
-                    float moveSpeed = 7.0f;
-                    bool moveSpeedFound = false;
-                    for (const auto &attr : charData.attributes)
-                    {
-                        if (attr.slug == "move_speed")
-                        {
-                            moveSpeed = static_cast<float>(attr.value);
-                            moveSpeedFound = true;
-                            break;
-                        }
-                    }
-
-                    // Apply active effects that additively modify move_speed (non-tick stat modifiers).
-                    // Without this, speed buffs/debuffs from skills/items/quests are not accounted for,
-                    // causing false-positive positionCorrection rejections on the buffed client.
-                    {
-                        const int64_t nowSec = srvNowMs / 1000;
-                        for (const auto &eff : charData.activeEffects)
-                        {
-                            if (eff.attributeSlug == "move_speed" && eff.tickMs == 0 &&
-                                (eff.expiresAt == 0 || eff.expiresAt > nowSec))
-                            {
-                                moveSpeed += eff.value;
-                            }
-                        }
-                    }
-
-                    // move_speed is an abstract stat (DB stores e.g. 5), not world-space units/s.
-                    // The client applies the same scale to set MaxWalkSpeed.
-                    // Scale factor deduced from logs: ~193 actual units/s / 5 stat = ~38.6.
-                    // Adjust MOVE_SPEED_SCALE if the Unreal project changes the conversion formula.
-                    static constexpr float MOVE_SPEED_SCALE = 40.0f;
-                    const float moveSpeedUnits = moveSpeed * MOVE_SPEED_SCALE;
+                    const auto resolved = MovementValidation::resolveMoveSpeed(
+                        charData.attributes, charData.activeEffects, srvNowMs / 1000);
+                    const float moveSpeedUnits =
+                        resolved.speed * MovementUnits::kMoveSpeedScale;
 
                     log_->debug("[MOVE_VALIDATE] char {} move_speed_stat={:.1f} (found={}, attrs={}, effects={}) -> {:.1f} units/s",
                         movementData.characterId,
-                        moveSpeed,
-                        moveSpeedFound,
+                        resolved.speed,
+                        resolved.fromAttributes,
                         charData.attributes.size(),
                         charData.activeEffects.size(),
                         moveSpeedUnits);
 
                     const float speedBuffer = gameServices_.getGameConfigService().getFloat("movement.speed_buffer_multiplier", 1.3f);
-                    const float maxDist = moveSpeedUnits * (effectiveDelta / 1000.0f) * speedBuffer;
-                    const float dx = movementData.position.positionX - charData.lastValidatedPosition.positionX;
-                    const float dy = movementData.position.positionY - charData.lastValidatedPosition.positionY;
+                    const float maxDist = MovementValidation::maxDistanceFor(moveSpeedUnits, deltaMs, speedBuffer);
                     // posZ is the vertical axis (altitude/terrain height); gravity and slopes are
                     // not bounded by move_speed, so the speed check uses the horizontal XY plane only.
-                    const float actualDist = std::sqrt(dx * dx + dy * dy);
+                    const float actualDist = DistanceUtils::dist2D(
+                        movementData.position, charData.lastValidatedPosition);
 
                     if (actualDist > maxDist)
                     {
                         // Sliding window fallback — tolerates VPN jitter where
                         // packets arrive in bursts.  Checks average speed over
                         // the last N valid positions instead of just the last one.
-                        bool windowPassed = false;
-                        if (charData.movementWindowCount >= 2)
+                        const auto verdict = MovementValidation::checkWindow(
+                            charData.movementWindow,
+                            charData.movementWindowCount,
+                            charData.movementWindowHead,
+                            CharacterDataStruct::MOVEMENT_WINDOW_SIZE,
+                            movementData.position,
+                            srvNowMs,
+                            moveSpeedUnits,
+                            speedBuffer);
+                        const bool windowPassed = verdict.passed;
+                        if (charData.movementWindowCount >= 2 && verdict.deltaMs > 0.0f)
                         {
-                            const int oldestIdx = (charData.movementWindowCount < CharacterDataStruct::MOVEMENT_WINDOW_SIZE)
-                                ? 0
-                                : charData.movementWindowHead;
-                            const auto &oldest = charData.movementWindow[oldestIdx];
-                            const float windowDeltaMs = static_cast<float>(srvNowMs - oldest.srvMs);
-                            if (windowDeltaMs > 0.0f)
-                            {
-                                const float wx = movementData.position.positionX - oldest.position.positionX;
-                                const float wy = movementData.position.positionY - oldest.position.positionY;
-                                const float windowDist = std::sqrt(wx * wx + wy * wy);
-                                const float windowMaxDist = moveSpeedUnits * (windowDeltaMs / 1000.0f) * speedBuffer;
-                                windowPassed = (windowDist <= windowMaxDist);
-
-                                log_->debug("[MOVE_VALIDATE] char {} individual failed ({:.2f} > {:.2f}), window {} (wDist={:.2f}, wMax={:.2f}, wMs={:.0f}, samples={})",
-                                    movementData.characterId,
-                                    actualDist, maxDist,
-                                    windowPassed ? "passed" : "failed",
-                                    windowDist, windowMaxDist,
-                                    windowDeltaMs,
-                                    charData.movementWindowCount);
-                            }
+                            log_->debug("[MOVE_VALIDATE] char {} individual failed ({:.2f} > {:.2f}), window {} (wDist={:.2f}, wMax={:.2f}, wMs={:.0f}, samples={})",
+                                movementData.characterId,
+                                actualDist, maxDist,
+                                windowPassed ? "passed" : "failed",
+                                verdict.dist, verdict.maxDist,
+                                verdict.deltaMs,
+                                verdict.samples);
                         }
 
                         if (!windowPassed)
@@ -791,7 +759,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
             // Interest v2 (phase 5a): update spatial subscription; every newly
             // entered cell gets an enter-snapshot (mobs + corpses + NPCs) so
             // returning clients recreate entities instead of seeing ghosts.
-            // Never fails the move.
+            // Never fails the move. Debug-level: move is the hottest path.
             try
             {
                 auto &interest = gameServices_.getInterestManager();
@@ -821,8 +789,15 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                     }
                 }
             }
+            catch (const std::exception &e)
+            {
+                log_->debug("Interest move hook failed for client {} ({}), move accepted anyway",
+                    clientID, e.what());
+            }
             catch (...)
             {
+                log_->debug("Interest move hook failed for client {} (unknown), move accepted anyway",
+                    clientID);
             }
 
             // Send ground items snapshot if player has moved far enough
@@ -1141,6 +1116,7 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
 
     // Seed interest subscription at spawn (stationary clients never move, so
     // the move-path hook alone would leave them unsubscribed = fail-open).
+    // Never fails player-ready; once per join, so debug is cheap.
     try
     {
         gameServices_.getInterestManager().onPlayerMoved(
@@ -1148,8 +1124,15 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
             characterData.characterPosition.positionX,
             characterData.characterPosition.positionY);
     }
+    catch (const std::exception &e)
+    {
+        log_->debug("[PLAYER_READY] interest seed failed for client {} ({}), continuing",
+            clientID, e.what());
+    }
     catch (...)
     {
+        log_->debug("[PLAYER_READY] interest seed failed for client {} (unknown), continuing",
+            clientID);
     }
 
     // 1. NPCs in range
@@ -1444,6 +1427,11 @@ CharacterEventHandler::processPendingJoinRequests(int characterId)
                 auto zoneOpt = gameServices_.getGameZoneManager().getZoneForPosition(characterData.characterPosition);
                 if (zoneOpt.has_value())
                     zoneId = zoneOpt->id;
+            }
+            catch (const std::exception &e)
+            {
+                log_->debug("session_start analytics: zone lookup failed for char={} ({}), zoneId=0",
+                    characterId, e.what());
             }
             catch (...)
             {

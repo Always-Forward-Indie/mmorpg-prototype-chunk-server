@@ -207,6 +207,8 @@ HarvestEventHandler::handleGetNearbyCorpses(const Event &event)
             const auto &data = event.getData();
             // GET_NEARBY_CORPSES carries CharacterDataStruct from the dispatcher.
             // (Parsed defensively: dispatcher context always sets it.)
+            // bad_variant_access => fall through to the client-record lookup
+            // below (explicit fallback, not a swallowed error).
             try
             {
                 // CharacterDataStruct has characterId field; access via known layout.
@@ -611,7 +613,8 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                     networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", notifResp));
                 }
 
-                // Analytics: item_acquired (corpse loot)
+                // Analytics: item_acquired (corpse loot). Best-effort: must
+                // never fail the already-completed pickup.
                 try
                 {
                     CharacterDataStruct pickerData = gameServices_.getCharacterManager().getCharacterData(pickupRequest.characterId);
@@ -635,6 +638,11 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                             gameServerWorker_.sendDataToGameServer(ap.dump() + "\n");
                         }
                     }
+                }
+                catch (const std::exception &e)
+                {
+                    log_->debug("corpse loot analytics for char={} skipped ({})",
+                        pickupRequest.characterId, e.what());
                 }
                 catch (...)
                 {

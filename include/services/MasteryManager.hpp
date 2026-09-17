@@ -109,6 +109,18 @@ class MasteryManager
     }
 
   private:
+    // Single source of truth for mastery tier thresholds (Wave 2.5). Three
+    // call sites previously hand-synced these literals; live values come
+    // from game_config (mastery.tier{1..4}_value) with these as fallbacks.
+    struct MasteryTiers
+    {
+        float t1 = 20.f;
+        float t2 = 50.f;
+        float t3 = 80.f;
+        float t4 = 100.f;
+    };
+    MasteryTiers tiers() const;
+
     float calculateDelta(float currentValue, int charLevel, int targetLevel) const;
     void checkAndApplyMilestone(int characterId, const std::string &masterySlug, float oldValue, float newValue);
     void persist(int characterId, const std::string &masterySlug, float value);

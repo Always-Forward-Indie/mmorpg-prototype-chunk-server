@@ -106,7 +106,8 @@ RegenManager::tickRegen()
                 maxMpEff += val;
         }
 
-        // Layer equipped-item bonuses (apply_on == "equip")
+        // Layer equipped-item bonuses (apply_on == "equip"). Best-effort per
+        // tick: a broken equip lookup must not zero the whole regen tick.
         try
         {
             const auto equipState = equipment_.getEquipmentState(cid);
@@ -130,6 +131,11 @@ RegenManager::tickRegen()
                         maxMpEff += v;
                 }
             }
+        }
+        catch (const std::exception &e)
+        {
+            log_->debug("[Regen] equip-bonus layer skipped for char={} ({}), base regen kept",
+                cid, e.what());
         }
         catch (...)
         {

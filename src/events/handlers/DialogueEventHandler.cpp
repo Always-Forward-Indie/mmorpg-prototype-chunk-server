@@ -3,6 +3,7 @@
 #include "services/DialogueActionExecutor.hpp"
 #include "services/DialogueConditionEvaluator.hpp"
 #include "services/GameServices.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TerminalColors.hpp"
 #include <cmath>
@@ -921,7 +922,6 @@ DialogueEventHandler::isPlayerInRange(
     const PositionStruct &npcPos,
     float radius) const
 {
-    float dx = playerPos.positionX - npcPos.positionX;
-    float dy = playerPos.positionY - npcPos.positionY;
-    return std::sqrt(dx * dx + dy * dy) <= radius;
+    // 2D by design (differs from the vendor 3D check — see DistanceUtils).
+    return DistanceUtils::withinRange2D(playerPos, npcPos, radius);
 }

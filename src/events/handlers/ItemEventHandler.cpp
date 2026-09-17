@@ -216,7 +216,8 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                             notifResp["body"] = std::move(notifBody);
                             networkManager_.sendResponse(weightSocket, networkManager_.generateResponseMessage("success", notifResp));
 
-                            // Analytics: item_acquired (loot pickup)
+                            // Analytics: item_acquired (loot pickup). Best-effort:
+                            // must never fail the already-completed pickup.
                             try
                             {
                                 CharacterDataStruct pickerData = gameServices_.getCharacterManager().getCharacterData(pickupRequest.characterId);
@@ -236,6 +237,11 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                                     ap["body"]["payload"] = {{"source", "loot_pickup"}, {"itemSlug", itemInfo.slug}, {"quantity", droppedInfo.quantity}};
                                     gameServerWorker_.sendDataToGameServer(ap.dump() + "\n");
                                 }
+                            }
+                            catch (const std::exception &e)
+                            {
+                                log_->debug("[ITEM_PICKUP_EVENT] pickup analytics for char={} skipped ({})",
+                                    pickupRequest.characterId, e.what());
                             }
                             catch (...)
                             {

@@ -99,12 +99,6 @@ NPCManager::getNPCsInArea(float centerX, float centerY, float radius) const
         float dy = npc.position.positionY - centerY;
         float distance = std::sqrt(dx * dx + dy * dy);
 
-        // debug npc
-        // std::cout << "NPC ID: " << npc.id << " Position: (" << npc.position.positionX << ", " << npc.position.positionY << ") Distance: " << distance << std::endl;
-
-        // debug radius
-        // std::cout << "Search Radius: " << radius << std::endl;
-
         if (distance <= radius)
         {
             npcsInArea.push_back(npc);

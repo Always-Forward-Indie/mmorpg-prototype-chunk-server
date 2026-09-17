@@ -6,7 +6,6 @@
 #include <map>
 #include <mutex>
 #include <optional>
-#include <random>
 #include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -59,14 +58,6 @@ class MobMovementManager
     bool moveSingleMob(int mobUID, int zoneId);
 
     /**
-     * @brief Set movement parameters for zone
-     *
-     * @param zoneId Zone identifier
-     * @param params Movement parameters
-     */
-    void setZoneMovementParams(int zoneId, const MobMovementParams &params);
-
-    /**
      * @brief Set reference to EventQueue for combat events (also late-wires the AI controller)
      */
     void setEventQueue(class EventQueue *eventQueue);
@@ -106,16 +97,6 @@ class MobMovementManager
      */
     void updateLastBroadcastMs(int mobUID, int64_t nowMs);
 
-    /**
-     * @brief Set AI configuration for mobs
-     */
-    void setAIConfig(const MobAIConfig &config);
-
-    /**
-     * @brief Get current AI configuration
-     */
-    const MobAIConfig &getAIConfig() const;
-
     // ---- helpers used by MobAIController (must be public) ----
 
     /**
@@ -133,10 +114,8 @@ class MobMovementManager
      */
     bool canSearchNewTargets(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
 
-    /**
-     * @brief Euclidean distance between two positions.
-     */
-    static float calculateDistance(const PositionStruct &a, const PositionStruct &b);
+    // NOTE: planar distance now lives in utils/DistanceUtils (dist2D) — the
+    // per-class copy was removed (Wave 2.1).
 
   private:
     Logger &logger_;
@@ -148,18 +127,17 @@ class MobMovementManager
     class CombatSystem *combatSystem_;
     GameServices *gameServices_ = nullptr;
 
-    // Random number generator
-    std::mt19937 rng_;
+    // Random draws use RandomUtils (one thread_local engine per thread; the
+    // old shared member mt19937 was the same race family as CombatCalculator).
     mutable std::shared_mutex mutex_;
-
-    // Movement parameters per zone
-    std::map<int, MobMovementParams> zoneMovementParams_;
 
     // Movement data per mob
     std::map<int, MobMovementData> mobMovementData_;
 
-    // AI configuration
-    MobAIConfig aiConfig_;
+    // AI configuration: construction-time defaults, effectively read-only
+    // afterwards (setAIConfig/getAIConfig were dead — zero callers — and were
+    // removed; the field stays for the ~20 read sites). const enforces that.
+    const MobAIConfig aiConfig_;
 
     // Log-guard for chase movement: tracks which mob UIDs have had their
     // "reached attack range" message emitted to avoid continuous spam.

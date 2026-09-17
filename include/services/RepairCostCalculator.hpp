@@ -34,6 +34,23 @@ struct RepairCostEntry
     int repairCost = 0;
 };
 
+// Single unit-cost formula (Wave 3.1): cost = ceil(vendorPriceBuy *
+// missing / durabilityMax). Previously duplicated in
+// VendorEventHandler::computeRepairCost. Callers normalize durabilityCurrent
+// first (> 0, not full); the guards below make standalone misuse safe.
+// NOTE: keep float32 arithmetic 1-1 — 100 * (30/100 in float32) = 30.000002
+// → ceil = 31. Pinned by tests; do not "fix" without a product decision.
+inline int repairUnitCost(int vendorPriceBuy, int durabilityMax, int durabilityCurrent)
+{
+    if (durabilityMax <= 0)
+        return 0;
+    const int missing = durabilityMax - durabilityCurrent;
+    if (missing <= 0)
+        return 0;
+    return static_cast<int>(
+        std::ceil(static_cast<float>(vendorPriceBuy) * (static_cast<float>(missing) / durabilityMax)));
+}
+
 inline std::vector<RepairCostEntry> computeRepairEntries(const std::vector<RepairCostInput> &items)
 {
     std::vector<RepairCostEntry> out;
@@ -48,8 +65,7 @@ inline std::vector<RepairCostEntry> computeRepairEntries(const std::vector<Repai
             continue;
 
         // Cost proportional to missing durability
-        int repairCost = static_cast<int>(
-            std::ceil(static_cast<float>(it.vendorPriceBuy) * (static_cast<float>(missing) / it.durabilityMax)));
+        int repairCost = repairUnitCost(it.vendorPriceBuy, it.durabilityMax, durCurrent);
 
         RepairCostEntry entry;
         entry.inventoryItemId = it.inventoryItemId;

@@ -397,6 +397,9 @@ EventDispatcher::handleMoveCharacter(const EventContext &context, std::shared_pt
     movementData.position = context.positionData;
     movementData.timestamps = context.timestamps; // Add timestamps for lag compensation
 
+    // isFalling is an OPTIONAL field (old clients don't send it): any parse
+    // failure keeps the default. Deliberately silent — this is the hottest
+    // event path and a log line per move would drown real signals.
     try
     {
         auto jsonData = nlohmann::json::parse(context.fullMessage);
@@ -660,6 +663,8 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
 
             // Interest watch: the attacker's client keeps receiving this mob's
             // updates regardless of cell subscription (hunters track targets).
+            // Best-effort: must never break the attack dispatch. Debug-level
+            // so a failing watch stays traceable without hot-path spam.
             try
             {
                 const auto &body = fullData["body"];
@@ -667,8 +672,15 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
                     gameServices_.getInterestManager().watch(
                         context.clientData.clientId, body.value("targetId", 0));
             }
+            catch (const std::exception &e)
+            {
+                log_->debug("EventDispatcher handlePlayerAttack: interest watch failed for client {} ({}), continuing",
+                    context.clientData.clientId, e.what());
+            }
             catch (...)
             {
+                log_->debug("EventDispatcher handlePlayerAttack: interest watch failed for client {} (unknown), continuing",
+                    context.clientData.clientId);
             }
 
             if (eventsBatch_.size() >= BATCH_SIZE)
@@ -1987,9 +1999,14 @@ EventDispatcher::handleEquipTitle(const EventContext &context,
         const auto &jsonData = nlohmann::json::parse(context.fullMessage);
         titleSlug = jsonData.value("body", nlohmann::json::object()).value("titleSlug", "");
     }
+    catch (const std::exception &e)
+    {
+        log_->error("[EventDispatcher] equipTitle: failed to parse rawMessage ({})", e.what());
+        return;
+    }
     catch (...)
     {
-        log_->error("[EventDispatcher] equipTitle: failed to parse rawMessage");
+        log_->error("[EventDispatcher] equipTitle: failed to parse rawMessage (unknown)");
         return;
     }
 
@@ -2025,9 +2042,14 @@ EventDispatcher::handleSetSkillBarSlot(const EventContext &context,
         slotIndex = body.value("slotIndex", -1);
         skillSlug = body.value("skillSlug", std::string{});
     }
+    catch (const std::exception &e)
+    {
+        log_->error("[EventDispatcher] setSkillBarSlot: failed to parse message ({})", e.what());
+        return;
+    }
     catch (...)
     {
-        log_->error("[EventDispatcher] setSkillBarSlot: failed to parse message");
+        log_->error("[EventDispatcher] setSkillBarSlot: failed to parse message (unknown)");
         return;
     }
 
@@ -2067,9 +2089,14 @@ EventDispatcher::handleUseEmote(const EventContext &context,
         const auto &jsonData = nlohmann::json::parse(context.fullMessage);
         emoteSlug = jsonData.value("body", nlohmann::json::object()).value("emoteSlug", "");
     }
+    catch (const std::exception &e)
+    {
+        log_->error("[EventDispatcher] useEmote: failed to parse message ({})", e.what());
+        return;
+    }
     catch (...)
     {
-        log_->error("[EventDispatcher] useEmote: failed to parse message");
+        log_->error("[EventDispatcher] useEmote: failed to parse message (unknown)");
         return;
     }
 

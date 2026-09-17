@@ -3,8 +3,12 @@
 #include "services/GameServices.hpp"
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
+#include "services/RepairCostCalculator.hpp"
+#include "services/TradeOfferValidator.hpp"
+#include "services/TradeRequestValidator.hpp"
 #include "services/TradeSessionManager.hpp"
 #include "services/VendorManager.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <algorithm>
 #include <cmath>
@@ -26,23 +30,18 @@ VendorEventHandler::isPlayerInRange(
     const PositionStruct &npc,
     float radius) const
 {
-    float dx = player.positionX - npc.positionX;
-    float dy = player.positionY - npc.positionY;
-    float dz = player.positionZ - npc.positionZ;
-    return (dx * dx + dy * dy + dz * dz) <= (radius * radius);
+    // Single implementation in DistanceUtils (squared comparison, Wave 3.1).
+    return DistanceUtils::withinRange3D(player, npc, radius);
 }
 
 int
 VendorEventHandler::computeRepairCost(const ItemDataStruct &item, int durabilityCurrent) const
 {
+    // Single formula lives in RepairCostCalculator::repairUnitCost (Wave 3.1).
+    // Callers (repairOne, buildRepairableItemsJson) normalize current first.
     if (!item.isDurable || item.durabilityMax <= 0)
         return 0;
-    int missing = item.durabilityMax - durabilityCurrent;
-    if (missing <= 0)
-        return 0;
-    // cost = vendorPriceBuy * (missing / durabilityMax)  (rounded up)
-    return static_cast<int>(std::ceil(
-        static_cast<float>(item.vendorPriceBuy) * missing / item.durabilityMax));
+    return repairUnitCost(item.vendorPriceBuy, item.durabilityMax, durabilityCurrent);
 }
 
 float
@@ -267,7 +266,7 @@ VendorEventHandler::handleOpenVendorShopEvent(const Event &event)
             return;
         }
 
-        float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", 0.0f);
+        float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
         markup -= getReputationDiscountPct(req.characterId, npc.factionSlug);
         nlohmann::json shopJson = gameServices_.getVendorManager().buildShopJson(req.npcId, markup);
         if (shopJson.is_null())
@@ -320,7 +319,7 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
             return;
         }
 
-        float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", 0.0f);
+        float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
         markup -= getReputationDiscountPct(req.characterId, npc.factionSlug);
         auto result = gameServices_.getVendorManager().buyItem(
             req.characterId, req.npcId, req.itemId, req.quantity, goldItem->id, gameServices_.getInventoryManager(), markup);
@@ -349,7 +348,8 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
             notifResp["body"] = std::move(notifBody);
             networkManager_.sendResponse(socket, networkManager_.generateResponseMessage("success", notifResp));
 
-            // Analytics: item_acquired + gold_change (vendor purchase)
+            // Analytics: item_acquired + gold_change (vendor purchase).
+            // Best-effort: must never fail the already-completed purchase.
             try
             {
                 CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(req.characterId);
@@ -380,6 +380,11 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
                     apGold["body"]["payload"] = {{"source", "vendor_buy"}, {"delta", -result.totalPrice}};
                     gameServerWorker_.sendDataToGameServer(apGold.dump() + "\n");
                 }
+            }
+            catch (const std::exception &e)
+            {
+                log_->debug("[VendorEventHandler] buy analytics for char={} skipped ({})",
+                    req.characterId, e.what());
             }
             catch (...)
             {
@@ -485,7 +490,7 @@ VendorEventHandler::handleBuyItemBatchEvent(const Event &event)
             return;
         }
 
-        float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", 0.0f);
+        float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
         markup -= getReputationDiscountPct(req.characterId, npc.factionSlug);
         auto result = gameServices_.getVendorManager().buyBatch(
             req.characterId, req.npcId, req.items, goldItem->id, gameServices_.getInventoryManager(), markup);
@@ -865,51 +870,29 @@ VendorEventHandler::handleTradeRequestEvent(const Event &event)
         if (!socket)
             return;
 
-        if (!isPlayerAlive(req.characterId))
-        {
-            sendErrorResponseWithTimestamps(socket, "cannot_trade_while_dead", "tradeRequest", req.clientId, req.timestamps);
-            return;
-        }
-
-        // Validate initiator has no active session
-        if (gameServices_.getTradeSessionManager().getSessionByCharacter(req.characterId))
-        {
-            sendErrorResponseWithTimestamps(socket, "already_in_trade", "tradeRequest", req.clientId, req.timestamps);
-            return;
-        }
-
+        // Resolve validation inputs (pure lookups, no sends) and run the
+        // shared truth table (TradeRequestValidator — order is load-bearing).
+        // Lookup order matches the old inline checks; getClientSocket(0) for
+        // a missing target safely yields nullptr.
         const auto &targetChar = gameServices_.getCharacterManager().getCharacterData(req.targetCharacterId);
-        if (targetChar.characterId == 0)
-        {
-            sendErrorResponseWithTimestamps(socket, "target_not_found", "tradeRequest", req.clientId, req.timestamps);
-            return;
-        }
-
-        // Range check
         float tradeRange = gameServices_.getGameConfigService().getFloat("economy.trade_range", 5.0f);
-        const auto &myPos = req.playerPosition;
-        const auto &theirPos = targetChar.characterPosition;
-        if (!isPlayerInRange(myPos, theirPos, tradeRange))
-        {
-            sendErrorResponseWithTimestamps(socket, "out_of_range", "tradeRequest", req.clientId, req.timestamps);
-            return;
-        }
-
-        // Target busy?
-        if (gameServices_.getTradeSessionManager().getSessionByCharacter(req.targetCharacterId))
-        {
-            sendErrorResponseWithTimestamps(socket, "target_busy", "tradeRequest", req.clientId, req.timestamps);
-            return;
-        }
-
-        // Send invite to target character
         auto targetSocket = gameServices_.getClientManager().getClientSocket(targetChar.clientId);
-        if (!targetSocket)
+        const TradeRequestValidator::Input vargs{
+            isPlayerAlive(req.characterId),
+            gameServices_.getTradeSessionManager().getSessionByCharacter(req.characterId) != nullptr,
+            targetChar.characterId != 0,
+            isPlayerInRange(req.playerPosition, targetChar.characterPosition, tradeRange),
+            gameServices_.getTradeSessionManager().getSessionByCharacter(req.targetCharacterId) != nullptr,
+            targetSocket != nullptr,
+        };
+        const std::string validationError = TradeRequestValidator::validate(vargs);
+        if (!validationError.empty())
         {
-            sendErrorResponseWithTimestamps(socket, "target_offline", "tradeRequest", req.clientId, req.timestamps);
+            sendErrorResponseWithTimestamps(socket, validationError, "tradeRequest", req.clientId, req.timestamps);
             return;
         }
 
+        // Send invite to target character (socket proven live by the table).
         const auto &myChar = gameServices_.getCharacterManager().getCharacterData(req.characterId);
         gameServices_.getTradeSessionManager().addInvite(req.characterId, req.targetCharacterId);
         ResponseBuilder inviteBuilder;
@@ -944,6 +927,7 @@ VendorEventHandler::handleTradeAcceptEvent(const Event &event)
         // The accepter replies with fromCharacterId to the server
         // We store the initiator char ID in the sessionId field of TradeRespondStruct
         int initiatorCharId = 0;
+        // stoi failure => 0 => explicit invalid_session error below (fail-closed).
         try
         {
             initiatorCharId = std::stoi(req.sessionId);
@@ -1001,6 +985,7 @@ VendorEventHandler::handleTradeDeclineEvent(const Event &event)
         const auto &req = std::get<TradeRespondStruct>(data);
 
         int initiatorCharId = 0;
+        // stoi failure => 0 => invites simply not found (fail-closed below).
         try
         {
             initiatorCharId = std::stoi(req.sessionId);
@@ -1059,22 +1044,15 @@ VendorEventHandler::handleTradeOfferUpdateEvent(const Event &event)
         }
 
         // Validate offered items exist in player's non-equipped inventory
+        // (offer-time shape: tradable required — see TradeOfferValidator).
         auto &inventoryMgr = gameServices_.getInventoryManager();
+        auto &itemMgr = gameServices_.getItemManager();
         for (const auto &oi : req.items)
         {
             auto inventory = inventoryMgr.getPlayerInventory(req.characterId);
-            bool found = false;
-            for (const auto &s : inventory)
-                if (s.id == oi.inventoryItemId && s.quantity >= oi.quantity && !s.isEquipped)
-                {
-                    const ItemDataStruct item = gameServices_.getItemManager().getItemById(s.itemId);
-                    if (item.isTradable)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
-            if (!found)
+            const bool ok = TradeOfferValidator::isOfferItemValid(oi, inventory, true,
+                [&](int itemId) { return itemMgr.getItemById(itemId).isTradable; });
+            if (!ok)
             {
                 sendErrorResponseWithTimestamps(socket, "invalid_offer_item", "tradeOfferUpdate", req.clientId, req.timestamps);
                 return;
@@ -1153,22 +1131,14 @@ VendorEventHandler::handleTradeConfirmEvent(const Event &event)
                 return;
             }
 
-            // Final validation: both players still have all offered items and gold
+            // Final validation: both players still have all offered items and gold.
+            // Confirm-time shape: slot match only, no tradable re-check
+            // (see TradeOfferValidator — do not tighten without a decision).
             auto validateOfferor = [&](int charId, const std::vector<TradeOfferItemStruct> &offer, int gold) -> bool
             {
-                for (const auto &oi : offer)
-                {
-                    auto inv = inventoryMgr.getPlayerInventory(charId);
-                    bool ok = false;
-                    for (const auto &s : inv)
-                        if (s.id == oi.inventoryItemId && s.quantity >= oi.quantity && !s.isEquipped)
-                        {
-                            ok = true;
-                            break;
-                        }
-                    if (!ok)
-                        return false;
-                }
+                auto inv = inventoryMgr.getPlayerInventory(charId);
+                if (!TradeOfferValidator::isOfferValid(offer, inv))
+                    return false;
                 if (gold > 0 && inventoryMgr.getItemQuantity(charId, goldItem->id) < gold)
                     return false;
                 return true;

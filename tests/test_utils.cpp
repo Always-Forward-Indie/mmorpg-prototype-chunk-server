@@ -1,4 +1,5 @@
 // Unit tests for chunk utils: ThreadPool, TimestampUtils, ResponseBuilder.
+#include "utils/DistanceUtils.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include "utils/ThreadPool.hpp"
 #include "utils/TimestampUtils.hpp"
@@ -91,6 +92,56 @@ TEST(Timestamps, ExtractAndRoundtrip)
     EXPECT_EQ(resp["header"]["clientSendMsEcho"], 777);
     EXPECT_EQ(resp["header"]["requestIdEcho"], "sync_9");
     EXPECT_GE(resp["header"]["serverRecvMs"], 0);
+}
+
+TEST(DistanceUtils, Dist2DKnownValues)
+{
+    // Pin the single implementation all six former copies shared (3-4-5).
+    PositionStruct a, b;
+    a.positionX = 0.0f;
+    a.positionY = 0.0f;
+    b.positionX = 3.0f;
+    b.positionY = 4.0f;
+    EXPECT_FLOAT_EQ(DistanceUtils::dist2D(a, b), 5.0f);
+    EXPECT_FLOAT_EQ(DistanceUtils::dist2D(b, a), 5.0f); // symmetric
+    EXPECT_FLOAT_EQ(DistanceUtils::dist2D(a, a), 0.0f);
+    // Z is ignored by the 2D variant (movement/aggro plane).
+    b.positionZ = 100.0f;
+    EXPECT_FLOAT_EQ(DistanceUtils::dist2D(a, b), 5.0f);
+}
+
+TEST(DistanceUtils, Dist3DKnownValues)
+{
+    // The AttackSystem variant: Z counts (kept 1-1, not "fixed" here).
+    PositionStruct a, b;
+    a.positionX = 1.0f;
+    a.positionY = 2.0f;
+    a.positionZ = 2.0f;
+    b.positionX = 1.0f;
+    b.positionY = 2.0f;
+    b.positionZ = 6.0f;
+    EXPECT_FLOAT_EQ(DistanceUtils::dist3D(a, b), 4.0f);
+    EXPECT_FLOAT_EQ(DistanceUtils::dist3D(a, a), 0.0f);
+}
+
+TEST(DistanceUtils, WithinRangeMatchesSqrtCompare)
+{
+    // Wave 3.1: the vendor (3D) and dialogue (2D) range checks now share
+    // these. Pin against naive sqrt comparison away from the ulp boundary.
+    PositionStruct a, b;
+    a.positionX = 0.0f;
+    a.positionY = 0.0f;
+    a.positionZ = 0.0f;
+    b.positionX = 30.0f;
+    b.positionY = 40.0f;
+    b.positionZ = 0.0f;
+    EXPECT_TRUE(DistanceUtils::withinRange2D(a, b, 50.5f));
+    EXPECT_FALSE(DistanceUtils::withinRange2D(a, b, 49.5f));
+    EXPECT_TRUE(DistanceUtils::withinRange3D(a, b, 50.5f));
+    EXPECT_FALSE(DistanceUtils::withinRange3D(a, b, 49.5f));
+    b.positionZ = 100.0f; // Z splits the two: 2D still in, 3D out
+    EXPECT_TRUE(DistanceUtils::withinRange2D(a, b, 50.5f));
+    EXPECT_FALSE(DistanceUtils::withinRange3D(a, b, 50.5f));
 }
 
 TEST(ResponseBuilder, HeaderBodyAndTimestamps)

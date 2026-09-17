@@ -20,7 +20,6 @@ set(SOURCE_FILES
     src/services/ChunkManager.cpp
     src/services/CharacterManager.cpp
     src/services/SpawnZoneManager.cpp
-    src/services/SpawnManager.cpp
     src/services/MobManager.cpp
     src/services/NPCManager.cpp
     src/services/MobInstanceManager.cpp
@@ -121,16 +120,19 @@ set(HEADER_FILES
     include/services/LearnSkillValidator.hpp
     include/services/RepairCostCalculator.hpp
     include/services/DialogueNotificationBuilders.hpp
+    include/services/ItemSoulTiers.hpp
+    include/services/TradeOfferValidator.hpp
+    include/services/TradeRequestValidator.hpp
     include/services/IStatsNotifier.hpp
     include/services/RegenManager.hpp
     include/services/SpawnZoneManager.hpp
-    include/services/SpawnManager.hpp
     include/services/MobManager.hpp
     include/services/NPCManager.hpp
     include/services/MobInstanceManager.hpp
     include/services/MobMovementManager.hpp
     include/services/MobAIController.hpp
     include/services/MobAIFormulas.hpp
+    include/services/MovementValidation.hpp
     include/services/CombatCalculator.hpp
     include/services/SkillManager.hpp
     include/services/SkillSystem.hpp
@@ -193,6 +195,9 @@ set(HEADER_FILES
     include/utils/ResponseBuilder.hpp
     include/utils/TimeConverter.hpp
     include/utils/Generators.hpp
+    include/utils/DistanceUtils.hpp
+    include/utils/MovementUnits.hpp
+    include/utils/RandomUtils.hpp
     include/utils/Logger.hpp
     include/utils/TerminalColors.hpp
     include/utils/Config.hpp

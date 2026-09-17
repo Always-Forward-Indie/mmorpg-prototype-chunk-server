@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 #include <unordered_map>
+#include <vector>
 
 namespace
 {
@@ -211,7 +212,7 @@ TEST(MobAIFormulas, ThreatDecay)
 
 TEST(MobAIFormulas, MeleeCapacity)
 {
-    // 2π*150/140 ≈ 6.7 -> 6 slots
+    // 2�?*150/140 �%? 6.7 -> 6 slots
     EXPECT_EQ(MobAIFormulas::maxMeleeSlots(150.0f, 0.0f), 6);
     // radius 70 -> diameter 140 -> same 6
     EXPECT_EQ(MobAIFormulas::maxMeleeSlots(150.0f, 70.0f), 6);
@@ -219,4 +220,23 @@ TEST(MobAIFormulas, MeleeCapacity)
     EXPECT_EQ(MobAIFormulas::maxMeleeSlots(0.0f, 0.0f), 1);
     EXPECT_FLOAT_EQ(MobAIFormulas::mobDiameter(0.0f), 140.0f);
     EXPECT_FLOAT_EQ(MobAIFormulas::mobDiameter(70.0f), 140.0f);
+}
+
+TEST(MobAIFormulas, CountMeleeOccupants)
+{
+    // Wave 4.1 pin: extracted from countMobsEngagingTarget. Only alive,
+    // non-excluded, same-target mobs in attack state occupy a slot.
+    using MobAIFormulas::MeleeOccupant;
+    std::vector<MeleeOccupant> mobs = {
+        {9001, false, 1, true},
+        {9002, false, 1, true},
+        {9003, false, 1, false}, // patrolling: no slot
+        {9004, false, 2, true},  // other target: no slot
+        {9005, true, 1, true},   // dead: no slot
+    };
+    EXPECT_EQ(MobAIFormulas::countMeleeOccupants(mobs, 1, 0), 2);
+    EXPECT_EQ(MobAIFormulas::countMeleeOccupants(mobs, 1, 9001), 1);
+    EXPECT_EQ(MobAIFormulas::countMeleeOccupants(mobs, 2, 0), 1);
+    EXPECT_EQ(MobAIFormulas::countMeleeOccupants(mobs, 424242, 0), 0);
+    EXPECT_EQ(MobAIFormulas::countMeleeOccupants({}, 1, 0), 0);
 }

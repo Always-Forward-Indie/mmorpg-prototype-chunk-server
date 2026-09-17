@@ -117,8 +117,8 @@ class CharacterManager
     // Get character by ID (returns empty struct if not found)
     CharacterDataStruct getCharacterById(int characterID);
 
-    // Calculate distance between two positions
-    float calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2);
+    // NOTE: planar distance now lives in utils/DistanceUtils (dist2D) — the
+    // per-class copy was removed (Wave 2.1).
 
     // Skill system helpers
     void addCharacterSkill(int characterID, const SkillStruct &skill);

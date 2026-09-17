@@ -7,12 +7,47 @@
 #include "services/QuestManager.hpp"
 #include "services/RepairCostCalculator.hpp"
 #include "services/TrainerManager.hpp"
+#include "services/VendorManager.hpp"
 #include <spdlog/logger.h>
 
 DialogueActionExecutor::DialogueActionExecutor(GameServices &services, Logger &logger)
     : services_(services), logger_(logger)
 {
     log_ = logger.getSystem("dialogue");
+}
+
+void
+DialogueActionExecutor::sendDialogueAnalytics(const std::string &analyticsType,
+    int characterId,
+    const nlohmann::json &payload)
+{
+    // Best-effort: analytics must never break dialogue rewards. Debug-level
+    // so a failing analytics path stays traceable without spamming.
+    try
+    {
+        auto charData = services_.getCharacterManager().getCharacterData(characterId);
+        if (charData.sessionId.empty())
+            return;
+        nlohmann::json ap;
+        ap["header"]["eventType"] = "analyticsEvent";
+        ap["body"]["analyticsType"] = analyticsType;
+        ap["body"]["characterId"] = characterId;
+        ap["body"]["sessionId"] = charData.sessionId;
+        ap["body"]["level"] = charData.characterLevel;
+        ap["body"]["zoneId"] = 0;
+        ap["body"]["payload"] = payload;
+        services_.sendAnalytics(ap.dump() + "\n");
+    }
+    catch (const std::exception &e)
+    {
+        log_->debug("[DialogueAction] analytics '{}' for char={} skipped ({})",
+            analyticsType, characterId, e.what());
+    }
+    catch (...)
+    {
+        log_->debug("[DialogueAction] analytics '{}' for char={} skipped (unknown)",
+            analyticsType, characterId);
+    }
 }
 
 DialogueActionExecutor::ActionResult
@@ -114,26 +149,8 @@ DialogueActionExecutor::executeOfferQuest(const nlohmann::json &action,
     {
         ctx.questStates[slug] = "active";
 
-        // Analytics: quest_accept
-        try
-        {
-            auto charData = services_.getCharacterManager().getCharacterData(characterId);
-            if (!charData.sessionId.empty())
-            {
-                nlohmann::json ap;
-                ap["header"]["eventType"] = "analyticsEvent";
-                ap["body"]["analyticsType"] = "quest_accept";
-                ap["body"]["characterId"] = characterId;
-                ap["body"]["sessionId"] = charData.sessionId;
-                ap["body"]["level"] = charData.characterLevel;
-                ap["body"]["zoneId"] = 0;
-                ap["body"]["payload"] = {{"questSlug", slug}};
-                services_.sendAnalytics(ap.dump() + "\n");
-            }
-        }
-        catch (...)
-        {
-        }
+        // Analytics: quest_accept (best-effort, never throws)
+        sendDialogueAnalytics("quest_accept", characterId, {{"questSlug", slug}});
 
         // Build client notification
         const QuestStruct *quest = questManager.getQuestBySlug(slug);
@@ -178,26 +195,8 @@ DialogueActionExecutor::executeTurnInQuest(const nlohmann::json &action,
     for (auto &n : notifications)
         result.clientNotifications.push_back(std::move(n));
 
-    // Analytics: quest_complete
-    try
-    {
-        auto charData = services_.getCharacterManager().getCharacterData(characterId);
-        if (!charData.sessionId.empty())
-        {
-            nlohmann::json ap;
-            ap["header"]["eventType"] = "analyticsEvent";
-            ap["body"]["analyticsType"] = "quest_complete";
-            ap["body"]["characterId"] = characterId;
-            ap["body"]["sessionId"] = charData.sessionId;
-            ap["body"]["level"] = charData.characterLevel;
-            ap["body"]["zoneId"] = 0;
-            ap["body"]["payload"] = {{"questSlug", slug}};
-            services_.sendAnalytics(ap.dump() + "\n");
-        }
-    }
-    catch (...)
-    {
-    }
+    // Analytics: quest_complete (best-effort, never throws)
+    sendDialogueAnalytics("quest_complete", characterId, {{"questSlug", slug}});
 }
 
 void
@@ -243,26 +242,8 @@ DialogueActionExecutor::executeFailQuest(const nlohmann::json &action,
         log_->info("[DialogueAction] Failed quest '" + slug + "' for character " +
                    std::to_string(characterId));
 
-        // Analytics: quest_abandon
-        try
-        {
-            auto charData = services_.getCharacterManager().getCharacterData(characterId);
-            if (!charData.sessionId.empty())
-            {
-                nlohmann::json ap;
-                ap["header"]["eventType"] = "analyticsEvent";
-                ap["body"]["analyticsType"] = "quest_abandon";
-                ap["body"]["characterId"] = characterId;
-                ap["body"]["sessionId"] = charData.sessionId;
-                ap["body"]["level"] = charData.characterLevel;
-                ap["body"]["zoneId"] = 0;
-                ap["body"]["payload"] = {{"questSlug", slug}};
-                services_.sendAnalytics(ap.dump() + "\n");
-            }
-        }
-        catch (...)
-        {
-        }
+        // Analytics: quest_abandon (best-effort, never throws)
+        sendDialogueAnalytics("quest_abandon", characterId, {{"questSlug", slug}});
     }
 }
 
@@ -285,26 +266,9 @@ DialogueActionExecutor::executeGiveItem(const nlohmann::json &action,
         result.clientNotifications.push_back(
             DialogueNotificationBuilders::itemReceived(itemId, item.slug, quantity));
 
-        // Analytics: item_acquired
-        try
-        {
-            auto charData = services_.getCharacterManager().getCharacterData(characterId);
-            if (!charData.sessionId.empty())
-            {
-                nlohmann::json ap;
-                ap["header"]["eventType"] = "analyticsEvent";
-                ap["body"]["analyticsType"] = "item_acquired";
-                ap["body"]["characterId"] = characterId;
-                ap["body"]["sessionId"] = charData.sessionId;
-                ap["body"]["level"] = charData.characterLevel;
-                ap["body"]["zoneId"] = 0;
-                ap["body"]["payload"] = {{"source", "dialogue"}, {"itemSlug", item.slug}, {"quantity", quantity}};
-                services_.sendAnalytics(ap.dump() + "\n");
-            }
-        }
-        catch (...)
-        {
-        }
+        // Analytics: item_acquired (best-effort, never throws)
+        sendDialogueAnalytics("item_acquired", characterId,
+            {{"source", "dialogue"}, {"itemSlug", item.slug}, {"quantity", quantity}});
     }
 }
 
@@ -355,26 +319,9 @@ DialogueActionExecutor::executeGiveGold(const nlohmann::json &action,
     {
         result.clientNotifications.push_back(DialogueNotificationBuilders::goldReceived(amount));
 
-        // Analytics: gold_change
-        try
-        {
-            auto charData = services_.getCharacterManager().getCharacterData(characterId);
-            if (!charData.sessionId.empty())
-            {
-                nlohmann::json ap;
-                ap["header"]["eventType"] = "analyticsEvent";
-                ap["body"]["analyticsType"] = "gold_change";
-                ap["body"]["characterId"] = characterId;
-                ap["body"]["sessionId"] = charData.sessionId;
-                ap["body"]["level"] = charData.characterLevel;
-                ap["body"]["zoneId"] = 0;
-                ap["body"]["payload"] = {{"source", "dialogue_give_gold"}, {"delta", static_cast<int>(amount)}};
-                services_.sendAnalytics(ap.dump() + "\n");
-            }
-        }
-        catch (...)
-        {
-        }
+        // Analytics: gold_change (best-effort, never throws)
+        sendDialogueAnalytics("gold_change", characterId,
+            {{"source", "dialogue_give_gold"}, {"delta", static_cast<int>(amount)}});
     }
 }
 
@@ -395,7 +342,7 @@ DialogueActionExecutor::executeOpenVendorShop(const nlohmann::json &action,
     int npcId = session->npcId;
 
     float markupPct = static_cast<float>(
-        services_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", 0.0f));
+        services_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct));
 
     nlohmann::json shopData = services_.getVendorManager().buildShopJson(npcId, markupPct);
     if (shopData.is_null())

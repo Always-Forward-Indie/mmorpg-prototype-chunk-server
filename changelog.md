@@ -1,3 +1,209 @@
+v0.2.40
+17.09.2026
+================
+
+Fixes:
+
+**Wave 4.1 hardening — CombatFixture determinism (test-only, no product change).**
+- `CombatFixture.InitiateAndExecuteStrikeDamagesMob` flaked ~1 run in 20:
+  hit chance sits at the 0.95 cap, so an unseeded engine legitimately
+  misses (success=true, damage=0 — correct product behavior, wrong test
+  expectation). Fixture now calls `RandomUtils::seedForTests(12345u)` in
+  SetUp (verified 20/20 green); the damage test asserts branch-aware
+  (miss → 0 dmg + HP intact, hit → dmg>0 + HP dropped, mana always paid);
+  the PvP test fails loud with "fixture seed drifted" if the calculator's
+  roll order ever changes instead of asserting the guard on a miss path.
+- Verified: 347/347 unit green. TSan: 347/347 pass, 9 warnings confined to
+  the documented Scheduler same-mutex family (`Scheduler::stop:22`
+  double-lock + `scheduleTask:37` vs `run():71/73/74/79` in the two
+  `Scheduler_*` tests, both green) — same stack shapes as triaged in
+  `tests/README.md`, zero frames from Wave 1–4.1 code. Fingerprint recorded
+  so future gates diff shapes instead of counts.
+
+---
+
+v0.2.39
+17.09.2026
+================
+
+Fixes:
+
+**Wave 3.4 — movement speed validation extract (MovementValidation).**
+- handleMoveCharacterEvent's inline speed math (effective move_speed from
+  attrs + live non-tick effects, MIN_DELTA clamp, buffer-scaled max
+  distance, sliding-window VPN fallback) now lives in the pure header
+  `services/MovementValidation.hpp` (resolveMoveSpeed / maxDistanceFor /
+  checkWindow with a WindowVerdict for log fidelity). The handler keeps
+  lookups, logging, correction responses and state writes; all log lines
+  and the XY-plane-only rule preserved 1-1.
+- Pin tests: defaults, effect stacking/expiry, delta clamp, window
+  oldest-sample/ring-wrap/empty-window semantics.
+- Verified: 326/326 unit green, full TSan suite clean (zero warnings),
+  patrol swarm 4/4 OK with 0 MOVE_VALIDATE rejections and 0 fatals on
+  live dev. All behavior 1-1.
+
+---
+
+v0.2.38
+17.09.2026
+================
+
+Fixes:
+
+**Wave 3.3 — trade-request validation extract (TradeRequestValidator).**
+- handleTradeRequestEvent's six ordered precondition checks (each with its
+  own client error code) now live in a pure truth table; the handler only
+  resolves inputs (manager lookups, hoisted without reordering checks) and
+  sends the resulting code. Order is load-bearing (first match wins) and is
+  pinned by FirstMatchWinsInHandlerOrder. getClientSocket(0) for a missing
+  target safely yields nullptr (verified in ClientManager).
+- Pin tests: all-clear, per-gate codes, precedence.
+- Verified: 320/320 unit green, full TSan suite clean (zero warnings),
+  L3 test_trade.py 3/3 green on live dev. All behavior 1-1.
+
+---
+
+v0.2.37
+17.09.2026
+================
+
+Fixes:
+
+**Wave 3.2 — P2P trade-offer validation extract (TradeOfferValidator).**
+- The "does the player really hold this offered stack" check lived twice:
+  offer-time (tradable required) and confirm-time validateOfferor (slot
+  match only + gold). Both delegate to the new pure header now; the
+  requireTradable flag preserves the exact per-site semantics — the confirm
+  side deliberately does NOT re-check tradable (documented; tightening it
+  could strand in-flight sessions, needs a product decision).
+- Pin tests: offer-time shape, template-per-slot resolution, confirm-time
+  shape in test_vendor.cpp.
+- Verified: 317/317 unit green, full TSan suite clean (zero warnings),
+  L3 test_trade.py 3/3 green on live dev. All behavior 1-1.
+
+---
+
+v0.2.36
+17.09.2026
+================
+
+Fixes:
+
+**Wave 3.1 — first VendorEventHandler extracts (repair cost + range checks).**
+- `RepairCostCalculator::repairUnitCost`: the repair price formula
+  (`ceil(vendorPriceBuy * missing / durabilityMax)`) lived twice — in the
+  dialogue batch builder and in `VendorEventHandler::computeRepairCost`.
+  The batch builder delegates to it; the handler member delegates too
+  (callers pre-normalize durability, semantics preserved incl. the pinned
+  float32 `31` artifact). Pin test `UnitCostMatchesBatchFormula`.
+- `DistanceUtils::withinRange2D/withinRange3D`: vendor `isPlayerInRange`
+  (3D, bit-identical) and dialogue `isPlayerInRange` (2D) now share these.
+  Found in passing: same name, DIFFERENT dimensionality (2D vs 3D) — a real
+  semantic difference, explicitly NOT merged (documented in the header; do
+  not unify without a product decision).
+- Verified: 314/314 unit green, full TSan suite clean (zero warnings),
+  L3 combat/vendor/repair green on live dev (1 documented single-shot skip),
+  auth/join storms 50/50. All behavior 1-1.
+
+---
+
+v0.2.35
+17.09.2026
+================
+
+Fixes:
+
+**Wave 2 (single sources of truth) — duplicate triage and unification.**
+- `DistanceUtils` (new header-only): 5 identical 2D `calculateDistance`
+  copies (MobMovement/ Loot/ Character/ MobAI/ Harvest) now delegate to
+  `dist2D`; AttackSystem's 3D copy → `dist3D` (3D semantics kept 1-1, not
+  "fixed" — that would change hit-chance). Member decls+defs removed. Pin
+  tests: 3-4-5 triangle, symmetry, Z-ignored (2D) / Z-counted (3D).
+- Drive-by (same RNG race family as 1.1, found while touching the file):
+  `HarvestManager` shared member mt19937 → `RandomUtils`.
+- Interest cell size: `kDefault*` constexprs on InterestManager (cell 1500,
+  radius 1, rehome 0.15, snapshots on/2000ms); ChunkServer configure()
+  fallbacks + the dead `1500.0f` fan-out literal now read them. Pin test
+  `InterestDefaults.DesignValuesAreSingleSourced`.
+- Combat variance: `kDefaultDamageVariance/kDefaultHealVariance` on
+  CombatCalculator (band tests already pin behavior). AttackSystem's
+  per-action variance untouched — that class is never instantiated (dead
+  code, recorded follow-up, not this wave).
+- ItemSoul tiers: new `ItemSoulTiers::Table` (thresholds + bonuses + flush
+  cadence) shared by MobKillRewardPipeline and
+  CharacterStatsNotificationService (previously hand-synced literals in two
+  places — we created that split in 10.4/9). Pin tests incl. custom config.
+- Mastery tiers: private `tiers()` helper replaces 3 hand-synced blocks
+  (20/50/80/100). Champion `evolve_hours` default → `kDefaultEvolveHours`
+  + `evolveHours()` helper (2 sites). Vendor buy-price formula →
+  `resolveBuyPrice` (3 sites) + `kDefaultBuyMarkupPct` (4 config readers).
+  `MOVE_SPEED_SCALE 40.0` → `MovementUnits::kMoveSpeedScale` (parity warning
+  links the UE client's `BasicPlayer.h: MoveSpeedScale`).
+- Triaged as false positives (verified, no change): `wio_state/stateCode`
+  (zero matches anywhere — stale audit entry), equip "slots 12" (only the
+  `ALL_SLOTS` vector + comments; no second literal), inline `sqrt(dx*dx..)`
+  at call sites (plain math, cannot diverge).
+- Verified: 312/312 unit green, full TSan suite clean (zero warnings),
+  L3 framing/tolerant/conn/combat/vendor 15/15 on live dev, auth/join
+  storms 50/50. All behavior 1-1 (no tuning numbers changed).
+
+---
+
+v0.2.34
+17.09.2026
+================
+
+Fixes:
+
+**Wave 1.2 — InventoryManager const find-overload removed (aliasing hazard).**
+- The const overload returned an iterator into a function-local static on miss
+  and had zero callers (only the non-const one is used, under lock). Deleted
+  decl + def; documented the lock contract on the remaining helper. No behavior
+  change.
+
+**Wave 1.4 — MobMovementManager dead code + shared rng_ unified.**
+- `setZoneMovementParams` / `setAIConfig` / `getAIConfig` had zero callers in
+  src/include/tests: the zone-params map was always empty and aiConfig_ was
+  de-facto constants. Removed setter/getter/map lookups (params = defaults +
+  the wired ZoneEvent multiplier); `aiConfig_` is now const. Removed 2
+  commented-out `std::cout` lines in NPCManager.
+- Found in passing: `rng_` was a SHARED member mt19937 used in ~25 tick sites
+  (same race family as 1.1; single-threaded today via the Scheduler tick, but
+  a trap). All sites now use `RandomUtils::engine()`; member removed.
+- Verified: full unit suite green + full TSan suite clean (only the known
+  Scheduler flake), Respawn/Champion/MobAI targeted tests green.
+
+**Wave 1.3 — catch(...) triage (chunk side).**
+- Taxonomy, no blind rewriting: (a) probes with safe defaults stay silent but
+  are now documented as such (BaseEventHandler liveness/position resolvers,
+  SkillSystem caster-type chain, Harvest variant fallback, trade stoi
+  fallbacks, bestiary slug resolver, socket is_open guards); (b) best-effort
+  side effects (analytics emits, quest hooks, interest hooks, equip-bonus
+  layering, soul-tier resolution) now debug-log with ids + what(); (c) real
+  risks escalated: Mastery milestone partial-application warns, QuestManager
+  sendQuestUpdate + CombatSystem PvP HP-echo debug-log, EventDispatcher
+  equipTitle/setSkillBarSlot/useEmote parse errors now include what(),
+  DialogueActionExecutor's 5 silent analytics blocks collapsed into one
+  `sendDialogueAnalytics` helper, game JSONB fallbacks warn with row ids.
+- Verified: 306/306 unit green, TSan clean, L3 framing/tolerant/conn/combat
+  13/13 green on the live dev stack.
+
+---
+
+v0.2.33
+17.09.2026
+================
+
+Fixes:
+
+**Shared RNG unification — RandomUtils: one thread_local engine per thread (Wave 1.1).**
+- Cause: `RespawnZoneManager::getRandomPointInZone` used `static mt19937 + static distributions` with no lock, called from ThreadPool workers — data race of the same class as the CombatCalculator one fixed after the TSan live run.
+- New `include/utils/RandomUtils.hpp` (header-only, single source of truth): one thread_local mt19937 per thread, function-local distributions only (distributions are stateful — never shared), `seedForTests()` for deterministic unit sequences.
+- Redirected: RespawnZoneManager (race gone), ChampionManager (was already thread_local — unified), CombatCalculator::rollUniform01 (same API, new engine), LootManager::dropRng (same accessor, new engine). Sampling math unchanged (1-1).
+- Tests: new `tests/test_random_utils.cpp` (ranges, buckets, seed determinism, 8-thread race test). Verified: 308/308 green, full TSan suite clean (only the known Scheduler same-mutex flake, deliberately unsuppressed).
+
+---
+
 v0.2.32
 15.09.2026
 ================

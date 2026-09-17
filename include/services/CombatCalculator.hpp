@@ -160,6 +160,14 @@ class CombatCalculator
     /// keep identical distribution with no locking.
     static float rollUniform01();
 
+    // Single source of truth for variance fallbacks (Wave 2.3). Live values
+    // come from game_config (combat.damage_variance / combat.heal_variance);
+    // these apply when config is absent. NOTE: AttackSystem has its own
+    // per-action damageVariance field, but that class is never instantiated
+    // (dead code, smells like a legacy prototype) — deliberately untouched.
+    static constexpr float kDefaultDamageVariance = 0.12f;
+    static constexpr float kDefaultHealVariance = 0.10f;
+
     /// @brief Reads float constant from config if loaded, otherwise returns defaultValue.
     float cfg(const std::string &key, float defaultValue) const;
 };

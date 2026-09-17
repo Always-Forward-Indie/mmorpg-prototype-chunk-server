@@ -99,7 +99,7 @@ PlayerDeathPipeline::execute(int targetId)
         log_->warn("[COMBAT] Death stats update error: " + std::string(e.what()));
     }
 
-    // Analytics: player_death
+    // Analytics: player_death (best-effort, never fails death processing)
     try
     {
         auto deadData = characters_.getCharacterData(targetId);
@@ -120,6 +120,11 @@ PlayerDeathPipeline::execute(int targetId)
             if (analyticsCallback_)
                 analyticsCallback_(ap.dump() + "\n");
         }
+    }
+    catch (const std::exception &e)
+    {
+        log_->debug("[COMBAT] player_death analytics for char={} skipped ({})",
+            targetId, e.what());
     }
     catch (...)
     {

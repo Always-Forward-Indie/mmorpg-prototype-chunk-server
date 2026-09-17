@@ -14,6 +14,7 @@ if(GTest_FOUND)
         test_event_queue.cpp
         test_trade_session.cpp
         test_combat_calculator.cpp
+        test_random_utils.cpp
         test_item_inventory.cpp
         test_vendor.cpp
         test_pity.cpp
@@ -39,6 +40,7 @@ if(GTest_FOUND)
         test_json_parser.cpp
         test_scheduler_gen.cpp
         test_mob_ai.cpp
+        test_movement_validation.cpp
         test_combat_response.cpp
         test_exp_cache.cpp
         test_champion.cpp
@@ -54,7 +56,12 @@ if(GTest_FOUND)
         test_player_death.cpp
         test_quest_store.cpp
         test_quest_resolvers.cpp
-        stubs/QuestManagerStub.cpp
+        test_quest_orchestrator.cpp
+        test_dialogue_executor.cpp
+        test_combat_system.cpp
+        test_quest_orchestrator.cpp
+        test_dialogue_executor.cpp
+        test_combat_system.cpp
         stubs/WorldStubs.cpp
         ../src/services/InterestManager.cpp
         ../src/services/TradeSessionManager.cpp
@@ -106,6 +113,9 @@ if(GTest_FOUND)
         ../src/services/MobKillRewardPipeline.cpp
         ../src/services/PlayerDeathPipeline.cpp
         ../src/services/QuestStore.cpp
+        ../src/services/QuestManager.cpp
+        ../src/services/DialogueActionExecutor.cpp
+        ../src/services/CombatSystem.cpp
         ../src/utils/ThreadPool.cpp
         ../src/utils/TimestampUtils.cpp
         ../src/utils/JSONParser.cpp

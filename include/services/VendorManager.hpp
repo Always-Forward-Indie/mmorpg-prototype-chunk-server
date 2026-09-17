@@ -21,6 +21,11 @@ class VendorManager
   public:
     VendorManager(ItemManager &itemManager, Logger &logger);
 
+    // Single source of truth for the markup fallback (Wave 2.5). Live value
+    // comes from game_config (economy.vendor_buy_markup_pct); four readers
+    // previously hand-synced this literal.
+    static constexpr float kDefaultBuyMarkupPct = 0.0f;
+
     // ── Data loading ─────────────────────────────────────────────────────────
 
     /** Replace the full vendor dataset (called once on chunk startup). */
@@ -160,6 +165,11 @@ class VendorManager
         float sellTaxPct);
 
   private:
+    // Single source of truth for the vendor buy-price formula (Wave 2.5):
+    // explicit per-slot override wins, otherwise base price + markup,
+    // rounded up. Three call sites previously hand-synced this expression.
+    static int resolveBuyPrice(int priceOverrideBuy, int baseBuyPrice, float buyMarkupPct);
+
     ItemManager &itemManager_;
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;

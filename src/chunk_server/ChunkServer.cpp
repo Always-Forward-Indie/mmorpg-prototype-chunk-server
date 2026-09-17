@@ -58,17 +58,21 @@ ChunkServer::ChunkServer(GameServices &gameServices,
 
     // Interest v2 (phase 1: track + metrics only, fan-out untouched).
     // All geometry is live-tunable via GameConfigService (game_config table).
+    // Fallbacks are InterestManager::kDefault* (single source of truth).
     gameServices_.getInterestManager().configure(
-        gameServices_.getGameConfigService().getFloat("interest.cell_size", 1500.0f),
-        gameServices_.getGameConfigService().getInt("interest.view_radius", 1),
-        gameServices_.getGameConfigService().getFloat("interest.rehome_margin_frac", 0.15f),
-        gameServices_.getGameConfigService().getBool("interest.enabled", true));
+        gameServices_.getGameConfigService().getFloat("interest.cell_size", InterestManager::kDefaultCellSize),
+        gameServices_.getGameConfigService().getInt("interest.view_radius", InterestManager::kDefaultViewRadius),
+        gameServices_.getGameConfigService().getFloat("interest.rehome_margin_frac", InterestManager::kDefaultRehomeMarginFrac),
+        gameServices_.getGameConfigService().getBool("interest.enabled", InterestManager::kDefaultEnabled));
     gameServices_.getInterestManager().setSnapshots(
-        gameServices_.getGameConfigService().getBool("interest.snapshots", true),
-        gameServices_.getGameConfigService().getInt("interest.snapshot_cooldown_ms", 2000));
+        gameServices_.getGameConfigService().getBool("interest.snapshots", InterestManager::kDefaultSnapshots),
+        gameServices_.getGameConfigService().getInt("interest.snapshot_cooldown_ms", static_cast<int>(InterestManager::kDefaultSnapshotCooldownMs)));
 
-    // Wire up QuestManager → GameServerWorker for persistence
-    gameServices_.getQuestManager().setGameServerWorker(&gameServerWorker_);
+    // Wire up QuestManager persistence sender (network seam; the lambda
+    // compiles here so QuestManager.cpp never references network types).
+    gameServices_.getQuestManager().setSendToGameServerCallback(
+        [this](const std::string &packet)
+        { gameServerWorker_.sendDataToGameServer(packet); });
 
     // Wire up reconnect callback: restore is_online=true for all loaded characters
     // after the chunk server reconnects to the game server (network blip recovery)
@@ -101,8 +105,14 @@ ChunkServer::ChunkServer(GameServices &gameServices,
             }
         });
 
-    // Wire up QuestManager → NetworkManager for sending packets to clients
-    gameServices_.getQuestManager().setNetworkManager(&networkManager_);
+    // Wire up QuestManager QUEST_UPDATE sender (network seam; same "success"
+    // wrapping the old direct call applied).
+    gameServices_.getQuestManager().setQuestUpdateSender(
+        [this](std::shared_ptr<boost::asio::ip::tcp::socket> socket, const nlohmann::json &packet)
+        {
+            networkManager_.sendResponse(
+                std::move(socket), networkManager_.generateResponseMessage("success", packet));
+        });
 
     // Wire up QuestManager into InventoryManager for onItemObtained triggers
     gameServices_.getInventoryManager().setQuestManager(&gameServices_.getQuestManager());
@@ -616,13 +626,15 @@ ChunkServer::mainEventLoopCH()
             const bool useInterest = interest.isEnabled();
             InterestManager::Snapshot interestSnap;
             std::unordered_map<int, std::vector<int>> interestWatch;
-            float interestCell = 1500.0f;
+            // Always the live cell size (single source: InterestManager). The
+            // old 1500.0f literal here was dead — overwritten below whenever
+            // the value is actually read (useInterest paths only).
+            float interestCell = interest.cellSize();
             std::vector<int> failOpen;
             if (useInterest)
             {
                 interestSnap = interest.snapshot();
                 interestWatch = interest.watchIndex();
-                interestCell = interest.cellSize();
                 failOpen.reserve(connectedClients.size());
                 for (const auto &client : connectedClients)
                 {

@@ -124,6 +124,9 @@ GameServerWorker::scheduleHeartbeat()
             if (timerEc)
                 return; // cancelled (shutdown): stop the chain
             bool open = false;
+            // is_open() is noexcept in practice; the guard defends the
+            // fail-closed direction (a throwing probe must read as closed,
+            // so the heartbeat skips instead of crashing the timer chain).
             try
             {
                 open = game_server_socket_ && game_server_socket_->is_open();

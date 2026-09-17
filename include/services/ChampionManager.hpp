@@ -140,6 +140,14 @@ class ChampionManager
         const std::string &slug = "");
 
   private:
+    // Single source of truth for the survival-evolution fallback (Wave 2.5).
+    // Live value comes from game_config (survival_champion.evolve_hours).
+    static constexpr int kDefaultEvolveHours = 12;
+    int evolveHours() const
+    {
+        return gameConfig_.getInt("survival_champion.evolve_hours", kDefaultEvolveHours);
+    }
+
     GameZoneManager &gameZones_;
     GameConfigService &gameConfig_;
     MobInstanceManager &mobInstances_;

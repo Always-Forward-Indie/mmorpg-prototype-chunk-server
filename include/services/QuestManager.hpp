@@ -4,22 +4,20 @@
 #include "services/QuestStore.hpp"
 #include "utils/Logger.hpp"
 #include <functional>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
 // Forward declare to break circular dependency
 class GameServices;
-class GameServerWorker;
-class NetworkManager;
 
 /**
  * @brief Thin quest orchestrator (Increment 11).
  *
  * Owns QuestStore (static data + progress + transitions under its mutex) and
- * QuestResolvers (ID → slug JSON enrichment). Holds services_/networkManager_
- * for offer/turnIn/fail side effects (rewards, reputation, packets) and binds
- * the store seams. Public API is unchanged from the pre-split QuestManager.
+ * QuestResolvers (ID → slug JSON enrichment). Network leaves through seams
+ * (game-server persistence sender, QUEST_UPDATE sender) bound by ChunkServer.
  */
 class QuestManager
 {
@@ -161,16 +159,22 @@ class QuestManager
     std::string getQuestStateBySlug(int characterId, const std::string &questSlug) const;
 
     /**
-     * @brief Set the game server worker used for persistence.
-     * Called from ChunkServer after construction.
+     * @brief Set the game-server persistence sender (network-agnostic seam).
+     * Forwards to the store. Called from ChunkServer after construction;
+     * tests bind a capture lambda instead (Wave 4.1 — same pattern as the
+     * phase-2 QuestStore seam).
      */
-    void setGameServerWorker(GameServerWorker *worker);
+    void setSendToGameServerCallback(QuestStore::SendToGameServerFn fn);
 
     /**
-     * @brief Set the network manager for sending packets to clients.
-     * Called from ChunkServer after construction.
+     * @brief Set the QUEST_UPDATE packet sender (network-agnostic seam).
+     * Replaces the old NetworkManager* wiring: ChunkServer binds the real
+     * sendResponse path, tests bind a capture (or leave unset — updates are
+     * then skipped with an error log, same as a null manager before).
      */
-    void setNetworkManager(NetworkManager *nm);
+    using QuestUpdateSender = std::function<void(
+        std::shared_ptr<boost::asio::ip::tcp::socket>, const nlohmann::json &)>;
+    void setQuestUpdateSender(QuestUpdateSender fn);
 
     // ── Public enrichment helpers (used by DialogueActionExecutor, DialogueEventHandler) ──
 
@@ -192,7 +196,7 @@ class QuestManager
     void sendQuestUpdate(int characterId, const PlayerQuestProgressStruct &pq, const QuestStruct &quest);
 
     GameServices *services_;
-    NetworkManager *networkManager_ = nullptr;
+    QuestUpdateSender questUpdateSender_;
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 

@@ -72,6 +72,17 @@ class InterestManager
 
     explicit InterestManager(Logger &logger);
 
+    // Single source of truth for design defaults (Wave 2.1/2.2). The member
+    // initializers below AND the ChunkServer configure() call both use these,
+    // so a tuning change touches exactly one place. Live values still come
+    // from game_config (interest.cell_size et al.) with these as fallbacks.
+    static constexpr float kDefaultCellSize = 1500.0f;
+    static constexpr int kDefaultViewRadius = 1; // 1 => 3x3 neighbourhood
+    static constexpr float kDefaultRehomeMarginFrac = 0.15f;
+    static constexpr bool kDefaultEnabled = true;
+    static constexpr bool kDefaultSnapshots = true;
+    static constexpr int64_t kDefaultSnapshotCooldownMs = 2000;
+
     // Live-tunable geometry. Defaults = design values, override via
     // GameConfigService (interest.cell_size / interest.view_radius /
     // interest.rehome_margin_frac / interest.enabled / interest.snapshots /
@@ -134,10 +145,10 @@ class InterestManager
     std::shared_ptr<spdlog::logger> log_;
 
     mutable std::mutex mutex_;
-    float cellSize_{1500.0f};
-    int viewRadius_{1}; // 1 => 3x3 neighbourhood
-    float rehomeMarginFrac_{0.15f};
-    bool enabled_{true};
+    float cellSize_{kDefaultCellSize};
+    int viewRadius_{kDefaultViewRadius};
+    float rehomeMarginFrac_{kDefaultRehomeMarginFrac};
+    bool enabled_{kDefaultEnabled};
 
     struct Sub
     {
@@ -152,8 +163,8 @@ class InterestManager
     uint64_t resubscribes_{0};
     uint64_t tickMobs_{0};
     uint64_t tickEvents_{0};
-    bool snapshots_{true};
-    int64_t snapshotCooldownMs_{2000};
+    bool snapshots_{kDefaultSnapshots};
+    int64_t snapshotCooldownMs_{kDefaultSnapshotCooldownMs};
     std::unordered_map<int, std::chrono::steady_clock::time_point> lastSnapshot_;
     uint64_t snapshotsSent_{0};
     uint64_t snapshotsSkipped_{0};

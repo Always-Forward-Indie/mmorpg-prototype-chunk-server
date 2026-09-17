@@ -1272,7 +1272,8 @@ EventHandler::handleGetBestiaryEntryEvent(const Event &event)
         // Resolve loot rows for this mob template
         std::vector<MobLootInfoStruct> lootRows = gameServices_.getItemManager().getLootForMob(mobTemplateId);
 
-        // Item slug resolver
+        // Item slug resolver: unknown item => "" (row renders without a name;
+        // the entry itself still sends — a broken slug must not fail it).
         auto itemSlugFn = [this](int itemId) -> std::string
         {
             try

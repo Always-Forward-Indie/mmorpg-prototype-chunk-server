@@ -31,6 +31,39 @@ inline constexpr float kDefaultMobDiameter = 140.0f;
 inline constexpr float kRangeUnitScale = 100.0f;
 
 /**
+ * @brief Melee-slot occupancy count (Wave 4.1).
+ *
+ * Extracted from MobAIController::countMobsEngagingTarget: a mob occupies a
+ * melee slot on a target when it is alive, not excluded, targets this player
+ * and is in an attack state (PREPARING_ATTACK / ATTACKING / ATTACK_COOLDOWN —
+ * mapped to inAttackState by the caller, which owns the enum).
+ */
+struct MeleeOccupant
+{
+    int uid = 0;
+    bool isDead = false;
+    int targetPlayerId = 0;
+    bool inAttackState = false;
+};
+
+inline int countMeleeOccupants(const std::vector<MeleeOccupant> &mobs,
+    int targetPlayerId,
+    int excludeUID)
+{
+    int count = 0;
+    for (const auto &m : mobs)
+    {
+        if (m.uid == excludeUID || m.isDead)
+            continue;
+        if (m.targetPlayerId != targetPlayerId)
+            continue;
+        if (m.inAttackState)
+            ++count;
+    }
+    return count;
+}
+
+/**
  * @brief Pick a skill index from a template skill list.
  *
  * Mirrors MobAIController::selectAttackSkill scoring: skip out-of-range

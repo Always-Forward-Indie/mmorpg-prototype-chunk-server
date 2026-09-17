@@ -42,6 +42,14 @@ VendorManager::updateStockCount(int npcId, int itemId, int newStock)
 
 // ── Shop queries ──────────────────────────────────────────────────────────────
 
+int
+VendorManager::resolveBuyPrice(int priceOverrideBuy, int baseBuyPrice, float buyMarkupPct)
+{
+    if (priceOverrideBuy > 0)
+        return priceOverrideBuy;
+    return static_cast<int>(std::ceil(baseBuyPrice * (1.0f + buyMarkupPct)));
+}
+
 nlohmann::json
 VendorManager::buildShopJson(int npcId, float buyMarkupPct) const
 {
@@ -57,9 +65,7 @@ VendorManager::buildShopJson(int npcId, float buyMarkupPct) const
         if (item.id == 0)
             continue;
 
-        int priceBuy = (slot.priceOverrideBuy > 0)
-                           ? slot.priceOverrideBuy
-                           : static_cast<int>(std::ceil(item.vendorPriceBuy * (1.0f + buyMarkupPct)));
+        int priceBuy = resolveBuyPrice(slot.priceOverrideBuy, item.vendorPriceBuy, buyMarkupPct);
 
         int priceSell = (slot.priceOverrideSell > 0)
                             ? slot.priceOverrideSell
@@ -162,9 +168,7 @@ VendorManager::buyItem(
     if (item.id == 0)
         return {false, "item_not_found", 0};
 
-    int unitPrice = (slot->priceOverrideBuy > 0)
-                        ? slot->priceOverrideBuy
-                        : static_cast<int>(std::ceil(item.vendorPriceBuy * (1.0f + buyMarkupPct)));
+    int unitPrice = resolveBuyPrice(slot->priceOverrideBuy, item.vendorPriceBuy, buyMarkupPct);
     int totalPrice = unitPrice * quantity;
 
     // Gold check (lock-free on inventory mutex — InventoryManager is separately locked)
@@ -323,9 +327,7 @@ VendorManager::buyBatch(
             if (item.id == 0)
                 return {false, "item_not_found", 0, {}};
 
-            int unitPrice = (slot->priceOverrideBuy > 0)
-                                ? slot->priceOverrideBuy
-                                : static_cast<int>(std::ceil(item.vendorPriceBuy * (1.0f + buyMarkupPct)));
+            int unitPrice = resolveBuyPrice(slot->priceOverrideBuy, item.vendorPriceBuy, buyMarkupPct);
             int lineTotal = unitPrice * entry.quantity;
             totalGold += lineTotal;
             resultItems.push_back({entry.itemId, entry.quantity, lineTotal});

@@ -14,22 +14,15 @@
 // unit_tests. If you add a real X.cpp to tests/CMakeLists.txt, delete its
 // stub here (ClientManager/GameZoneManager/InterestManager already link
 // the real thing, so they must never reappear here).
+//
+// Wave 4.1: the two CombatSystem stubs are gone — the real CombatSystem.cpp
+// is linked now (it is network-free; QuestManager/DialogueActionExecutor
+// joined it via the same seam work).
 #include "network/NetworkManager.hpp"
 #include "services/ClientManager.hpp"
-#include "services/CombatSystem.hpp"
 #include "services/GameZoneManager.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "services/ZoneEventManager.hpp"
-
-void CombatSystem::processAIAttack(int /*mobId*/, int /*targetPlayerId*/,
-    const std::string & /*forcedSkillSlug*/)
-{
-}
-
-void CombatSystem::broadcastMobSkillInitiation(int /*mobId*/, int /*targetPlayerId*/,
-    const SkillStruct & /*skill*/)
-{
-}
 
 std::string NetworkManager::generateResponseMessage(
     const std::string & /*status*/, const nlohmann::json & /*message*/)

@@ -2,6 +2,8 @@
 // Needs ItemManager + InventoryManager (Logger only, no DB/sockets).
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
+#include "services/TradeOfferValidator.hpp"
+#include "services/TradeRequestValidator.hpp"
 #include "services/VendorManager.hpp"
 
 #include <gtest/gtest.h>
@@ -214,4 +216,144 @@ TEST_F(VendorFixture, BatchSizeLimitEnforced)
     auto r = vendor.buyBatch(1, kVendor, tooMany, kGold, inv, 0.0f);
     EXPECT_FALSE(r.success);
     EXPECT_EQ(inv.getGoldAmount(1), 1000000);
+}
+
+namespace
+{
+
+PlayerInventoryItemStruct offerSlot(int rowId, int itemId, int qty, bool equipped)
+{
+    PlayerInventoryItemStruct s;
+    s.id = rowId;
+    s.itemId = itemId;
+    s.quantity = qty;
+    s.isEquipped = equipped;
+    return s;
+}
+
+TradeOfferItemStruct offerRow(int rowId, int itemId, int qty)
+{
+    TradeOfferItemStruct o;
+    o.inventoryItemId = rowId;
+    o.itemId = itemId;
+    o.quantity = qty;
+    return o;
+}
+
+} // namespace
+
+TEST(TradeOfferValidator, OfferTimeShape)
+{
+    // Wave 3.2 pin: offer-time semantics (tradable required).
+    const auto tradable = [](int itemId) { return itemId != 777; };
+    std::vector<PlayerInventoryItemStruct> inv = {
+        offerSlot(11, 100, 5, false),
+        offerSlot(12, 200, 1, true),   // equipped: never matchable
+        offerSlot(13, 777, 9, false),  // untradable template
+    };
+    EXPECT_TRUE(TradeOfferValidator::isOfferItemValid(offerRow(11, 100, 5), inv, true, tradable));
+    EXPECT_TRUE(TradeOfferValidator::isOfferItemValid(offerRow(11, 100, 3), inv, true, tradable));
+    EXPECT_FALSE(TradeOfferValidator::isOfferItemValid(offerRow(11, 100, 6), inv, true, tradable)); // short
+    EXPECT_FALSE(TradeOfferValidator::isOfferItemValid(offerRow(99, 100, 1), inv, true, tradable)); // wrong row
+    EXPECT_FALSE(TradeOfferValidator::isOfferItemValid(offerRow(12, 200, 1), inv, true, tradable)); // equipped
+    EXPECT_FALSE(TradeOfferValidator::isOfferItemValid(offerRow(13, 777, 1), inv, true, tradable)); // untradable
+    EXPECT_TRUE(TradeOfferValidator::isOfferValid({offerRow(11, 100, 2)}, inv, true, tradable));
+    EXPECT_FALSE(TradeOfferValidator::isOfferValid({offerRow(11, 100, 2), offerRow(13, 777, 1)}, inv, true, tradable));
+    EXPECT_TRUE(TradeOfferValidator::isOfferValid({}, inv, true, tradable)); // vacuous (matches loop)
+}
+
+TEST(TradeOfferValidator, TemplateResolvedPerSlot)
+{
+    // Tradability resolves per inventory slot's template (not the offered
+    // itemId): an untradable row is rejected while a tradable row passes.
+    const auto tradable = [](int itemId) { return itemId == 100; };
+    std::vector<PlayerInventoryItemStruct> inv = {
+        offerSlot(11, 777, 5, false),
+        offerSlot(12, 100, 5, false),
+    };
+    EXPECT_TRUE(TradeOfferValidator::isOfferItemValid(offerRow(12, 100, 5), inv, true, tradable));
+    EXPECT_FALSE(TradeOfferValidator::isOfferItemValid(offerRow(11, 777, 5), inv, true, tradable));
+    EXPECT_FALSE(TradeOfferValidator::isOfferItemValid(offerRow(12, 100, 5), inv, true,
+        [](int) { return false; })); // unknown template => untradable
+}
+
+TEST(TradeOfferValidator, ConfirmTimeShapeSkipsTemplateLookup)
+{
+    // Wave 3.2 pin: confirm-time semantics (slot match only, resolver unused).
+    // An untradable template still validates here — do not "fix" without a
+    // product decision (would strand in-flight sessions).
+    std::vector<PlayerInventoryItemStruct> inv = {
+        offerSlot(11, 100, 5, false),
+        offerSlot(13, 777, 9, false),
+    };
+    EXPECT_TRUE(TradeOfferValidator::isOfferValid({offerRow(11, 100, 5)}, inv));
+    EXPECT_TRUE(TradeOfferValidator::isOfferValid({offerRow(13, 777, 9)}, inv));
+    EXPECT_FALSE(TradeOfferValidator::isOfferValid({offerRow(13, 777, 10)}, inv)); // short
+    EXPECT_FALSE(TradeOfferValidator::isOfferValid({offerRow(99, 100, 1)}, inv));  // unknown row
+}
+
+namespace
+{
+
+TradeRequestValidator::Input allClearRequest()
+{
+    TradeRequestValidator::Input in;
+    in.initiatorAlive = true;
+    in.initiatorInSession = false;
+    in.targetExists = true;
+    in.inRange = true;
+    in.targetBusy = false;
+    in.targetOnline = true;
+    return in;
+}
+
+} // namespace
+
+TEST(TradeRequestValidator, AllClearProceeds)
+{
+    EXPECT_EQ(TradeRequestValidator::validate(allClearRequest()), "");
+}
+
+TEST(TradeRequestValidator, EachGateFiresItsCode)
+{
+    // Wave 3.4 pin: every gate maps to its exact client error code.
+    auto in = allClearRequest();
+    in.initiatorAlive = false;
+    EXPECT_EQ(TradeRequestValidator::validate(in), "cannot_trade_while_dead");
+    in = allClearRequest();
+    in.initiatorInSession = true;
+    EXPECT_EQ(TradeRequestValidator::validate(in), "already_in_trade");
+    in = allClearRequest();
+    in.targetExists = false;
+    EXPECT_EQ(TradeRequestValidator::validate(in), "target_not_found");
+    in = allClearRequest();
+    in.inRange = false;
+    EXPECT_EQ(TradeRequestValidator::validate(in), "out_of_range");
+    in = allClearRequest();
+    in.targetBusy = true;
+    EXPECT_EQ(TradeRequestValidator::validate(in), "target_busy");
+    in = allClearRequest();
+    in.targetOnline = false;
+    EXPECT_EQ(TradeRequestValidator::validate(in), "target_offline");
+}
+
+TEST(TradeRequestValidator, FirstMatchWinsInHandlerOrder)
+{
+    // Order is load-bearing (1-1 with handleTradeRequestEvent): earlier gates
+    // shadow later ones even when several fail at once.
+    auto in = allClearRequest();
+    in.initiatorAlive = false;
+    in.targetExists = false;
+    in.targetBusy = true;
+    EXPECT_EQ(TradeRequestValidator::validate(in), "cannot_trade_while_dead");
+    in = allClearRequest();
+    in.initiatorInSession = true;
+    in.inRange = false;
+    EXPECT_EQ(TradeRequestValidator::validate(in), "already_in_trade");
+    in = allClearRequest();
+    in.targetExists = false;
+    in.inRange = false;
+    in.targetBusy = true;
+    in.targetOnline = false;
+    EXPECT_EQ(TradeRequestValidator::validate(in), "target_not_found");
 }

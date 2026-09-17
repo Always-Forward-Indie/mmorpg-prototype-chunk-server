@@ -28,6 +28,12 @@ GameConfigService::getFloat(const std::string &key, float defaultValue) const
     {
         return std::stof(it->second);
     }
+    catch (const std::exception &e)
+    {
+        log_->error("GameConfigService::getFloat: invalid value for key '" + key +
+                         "' = '" + it->second + "' (" + e.what() + "), using default " + std::to_string(defaultValue));
+        return defaultValue;
+    }
     catch (...)
     {
         log_->error("GameConfigService::getFloat: invalid value for key '" + key +
@@ -46,6 +52,12 @@ GameConfigService::getInt(const std::string &key, int defaultValue) const
     try
     {
         return std::stoi(it->second);
+    }
+    catch (const std::exception &e)
+    {
+        log_->error("GameConfigService::getInt: invalid value for key '" + key +
+                         "' = '" + it->second + "' (" + e.what() + "), using default " + std::to_string(defaultValue));
+        return defaultValue;
     }
     catch (...)
     {

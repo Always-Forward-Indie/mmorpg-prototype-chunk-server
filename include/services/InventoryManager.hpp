@@ -180,9 +180,12 @@ class InventoryManager
      * @param characterId Character ID
      * @param itemId Item ID
      * @return Iterator to the item or end() if not found
+     * NOTE: internal helper, call only with inventoryMutex_ held (see
+     * addItemToInventory). There is deliberately no const overload: the old
+     * one returned an iterator into a function-local static on miss (aliasing
+     * hazard) and had zero callers, so it was removed (Wave 1.2).
      */
     std::vector<PlayerInventoryItemStruct>::iterator findInventoryItem(int characterId, int itemId);
-    std::vector<PlayerInventoryItemStruct>::const_iterator findInventoryItem(int characterId, int itemId) const;
 
     // Merge duplicate stacks of the same item (same itemId) into a single row
     void consolidateInventory(int characterId);

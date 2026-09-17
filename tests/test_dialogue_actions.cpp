@@ -156,6 +156,17 @@ TEST(RepairCostCalculator, FiltersAndPrices)
     EXPECT_EQ(out[1].repairCost, 1);
 }
 
+TEST(RepairCostCalculator, UnitCostMatchesBatchFormula)
+{
+    // Wave 3.1: repairUnitCost is the single formula behind both
+    // computeRepairEntries and VendorEventHandler::computeRepairCost.
+    EXPECT_EQ(repairUnitCost(100, 100, 70), 31); // float32 artifact, pinned
+    EXPECT_EQ(repairUnitCost(99, 100, 99), 1);
+    EXPECT_EQ(repairUnitCost(100, 100, 100), 0); // full -> 0
+    EXPECT_EQ(repairUnitCost(100, 0, 0), 0);     // degenerate max -> 0
+    EXPECT_EQ(repairUnitCost(0, 100, 10), 0);    // free item -> 0
+}
+
 TEST(DialogueNotificationBuilders, Shapes)
 {
     using namespace DialogueNotificationBuilders;

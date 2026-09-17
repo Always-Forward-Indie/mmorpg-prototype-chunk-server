@@ -241,9 +241,9 @@ class HarvestManager
     mutable std::shared_mutex harvestsMutex_;
     mutable std::shared_mutex lootMutex_;
 
-    // Random number generation for harvest loot
-    std::random_device randomDevice_;
-    mutable std::mt19937 randomGenerator_;
+    // NOTE: harvest loot rolls use RandomUtils (one thread_local engine per
+    // thread). The old shared member mt19937 raced across ThreadPool workers
+    // and was removed (Wave 2.1 drive-by, same family as 1.1).
 
     /**
      * @brief Generate harvest loot for a specific mob
@@ -259,10 +259,8 @@ class HarvestManager
      */
     void completeHarvest(int characterId, int corpseUID);
 
-    /**
-     * @brief Calculate distance between two positions
-     */
-    float calculateDistance(const PositionStruct &pos1, const PositionStruct &pos2) const;
+    // NOTE: planar distance now lives in utils/DistanceUtils (dist2D) — the
+    // per-class copy was removed (Wave 2.1).
 
     /**
      * @brief Send harvest event to client
