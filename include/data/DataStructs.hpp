@@ -1722,7 +1722,16 @@ struct RespawnZoneStruct
     float innerRadius = 0.0f;
     float outerRadius = 0.0f;
 
-    bool isAreaDefined() const { return minX < maxX || minY < maxY; }
+    bool isAreaDefined() const
+    {
+        // Shape-aware: CIRCLE/ANNULUS zones carry radii, not an AABB —
+        // the old AABB-only check collapsed them to a single point.
+        if (shape == ZoneShape::CIRCLE)
+            return outerRadius > 0.0f;
+        if (shape == ZoneShape::ANNULUS)
+            return outerRadius > 0.0f && outerRadius > innerRadius;
+        return minX < maxX || minY < maxY;
+    }
 };
 
 /// Starting spawn zone for a character class (first login).

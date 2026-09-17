@@ -277,8 +277,10 @@ ChampionManager::spawnChampion(int mobTemplateId,
         c.positionY = cy;
         auto gz = gameZones_.getZoneForPosition(c);
         if (gz.has_value() && gz->id == gameZoneId)
+        {
             base.zoneId = sz.zoneId;
-        break;
+            break;
+        }
     }
     if (base.zoneId == 0)
         base.zoneId = -1; // Fallback: not tracked by SpawnZoneManager
@@ -405,13 +407,12 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
     }
     const GameZoneStruct &gz = *gzIt;
 
-    // Collect spawn zones inside this game zone
+    // Collect spawn zones inside this game zone (shape-aware: a corner of
+    // the enclosing AABB is not inside a CIRCLE/ANNULUS game zone).
     std::vector<const SpawnZoneStruct *> candidates;
     for (const auto &[szId, sz] : spawnZones)
     {
-        float cx = sz.centerX;
-        float cy = sz.centerY;
-        if (cx >= gz.minX && cx <= gz.maxX && cy >= gz.minY && cy <= gz.maxY)
+        if (gz.contains(sz.centerX, sz.centerY))
             candidates.push_back(&sz);
     }
 
@@ -454,9 +455,7 @@ ChampionManager::resolveChampionSpawnPoint(int gameZoneId) const
     float fallbackZ = 500.0f;
     for (const auto &[szId, sz] : spawnZones)
     {
-        float cx = sz.centerX;
-        float cy = sz.centerY;
-        if (cx >= gz.minX && cx <= gz.maxX && cy >= gz.minY && cy <= gz.maxY)
+        if (gz.contains(sz.centerX, sz.centerY))
         {
             fallbackZ = (sz.minZ + sz.maxZ) * 0.5f;
             break;

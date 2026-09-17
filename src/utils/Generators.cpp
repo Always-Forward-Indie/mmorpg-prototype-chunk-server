@@ -1,4 +1,5 @@
 #include "utils/Generators.hpp"
+#include "utils/RandomUtils.hpp"
 
 // Initialize static members
 std::atomic<int> Generators::mobUIDCounter_(1000000); // Start from 1 million to avoid conflicts
@@ -11,8 +12,10 @@ Generators::generateUniqueTimeBasedKey(int keyId)
     auto now = std::chrono::system_clock::now().time_since_epoch();
     long long now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 
-    // Use safer approach to avoid overflow
-    long long key = (now_ms % 1000000000LL) * 1000 + keyId + (randomGenerator_() % 1000);
+    // Suffix from the thread_local engine (no shared state, no lock needed).
+    // Same role as before (break same-ms ties); distribution is now exact
+    // uniform [0, 999] instead of engine()%1000.
+    long long key = (now_ms % 1000000000LL) * 1000 + keyId + RandomUtils::rangeInt(0, 999);
 
     return key;
 }

@@ -1,3 +1,50 @@
+v0.2.41
+17.09.2026
+================
+
+Fixes:
+
+**Phase 0 — spawn/champion/respawn bug batch (all with pin tests).**
+- `ChampionManager::spawnChampion`: unconditional `break` always took the
+  first spawn zone (wrong `zoneId`, fell back to -1). `break` moved inside
+  the match. Pin: `ChampionZoneIdMatchesTargetGameZone` (failed pre-fix).
+- `SpawnZoneManager::removeMobByUID`: `unregisterMobInstance` ran under the
+  zone `unique_lock` despite the comment (deadlock hazard, same class as
+  the fixed `mobDied`). Scope now mirrors `mobDied`. Behavior pin kept
+  (single-threaded identical); TSan suite guards the locking.
+- `mobDied`: display counter floored at 0 (double-report via cleanup +
+  harvest drove it to -1). Pin: `MobDiedCounterFloorsAtZero`.
+- `loadMobsInSpawnZones`: `zoneId` (and `uid`) never copied — everything
+  landed in zone 0. Pin: `LoadMobsRoutesIntoOwnZone`.
+- `spawnMobsInZone`: missing template aborted ALL later entries (`return`);
+  now skips only its entry type (`break`, one log line). Pin:
+  `MissingTemplateSkipsEntryOnly`.
+- `loadMobSpawnZones`: hot-reload (chunk<->game reconnect re-push) wiped
+  runtime tracking (lists/counter) causing double-spawns; config refreshes,
+  runtime is preserved. Pin: `ReloadPreservesRuntimeTracking`.
+- Spawn sampling RNG unified to `RandomUtils` (was per-call
+  `random_device/mt19937` trio); sampling math unchanged. Pin:
+  `SpawnPositionsDeterministicUnderSeed`.
+- `RespawnZoneStruct::isAreaDefined` is shape-aware (CIRCLE/ANNULUS with
+  radii but no AABB no longer collapse to a point); degenerate annulus
+  falls back to the fixed point. Pins: `CircleZoneSamplesDiscNotPoint`,
+  `DegenerateAnnulusFallsBackToPoint` (boundary guard).
+- `findNearest`: removed unreachable isDefault/front fallback (nearest
+  always wins; preferring default needs a product decision — documented).
+- `Generators::generateUniqueTimeBasedKey`: suffix via
+  `RandomUtils::rangeInt` (was unmutexed shared `randomGenerator_()`).
+- `resolveChampionSpawnPoint` candidate search uses shape-aware
+  `GameZoneStruct::contains` (was AABB-only; admitted AABB corners outside
+  CIRCLE/ANNULUS game zones). Pin: `ChampionSpawnPointRespectsCircleGameZone`.
+- Deferred (no half-measures): `exclusionGameZoneId` still needs
+  GameZoneManager wiring + exclusion semantics (recorded follow-up).
+- Verified: 357/357 unit green (10 new pins; 6 fail pre-fix, degenerate
+  guard + removeMob pin pass both by construction); TSan 357 pass, same
+  9-warning Scheduler fingerprint, zero new shapes. All behavior 1-1
+  except documented bug corrections.
+
+---
+
 v0.2.40
 17.09.2026
 ================

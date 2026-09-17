@@ -69,6 +69,58 @@ TEST(RespawnZones, EmptyGivesEmpty)
     EXPECT_TRUE(zones.getAllZones().empty());
 }
 
+TEST(RespawnZones, CircleZoneSamplesDiscNotPoint)
+{
+    // isAreaDefined is shape-aware: a CIRCLE zone with radii but no AABB
+    // must sample the disc, not collapse to the fixed position.
+    Logger logger{"test"};
+    RespawnZoneManager zones(logger);
+    RespawnZoneStruct z;
+    z.id = 3;
+    z.shape = ZoneShape::CIRCLE;
+    z.centerX = 500.0f;
+    z.centerY = 500.0f;
+    z.outerRadius = 100.0f;
+    z.minZ = 0.0f;
+    z.maxZ = 50.0f;
+    z.position.positionX = 500.0f;
+    z.position.positionY = 500.0f;
+    zones.loadRespawnZones({z});
+
+    bool spread = false;
+    for (int i = 0; i < 25; ++i)
+    {
+        PositionStruct p = zones.getRandomPointInZone(z);
+        const float dx = p.positionX - 500.0f;
+        const float dy = p.positionY - 500.0f;
+        EXPECT_LE(dx * dx + dy * dy, 100.0f * 100.0f); // inside the disc
+        if (dx * dx + dy * dy > 1.0f)
+            spread = true; // not pinned to the centre point
+    }
+    EXPECT_TRUE(spread);
+}
+
+TEST(RespawnZones, DegenerateAnnulusFallsBackToPoint)
+{
+    // ANNULUS with outer <= inner has no area: fixed position fallback.
+    Logger logger{"test"};
+    RespawnZoneManager zones(logger);
+    RespawnZoneStruct z;
+    z.id = 4;
+    z.shape = ZoneShape::ANNULUS;
+    z.centerX = 500.0f;
+    z.centerY = 500.0f;
+    z.innerRadius = 100.0f;
+    z.outerRadius = 100.0f;
+    z.position.positionX = 500.0f;
+    z.position.positionY = 500.0f;
+    zones.loadRespawnZones({z});
+
+    PositionStruct p = zones.getRandomPointInZone(z);
+    EXPECT_FLOAT_EQ(p.positionX, 500.0f);
+    EXPECT_FLOAT_EQ(p.positionY, 500.0f);
+}
+
 TEST(WorldObjects, LoadQueryGlobalState)
 {
     Logger logger{"test"};

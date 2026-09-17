@@ -1,6 +1,7 @@
 #include "services/SpawnZoneManager.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "utils/Generators.hpp"
+#include "utils/RandomUtils.hpp"
 #include <algorithm>
 #include <ctime>
 #include <spdlog/logger.h>
@@ -53,7 +54,22 @@ SpawnZoneManager::loadMobSpawnZones(
             spawnZone.exclusionGameZoneId = row.exclusionGameZoneId;
             spawnZone.mobEntries = row.mobEntries;
             spawnZone.spawnEnabled = true;
-            spawnZone.spawnedMobsCount = 0;
+
+            // Hot-reload preserve: static pushes re-arrive on chunk↔game
+            // reconnect while mobs are live. Config (geometry/entries) is
+            // refreshed, but runtime tracking (lists/counter) survives —
+            // otherwise the zone forgets its mobs and double-spawns.
+            const auto existing = mobSpawnZones_.find(spawnZone.zoneId);
+            if (existing != mobSpawnZones_.end())
+            {
+                spawnZone.spawnedMobsList = existing->second.spawnedMobsList;
+                spawnZone.spawnedMobsUIDList = existing->second.spawnedMobsUIDList;
+                spawnZone.spawnedMobsCount = existing->second.spawnedMobsCount;
+            }
+            else
+            {
+                spawnZone.spawnedMobsCount = 0;
+            }
 
             logger_.log("[LOAD_ZONE] Loaded zone " + std::to_string(spawnZone.zoneId) +
                         " '" + spawnZone.zoneName + "' - mobEntries: " + std::to_string(spawnZone.mobEntries.size()) +
@@ -119,6 +135,9 @@ SpawnZoneManager::loadMobsInSpawnZones(
             mobData.factionSlug = row.factionSlug;
             mobData.repDeltaPerKill = row.repDeltaPerKill;
 
+            // Route into the mob's own zone (row.zoneId), not zone 0.
+            mobData.zoneId = row.zoneId;
+            mobData.uid = row.uid;
             mobSpawnZones_[mobData.zoneId].spawnedMobsList.push_back(mobData);
         }
     }
@@ -190,11 +209,10 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
                     std::to_string(zone->second.totalSpawnCount()));
     }
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> unitDist(0.0f, std::nextafter(1.0f, 0.0f));
-    std::uniform_real_distribution<float> angleDist(0.0f, static_cast<float>(2.0 * M_PI));
-    std::uniform_real_distribution<float> rotDist(0.0f, 360.0f);
+    // RNG: RandomUtils single source (one thread_local engine per thread,
+    // function-local distributions). Replaces the former per-call
+    // std::random_device/mt19937 trio — same sampling math, race-free and
+    // seedable for tests via seedForTests().
 
     std::unique_lock<std::shared_mutex> writeLock(mutex_);
     auto zone = mobSpawnZones_.find(zoneId);
@@ -232,16 +250,16 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     // Lambdas for shape-aware random point generation.
     auto sampleRect = [&]() -> std::pair<float, float>
     {
-        float x = zone->second.minX + unitDist(gen) * (zone->second.maxX - zone->second.minX);
-        float y = zone->second.minY + unitDist(gen) * (zone->second.maxY - zone->second.minY);
+        float x = zone->second.minX + RandomUtils::uniform01() * (zone->second.maxX - zone->second.minX);
+        float y = zone->second.minY + RandomUtils::uniform01() * (zone->second.maxY - zone->second.minY);
         return {x, y};
     };
 
     auto sampleCircle = [&]() -> std::pair<float, float>
     {
         // Uniform distribution over disc: r = R * sqrt(u)
-        float angle = angleDist(gen);
-        float r = zone->second.outerRadius * std::sqrt(unitDist(gen));
+        float angle = RandomUtils::angle();
+        float r = zone->second.outerRadius * std::sqrt(RandomUtils::uniform01());
         return {zone->second.centerX + r * std::cos(angle),
             zone->second.centerY + r * std::sin(angle)};
     };
@@ -249,10 +267,10 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     auto sampleAnnulus = [&]() -> std::pair<float, float>
     {
         // Equal-area sampling in annulus: r = sqrt(r_in^2 + u*(r_out^2 - r_in^2))
-        float angle = angleDist(gen);
+        float angle = RandomUtils::angle();
         float r2in = zone->second.innerRadius * zone->second.innerRadius;
         float r2out = zone->second.outerRadius * zone->second.outerRadius;
-        float r = std::sqrt(r2in + unitDist(gen) * (r2out - r2in));
+        float r = std::sqrt(r2in + RandomUtils::uniform01() * (r2out - r2in));
         return {zone->second.centerX + r * std::cos(angle),
             zone->second.centerY + r * std::sin(angle)};
     };
@@ -264,11 +282,10 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     {
         float sectorSize = 2.0f * static_cast<float>(M_PI) / static_cast<float>(totalSlots);
         float sectorStart = static_cast<float>(slotIdx) * sectorSize;
-        std::uniform_real_distribution<float> inSectorAngle(0.0f, sectorSize);
-        float angle = sectorStart + inSectorAngle(gen);
+        float angle = sectorStart + RandomUtils::range(0.0f, sectorSize);
         float r2in = zone->second.innerRadius * zone->second.innerRadius;
         float r2out = zone->second.outerRadius * zone->second.outerRadius;
-        float r = std::sqrt(r2in + unitDist(gen) * (r2out - r2in));
+        float r = std::sqrt(r2in + RandomUtils::uniform01() * (r2out - r2in));
         return {zone->second.centerX + r * std::cos(angle),
             zone->second.centerY + r * std::sin(angle)};
     };
@@ -300,7 +317,10 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             {
                 log_->info("[SPAWN_DELAY] Mob template ID " + std::to_string(entry.mobId) +
                            " not loaded yet, delaying spawn");
-                return mobs;
+                // Skip only this entry type this tick — later entries must
+                // still spawn (a bare return would starve them until the
+                // missing template arrives).
+                break;
             }
 
             mob.zoneId = zoneId;
@@ -371,7 +391,7 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
             }
 
             mob.position.positionZ = (zone->second.minZ + zone->second.maxZ) * 0.5f;
-            mob.position.rotationZ = rotDist(gen);
+            mob.position.rotationZ = RandomUtils::range(0.0f, 360.0f);
             mob.uid = Generators::generateUniqueMobUID();
             mob.spawnEpochSec = static_cast<int64_t>(std::time(nullptr));
 
@@ -407,8 +427,11 @@ SpawnZoneManager::mobDied(int zoneId, int mobUID)
             // remove mob from the list of spawned mobs (internal version without mutex)
             removeMobByUIDInternal(mobUID);
 
-            // decrease spawnedMobsCount
-            zone->second.spawnedMobsCount--;
+            // Floor at zero: cleanup and harvest paths can both report the
+            // same death (double mobDied), and the counter is display-only —
+            // the respawn task uses the live MobInstanceManager count.
+            if (zone->second.spawnedMobsCount > 0)
+                zone->second.spawnedMobsCount--;
 
             logger_.log("[MOB_DEATH] Mob UID " + std::to_string(mobUID) + " died in zone " +
                         std::to_string(zoneId) + ". Alive count: " + std::to_string(zone->second.spawnedMobsCount) +
@@ -479,10 +502,13 @@ SpawnZoneManager::removeMobByUIDInternal(int mobUID)
 void
 SpawnZoneManager::removeMobByUID(int mobUID)
 {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    removeMobByUIDInternal(mobUID);
+    {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        removeMobByUIDInternal(mobUID);
+    } // Release SpawnZoneManager mutex before calling MobInstanceManager
 
-    // Unregister from MobInstanceManager outside of internal mutex to avoid deadlock
+    // Unregister from MobInstanceManager outside of lock to avoid deadlock
+    // (same pattern as mobDied: MobInstanceManager takes its own locks).
     if (mobInstanceManager_)
     {
         mobInstanceManager_->unregisterMobInstance(mobUID);

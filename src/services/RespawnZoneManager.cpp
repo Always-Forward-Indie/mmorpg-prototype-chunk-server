@@ -45,13 +45,10 @@ RespawnZoneManager::findNearest(const PositionStruct &deathPosition) const
     if (best)
         return *best;
 
-    // Fallback: find zone marked as default
-    for (const auto &zone : zones_)
-    {
-        if (zone.isDefault)
-            return zone;
-    }
-
+    // Unreachable with a non-empty list (the loop above always picks the
+    // first zone at minimum), kept as a guard. NOTE: isDefault currently
+    // has no effect — nearest always wins. Preferring the default zone
+    // would change live respawn behavior and needs a product decision.
     return zones_.front();
 }
 

@@ -4,6 +4,7 @@
 #include "services/MobManager.hpp"
 #include "services/NPCManager.hpp"
 #include "services/SpawnZoneManager.hpp"
+#include "utils/RandomUtils.hpp"
 
 #include <gtest/gtest.h>
 
@@ -156,6 +157,162 @@ TEST_F(MobChainFixture, SpawnZoneSpawnsFromTemplate)
     // Zone is full now: further spawns add nothing.
     EXPECT_TRUE(zones.spawnMobsInZone(7).empty());
     EXPECT_TRUE(zones.spawnMobsInZone(424242).empty()); // unknown zone
+}
+
+TEST_F(MobChainFixture, RemoveMobByUIDUnregistersAndCleansZone)
+{
+    zones.setMobInstanceManager(&instances);
+    SpawnZoneStruct z;
+    z.zoneId = 7;
+    z.minX = 0;
+    z.maxX = 1000;
+    z.minY = 0;
+    z.maxY = 1000;
+    SpawnZoneMobEntry e;
+    e.mobId = 1;
+    e.maxCount = 1;
+    z.mobEntries = {e};
+    zones.loadMobSpawnZones({z});
+    ASSERT_EQ(zones.spawnMobsInZone(7).size(), 1u);
+    const int uid = zones.getMobsInZone(7)[0].uid;
+    ASSERT_NE(uid, 0);
+    ASSERT_EQ(instances.getMobInstance(uid).uid, uid); // spawn registered it
+
+    zones.removeMobByUID(uid);
+    EXPECT_EQ(instances.getMobInstance(uid).uid, 0); // unregistered ...
+    EXPECT_TRUE(zones.getMobsInZone(7).empty());      // ... and zone-cleaned
+
+    // Idempotent: second removal is a safe no-op (no crash, stays empty).
+    zones.removeMobByUID(uid);
+    EXPECT_TRUE(zones.getMobsInZone(7).empty());
+    // NOTE: lock ordering (zone mutex released before unregister, same as
+    // mobDied) is structural — it cannot deadlock-detect single-threaded;
+    // the full TSan suite guards the locking. This test pins the behavior.
+}
+
+TEST_F(MobChainFixture, MobDiedCounterFloorsAtZero)
+{
+    // Double mobDied (cleanup + harvest both reporting) must not drive the
+    // display counter negative; respawn uses the live instance count.
+    zones.setMobInstanceManager(&instances);
+    SpawnZoneStruct z;
+    z.zoneId = 7;
+    z.minX = 0;
+    z.maxX = 1000;
+    z.minY = 0;
+    z.maxY = 1000;
+    SpawnZoneMobEntry e;
+    e.mobId = 1;
+    e.maxCount = 1;
+    z.mobEntries = {e};
+    zones.loadMobSpawnZones({z});
+    ASSERT_EQ(zones.spawnMobsInZone(7).size(), 1u);
+    const int uid = zones.getMobsInZone(7)[0].uid;
+
+    zones.mobDied(7, uid);
+    zones.mobDied(7, uid);
+    EXPECT_GE(zones.getMobSpawnZoneByID(7).spawnedMobsCount, 0);
+}
+
+TEST_F(MobChainFixture, LoadMobsRoutesIntoOwnZone)
+{
+    // loadMobsInSpawnZones must file each mob under its own row.zoneId —
+    // previously zoneId was never copied and everything landed in zone 0.
+    MobDataStruct row = makeMob(1, "wolf");
+    row.uid = 9301;
+    row.zoneId = 7;
+    zones.loadMobsInSpawnZones({row});
+    ASSERT_EQ(zones.getMobsInZone(7).size(), 1u);
+    EXPECT_EQ(zones.getMobsInZone(7)[0].uid, 9301);
+    EXPECT_TRUE(zones.getMobsInZone(0).empty());
+}
+
+TEST_F(MobChainFixture, MissingTemplateSkipsEntryOnly)
+{
+    // A missing template delays only its own entry type — later entries
+    // must still spawn this tick (a bare return starved them).
+    SpawnZoneStruct z;
+    z.zoneId = 7;
+    z.minX = 0;
+    z.maxX = 1000;
+    z.minY = 0;
+    z.maxY = 1000;
+    SpawnZoneMobEntry missing;
+    missing.mobId = 424242;
+    missing.maxCount = 1;
+    SpawnZoneMobEntry present;
+    present.mobId = 1;
+    present.maxCount = 2;
+    z.mobEntries = {missing, present};
+    zones.loadMobSpawnZones({z});
+
+    auto spawned = zones.spawnMobsInZone(7);
+    ASSERT_EQ(spawned.size(), 2u);
+    for (const auto &m : spawned)
+        EXPECT_EQ(m.id, 1);
+}
+
+TEST_F(MobChainFixture, ReloadPreservesRuntimeTracking)
+{
+    // Static pushes re-arrive on chunk<->game reconnect while mobs are live:
+    // reload must refresh config but keep runtime tracking, else the zone
+    // forgets its mobs and double-spawns on the next tick.
+    SpawnZoneStruct z;
+    z.zoneId = 7;
+    z.zoneName = "v1";
+    z.minX = 0;
+    z.maxX = 1000;
+    z.minY = 0;
+    z.maxY = 1000;
+    SpawnZoneMobEntry e;
+    e.mobId = 1;
+    e.maxCount = 1;
+    z.mobEntries = {e};
+    zones.loadMobSpawnZones({z});
+    ASSERT_EQ(zones.spawnMobsInZone(7).size(), 1u);
+
+    z.zoneName = "v2-reload";
+    zones.loadMobSpawnZones({z});
+    EXPECT_EQ(zones.getMobSpawnZoneByID(7).zoneName, "v2-reload"); // config refreshed
+    EXPECT_EQ(zones.getMobsInZone(7).size(), 1u);                  // runtime kept
+    EXPECT_EQ(zones.getMobSpawnZoneByID(7).spawnedMobsCount, 1);
+}
+
+TEST_F(MobChainFixture, SpawnPositionsDeterministicUnderSeed)
+{
+    // Spawn sampling runs on RandomUtils: same seed + same config must give
+    // the same positions (uids differ — atomic counter — compare x/y only).
+    auto buildZone = [] {
+        SpawnZoneStruct z;
+        z.zoneId = 7;
+        z.minX = 0;
+        z.maxX = 1000;
+        z.minY = 0;
+        z.maxY = 1000;
+        SpawnZoneMobEntry e;
+        e.mobId = 1;
+        e.maxCount = 3;
+        z.mobEntries = {e};
+        return z;
+    };
+    RandomUtils::seedForTests(777u);
+    zones.loadMobSpawnZones({buildZone()});
+    auto first = zones.spawnMobsInZone(7);
+    ASSERT_EQ(first.size(), 3u);
+
+    MobManager mobs2{logger};
+    mobs2.setListOfMobs({makeMob(1, "wolf"), makeMob(2, "boar")});
+    SpawnZoneManager zones2{mobs2, logger};
+    RandomUtils::seedForTests(777u);
+    zones2.loadMobSpawnZones({buildZone()});
+    auto second = zones2.spawnMobsInZone(7);
+    ASSERT_EQ(second.size(), 3u);
+
+    for (size_t i = 0; i < first.size(); ++i)
+    {
+        EXPECT_FLOAT_EQ(first[i].position.positionX, second[i].position.positionX);
+        EXPECT_FLOAT_EQ(first[i].position.positionY, second[i].position.positionY);
+    }
 }
 
 TEST(NpcCatalog, LoadLookupAreaClear)
