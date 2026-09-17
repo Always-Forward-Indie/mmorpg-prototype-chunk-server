@@ -1,3 +1,29 @@
+v0.2.49
+17.09.2026
+================
+
+Wave 6 final gates (this session):
+
+**Unit:** 418/418 green (326 at v0.2.39 → +92: Wave 4.1 pins, Phase-0
+pins, SpawnGeometry, Dialogue/Quest/Combat/Movement/Join/Item extracts).
+**TSan:** 418 pass, fingerprint unchanged (9 Scheduler same-mutex reports
+from the triaged family, zero new shapes across all waves).
+**Full server build:** green after every wave (incl. AttackSystem delete).
+**L3 contracts (live dev):** 18/18 green — framing/tolerant/conn/combat/
+vendor/trade (4.5 min); reg_pvp green (81s, PvP refusal pinned).
+**Load:** auth_storm 50/50 auth (p50 1.06s = hash floor);
+combat_storm 2x2 verified live (ok + cooldown mix, 0 range errors);
+kill swarm 8/8 OK.
+**Log alerts:** Watch-ServerLogs gate exit 0 on all services post-soak
+(db operational noise + login "not fatal" allow-listed; 09-13 DB "too
+many clients" noted as pre-existing, healthy since).
+**Decisions kept:** corpse TTL 60s stays; SkillManager stays (LEGACY tag,
+deletion needs product decision); EventDispatcher untouched (uniform
+boilerplate); DamageApplier/AoE left as orchestration; exclusionGameZoneId
+deferred (needs GameZoneManager wiring).
+
+---
+
 v0.2.48
 17.09.2026
 ================
