@@ -69,6 +69,16 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
         const SkillStruct &skill = skillOpt.value();
         logger_.log("Skill found in useSkill: " + std::string(skill.skillName) + " (" + skill.skillSlug + ")", GREEN);
 
+        // Passive skills cannot be cast (ported from the deleted SkillManager
+        // path, which rejected them — the canonical path must agree).
+        if (skill.isPassive)
+        {
+            log_->warn("[useSkill] Cannot cast passive skill '" + skillSlug +
+                       "' for caster " + std::to_string(casterId));
+            result.errorMessage = "Cannot cast a passive skill";
+            return result;
+        }
+
         // Проверяем ресурсы и сразу списываем ману атомарно
         // ВАЖНО: ресурсы проверяются ДО выставления кулдауна — если маны не хватает,
         // кулдаун не начинается (игрок не теряет скил зря).

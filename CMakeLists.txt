@@ -26,7 +26,6 @@ set(SOURCE_FILES
     src/services/MobMovementManager.cpp
     src/services/MobAIController.cpp
     src/services/CombatCalculator.cpp
-    src/services/SkillManager.cpp
     src/services/SkillSystem.cpp
     src/services/CooldownService.cpp
     src/services/CombatSystem.cpp
@@ -133,7 +132,6 @@ set(HEADER_FILES
     include/services/MobAIFormulas.hpp
     include/services/MovementValidation.hpp
     include/services/CombatCalculator.hpp
-    include/services/SkillManager.hpp
     include/services/SkillSystem.hpp
     include/services/CooldownService.hpp
     include/services/CombatSystem.hpp

@@ -1,3 +1,28 @@
+v0.2.50
+18.09.2026
+================
+
+Fixes:
+
+**No-legacy: SkillManager deleted (canonical path is SkillSystem).**
+- `SkillManager` (own cooldown map + own CombatCalculator, parallel logic
+  to SkillSystem, zero production call sites) deleted with its unit suite:
+  hpp/cpp, `GameServices` wiring (include/member/getter/ctor), both
+  `CMakeLists.txt` entries, `test_skills.cpp`.
+- Ported the one behavior without parity: passive skills are now rejected
+  by `SkillSystem::useSkill` ("Cannot cast a passive skill", no mana/cooldown
+  spent) — previously only the legacy path guarded. Plus pins for
+  `Skill not found` / `Invalid target` messages on the canonical path.
+  Cooldown expiry stays pinned in `test_cooldown.cpp`; damage/mana/best-skill
+  in `test_skillsystem.cpp` + `CombatFixture`.
+- Stale `SkillManager` mention in `CombatCalculator` docs fixed.
+- Verified: 412/412 unit green (8 legacy cases replaced by 4 canonical
+  pins); full MMOChunkServer build green; TSan 412 pass, same 9-warning
+  Scheduler fingerprint. Live bots use active skills only — no protocol
+  impact (combat L3 re-run in gates).
+
+---
+
 v0.2.49
 17.09.2026
 ================

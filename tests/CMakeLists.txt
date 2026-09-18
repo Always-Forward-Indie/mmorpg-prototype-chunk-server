@@ -34,7 +34,6 @@ if(GTest_FOUND)
         test_emote_bestiary.cpp
         test_character.cpp
         test_equipment.cpp
-        test_skills.cpp
         test_chunk_registry.cpp
         test_utils.cpp
         test_json_parser.cpp
@@ -98,7 +97,6 @@ if(GTest_FOUND)
         ../src/services/EmoteManager.cpp
         ../src/services/BestiaryManager.cpp
         ../src/services/EquipmentManager.cpp
-        ../src/services/SkillManager.cpp
         ../src/services/SkillSystem.cpp
         ../src/services/MobMovementManager.cpp
         ../src/services/ChunkManager.cpp

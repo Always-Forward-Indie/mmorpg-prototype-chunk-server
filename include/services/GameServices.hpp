@@ -31,7 +31,7 @@
 #include "services/RegenManager.hpp"
 #include "services/ReputationManager.hpp"
 #include "services/RespawnZoneManager.hpp"
-#include "services/SkillManager.hpp"
+#include "services/SkillSystem.hpp"
 #include "services/SpawnZoneManager.hpp"
 #include "services/StatusEffectTemplateManager.hpp"
 #include "services/TitleManager.hpp"
@@ -77,8 +77,6 @@ class GameServices
           dialogueManager_(logger_),
           dialogueSessionManager_(logger_),
           questManager_(this, logger_),
-          skillManager_(characterManager_, mobManager_, mobInstanceManager_,
-              mobMovementManager_, gameConfigService_, logger_),
           cooldownService_(logger_),
           experienceManager_(characterManager_, experienceCacheManager_, &titleManager_,
               &statsNotificationService_, logger_),
@@ -183,15 +181,6 @@ class GameServices
     InterestManager &getInterestManager()
     {
         return interestManager_;
-    }
-    /// LEGACY (A5 verdict, do not extend): the live combat path runs on
-    /// SkillSystem + CooldownService (see CombatSystem); SkillManager has
-    /// zero production call sites — only its own unit suite exercises it.
-    /// Kept (not deleted) until a product decision names the canonical
-    /// skill path and its tests are ported. New code must use SkillSystem.
-    SkillManager &getSkillManager()
-    {
-        return skillManager_;
     }
     CooldownService &getCooldownService()
     {
@@ -357,7 +346,6 @@ class GameServices
     DialogueManager dialogueManager_;
     DialogueSessionManager dialogueSessionManager_;
     QuestManager questManager_;
-    SkillManager skillManager_;
     CooldownService cooldownService_;
     ExperienceManager experienceManager_;
     ExperienceCacheManager experienceCacheManager_;

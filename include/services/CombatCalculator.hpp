@@ -22,7 +22,7 @@ class CombatCalculator
     ~CombatCalculator() = default;
 
     /**
-     * @brief Привязать GameConfigService. Вызывается из SkillManager после получения
+     * @brief Привязать GameConfigService. Вызывается из SkillSystem после получения
      *        конфига от game-server (событие SET_GAME_CONFIG).
      */
     void setGameConfigService(GameConfigService *configService);

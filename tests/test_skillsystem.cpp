@@ -195,6 +195,35 @@ TEST_F(SystemFixture, CooldownForwards)
     EXPECT_NE(skills.getCombatCalculator(), nullptr);
 }
 
+TEST_F(SystemFixture, PassiveSkillRejectedWithoutSideEffects)
+{
+    // Ported from the deleted SkillManager path: passives are uncastable.
+    SkillStruct aura = makeSkill("aura", 0, 0, 10.0f);
+    aura.isPassive = true;
+    CharacterDataStruct c = chars.getCharacterData(1);
+    c.skills.push_back(aura);
+    chars.loadCharacterData(c);
+
+    auto r = skills.useSkill(1, "aura", 9001, CombatTargetType::MOB);
+    EXPECT_FALSE(r.success);
+    EXPECT_EQ(r.errorMessage, "Cannot cast a passive skill");
+    EXPECT_EQ(chars.getCharacterData(1).characterCurrentMana, 100); // untouched
+    EXPECT_FALSE(skills.isOnCooldown(1, "aura"));                   // no cooldown either
+}
+
+TEST_F(SystemFixture, UnknownSkillAndMobTargetMessages)
+{
+    auto rSkill = skills.useSkill(1, "nope", 9001, CombatTargetType::MOB);
+    EXPECT_FALSE(rSkill.success);
+    EXPECT_EQ(rSkill.errorMessage, "Skill not found: nope");
+
+    auto rMob = skills.useSkill(1, "strike", 424242, CombatTargetType::MOB);
+    EXPECT_FALSE(rMob.success);
+    // Canonical-path wording differs from the deleted SkillManager's
+    // ("Target mob not found") — rejection parity is what matters.
+    EXPECT_EQ(rMob.errorMessage, "Invalid target");
+}
+
 TEST_F(SystemFixture, BestSkillForMob)
 {
     MobDataStruct mob;
