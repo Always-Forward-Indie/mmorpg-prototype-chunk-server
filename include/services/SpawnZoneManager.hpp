@@ -10,6 +10,7 @@
 
 // Forward declaration to avoid circular dependency
 class MobInstanceManager;
+class GameZoneManager;
 
 class SpawnZoneManager
 {
@@ -18,6 +19,11 @@ class SpawnZoneManager
 
     // Set mob instance manager for registration of spawned mobs
     void setMobInstanceManager(MobInstanceManager *mobInstanceManager);
+
+    // Set game-zone manager for exclusionGameZoneId filtering (nullable:
+    // without it exclusion is silently ignored — same posture as the
+    // optional MobInstanceManager above).
+    void setGameZoneManager(GameZoneManager *gameZoneManager);
 
     void loadMobSpawnZones(std::vector<SpawnZoneStruct> selectSpawnZones);
     void loadMobsInSpawnZones(std::vector<MobDataStruct> selectMobs);
@@ -42,6 +48,7 @@ class SpawnZoneManager
     std::shared_ptr<spdlog::logger> log_;
     MobManager &mobManager_;
     MobInstanceManager *mobInstanceManager_; // Pointer to avoid circular dependency
+    GameZoneManager *gameZoneManager_ = nullptr; // Optional exclusion filter
 
     // Store the mob spawn zones in memory with zoneId as key
     std::map<int, SpawnZoneStruct> mobSpawnZones_;

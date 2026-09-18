@@ -1,3 +1,23 @@
+v0.2.51
+18.09.2026
+================
+
+New:
+
+**exclusionGameZoneId implemented (was a TODO).**
+- `SpawnZoneManager` takes an optional `GameZoneManager` (nullable
+  late-wire, set in `GameServices` ctor next to the instance-manager
+  wiring). Spawn candidates falling inside the zone's exclusion game zone
+  (shape-aware `contains`) are rejected per attempt; exhausted attempts skip
+  the mob until the next tick — never spawned inside. Unwired manager or
+  zero id = previous behavior, no crash.
+- Pins: partial exclusion (no spawn inside, any seed), full exclusion
+  (zero spawns when wired), inert when unwired.
+- Verified: 415/415 unit green; full MMOChunkServer build green; TSan 415
+  pass, same 9-warning Scheduler fingerprint, zero new shapes.
+
+---
+
 v0.2.50
 18.09.2026
 ================

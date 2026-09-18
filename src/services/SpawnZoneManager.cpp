@@ -1,4 +1,5 @@
 #include "services/SpawnZoneManager.hpp"
+#include "services/GameZoneManager.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "utils/Generators.hpp"
 #include "utils/RandomUtils.hpp"
@@ -20,6 +21,12 @@ void
 SpawnZoneManager::setMobInstanceManager(MobInstanceManager *mobInstanceManager)
 {
     mobInstanceManager_ = mobInstanceManager;
+}
+
+void
+SpawnZoneManager::setGameZoneManager(GameZoneManager *gameZoneManager)
+{
+    gameZoneManager_ = gameZoneManager;
 }
 
 void
@@ -343,11 +350,23 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
                     break;
                 }
 
-                // Reject if inside the optional exclusion game zone.
-                // (Full exclusion-zone lookup would require GameZoneManager access;
-                //  for now skip if exclusionGameZoneId != 0 — implement later via callback.)
+                // Reject candidates inside the zone's exclusion game zone
+                // (e.g. a safe village overlapping the spawn area). Shape-aware
+                // via GameZoneManager; unwired manager or zero id = no filtering.
+                // Exhausted attempts skip this mob until the next tick — a mob
+                // is never spawned inside the exclusion.
+                bool excluded = false;
+                if (zone->second.exclusionGameZoneId != 0 && gameZoneManager_ != nullptr)
+                {
+                    PositionStruct probe;
+                    probe.positionX = candidateX;
+                    probe.positionY = candidateY;
+                    const auto gz = gameZoneManager_->getZoneForPosition(probe);
+                    if (gz.has_value() && gz->id == zone->second.exclusionGameZoneId)
+                        excluded = true;
+                }
 
-                bool tooClose = false;
+                bool tooClose = excluded;
                 for (const auto &occ : occupiedPositions)
                 {
                     float ddx = candidateX - occ.positionX;

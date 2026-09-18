@@ -2,6 +2,7 @@
 // (Logger only; SpawnZoneManager takes MobManager&).
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
+#include "services/GameZoneManager.hpp"
 #include "services/NPCManager.hpp"
 #include "services/SpawnZoneManager.hpp"
 #include "utils/RandomUtils.hpp"
@@ -134,6 +135,93 @@ TEST_F(MobChainFixture, InstancesInZoneAndRange)
     EXPECT_EQ(instances.getAliveMobCountInZone(7), 2);
     EXPECT_EQ(instances.getMobsInRange(0, 0, 500).size(), 1u);
     EXPECT_EQ(instances.getMobInstancesInZone(7).size(), 2u);
+}
+
+TEST_F(MobChainFixture, ExclusionFiltersSafeArea)
+{
+    // Spawn zone 0..1000 with the western half (x<500) excluded as safe
+    // village (game zone 8): no spawned mob may land inside, any seed.
+    // NOTE: fixture logger is reused — a second Logger{"test"} throws
+    // (spdlog registry keeps the name).
+    GameZoneManager gameZones(logger);
+    GameZoneStruct safe;
+    safe.id = 8;
+    safe.minX = 0;
+    safe.maxX = 500;
+    safe.minY = 0;
+    safe.maxY = 1000;
+    gameZones.loadGameZones({safe});
+    zones.setGameZoneManager(&gameZones);
+
+    SpawnZoneStruct z;
+    z.zoneId = 7;
+    z.minX = 0;
+    z.maxX = 1000;
+    z.minY = 0;
+    z.maxY = 1000;
+    z.exclusionGameZoneId = 8;
+    SpawnZoneMobEntry e;
+    e.mobId = 1;
+    e.maxCount = 10;
+    z.mobEntries = {e};
+    zones.loadMobSpawnZones({z});
+
+    RandomUtils::seedForTests(99u);
+    auto spawned = zones.spawnMobsInZone(7);
+    ASSERT_FALSE(spawned.empty());
+    for (const auto &m : spawned)
+        EXPECT_GE(m.position.positionX, 500.0f);
+}
+
+TEST_F(MobChainFixture, FullExclusionSpawnsNothingWhenWired)
+{
+    // Exclusion covering the whole spawn zone: every attempt rejected,
+    // mobs skipped until the next tick (never spawned inside).
+    GameZoneManager gameZones(logger);
+    GameZoneStruct safe;
+    safe.id = 8;
+    safe.minX = 0;
+    safe.maxX = 1000;
+    safe.minY = 0;
+    safe.maxY = 1000;
+    gameZones.loadGameZones({safe});
+    zones.setGameZoneManager(&gameZones);
+
+    SpawnZoneStruct z;
+    z.zoneId = 7;
+    z.minX = 0;
+    z.maxX = 1000;
+    z.minY = 0;
+    z.maxY = 1000;
+    z.exclusionGameZoneId = 8;
+    SpawnZoneMobEntry e;
+    e.mobId = 1;
+    e.maxCount = 3;
+    z.mobEntries = {e};
+    zones.loadMobSpawnZones({z});
+
+    RandomUtils::seedForTests(99u);
+    EXPECT_TRUE(zones.spawnMobsInZone(7).empty());
+}
+
+TEST_F(MobChainFixture, ExclusionIgnoredWhenUnwired)
+{
+    // No GameZoneManager wired: exclusion id is inert, spawn proceeds.
+    SpawnZoneStruct z;
+    z.zoneId = 7;
+    z.minX = 0;
+    z.maxX = 1000;
+    z.minY = 0;
+    z.maxY = 1000;
+    z.exclusionGameZoneId = 8;
+    SpawnZoneMobEntry e;
+    e.mobId = 1;
+    e.maxCount = 3;
+    z.mobEntries = {e};
+    zones.loadMobSpawnZones({z});
+
+    RandomUtils::seedForTests(99u);
+    EXPECT_EQ(zones.spawnMobsInZone(7).size(), 3u);
 }
 
 TEST_F(MobChainFixture, SpawnZoneSpawnsFromTemplate)

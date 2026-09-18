@@ -115,6 +115,9 @@ class GameServices
     {
         // Set up manager dependencies
         spawnZoneManager_.setMobInstanceManager(&mobInstanceManager_);
+        // Exclusion filter for safe zones (nullable in the manager; without
+        // this call exclusionGameZoneId is inert).
+        spawnZoneManager_.setGameZoneManager(&gameZoneManager_);
         mobMovementManager_.setSpawnZoneManager(&spawnZoneManager_);
         // Activate zone-event mob speed multipliers (intended design; the
         // setter existed but was never wired, so multipliers never applied).
