@@ -1,3 +1,24 @@
+v0.2.52
+18.09.2026
+================
+
+New:
+
+**Threshold champion chance + per-zone cap (Wave 6).**
+- Post-threshold spawn chance: `champion.spawn_chance_pct` (default 100 =
+  legacy always-spawn). Counter resets on reaching threshold either way.
+- Hard cap `champion.max_active_per_zone` (default 3): threshold hits at
+  cap reset the counter and skip (natural retry later) — a farmed zone can
+  no longer stack champions without bound. Existing same-template
+  suppression unchanged.
+- Rationale: prod threshold-100 zones never fire live (see SERVER_BUGS #8);
+  chance + cap make the mechanic tunable per content without code changes.
+- Pins: chance=0 never spawns across 10 kills; cap=1 blocks a second
+  template while one is active.
+- Verified: 8/8 ChampFixture green; full suite + TSan below.
+
+---
+
 v0.2.51
 18.09.2026
 ================

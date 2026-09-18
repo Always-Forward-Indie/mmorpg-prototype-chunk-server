@@ -81,6 +81,38 @@ ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId)
         return; // threshold not reached
     }
 
+    // Post-threshold spawn chance (game_config champion.spawn_chance_pct,
+    // default 100 = legacy always-spawn). Lets content tune rarity without
+    // touching thresholds; tests pin both extremes.
+    {
+        const float chancePct = gameConfig_.getFloat("champion.spawn_chance_pct", kDefaultSpawnChancePct);
+        const float roll = RandomUtils::uniform01() * 100.0f;
+        if (roll >= chancePct)
+        {
+            log_->info("[Champion] Threshold reached in zone {} but chance roll failed ({:.1f} >= {:.1f}%)",
+                gameZoneId, roll, chancePct);
+            return;
+        }
+    }
+
+    // Hard cap on simultaneous champions per zone (game_config
+    // champion.max_active_per_zone, default 3): no flood even under farmed
+    // thresholds. Counter already reset — natural retry next threshold.
+    {
+        const int maxActive = gameConfig_.getInt("champion.max_active_per_zone", kDefaultMaxActivePerZone);
+        std::lock_guard<std::mutex> alck(activeMutex_);
+        int zoneActive = 0;
+        for (const auto &c : active_)
+            if (c.gameZoneId == gameZoneId)
+                ++zoneActive;
+        if (zoneActive >= maxActive)
+        {
+            log_->warn("[Champion] Zone {} at cap ({}/{} active) — threshold spawn skipped",
+                gameZoneId, zoneActive, maxActive);
+            return;
+        }
+    }
+
     // Spawn outside of counterMutex_ lock
     spawnChampion(mobTemplateId, gameZoneId, "[Чемпион] ", 1.5f);
 }

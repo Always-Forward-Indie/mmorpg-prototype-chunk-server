@@ -174,6 +174,34 @@ TEST_F(ChampFixture, ChampionSpawnPointRespectsCircleGameZone)
     EXPECT_LE(dx * dx + dy * dy, 1000.0f * 1000.0f);
 }
 
+TEST_F(ChampFixture, ChanceZeroNeverSpawns)
+{
+    // spawn_chance_pct=0: threshold reached, roll always fails, counter
+    // resets (retry next threshold — still nothing).
+    config.setConfig({{"champion.spawn_chance_pct", "0"}});
+    for (int i = 0; i < 10; ++i)
+        champ.recordMobKill(7, 5);
+    EXPECT_EQ(liveChampions(), 0u);
+}
+
+TEST_F(ChampFixture, CapBlocksSecondTemplateWhileActive)
+{
+    // max_active_per_zone=1: first template spawns, second template's
+    // threshold is refused (counter reset, natural retry later).
+    MobDataStruct tpl2 = makeTemplate();
+    tpl2.id = 6;
+    tpl2.slug = "boar";
+    tpl2.name = "Boar";
+    mobs.setListOfMobs({makeTemplate(), tpl2});
+    config.setConfig({{"champion.max_active_per_zone", "1"}});
+    for (int i = 0; i < 3; ++i)
+        champ.recordMobKill(7, 5);
+    ASSERT_EQ(liveChampions(), 1u);
+    for (int i = 0; i < 3; ++i)
+        champ.recordMobKill(7, 6);
+    EXPECT_EQ(liveChampions(), 1u);
+}
+
 TEST_F(ChampFixture, TimedLoadAndTick)
 {
     TimedChampionTemplate t;
