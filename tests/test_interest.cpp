@@ -31,6 +31,41 @@ struct InterestFixture : ::testing::Test
 
 } // namespace
 
+TEST(InterestEvict, MobsInLeftCells)
+{
+    // mobCellLeft payload computation: mobs standing in vacated cells are
+    // listed, everyone else is not. Cell size 1500: (100,100)->(0,0),
+    // (1600,100)->(1,0), (-100,100)->(-1,0).
+    auto at = [](int uid, float x, float y)
+    {
+        PositionStruct p;
+        p.positionX = x;
+        p.positionY = y;
+        return std::make_pair(uid, p);
+    };
+    const std::vector<std::pair<int, PositionStruct>> mobs = {
+        at(11, 100, 100), at(22, 1600, 100), at(33, -100, 100)};
+    const InterestManager::CellKey left00{0, 0};
+    const InterestManager::CellKey left10{1, 0};
+
+    auto only00 = InterestManager::mobsInCells(mobs, {left00}, 1500.0f);
+    ASSERT_EQ(only00.size(), 1u);
+    EXPECT_EQ(only00[0], 11);
+
+    auto both = InterestManager::mobsInCells(mobs, {left00, left10}, 1500.0f);
+    EXPECT_EQ(both.size(), 2u);
+
+    // Watched (combat-target) uids survive the evict.
+    auto excl = InterestManager::mobsInCells(mobs, {left00, left10}, 1500.0f, {11});
+    ASSERT_EQ(excl.size(), 1u);
+    EXPECT_EQ(excl[0], 22);
+
+    // Empty cells / degenerate cell size: nothing (handler no-ops).
+    EXPECT_TRUE(InterestManager::mobsInCells(mobs, {}, 1500.0f).empty());
+    EXPECT_TRUE(InterestManager::mobsInCells(mobs, {left00}, 0.0f).empty());
+    EXPECT_TRUE(InterestManager::mobsInCells({}, {left00}, 1500.0f).empty());
+}
+
 TEST(InterestDefaults, DesignValuesAreSingleSourced)
 {
     // Wave 2.2 pin: the ChunkServer configure() fallbacks, the member

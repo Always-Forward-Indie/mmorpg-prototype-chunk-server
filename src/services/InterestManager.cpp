@@ -30,6 +30,47 @@ InterestManager::cellFor(float x, float y, float cellSize)
     };
 }
 
+std::vector<int>
+InterestManager::mobsInCells(
+    const std::vector<std::pair<int, PositionStruct>> &mobPositions,
+    const std::vector<CellKey> &cells,
+    float cellSize,
+    const std::unordered_set<int> &exclude)
+{
+    std::vector<int> uids;
+    if (cells.empty() || cellSize <= 0.0f)
+        return uids;
+    uids.reserve(mobPositions.size() / 8 + 1);
+    for (const auto &[uid, pos] : mobPositions)
+    {
+        if (exclude.count(uid) != 0)
+            continue;
+        const CellKey c = cellFor(pos.positionX, pos.positionY, cellSize);
+        for (const auto &left : cells)
+        {
+            if (c == left)
+            {
+                uids.push_back(uid);
+                break;
+            }
+        }
+    }
+    return uids;
+}
+
+std::unordered_set<int>
+InterestManager::watchedUids(int clientId) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::unordered_set<int> out;
+    const auto it = watches_.find(clientId);
+    if (it == watches_.end())
+        return out;
+    for (const auto &[uid, _when] : it->second)
+        out.insert(uid);
+    return out;
+}
+
 bool
 InterestManager::isEnabled() const
 {

@@ -87,6 +87,18 @@ class CharacterEventHandler : public BaseEventHandler
     void sendCellSnapshot(int clientId, float cx, float cy, float halfDiag);
 
     /**
+     * @brief Cell-left evict (interest v2): tell one client to drop mob
+     * entries standing in cells it just unsubscribed (mobCellLeft{uids}).
+     * Kills client-side ghosts (culled mobs otherwise freeze with dead
+     * positions forever). No-op on empty diff or disabled interest; never
+     * fails the move. Over-inclusive by design (unknown uids dropped
+     * silently); corpse discovery untouched.
+     */
+    void sendCellLeftEvict(int clientId,
+        std::shared_ptr<boost::asio::ip::tcp::socket> socket,
+        const InterestManager::UpdateResult &diff);
+
+    /**
      * @brief Handle character join event
      *
      * Validates character and broadcasts join notification to all clients

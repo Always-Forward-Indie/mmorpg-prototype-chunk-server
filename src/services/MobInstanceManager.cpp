@@ -145,6 +145,17 @@ MobInstanceManager::getMobPositionsInZone(int zoneId) const
     return result;
 }
 
+std::vector<std::pair<int, PositionStruct>>
+MobInstanceManager::getAllMobPositions() const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    std::vector<std::pair<int, PositionStruct>> result;
+    result.reserve(mobInstances_.size());
+    for (const auto &[uid, mob] : mobInstances_)
+        result.emplace_back(uid, mob.position);
+    return result;
+}
+
 bool
 MobInstanceManager::updateMobPosition(int mobUID, const PositionStruct &position)
 {

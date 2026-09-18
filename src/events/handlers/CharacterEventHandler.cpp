@@ -108,6 +108,55 @@ CharacterEventHandler::sendCellSnapshot(int clientId, float cx, float cy, float 
     }
 }
 
+void
+CharacterEventHandler::sendCellLeftEvict(int clientId,
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket,
+    const InterestManager::UpdateResult &diff)
+{
+    // Interest v2 cell-left evict: drop mob entries standing in vacated
+    // cells so culled mobs stop freezing client-side with dead positions.
+    // Never fails the caller (move/ready); empty diff or disabled interest
+    // is a no-op. Direct unicast — only the leaver needs it.
+    try
+    {
+        if (diff.left.empty() || !socket || !socket->is_open())
+            return;
+        auto &interest = gameServices_.getInterestManager();
+        if (!interest.isEnabled())
+            return;
+        const auto positions = gameServices_.getMobInstanceManager().getAllMobPositions();
+        // Never evict an active combat target (watched): it would flicker
+        // for one tick until the culling-bypassing watched update re-adds it.
+        const auto uids = InterestManager::mobsInCells(
+            positions, diff.left, interest.cellSize(), interest.watchedUids(clientId));
+        if (uids.empty())
+            return;
+        nlohmann::json uidsJson = nlohmann::json::array();
+        for (int uid : uids)
+            uidsJson.push_back(uid);
+        nlohmann::json evict = ResponseBuilder()
+                                   .setHeader("message", "Cells left — drop these mobs")
+                                   .setHeader("hash", "")
+                                   .setHeader("clientId", clientId)
+                                   .setHeader("eventType", "mobCellLeft")
+                                   .setBody("uids", uidsJson)
+                                   .build();
+        networkManager_.sendResponse(socket,
+            networkManager_.generateResponseMessage("success", evict));
+        log_->debug("[INTEREST] mobCellLeft: {} uids to client {}", uids.size(), clientId);
+    }
+    catch (const std::exception &e)
+    {
+        log_->debug("[INTEREST] mobCellLeft failed for client {} ({}), move accepted anyway",
+            clientId, e.what());
+    }
+    catch (...)
+    {
+        log_->debug("[INTEREST] mobCellLeft failed for client {} (unknown), move accepted anyway",
+            clientId);
+    }
+}
+
 bool
 CharacterEventHandler::validateCharacterAuthentication(int clientId, int characterId)
 {
@@ -794,6 +843,8 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                                 (cell.cx + 0.5f) * cs, (cell.cy + 0.5f) * cs, cs * 0.75f);
                         }
                     }
+                    // Vacated cells: evict their mobs client-side (no ghosts).
+                    sendCellLeftEvict(clientID, clientSocket, diff);
                 }
             }
             catch (const std::exception &e)
@@ -1126,10 +1177,13 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     // Never fails player-ready; once per join, so debug is cheap.
     try
     {
-        gameServices_.getInterestManager().onPlayerMoved(
+        auto diff = gameServices_.getInterestManager().onPlayerMoved(
             clientID, characterId,
             characterData.characterPosition.positionX,
             characterData.characterPosition.positionY);
+        // Fresh subscription: left is normally empty; routed through the
+        // same evict for uniformity (no-op when empty).
+        sendCellLeftEvict(clientID, clientSocket, diff);
     }
     catch (const std::exception &e)
     {

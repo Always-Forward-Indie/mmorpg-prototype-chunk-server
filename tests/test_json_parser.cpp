@@ -15,6 +15,29 @@ nlohmann::json hdr(const std::string &type)
 
 } // namespace
 
+TEST(JsonParser, SpawnZonesGameZoneId)
+{
+    // Origin attribution needs gameZoneId on the wire; legacy pushes
+    // without it must parse as 0 (position fallback).
+    JSONParser p;
+    nlohmann::json with;
+    with["body"]["spawnZonesData"] = nlohmann::json::array(
+        {{{"id", 9}, {"name", "arena"}, {"gameZoneId", 7}, {"shape", "RECT"}}});
+    std::string rawWith = with.dump();
+    auto listWith = p.parseSpawnZonesList(rawWith.c_str(), rawWith.size());
+    ASSERT_EQ(listWith.size(), 1u);
+    EXPECT_EQ(listWith[0].zoneId, 9);
+    EXPECT_EQ(listWith[0].gameZoneId, 7);
+
+    nlohmann::json without;
+    without["body"]["spawnZonesData"] = nlohmann::json::array(
+        {{{"id", 9}, {"name", "arena"}, {"shape", "RECT"}}});
+    std::string rawWithout = without.dump();
+    auto listWithout = p.parseSpawnZonesList(rawWithout.c_str(), rawWithout.size());
+    ASSERT_EQ(listWithout.size(), 1u);
+    EXPECT_EQ(listWithout[0].gameZoneId, 0);
+}
+
 TEST(JsonParser, EventType)
 {
     JSONParser p;

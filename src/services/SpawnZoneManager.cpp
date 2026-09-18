@@ -48,6 +48,7 @@ SpawnZoneManager::loadMobSpawnZones(
             SpawnZoneStruct spawnZone;
             spawnZone.zoneId = row.zoneId;
             spawnZone.zoneName = row.zoneName;
+            spawnZone.gameZoneId = row.gameZoneId;
             spawnZone.shape = row.shape;
             spawnZone.minX = row.minX;
             spawnZone.maxX = row.maxX;

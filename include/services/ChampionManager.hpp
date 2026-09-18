@@ -62,6 +62,12 @@ class ChampionManager
     /**
      * @brief Record a mob kill in a game zone for Threshold Champion tracking.
      *
+     * Attribution is by ORIGIN (spawn zone), not death position: a mob that
+     * flees across a boundary (or dies in unzoned space) still credits the
+     * zone it spawned in — otherwise kiting voids threshold progress. When
+     * the spawn zone is unknown (spawnZoneId 0 or unmapped), falls back to
+     * the position-resolved gameZoneId.
+     *
      * If the kill count for (gameZoneId, mobTemplateId) reaches the configured
      * threshold AND no champion of that type is already active in the zone, a
      * Threshold Champion is spawned and the counter is reset — subject to two
@@ -72,10 +78,11 @@ class ChampionManager
      *
      * Call from CombatSystem::handleMobDeath (skip if mob.isChampion == true).
      *
-     * @param gameZoneId      zones.id of the zone where the kill happened
+     * @param gameZoneId      position-resolved zones.id (fallback, 0 = none)
      * @param mobTemplateId   mob_templates.id of the killed mob
+     * @param spawnZoneId     mob's spawn zone id (mob.zoneId, 0 = unknown)
      */
-    void recordMobKill(int gameZoneId, int mobTemplateId);
+    void recordMobKill(int gameZoneId, int mobTemplateId, int spawnZoneId = 0);
 
     // ── Timed Champion ───────────────────────────────────────────────────────
 

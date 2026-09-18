@@ -1,3 +1,28 @@
+v0.2.53
+18.09.2026
+================
+
+New:
+
+**Threshold attribution by origin + mobCellLeft evict.**
+- Kills credit the mob's SPAWN zone game zone, not the death position
+  (`SpawnZoneStruct.gameZoneId`, pushed by game-server, parsed with
+  legacy-default 0). Fleeing/kiting across boundaries (or dying in unzoned
+  space) no longer voids threshold progress; unknown origin falls back to
+  the position lookup 1-1. Fixes the arena farm (fleeing foxes died
+  outside the 200u box) and a real product flaw.
+- `mobCellLeft{uids}` unicast on interest cell-leave: clients drop mob
+  entries standing in vacated cells (no more frozen ghosts). Watched
+  combat targets excluded (no one-tick flicker); empty diff/disabled
+  interest = no-op; corpses untouched. Documented in docs/api/03
+  (3.2b) for the UE client.
+- Pins: parser roundtrip + legacy default, origin-beats-position,
+  unknown-origin silence, mobsInCells (+watched exclusion).
+- Verified: 421/421 unit green; full MMOChunkServer build green; TSan 421
+  pass, same 9-warning Scheduler fingerprint. Live-verified below.
+
+---
+
 v0.2.52
 18.09.2026
 ================

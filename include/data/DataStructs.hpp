@@ -572,6 +572,10 @@ struct SpawnZoneStruct
 {
     int zoneId = 0;
     std::string zoneName;
+    /// Owning game zone (zones.id) for threshold attribution: kills credit
+    /// here even when the mob flees/dies outside of it. 0 = unknown (legacy
+    /// pushes without the field fall back to death-position lookup).
+    int gameZoneId = 0;
 
     // --- Geometry -------------------------------------------------
     ZoneShape shape = ZoneShape::RECT;

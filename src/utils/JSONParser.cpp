@@ -533,6 +533,7 @@ JSONParser::parseSpawnZonesList(const char *data, size_t length)
         SpawnZoneStruct zoneData;
         zoneData.zoneId = zone.value("id", 0);
         zoneData.zoneName = zone.value("name", std::string{});
+        zoneData.gameZoneId = zone.value("gameZoneId", 0);
         zoneData.shape = shapeFromStr(zone.value("shape", std::string{"RECT"}));
         zoneData.minX = zone.value("minX", 0.0f);
         zoneData.maxX = zone.value("maxX", 0.0f);

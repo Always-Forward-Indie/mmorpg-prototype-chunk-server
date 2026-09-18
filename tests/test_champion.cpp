@@ -184,6 +184,31 @@ TEST_F(ChampFixture, ChanceZeroNeverSpawns)
     EXPECT_EQ(liveChampions(), 0u);
 }
 
+TEST_F(ChampFixture, OriginAttributionBeatsDeathPosition)
+{
+    // Spawn zone 9 belongs to game zone 7: kills with an empty position
+    // fallback (0 = unzoned death, e.g. fled far) still credit zone 7.
+    SpawnZoneStruct sz;
+    sz.zoneId = 9;
+    sz.gameZoneId = 7;
+    spawnZones.loadMobSpawnZones({sz});
+    for (int i = 0; i < 3; ++i)
+        champ.recordMobKill(0, 5, 9);
+    EXPECT_EQ(liveChampions(), 1u);
+}
+
+TEST_F(ChampFixture, UnknownOriginAndFallbackSpawnsNothing)
+{
+    // No spawn mapping and no position zone: counter never starts.
+    for (int i = 0; i < 3; ++i)
+        champ.recordMobKill(0, 5, 0);
+    EXPECT_EQ(liveChampions(), 0u);
+    // Unmapped spawn zone id: same, falls back to empty.
+    for (int i = 0; i < 3; ++i)
+        champ.recordMobKill(0, 5, 424242);
+    EXPECT_EQ(liveChampions(), 0u);
+}
+
 TEST_F(ChampFixture, CapBlocksSecondTemplateWhileActive)
 {
     // max_active_per_zone=1: first template spawns, second template's

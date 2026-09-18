@@ -390,13 +390,18 @@ MobKillRewardPipeline::fireKillHooks(int mobId, int killerId)
     }
 
     // --- Threshold Champion kill counter ---
+    // Attribution by ORIGIN (mob.zoneId = spawn zone id): fleeing mobs must
+    // not void threshold progress. Position lookup is the fallback for mobs
+    // with unknown origin (mob.zoneId 0).
     try
     {
         if (!mobData.isChampion && mobData.id > 0)
         {
+            int fallbackZoneId = 0;
             auto gameZone = gameZones_.getZoneForPosition(mobData.position);
             if (gameZone.has_value())
-                champions_.recordMobKill(gameZone->id, mobData.id);
+                fallbackZoneId = gameZone->id;
+            champions_.recordMobKill(fallbackZoneId, mobData.id, mobData.zoneId);
         }
     }
     catch (const std::exception &e)

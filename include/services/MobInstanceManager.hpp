@@ -74,6 +74,15 @@ class MobInstanceManager
     std::vector<std::pair<int, PositionStruct>> getMobPositionsInZone(int zoneId) const;
 
     /**
+     * @brief Get lightweight {uid, position} pairs for ALL live mobs.
+     *
+     * Same no-deep-copy rationale as getMobPositionsInZone; used by the
+     * interest cell-left evict (mobCellLeft) to find mobs in vacated cells
+     * without copying full structs on the hot move path.
+     */
+    std::vector<std::pair<int, PositionStruct>> getAllMobPositions() const;
+
+    /**
      * @brief Apply attributes to all live instances matching mob_id.
      *        Called after setMobsAttributes arrives from game-server so that
      *        already-spawned instances gain their attribute values.

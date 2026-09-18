@@ -46,8 +46,20 @@ ChampionManager::setSendToGameServerCallback(std::function<void(const std::strin
 // ── Threshold Champion ────────────────────────────────────────────────────────
 
 void
-ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId)
+ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId, int spawnZoneId)
 {
+    // Origin attribution: the spawn zone's game zone wins over the death
+    // position (fleeing/kiting must not void threshold progress).
+    int zoneId = gameZoneId;
+    if (spawnZoneId != 0)
+    {
+        const auto spawnZone = spawnZones_.getMobSpawnZoneByID(spawnZoneId);
+        if (spawnZone.zoneId != 0 && spawnZone.gameZoneId != 0)
+            zoneId = spawnZone.gameZoneId;
+    }
+    if (zoneId <= 0)
+        return; // no attribution possible (unzoned death, unknown origin)
+
     std::lock_guard<std::mutex> lk(counterMutex_);
 
     // Do not accumulate if a champion of this template is already active in the zone
@@ -55,17 +67,17 @@ ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId)
         std::lock_guard<std::mutex> alck(activeMutex_);
         for (const auto &c : active_)
         {
-            if (c.gameZoneId == gameZoneId && c.baseTemplateId == mobTemplateId)
+            if (c.gameZoneId == zoneId && c.baseTemplateId == mobTemplateId)
                 return;
         }
     }
 
-    auto &count = zoneKillCounters_[gameZoneId][mobTemplateId];
+    auto &count = zoneKillCounters_[zoneId][mobTemplateId];
     ++count;
 
     auto zones = gameZones_.getAllZones();
-    auto it = std::find_if(zones.begin(), zones.end(), [gameZoneId](const GameZoneStruct &z)
-        { return z.id == gameZoneId; });
+    auto it = std::find_if(zones.begin(), zones.end(), [zoneId](const GameZoneStruct &z)
+        { return z.id == zoneId; });
     if (it == zones.end())
         return;
 
@@ -90,7 +102,7 @@ ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId)
         if (roll >= chancePct)
         {
             log_->info("[Champion] Threshold reached in zone {} but chance roll failed ({:.1f} >= {:.1f}%)",
-                gameZoneId, roll, chancePct);
+                zoneId, roll, chancePct);
             return;
         }
     }
@@ -103,18 +115,18 @@ ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId)
         std::lock_guard<std::mutex> alck(activeMutex_);
         int zoneActive = 0;
         for (const auto &c : active_)
-            if (c.gameZoneId == gameZoneId)
+            if (c.gameZoneId == zoneId)
                 ++zoneActive;
         if (zoneActive >= maxActive)
         {
             log_->warn("[Champion] Zone {} at cap ({}/{} active) — threshold spawn skipped",
-                gameZoneId, zoneActive, maxActive);
+                zoneId, zoneActive, maxActive);
             return;
         }
     }
 
     // Spawn outside of counterMutex_ lock
-    spawnChampion(mobTemplateId, gameZoneId, "[Чемпион] ", 1.5f);
+    spawnChampion(mobTemplateId, zoneId, "[Чемпион] ", 1.5f);
 }
 
 // ── Timed Champion ────────────────────────────────────────────────────────────

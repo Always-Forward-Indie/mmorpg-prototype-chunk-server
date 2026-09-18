@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data/DataStructs.hpp"
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -107,6 +108,10 @@ class InterestManager
     static constexpr int64_t WATCH_TTL_SEC = 30;
     void watch(int clientId, int mobUid);
     void unwatch(int clientId, int mobUid);
+    /// Uids currently watched by a client (for mobCellLeft exclusion:
+    /// evicting an active combat target would flicker it for one tick
+    /// until the watched update re-adds it).
+    std::unordered_set<int> watchedUids(int clientId) const;
     // mobUid -> watching clientIds (one lock, call once per fan-out tick).
     // Also purges expired entries.
     std::unordered_map<int, std::vector<int>> watchIndex();
@@ -125,6 +130,16 @@ class InterestManager
     static CellKey cellFor(float x, float y, float cellSize);
     bool isEnabled() const;
     float cellSize() const;
+
+    /// Uids of mobs standing in the given (vacated) cells — the mobCellLeft
+    /// evict payload. Pure/static: caller supplies lightweight positions.
+    /// Over-inclusive by design (no per-client known-set): the client drops
+    /// unknown uids silently. Corpse discovery is untouched (separate flow).
+    static std::vector<int> mobsInCells(
+        const std::vector<std::pair<int, PositionStruct>> &mobPositions,
+        const std::vector<CellKey> &cells,
+        float cellSize,
+        const std::unordered_set<int> &exclude = {});
 
     // One-lock snapshot of the whole subscription table for fan-out ticks:
     // cell -> member clientIds, plus the set of tracked clientIds (anyone
