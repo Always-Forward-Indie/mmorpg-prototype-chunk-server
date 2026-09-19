@@ -152,7 +152,7 @@ ChampionManager::tickTimedChampions()
     const auto &cfg = gameConfig_;
     const int preAnnounceSec = cfg.getInt("champion.pre_announce_sec", 300); // 5 min before
 
-    const int64_t nowEpoch = static_cast<int64_t>(std::time(nullptr));
+    const int64_t nowEpoch = epochSecFn_();
 
     // First check for any champions that have exceeded their window
     checkDespawnedChampions();
@@ -203,7 +203,7 @@ ChampionManager::tickSurvivalEvolution()
     const int evolveHours = this->evolveHours();
     const int64_t evolveThresholdSec = static_cast<int64_t>(evolveHours) * 3600;
 
-    const int64_t nowEpoch = static_cast<int64_t>(std::time(nullptr));
+    const int64_t nowEpoch = epochSecFn_();
 
     auto living = mobInstances_.getAllLivingInstances();
     for (const auto &mob : living)
@@ -303,7 +303,7 @@ ChampionManager::spawnChampion(int mobTemplateId,
     base.rankMult = hpMult;
     base.isChampion = true;
     base.lootMultiplier = lootMult;
-    base.spawnEpochSec = static_cast<int64_t>(std::time(nullptr));
+    base.spawnEpochSec = epochSecFn_();
     base.position = resolveChampionSpawnPoint(gameZoneId);
 
     // Scale physical_attack attribute by dmgMult
@@ -336,7 +336,7 @@ ChampionManager::spawnChampion(int mobTemplateId,
     mobInstances_.registerMobInstance(base);
 
     const int despawnMin = cfg.getInt("champion.despawn_minutes", 30);
-    const auto now = std::chrono::steady_clock::now();
+    const auto now = steadyFn_();
     {
         std::lock_guard<std::mutex> lk(activeMutex_);
         active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, now + std::chrono::minutes(despawnMin)});
@@ -384,7 +384,7 @@ ChampionManager::resolveGameZone(int spawnZoneId, int fallbackZoneId) const
 void
 ChampionManager::checkDespawnedChampions()
 {
-    const auto now = std::chrono::steady_clock::now();
+    const auto now = steadyFn_();
     std::lock_guard<std::mutex> lk(activeMutex_);
 
     for (auto it = active_.begin(); it != active_.end();)
@@ -459,7 +459,7 @@ ChampionManager::evolveSurvivalMob(int mobUid)
     {
         std::lock_guard<std::mutex> lk(activeMutex_);
         // No despawn time for Survival Champions — they live until killed
-        active_.push_back({mobUid, gzId, mob.id, "", std::chrono::steady_clock::now(), std::chrono::steady_clock::time_point::max()});
+        active_.push_back({mobUid, gzId, mob.id, "", steadyFn_(), std::chrono::steady_clock::time_point::max()});
     }
 
     broadcastToGameZone(gzId, "survival_evolved", nlohmann::json{{"uid", mobUid}, {"mobSlug", mob.slug}});
@@ -567,7 +567,7 @@ ChampionManager::sendTimedChampionKilledToGameServer(const std::string &slug, in
     pkt["header"]["hash"] = "";
     pkt["body"]["slug"] = slug;
     pkt["body"]["killerCharId"] = killerCharId;
-    pkt["body"]["killedAt"] = static_cast<int64_t>(std::time(nullptr));
+    pkt["body"]["killedAt"] = epochSecFn_();
 
     sendToGameServerCb_(pkt.dump() + "\n");
     log_->info("[Timed] Sent timedChampionKilled slug='{}' to game-server", slug);

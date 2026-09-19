@@ -9,6 +9,7 @@
 #include "services/SpawnZoneManager.hpp"
 
 #include <gtest/gtest.h>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -255,4 +256,95 @@ TEST_F(ChampFixture, TimedLoadAndTick)
     champ.tickTimedChampions(); // must not crash, nothing due
     champ.tickSurvivalEvolution();
     SUCCEED();
+}
+
+// ── Clock-seam pins (fake time, milliseconds, no DB/bots) ───────────────────
+
+TEST_F(ChampFixture, TimedSpawnViaFakeClock)
+{
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+
+    TimedChampionTemplate t;
+    t.slug = "alpha";
+    t.gameZoneId = 7;
+    t.mobTemplateId = 5;
+    t.intervalHours = 6;
+    t.nextSpawnAt = fakeEpoch + 100;
+    champ.loadTimedChampions({t});
+
+    champ.tickTimedChampions();
+    EXPECT_EQ(liveChampions(), 0u); // 100 s out: pre-announce only, no spawn
+
+    fakeEpoch += 100;
+    champ.tickTimedChampions();
+    ASSERT_EQ(liveChampions(), 1u); // window reached -> spawned
+
+    champ.tickTimedChampions();
+    EXPECT_EQ(liveChampions(), 1u); // state.spawned: no double spawn
+}
+
+TEST_F(ChampFixture, TimedKillReportsFakeEpoch)
+{
+    // killedAt must be the epoch seconds the game-server stores into
+    // next_spawn_at (bigint). Pins the seam end of the reschedule contract.
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+
+    TimedChampionTemplate t;
+    t.slug = "alpha";
+    t.gameZoneId = 7;
+    t.mobTemplateId = 5;
+    t.intervalHours = 6;
+    t.nextSpawnAt = fakeEpoch;
+    champ.loadTimedChampions({t});
+    champ.tickTimedChampions();
+    ASSERT_EQ(liveChampions(), 1u);
+
+    std::vector<std::string> sent;
+    champ.setSendToGameServerCallback([&](const std::string &pkt) { sent.push_back(pkt); });
+    const int uid = instances.getAllLivingInstances()[0].uid;
+    instances.applyDamageToMob(uid, 1000000);
+    champ.onChampionKilled(uid, 1, "alpha");
+    ASSERT_EQ(sent.size(), 1u);
+    EXPECT_NE(sent[0].find(std::to_string(fakeEpoch)), std::string::npos);
+}
+
+TEST_F(ChampFixture, DespawnViaFakeSteady)
+{
+    auto t0 = std::chrono::steady_clock::now();
+    auto fakeSteady = t0;
+    champ.setSteadyFn([&] { return fakeSteady; });
+
+    for (int i = 0; i < 3; ++i)
+        champ.recordMobKill(7, 5);
+    ASSERT_EQ(liveChampions(), 1u);
+    const int uid = instances.getAllLivingInstances()[0].uid;
+
+    fakeSteady = t0 + std::chrono::minutes(31); // past default 30 min window
+    champ.tickTimedChampions(); // opens with checkDespawnedChampions()
+    EXPECT_EQ(liveChampions(), 0u);
+    EXPECT_EQ(instances.getMobInstance(uid).uid, 0);
+}
+
+TEST_F(ChampFixture, SurvivalEvolveViaFakeClock)
+{
+    config.setConfig({{"survival_champion.evolve_hours", "1"}});
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+
+    MobDataStruct mob = makeTemplate();
+    mob.uid = 9001;
+    mob.canEvolve = true;
+    mob.spawnEpochSec = fakeEpoch;
+    mob.position.positionX = 5000.0f;
+    mob.position.positionY = 5000.0f;
+    ASSERT_TRUE(instances.registerMobInstance(mob));
+
+    champ.tickSurvivalEvolution();
+    EXPECT_FALSE(instances.getMobInstance(9001).hasEvolved); // 0 h < 1 h
+
+    fakeEpoch += 2 * 3600;
+    champ.tickSurvivalEvolution();
+    EXPECT_TRUE(instances.getMobInstance(9001).hasEvolved);
 }

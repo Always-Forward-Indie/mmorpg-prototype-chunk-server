@@ -10,6 +10,7 @@
 #include "services/SpawnZoneManager.hpp"
 #include "utils/Logger.hpp"
 #include <chrono>
+#include <ctime>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -132,6 +133,16 @@ class ChampionManager
     /// Must be called from ChunkServer constructor before any tick.
     void setSendToGameServerCallback(std::function<void(const std::string &)> cb);
 
+    // ── Test seam: injectable clocks ──────────────────────────────────────────
+    // Defaults are the wall clocks; unit tests override them to drive
+    // timed/despawn/survival paths in milliseconds without DB or bots.
+    // Pure seam: production behavior is bit-for-bit identical.
+    void setEpochSecFn(std::function<int64_t()> fn) { epochSecFn_ = std::move(fn); }
+    void setSteadyFn(std::function<std::chrono::steady_clock::time_point()> fn)
+    {
+        steadyFn_ = std::move(fn);
+    }
+
     // ── Internal spawn helper (also callable by tickTimedChampions) ──────────
 
     /**
@@ -167,7 +178,9 @@ class ChampionManager
 
     GameZoneManager &gameZones_;
     GameConfigService &gameConfig_;
-    MobInstanceManager &mobInstances_;
+    // Injectable clocks (test seam; defaults = wall clocks, see setters above).
+    std::function<int64_t()> epochSecFn_ = [] { return static_cast<int64_t>(std::time(nullptr)); };
+    std::function<std::chrono::steady_clock::time_point()> steadyFn_ = [] { return std::chrono::steady_clock::now(); };    MobInstanceManager &mobInstances_;
     CharacterManager &characters_;
     MobManager &mobs_;
     SpawnZoneManager &spawnZones_;
