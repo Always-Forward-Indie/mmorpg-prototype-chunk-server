@@ -48,15 +48,9 @@ ChampionManager::setSendToGameServerCallback(std::function<void(const std::strin
 void
 ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId, int spawnZoneId)
 {
-    // Origin attribution: the spawn zone's game zone wins over the death
-    // position (fleeing/kiting must not void threshold progress).
-    int zoneId = gameZoneId;
-    if (spawnZoneId != 0)
-    {
-        const auto spawnZone = spawnZones_.getMobSpawnZoneByID(spawnZoneId);
-        if (spawnZone.zoneId != 0 && spawnZone.gameZoneId != 0)
-            zoneId = spawnZone.gameZoneId;
-    }
+    // Resolve the attributing zone BEFORE taking any lock (all lookups below
+    // are internally synchronized; no new lock-order edges).
+    const int zoneId = resolveGameZone(spawnZoneId, gameZoneId);
     if (zoneId <= 0)
         return; // no attribution possible (unzoned death, unknown origin)
 
@@ -347,6 +341,37 @@ ChampionManager::spawnChampion(int mobTemplateId,
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+int
+ChampionManager::resolveGameZone(int spawnZoneId, int fallbackZoneId) const
+{
+    if (spawnZoneId != 0)
+    {
+        const auto spawnZone = spawnZones_.getMobSpawnZoneByID(spawnZoneId);
+        if (spawnZone.zoneId != 0)
+        {
+            // Pushed mapping wins, but only when it names a game zone we
+            // actually know (stale pushes / garbage must never attribute).
+            if (spawnZone.gameZoneId != 0)
+            {
+                const auto known = gameZones_.getAllZones();
+                const bool knownId = std::any_of(known.begin(), known.end(),
+                    [&](const GameZoneStruct &z) { return z.id == spawnZone.gameZoneId; });
+                if (knownId)
+                    return spawnZone.gameZoneId;
+            }
+            // Live containment fallback: the spawn zone center in the
+            // CURRENT game zones (load-order and push independent).
+            PositionStruct center;
+            center.positionX = spawnZone.centerX;
+            center.positionY = spawnZone.centerY;
+            const auto gz = gameZones_.getZoneForPosition(center);
+            if (gz.has_value())
+                return gz->id;
+        }
+    }
+    return fallbackZoneId;
+}
 
 void
 ChampionManager::checkDespawnedChampions()

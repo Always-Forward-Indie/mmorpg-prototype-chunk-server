@@ -211,6 +211,14 @@ class ChampionManager
     /// Evolve a single living mob into a Survival Champion.
     void evolveSurvivalMob(int mobUid);
 
+    /// Resolve the attributing game zone for a kill (lock-free entry:
+    /// all lookups below synchronize internally).
+    /// Order: pushed spawn-zone mapping (validated against known game
+    /// zones — stale/garbage ids are ignored, never trusted blindly) →
+    /// live containment of the spawn zone center → caller fallback
+    /// (death position). Returns <= 0 when nothing attributes.
+    int resolveGameZone(int spawnZoneId, int fallbackZoneId) const;
+
     /// Resolve a world spawn position within the given game zone.
     PositionStruct resolveChampionSpawnPoint(int gameZoneId) const;
 

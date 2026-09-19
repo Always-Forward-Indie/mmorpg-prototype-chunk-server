@@ -1,3 +1,21 @@
+v0.2.54
+19.09.2026
+================
+
+Fixes:
+
+**Threshold attribution hardened: validate-then-contain.**
+- `recordMobKill` resolves the zone via `resolveGameZone()` BEFORE taking
+  locks: pushed spawn-zone mapping wins ONLY when it names a known game
+  zone (stale/garbage ids ignored, never trusted blindly); otherwise live
+  containment of the spawn zone center; then the death-position fallback.
+  (Live incident: the push carried gameZoneId 41 for a zone owning 9001 —
+  now contained to 9001 instead of voiding progress.)
+- Verified: 422/422 unit green (incl. the garbage-41 pin); TSan same
+  9-warning fingerprint.
+
+---
+
 v0.2.53
 18.09.2026
 ================

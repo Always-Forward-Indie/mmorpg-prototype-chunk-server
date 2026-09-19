@@ -27,7 +27,8 @@ ZoneEventHandler::logSpawnZoneInfo(const SpawnZoneStruct &spawnZone)
         }
     };
     gameServices_.getLogger().log("Spawn Zone ID: " + std::to_string(spawnZone.zoneId) +
-                                  ", Name: " + spawnZone.zoneName +
+                                   ", Name: " + spawnZone.zoneName +
+                                   ", GameZone: " + std::to_string(spawnZone.gameZoneId) +
                                   ", Shape: " + shapeStr(spawnZone.shape) +
                                   ", MinX: " + std::to_string(spawnZone.minX) +
                                   ", MaxX: " + std::to_string(spawnZone.maxX) +

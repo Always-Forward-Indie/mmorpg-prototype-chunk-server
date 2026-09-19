@@ -184,6 +184,22 @@ TEST_F(ChampFixture, ChanceZeroNeverSpawns)
     EXPECT_EQ(liveChampions(), 0u);
 }
 
+TEST_F(ChampFixture, GarbagePushedIdFallsBackToContainment)
+{
+    // A pushed gameZoneId naming no known game zone is ignored (never
+    // trusted blindly); the spawn zone center resolves live instead.
+    // (Live incident: push carried 41 for a zone owning 9001.)
+    SpawnZoneStruct sz;
+    sz.zoneId = 9;
+    sz.gameZoneId = 41;
+    sz.centerX = 5000.0f;
+    sz.centerY = 5000.0f;
+    spawnZones.loadMobSpawnZones({sz});
+    for (int i = 0; i < 3; ++i)
+        champ.recordMobKill(0, 5, 9);
+    EXPECT_EQ(liveChampions(), 1u);
+}
+
 TEST_F(ChampFixture, OriginAttributionBeatsDeathPosition)
 {
     // Spawn zone 9 belongs to game zone 7: kills with an empty position
