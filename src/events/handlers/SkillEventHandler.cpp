@@ -499,6 +499,33 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         packet["body"]["skillSlug"] = req.skillSlug;
         gameServerWorker_.sendDataToGameServer(packet.dump() + "\n");
 
+        // Optimistic confirm (SERVER_BUGS #11): the game->chunk->client leg
+        // of setLearnedSkill is unreliable, so confirm inline from validated
+        // authoritative state. The cache update makes repeats hit
+        // already_learned (no double charge); game persist stays the source
+        // of truth at next join; a late setLearnedSkill only replaces the
+        // same slug (addCharacterSkill is dedup-safe).
+        SkillStruct optimistic;
+        optimistic.skillSlug = req.skillSlug;
+        optimistic.skillName = entry->skillName;
+        optimistic.isPassive = entry->isPassive;
+        gameServices_.getCharacterManager().addCharacterSkill(req.characterId, optimistic);
+        gameServices_.getStatsNotificationService().sendStatsUpdate(req.characterId);
+
+        nlohmann::json notif;
+        notif["type"] = "skill_learned";
+        notif["skillSlug"] = req.skillSlug;
+        notif["skillName"] = entry->skillName;
+        notif["isPassive"] = entry->isPassive;
+        notif["newFreeSkillPoints"] =
+            gameServices_.getCharacterManager().getCharacterFreeSkillPoints(req.characterId);
+        nlohmann::json okResp;
+        okResp["header"]["eventType"] = "skill_learned";
+        okResp["header"]["status"] = "success";
+        okResp["header"]["clientId"] = req.clientId;
+        okResp["body"] = notif;
+        networkManager_.sendResponse(socket, okResp.dump() + "\n");
+
         log_->info("[SkillEventHandler] REQUEST_LEARN_SKILL: char={} npc={} skill={}",
             req.characterId,
             effectiveNpcId,
