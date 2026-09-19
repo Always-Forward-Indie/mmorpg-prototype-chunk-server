@@ -75,6 +75,14 @@ ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId, int spawnZoneI
     if (it == zones.end())
         return;
 
+    // Threshold window is INFO (rare, diagnostic gold); every increment is
+    // debug (hot path, off by default).
+    log_->debug("[Champion] kill counter zone={} template={} count={}",
+        zoneId, mobTemplateId, count);
+    if (count >= it->championThresholdKills - 1)
+        log_->info("[Champion] threshold window zone={} template={} count={}/{}",
+            zoneId, mobTemplateId, count, it->championThresholdKills);
+
     if (count >= it->championThresholdKills)
     {
         count = 0;
