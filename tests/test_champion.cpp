@@ -258,6 +258,60 @@ TEST_F(ChampFixture, TimedLoadAndTick)
     SUCCEED();
 }
 
+TEST_F(ChampFixture, TimedReloadPreservesSpawnedState)
+{
+    // Regression: full template re-push (boot, heartbeat re-assert) used
+    // to wipe spawned flags -> past-due schedules refired every reload
+    // (champion flood, one per minute). Merge must preserve runtime state.
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+
+    TimedChampionTemplate t;
+    t.slug = "alpha";
+    t.gameZoneId = 7;
+    t.mobTemplateId = 5;
+    t.intervalHours = 6;
+    t.nextSpawnAt = fakeEpoch - 10; // due
+    champ.loadTimedChampions({t});
+    champ.tickTimedChampions();
+    ASSERT_EQ(liveChampions(), 1u);
+
+    champ.loadTimedChampions({t}); // re-push, same content
+    champ.tickTimedChampions();
+    EXPECT_EQ(liveChampions(), 1u); // no double spawn
+}
+
+TEST_F(ChampFixture, TimedKillWaitsForNextCycle)
+{
+    // Spawn advances the in-memory schedule: after a kill the next spawn
+    // waits a full interval instead of refiring immediately (DB only moves
+    // on kill; without the advance the past timestamp refires at once).
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+
+    TimedChampionTemplate t;
+    t.slug = "alpha";
+    t.gameZoneId = 7;
+    t.mobTemplateId = 5;
+    t.intervalHours = 6;
+    t.nextSpawnAt = fakeEpoch - 10; // due
+    champ.loadTimedChampions({t});
+    champ.tickTimedChampions();
+    ASSERT_EQ(liveChampions(), 1u);
+
+    const int uid = instances.getAllLivingInstances()[0].uid;
+    instances.applyDamageToMob(uid, 1000000);
+    champ.onChampionKilled(uid, 1, "alpha");
+    ASSERT_EQ(liveChampions(), 0u);
+
+    champ.tickTimedChampions();
+    EXPECT_EQ(liveChampions(), 0u); // next cycle not reached
+
+    fakeEpoch += 6 * 3600 + 1;
+    champ.tickTimedChampions();
+    EXPECT_EQ(liveChampions(), 1u); // next cycle fires
+}
+
 // ── Clock-seam pins (fake time, milliseconds, no DB/bots) ───────────────────
 
 TEST_F(ChampFixture, TimedSpawnViaFakeClock)

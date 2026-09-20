@@ -137,12 +137,23 @@ void
 ChampionManager::loadTimedChampions(const std::vector<TimedChampionTemplate> &templates)
 {
     std::lock_guard<std::mutex> lk(timedMutex_);
-    timedStates_.clear();
-    timedStates_.reserve(templates.size());
+    // Merge by slug, preserving runtime state: a full re-push (boot or
+    // heartbeat re-assert) must not reset spawned/preAnnounce flags, else
+    // past-due schedules refire every reload (champion flood). Fresh slugs
+    // start unspawned; vanished slugs are dropped.
+    std::vector<TimedChampionState> merged;
+    merged.reserve(templates.size());
     for (const auto &t : templates)
     {
-        timedStates_.push_back({t, false, false});
+        auto it = std::find_if(timedStates_.begin(), timedStates_.end(),
+            [&](const TimedChampionState &s) { return s.tmpl.slug == t.slug; });
+        // NB: field order is {tmpl, preAnnounceSent, spawned}.
+        if (it != timedStates_.end())
+            merged.push_back({t, it->preAnnounceSent, it->spawned});
+        else
+            merged.push_back({t, false, false});
     }
+    timedStates_ = std::move(merged);
     log_->info("[Timed] Loaded {} timed champion templates", templates.size());
 }
 
@@ -188,6 +199,12 @@ ChampionManager::tickTimedChampions()
                 {
                     state.spawned = true;
                     state.preAnnounceSent = false;
+                    // Advance the schedule in-memory: the DB row only moves
+                    // on kill, so without this a spawned-but-alive champion
+                    // refires on every template reload. Kill path
+                    // (killedAt + interval) overrides on the next reload.
+                    state.tmpl.nextSpawnAt = nowEpoch +
+                        static_cast<int64_t>(state.tmpl.intervalHours) * 3600;
                     log_->info("[Timed] Champion '{}' spawned (uid={})", state.tmpl.slug, uid);
                 }
             }
