@@ -196,10 +196,20 @@ GameServerWorker::sendDataToGameServer(const std::string &data)
                     j.value("header", nlohmann::json::object()).value("eventType", "");
                 if (FactOutbox::isFactType(type))
                 {
-                    const int characterId =
-                        j.value("body", nlohmann::json::object()).value("characterId", 0);
+                    // characterId may be absent (array bodies): default 0 bucket.
+                    int characterId = 0;
+                    const auto bodyIt = j.find("body");
+                    const bool bodyIsObject =
+                        bodyIt != j.end() && bodyIt->is_object();
+                    if (bodyIsObject)
+                        characterId = bodyIt->value("characterId", 0);
                     const std::string key = outbox_.assignKey(characterId, type);
-                    j["body"]["factKey"] = key;
+                    // Key in header always (wire forensics); duplicated into
+                    // object bodies (array bodies stay keyless = legacy path:
+                    // periodic snapshots self-heal).
+                    j["header"]["factKey"] = key;
+                    if (bodyIsObject)
+                        (*bodyIt)["factKey"] = key;
                     wire = j.dump() + "\n";
                     outbox_.store(key, wire, steadyMs());
                 }
