@@ -88,6 +88,12 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         characterData.characterExperiencePoints = newExperience;
         characterData.characterLevel = newLevel;
         characterData.expForNextLevel = result.experienceEvent.expForNextLevel;
+        // SP grant mirrors game set_character_exp_level (+1 per level gained).
+        // On the local copy BEFORE loadCharacterData (a manager-side touch
+        // here would be wiped by the stale-copy overwrite below). Without it
+        // chunk memory goes stale after every level-up (false
+        // insufficient_sp until relog); game persist stays source of truth.
+        characterData.freeSkillPoints += (newLevel - oldLevel);
 
         // Тестируем новый метод получения опыта из гейм-сервера
         log_->info("Testing getExperienceForLevelFromGameServer for level " + std::to_string(newLevel + 1));

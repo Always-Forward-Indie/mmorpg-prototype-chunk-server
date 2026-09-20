@@ -169,6 +169,28 @@ TEST_F(ExpFixture, GrantMilestoneAbility)
     EXPECT_EQ(r.newAbilities[0], "ability_level_5");
 }
 
+TEST_F(ExpFixture, LevelUpCreditsSkillPoints)
+{
+    // Single owner rule: chunk credits +1 SP per level in-session (mirrors
+    // game set_character_exp_level). Without it chunk memory goes stale
+    // after every level-up (false insufficient_sp until relog).
+    chars.addCharacter(baseChar(1));
+    ASSERT_EQ(chars.getCharacterData(1).freeSkillPoints, 0);
+    auto r = exp.grantExperience(1, 150, "mob_kill");
+    EXPECT_TRUE(r.levelUp);
+    EXPECT_EQ(r.experienceEvent.newLevel, 2);
+    EXPECT_EQ(chars.getCharacterData(1).freeSkillPoints, 1);
+}
+
+TEST_F(ExpFixture, MultiLevelUpCreditsPerLevel)
+{
+    chars.addCharacter(baseChar(1));
+    auto r = exp.grantExperience(1, 600, "quest");
+    EXPECT_TRUE(r.levelUp);
+    EXPECT_EQ(r.experienceEvent.newLevel, 5);
+    EXPECT_EQ(chars.getCharacterData(1).freeSkillPoints, 4); // 1->5 is +4
+}
+
 TEST_F(ExpFixture, GrantUsesCacheTableWhenLoaded)
 {
     cache.setExperienceTable({entry(1, 0), entry(2, 100), entry(3, 300)});

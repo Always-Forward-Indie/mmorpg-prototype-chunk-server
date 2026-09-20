@@ -553,7 +553,14 @@ DialogueActionExecutor::executeLearnSkill(const nlohmann::json &action,
     // Update ctx so subsequent conditions work
     ctx.learnedSkillSlugs.insert(skillSlug);
 
-    // Queue saveLearnedSkill packet to game server
+    // Update in-memory cache (else the skill is missing till relog).
+    SkillStruct sparse;
+    sparse.skillSlug = skillSlug;
+    services_.getCharacterManager().addCharacterSkill(characterId, sparse);
+
+    // Queue saveLearnedSkill packet to game server. freeSkillPoints carries
+    // the authoritative post-deduct value (game persists as-is, no second
+    // decrement — single owner: chunk decides, game stores).
     nlohmann::json packet;
     packet["header"]["eventType"] = "saveLearnedSkill";
     packet["header"]["clientId"] = clientId;
@@ -561,6 +568,8 @@ DialogueActionExecutor::executeLearnSkill(const nlohmann::json &action,
     packet["body"]["characterId"] = characterId;
     packet["body"]["clientId"] = clientId;
     packet["body"]["skillSlug"] = skillSlug;
+    packet["body"]["freeSkillPoints"] =
+        services_.getCharacterManager().getCharacterFreeSkillPoints(characterId);
     result.pendingGameServerPackets.push_back(packet.dump() + "\n");
 
     log_->info("[DialogueAction] learn_skill: char={} skill={} sp={} gold={}",

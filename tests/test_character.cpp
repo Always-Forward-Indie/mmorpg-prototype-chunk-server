@@ -104,3 +104,20 @@ TEST_F(CharFixture, ActiveEffectsAddRemove)
     chars.removeActiveEffectBySlug(1, "nope"); // safe no-op
     SUCCEED();
 }
+
+TEST_F(CharFixture, AddCharacterSkillDedupsBySlug)
+{
+    // Sparse optimistic inserts (learn paths) must never duplicate: a late
+    // game-driven setLearnedSkill only replaces the same slug.
+    SkillStruct a;
+    a.skillSlug = "power_slash";
+    a.skillName = "Short";
+    chars.addCharacterSkill(1, a);
+    SkillStruct b;
+    b.skillSlug = "power_slash";
+    b.skillName = "Full Name From DB";
+    chars.addCharacterSkill(1, b);
+    auto got = chars.getCharacterData(1);
+    ASSERT_EQ(got.skills.size(), 1u);
+    EXPECT_EQ(got.skills[0].skillName, "Full Name From DB");
+}

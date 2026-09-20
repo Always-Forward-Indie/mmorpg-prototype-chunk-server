@@ -490,6 +490,9 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         // Queue saveLearnedSkill to game server — game server will respond with
         // setLearnedSkill which calls EventHandler::handleSetLearnedSkillEvent() and
         // sends the skill_learned packet to the client.
+        // freeSkillPoints carries the authoritative post-deduct value: game
+        // persists it as-is (SET, idempotent) instead of decrementing again
+        // (single owner: chunk decides, game stores).
         nlohmann::json packet;
         packet["header"]["eventType"] = "saveLearnedSkill";
         packet["header"]["clientId"] = req.clientId;
@@ -497,6 +500,8 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         packet["body"]["characterId"] = req.characterId;
         packet["body"]["clientId"] = req.clientId;
         packet["body"]["skillSlug"] = req.skillSlug;
+        packet["body"]["freeSkillPoints"] =
+            gameServices_.getCharacterManager().getCharacterFreeSkillPoints(req.characterId);
         gameServerWorker_.sendDataToGameServer(packet.dump() + "\n");
 
         // Optimistic confirm (SERVER_BUGS #11): the game->chunk->client leg
