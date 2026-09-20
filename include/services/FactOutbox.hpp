@@ -56,13 +56,29 @@ class FactOutbox
     /// would retry forever (no ack ever comes) into DLQ noise. Widen this
     /// list strictly together with wiring the game-side handler (same
     /// 6-line claim/ack pattern). Link-level traffic
-    /// (chunkServerConnection, markCharactersOnline, heartbeats) bypasses.
+    /// (chunkServerConnection, markCharactersOnline, heartbeats) and
+    /// typed-vector handlers without key access (positions/HP/progress,
+    /// quest/flag/playtime/markOnline delegates) stay on the legacy path.
     static bool isFactType(const std::string &eventType)
     {
         static const std::unordered_set<std::string> kFacts = {
             "saveLearnedSkill",
             "saveReputation",
             "saveInventoryChange",
+            "saveDurabilityChange",
+            "saveCurrencyTransaction",
+            "saveEquipmentChange",
+            "saveExperienceDebt",
+            "saveActiveEffect",
+            "saveItemKillCount",
+            "savePityCounter",
+            "saveBestiaryKill",
+            "timedChampionKilled",
+            "saveMastery",
+            "saveSkillBarSlot",
+            "savePlayerTitle",
+            "saveSkillCooldown",
+            "analyticsEvent",
         };
         return kFacts.count(eventType) > 0;
     }
@@ -168,6 +184,9 @@ class FactOutbox
             expired_.load(std::memory_order_relaxed),
         };
     }
+
+    /// Count an immediate (non-retry) send so sent>=acked always holds.
+    void noteSent() { ++sent_; }
 
     size_t size() const { return pendingCount_.load(std::memory_order_relaxed); }
 

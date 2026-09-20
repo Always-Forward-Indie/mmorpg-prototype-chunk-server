@@ -212,6 +212,7 @@ GameServerWorker::sendDataToGameServer(const std::string &data)
                         (*bodyIt)["factKey"] = key;
                     wire = j.dump() + "\n";
                     outbox_.store(key, wire, steadyMs());
+                    outbox_.noteSent();
                 }
             }
             catch (const std::exception &)

@@ -31,7 +31,13 @@ TEST(FactOutbox, IsFactTypeAllowlist)
     EXPECT_TRUE(FactOutbox::isFactType("saveReputation"));
     EXPECT_TRUE(FactOutbox::isFactType("saveLearnedSkill"));
     EXPECT_TRUE(FactOutbox::isFactType("saveInventoryChange"));
+    EXPECT_TRUE(FactOutbox::isFactType("saveDurabilityChange"));
+    EXPECT_TRUE(FactOutbox::isFactType("saveCurrencyTransaction"));
+    EXPECT_TRUE(FactOutbox::isFactType("timedChampionKilled"));
+    EXPECT_TRUE(FactOutbox::isFactType("analyticsEvent"));
+    // Typed-vector / delegated / link-level traffic stays legacy.
     EXPECT_FALSE(FactOutbox::isFactType("savePositions"));
+    EXPECT_FALSE(FactOutbox::isFactType("saveHpMana"));
     EXPECT_FALSE(FactOutbox::isFactType("chunkServerConnection"));
     EXPECT_FALSE(FactOutbox::isFactType("pingClient"));
     EXPECT_FALSE(FactOutbox::isFactType(""));
@@ -82,11 +88,13 @@ TEST(FactOutbox, CountersSnapshot)
 {
     FactOutbox box;
     box.store("a", "p", 0);
-    box.dueFlush(0); // sent=1
+    box.noteSent();
+    box.dueFlush(0); // sent=2 (1 immediate + 1 retry)
     box.ack("a");    // acked=1
     auto snap = box.snapshot();
     EXPECT_EQ(snap.pending, 0u);
-    EXPECT_EQ(snap.sent, 1u);
+    EXPECT_EQ(snap.sent, 2u);
     EXPECT_EQ(snap.acked, 1u);
     EXPECT_EQ(snap.expired, 0u);
+    EXPECT_GE(snap.sent, snap.acked); // invariant: sends >= acks
 }
