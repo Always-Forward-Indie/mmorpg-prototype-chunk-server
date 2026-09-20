@@ -64,6 +64,21 @@ TEST_F(MasteryFixture, LoadQueryUnload)
     EXPECT_EQ(mastery.getMasteryValue(1, "sword"), 0.0f);
 }
 
+TEST_F(MasteryFixture, UnloadFlushesPendingValues)
+{
+    // Periodic persist runs only every N hits: without an unload flush the
+    // last <N hits are lost on every logout. Unload must save quietly
+    // (no client notify — session is going away).
+    std::vector<std::string> saved;
+    mastery.setSaveCallback([&](const std::string &pkt) { saved.push_back(pkt); });
+    int notified = 0;
+    mastery.setClientNotifyCallback([&](int, const std::string &, float, const std::string &) { ++notified; });
+    mastery.loadCharacterMasteries(1, {{"sword", 30.5f}, {"axe", 10.0f}});
+    mastery.unloadCharacterMasteries(1);
+    EXPECT_EQ(saved.size(), 2u);
+    EXPECT_EQ(notified, 0);
+}
+
 TEST_F(MasteryFixture, AttackProgressesValueWithDefaults)
 {
     // Defaults: base 0.5, same level -> x1.0 -> +0.5 per hit, cap 100.

@@ -118,7 +118,7 @@ ReputationManager::changeReputation(int characterId,
         charMap[factionSlug] = newValue;
     }
 
-    persist(characterId, factionSlug, newValue);
+    persist(characterId, factionSlug, newValue, delta);
 
     // Notify client on every change
     if (clientNotifyCallback_)
@@ -145,7 +145,8 @@ ReputationManager::changeReputation(int characterId,
 void
 ReputationManager::persist(int characterId,
     const std::string &factionSlug,
-    int value)
+    int value,
+    int delta)
 {
     if (!saveCallback_)
         return;
@@ -156,6 +157,9 @@ ReputationManager::persist(int characterId,
         pkt["body"]["characterId"] = characterId;
         pkt["body"]["factionSlug"] = factionSlug;
         pkt["body"]["value"] = value;
+        // Delta for atomic apply on game side: absolutes race
+        // last-writer-wins on concurrent changes (lost update).
+        pkt["body"]["delta"] = delta;
         saveCallback_(pkt.dump() + "\n");
     }
     catch (const std::exception &e)

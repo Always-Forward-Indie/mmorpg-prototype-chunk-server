@@ -2,6 +2,7 @@
 #include "services/ReputationManager.hpp"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,20 @@ TEST_F(RepFixture, TierChangeCallbackFires)
     rep.setTierChangeCallback([&](int, const std::string &, const std::string &, int) { ++tierChanges; });
     rep.changeReputation(1, "wolves", 5000); // force tier jump
     EXPECT_GE(tierChanges, 1);
+}
+
+TEST_F(RepFixture, PersistPacketCarriesDelta)
+{
+    // Game applies deltas atomically (add_reputation); absolutes race
+    // last-writer-wins on concurrent changes (lost update).
+    rep.loadCharacterReputations(1, {{"wolves", 10}});
+    std::vector<std::string> saved;
+    rep.setSaveCallback([&](const std::string &pkt) { saved.push_back(pkt); });
+    rep.changeReputation(1, "wolves", 30);
+    ASSERT_FALSE(saved.empty());
+    const auto body = nlohmann::json::parse(saved.back())["body"];
+    EXPECT_EQ(body["delta"], 30);
+    EXPECT_EQ(body["value"], 40);
 }
 
 TEST_F(RepFixture, FillContext)

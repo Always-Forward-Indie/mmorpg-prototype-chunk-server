@@ -95,7 +95,7 @@ class ReputationManager
     }
 
   private:
-    void persist(int characterId, const std::string &factionSlug, int value);
+    void persist(int characterId, const std::string &factionSlug, int value, int delta);
 
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;

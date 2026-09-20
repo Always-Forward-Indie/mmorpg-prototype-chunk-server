@@ -124,6 +124,8 @@ class MasteryManager
     float calculateDelta(float currentValue, int charLevel, int targetLevel) const;
     void checkAndApplyMilestone(int characterId, const std::string &masterySlug, float oldValue, float newValue);
     void persist(int characterId, const std::string &masterySlug, float value);
+    /// Quiet save (no client notify) for unload flush.
+    void sendSave(int characterId, const std::string &masterySlug, float value);
 
     /// Look up which attributeSlug this mastery type's milestone buffs should modify.
     /// Returns "physical_attack" if the definitions haven't been loaded yet (safe default).

@@ -39,9 +39,20 @@ MasteryManager::loadCharacterMasteries(int characterId,
 void
 MasteryManager::unloadCharacterMasteries(int characterId)
 {
-    std::unique_lock lk(mutex_);
-    data_.erase(characterId);
-    hitCounters_.erase(characterId);
+    // Flush everything first: periodic persist runs only every N hits, so
+    // the last <N hits would otherwise be lost on every logout. Quiet
+    // (no client notify — the session is going away).
+    std::unordered_map<std::string, float> pending;
+    {
+        std::unique_lock lk(mutex_);
+        auto it = data_.find(characterId);
+        if (it != data_.end())
+            pending = it->second;
+        data_.erase(characterId);
+        hitCounters_.erase(characterId);
+    }
+    for (const auto &[slug, value] : pending)
+        sendSave(characterId, slug, value);
 }
 
 void
@@ -313,26 +324,33 @@ MasteryManager::checkAndApplyMilestone(int characterId,
 // ── Persistence ────────────────────────────────────────────────────────────
 
 void
+MasteryManager::sendSave(int characterId,
+    const std::string &masterySlug,
+    float value)
+{
+    if (!saveCallback_)
+        return;
+    try
+    {
+        nlohmann::json pkt;
+        pkt["header"]["eventType"] = "saveMastery";
+        pkt["body"]["characterId"] = characterId;
+        pkt["body"]["masterySlug"] = masterySlug;
+        pkt["body"]["value"] = value;
+        saveCallback_(pkt.dump() + "\n");
+    }
+    catch (const std::exception &e)
+    {
+        log_->error("[Mastery] persist error: {}", e.what());
+    }
+}
+
+void
 MasteryManager::persist(int characterId,
     const std::string &masterySlug,
     float value)
 {
-    if (saveCallback_)
-    {
-        try
-        {
-            nlohmann::json pkt;
-            pkt["header"]["eventType"] = "saveMastery";
-            pkt["body"]["characterId"] = characterId;
-            pkt["body"]["masterySlug"] = masterySlug;
-            pkt["body"]["value"] = value;
-            saveCallback_(pkt.dump() + "\n");
-        }
-        catch (const std::exception &e)
-        {
-            log_->error("[Mastery] persist error: {}", e.what());
-        }
-    }
+    sendSave(characterId, masterySlug, value);
 
     // Notify client with incremental progress update
     if (clientNotifyCallback_)
