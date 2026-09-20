@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -39,31 +40,41 @@ class FactOutbox
     static constexpr int64_t kBackoffCapMs = 60000;
     static constexpr size_t kCap = 20000;
 
-    /// Fact eventTypes (chunk→game saves). Link-level traffic
+    FactOutbox()
+    {
+        // Random boot id: sequence counters restart with the process, so
+        // keys must differ across boots — otherwise a post-restart fact
+        // collides with a pre-restart key in fact_keys_applied and gets
+        // falsely deduped (LOSS, not duplication).
+        std::random_device rd;
+        std::mt19937_64 gen(rd());
+        bootId_ = std::to_string(gen());
+    }
+
+    /// Fact eventTypes tracked with keys + retries. ONLY types whose game
+    /// handler claims keys and sends factAck may be listed: untracked facts
+    /// would retry forever (no ack ever comes) into DLQ noise. Widen this
+    /// list strictly together with wiring the game-side handler (same
+    /// 6-line claim/ack pattern). Link-level traffic
     /// (chunkServerConnection, markCharactersOnline, heartbeats) bypasses.
     static bool isFactType(const std::string &eventType)
     {
         static const std::unordered_set<std::string> kFacts = {
-            "savePositions", "saveHpMana", "savePlayTime", "saveCharacterProgress",
-            "saveExperienceDebt", "saveInventoryChange", "nullifyItemOwner",
-            "deleteInventoryItem", "transferInventoryItem", "saveDurabilityChange",
-            "saveItemKillCount", "saveEquipmentChange", "saveActiveEffect",
-            "saveCurrencyTransaction", "saveSkillBarSlot", "saveSkillCooldown",
-            "updatePlayerQuestProgress", "updatePlayerFlag", "savePityCounter",
-            "saveBestiaryKill", "timedChampionKilled", "saveReputation",
-            "saveMastery", "savePlayerTitle", "saveLearnedSkill", "analyticsEvent",
+            "saveLearnedSkill",
+            "saveReputation",
+            "saveInventoryChange",
         };
         return kFacts.count(eventType) > 0;
     }
 
     /// Store a fact, return its key ("{characterId}:{factType}:{seq}").
-    /// Mint a fresh key ("{characterId}:{factType}:{seq}"). Caller stamps
-    /// it into the payload, then store()s the stamped copy (retries must
-    /// carry the same key the game dedups on).
+    /// Mint a fresh key ("{characterId}:{factType}:{bootId}:{seq}").
+    /// Caller stamps it into the payload, then store()s the stamped copy
+    /// (retries must carry the same key the game dedups on).
     std::string assignKey(int characterId, const std::string &factType)
     {
-        return std::to_string(characterId) + ":" + factType +
-               ":" + std::to_string(++seq_);
+        return std::to_string(characterId) + ":" + factType + ":" +
+               bootId_ + ":" + std::to_string(++seq_);
     }
 
     /// Store a stamped payload under its key. Same key twice = coalesce to
@@ -170,6 +181,7 @@ class FactOutbox
     }
 
     uint64_t seq_ = 0;
+    std::string bootId_;
     std::unordered_map<std::string, OutboxFact> pending_;
     std::atomic<size_t> pendingCount_{0};
     std::atomic<uint64_t> sent_{0};

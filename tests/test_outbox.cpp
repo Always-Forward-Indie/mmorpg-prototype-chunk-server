@@ -11,15 +11,27 @@ TEST(FactOutbox, KeysUniqueAndMonotonic)
     const std::string k1 = box.assignKey(7, "saveReputation");
     const std::string k2 = box.assignKey(7, "saveReputation");
     EXPECT_NE(k1, k2);
-    EXPECT_EQ(k1, "7:saveReputation:1");
-    EXPECT_EQ(k2, "7:saveReputation:2");
+    // "{characterId}:{factType}:{bootId}:{seq}": same prefix, seq grows.
+    EXPECT_EQ(k1.rfind("7:saveReputation:", 0), 0u);
+    EXPECT_EQ(k2.rfind("7:saveReputation:", 0), 0u);
+    EXPECT_NE(k1.substr(17), k2.substr(17));
+}
+
+TEST(FactOutbox, BootIdsDifferAcrossInstances)
+{
+    // Restart safety: post-restart keys must not collide with pre-restart
+    // ones (else fact_keys_applied falsely dedups them = LOSS).
+    FactOutbox a, b;
+    EXPECT_NE(a.assignKey(7, "saveReputation"), b.assignKey(7, "saveReputation"));
 }
 
 TEST(FactOutbox, IsFactTypeAllowlist)
 {
+    // Only game handlers wired with claim/ack may be listed (see header).
     EXPECT_TRUE(FactOutbox::isFactType("saveReputation"));
     EXPECT_TRUE(FactOutbox::isFactType("saveLearnedSkill"));
-    EXPECT_TRUE(FactOutbox::isFactType("savePositions"));
+    EXPECT_TRUE(FactOutbox::isFactType("saveInventoryChange"));
+    EXPECT_FALSE(FactOutbox::isFactType("savePositions"));
     EXPECT_FALSE(FactOutbox::isFactType("chunkServerConnection"));
     EXPECT_FALSE(FactOutbox::isFactType("pingClient"));
     EXPECT_FALSE(FactOutbox::isFactType(""));
