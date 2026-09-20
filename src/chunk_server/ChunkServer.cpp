@@ -1222,6 +1222,44 @@ ChunkServer::mainEventLoopCH()
     );
     scheduler_.scheduleTask(cleanupTradeSessionsTask);
 
+    // Periodic task: absolute reputation snapshot every 60 seconds.
+    // Delta facts are exact but losable (chunk crash wipes the in-memory
+    // outbox); the snapshot bounds staleness to a minute via the legacy
+    // absolute upsert path (no delta field). Cheap: only online chars.
+    Task repSnapshotTask(
+        [this]
+        {
+            try
+            {
+                for (const auto &c : gameServices_.getCharacterManager().getCharactersList())
+                {
+                    if (c.characterId <= 0)
+                        continue;
+                    for (const auto &[faction, value] :
+                        gameServices_.getReputationManager().getAllReputations(c.characterId))
+                    {
+                        nlohmann::json pkt;
+                        pkt["header"]["eventType"] = "saveReputation";
+                        pkt["header"]["clientId"] = 0;
+                        pkt["header"]["hash"] = "";
+                        pkt["body"]["characterId"] = c.characterId;
+                        pkt["body"]["factionSlug"] = faction;
+                        pkt["body"]["value"] = value;
+                        gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+                    }
+                }
+            }
+            catch (const std::exception &)
+            {
+                // Best effort: next minute retries. Never break the scheduler.
+            }
+        },
+        60000,
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(60 * 1000),
+        28 // unique task ID
+    );
+    scheduler_.scheduleTask(repSnapshotTask);
+
     // Periodic task: flush dirty quest progress + pending flags every 5 seconds
     Task flushQuestProgressTask(
         [this]
