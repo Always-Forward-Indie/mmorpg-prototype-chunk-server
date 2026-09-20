@@ -876,6 +876,15 @@ ChunkServer::mainEventLoopCH()
             gameServices_.getLogger().log("Ping Queue size: " + std::to_string(eventQueueGameServerPing_.size()), BLUE);
             gameServices_.getLogger().log("ThreadPool Queue size: " + std::to_string(threadPool_.getTaskQueueSize()), BLUE);
             {
+                const auto osnap = gameServerWorker_.outboxSnapshot();
+                gameServices_.getLogger().log(
+                    "Outbox game: pending=" + std::to_string(osnap.pending) +
+                    " sent=" + std::to_string(osnap.sent) +
+                    " acked=" + std::to_string(osnap.acked) +
+                    " expired=" + std::to_string(osnap.expired),
+                    BLUE);
+            }
+            {
                 auto istats = gameServices_.getInterestManager().stats();
                 gameServices_.getLogger().log(
                     "Interest: clients=" + std::to_string(istats.trackedClients) +

@@ -2,6 +2,7 @@
 
 #include "events/EventQueue.hpp"
 #include "network/NetworkManager.hpp"
+#include "services/FactOutbox.hpp"
 #include "utils/Config.hpp"
 #include "utils/JSONParser.hpp"
 #include "utils/Logger.hpp"
@@ -30,6 +31,12 @@ class GameServerWorker
     // every 60s so the game never permanently loses the chunk registration
     // (stale-disconnect races, missed events). Idempotent server-side.
     boost::asio::steady_timer heartbeat_timer_;
+    // Outbox flush: resends unacked facts every 5s (strand-bound).
+    boost::asio::steady_timer flush_timer_;
+    void scheduleFlush();
+    /// Chunk→game fact outbox (at-least-once + idempotent receivers).
+    /// Strand-confined: touched only on strand_ (or single-threaded tests).
+    FactOutbox outbox_;
     void scheduleHeartbeat();
     std::string buildHandshakeMessage() const;
     std::vector<std::thread> io_threads_;
@@ -64,6 +71,8 @@ class GameServerWorker
     ~GameServerWorker();
     void startIOEventLoop();
     void sendDataToGameServer(const std::string &data);
+    /// Lock-free outbox snapshot for the periodic status task.
+    OutboxSnapshot outboxSnapshot() const { return outbox_.snapshot(); }
     void receiveDataFromGameServer();
     void connect(boost::asio::ip::tcp::resolver::results_type endpoints, int currentRetryCount = 0);
     void closeConnection();

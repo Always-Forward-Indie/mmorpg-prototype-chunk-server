@@ -13,6 +13,7 @@ GameServerWorker::GameServerWorker(EventQueue &eventQueue,
       game_server_socket_(std::make_shared<boost::asio::ip::tcp::socket>(io_context_game_server_)),
       retry_timer_(io_context_game_server_),
       heartbeat_timer_(io_context_game_server_),
+      flush_timer_(io_context_game_server_),
       eventQueue_(eventQueue),
       logger_(logger),
       jsonParser_(),
@@ -29,6 +30,7 @@ GameServerWorker::GameServerWorker(EventQueue &eventQueue,
 
     log_->info("Connecting to the Game Server on IP: " + host + " Port: " + std::to_string(port));
     connect(endpoints_, 0); // Start connection to the Game Server
+    scheduleFlush(); // Outbox retry sweep (no-op until facts pend)
 }
 
 void
@@ -51,6 +53,7 @@ GameServerWorker::~GameServerWorker()
     // stops on the cancelled error code.
     boost::system::error_code ign;
     heartbeat_timer_.cancel(ign);
+    flush_timer_.cancel(ign);
     retry_timer_.cancel(ign);
     work_.reset();
     for (auto &thread : io_threads_)
@@ -141,16 +144,73 @@ GameServerWorker::scheduleHeartbeat()
         });
 }
 
+namespace
+{
+int64_t steadyMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+} // namespace
+
+void
+GameServerWorker::scheduleFlush()
+{
+    // Outbox retry sweep (5s, strand-bound so outbox_ needs no locks).
+    // Resends unacked facts with backoff; drops ancient ones to DLQ log.
+    flush_timer_.expires_after(std::chrono::milliseconds(FactOutbox::kFlushMs));
+    flush_timer_.async_wait(boost::asio::bind_executor(strand_,
+        [this](const boost::system::error_code &timerEc)
+        {
+            if (timerEc)
+                return; // cancelled (shutdown): stop the chain
+            for (auto &f : outbox_.dueFlush(steadyMs()))
+            {
+                sendQueue_.push(f.payload);
+                if (!writePending_)
+                    doNextWrite();
+            }
+            for (auto &f : outbox_.sweepExpired(steadyMs(), 3600000))
+                log_->error("[Outbox] expired undelivered fact key={} attempts={}",
+                    f.key, f.attempts);
+            scheduleFlush();
+        }));
+}
+
 void
 GameServerWorker::sendDataToGameServer(const std::string &data)
 {
     // CRITICAL-2: post onto strand so sendQueue_ and writePending_ are only
     // accessed from one logical thread, eliminating concurrent async_write.
+    // Fact packets (save* family) additionally enter the outbox: stamped
+    // with an idempotency key, sent immediately (zero added latency), and
+    // retried by the flush timer until game ACKs (see scheduleFlush).
     boost::asio::post(strand_, [this, data]()
         {
-        sendQueue_.push(data);
-        if (!writePending_)
-            doNextWrite(); });
+            std::string wire = data;
+            try
+            {
+                auto j = nlohmann::json::parse(data);
+                const std::string type =
+                    j.value("header", nlohmann::json::object()).value("eventType", "");
+                if (FactOutbox::isFactType(type))
+                {
+                    const int characterId =
+                        j.value("body", nlohmann::json::object()).value("characterId", 0);
+                    const std::string key = outbox_.assignKey(characterId, type);
+                    j["body"]["factKey"] = key;
+                    wire = j.dump() + "\n";
+                    outbox_.store(key, wire, steadyMs());
+                }
+            }
+            catch (const std::exception &)
+            {
+                // Unparseable payload: legacy direct send, no tracking.
+            }
+            sendQueue_.push(wire);
+            if (!writePending_)
+                doNextWrite(); });
 }
 
 void
@@ -418,6 +478,27 @@ GameServerWorker::processGameServerData(std::string_view data)
     {
         auto objects = jsonParser_.parseWorldObjectsList(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_ALL_WORLD_OBJECTS, clientData.clientId, std::move(objects));
+    }
+    else if (eventType == "factAck")
+    {
+        // Outbox ack (game confirms a fact was applied or deduped).
+        // Handled inline, never enters the EventQueue.
+        try
+        {
+            nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+            const std::string key = body.value("key", "");
+            if (!key.empty())
+            {
+                boost::asio::post(strand_, [this, key]()
+                    {
+                        outbox_.ack(key);
+                    });
+            }
+        }
+        catch (const std::exception &)
+        {
+            // Malformed ack: ignore (the fact stays pending and retries).
+        }
     }
     else
     {

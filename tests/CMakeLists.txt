@@ -64,6 +64,7 @@ if(GTest_FOUND)
         test_item_cooldowns.cpp
         test_join_respawn.cpp
         test_spawn_geometry.cpp
+        test_outbox.cpp
         stubs/WorldStubs.cpp
         ../src/services/InterestManager.cpp
         ../src/services/TradeSessionManager.cpp
