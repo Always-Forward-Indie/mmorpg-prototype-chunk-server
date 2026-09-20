@@ -58,6 +58,9 @@ class JSONParser
     // Experience system parsers
     std::vector<ExperienceLevelEntry> parseExpLevelTable(const char *data, size_t length);
 
+    // World objects (game setWorldObjects push)
+    std::vector<WorldObjectDataStruct> parseWorldObjectsList(const char *data, size_t length);
+
     // Champion system parsers
     std::vector<TimedChampionTemplate> parseTimedChampionTemplates(const char *data, size_t length);
 

@@ -414,6 +414,11 @@ GameServerWorker::processGameServerData(std::string_view data)
         auto configs = jsonParser_.parseNPCAmbientSpeech(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_NPC_AMBIENT_SPEECH, clientData.clientId, std::move(configs));
     }
+    else if (eventType == "setWorldObjects")
+    {
+        auto objects = jsonParser_.parseWorldObjectsList(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_ALL_WORLD_OBJECTS, clientData.clientId, std::move(objects));
+    }
     else
     {
         log_->info("Unknown event type from Game Server: " + eventType);

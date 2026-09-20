@@ -1409,6 +1409,72 @@ JSONParser::parseExpLevelTable(const char *data, size_t length)
     return expLevelTable;
 }
 
+std::vector<WorldObjectDataStruct>
+JSONParser::parseWorldObjectsList(const char *data, size_t length)
+{
+    std::vector<WorldObjectDataStruct> objects;
+
+    try
+    {
+        nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+
+        if (!jsonData.contains("body") || !jsonData["body"].is_object() ||
+            !jsonData["body"].contains("worldObjects") || !jsonData["body"]["worldObjects"].is_array())
+            return objects;
+
+        for (const auto &o : jsonData["body"]["worldObjects"])
+        {
+            WorldObjectDataStruct obj;
+            if (o.contains("id") && o["id"].is_number_integer())
+                obj.id = o["id"].get<int>();
+            if (o.contains("slug") && o["slug"].is_string())
+                obj.slug = o["slug"].get<std::string>();
+            if (o.contains("nameKey") && o["nameKey"].is_string())
+                obj.nameKey = o["nameKey"].get<std::string>();
+            if (o.contains("objectType") && o["objectType"].is_string())
+                obj.objectType = o["objectType"].get<std::string>();
+            if (o.contains("scope") && o["scope"].is_string())
+                obj.scope = o["scope"].get<std::string>();
+            if (o.contains("posX") && o["posX"].is_number())
+                obj.position.positionX = o["posX"].get<float>();
+            if (o.contains("posY") && o["posY"].is_number())
+                obj.position.positionY = o["posY"].get<float>();
+            if (o.contains("posZ") && o["posZ"].is_number())
+                obj.position.positionZ = o["posZ"].get<float>();
+            if (o.contains("zoneId") && o["zoneId"].is_number_integer())
+                obj.zoneId = o["zoneId"].get<int>();
+            if (o.contains("dialogueId") && o["dialogueId"].is_number_integer())
+                obj.dialogueId = o["dialogueId"].get<int>();
+            if (o.contains("lootTableId") && o["lootTableId"].is_number_integer())
+                obj.lootTableId = o["lootTableId"].get<int>();
+            if (o.contains("requiredItemId") && o["requiredItemId"].is_number_integer())
+                obj.requiredItemId = o["requiredItemId"].get<int>();
+            if (o.contains("interactionRadius") && o["interactionRadius"].is_number())
+                obj.interactionRadius = o["interactionRadius"].get<float>();
+            if (o.contains("channelTimeSec") && o["channelTimeSec"].is_number_integer())
+                obj.channelTimeSec = o["channelTimeSec"].get<int>();
+            if (o.contains("respawnSec") && o["respawnSec"].is_number_integer())
+                obj.respawnSec = o["respawnSec"].get<int>();
+            if (o.contains("isActiveByDefault") && o["isActiveByDefault"].is_boolean())
+                obj.isActiveByDefault = o["isActiveByDefault"].get<bool>();
+            if (o.contains("minLevel") && o["minLevel"].is_number_integer())
+                obj.minLevel = o["minLevel"].get<int>();
+            if (o.contains("conditionGroup"))
+                obj.conditionGroup = o["conditionGroup"];
+            if (o.contains("currentState") && o["currentState"].is_string())
+                obj.initialState = o["currentState"].get<std::string>();
+            if (obj.id > 0)
+                objects.push_back(std::move(obj));
+        }
+    }
+    catch (const std::exception &)
+    {
+        objects.clear();
+    }
+
+    return objects;
+}
+
 std::vector<NPCDataStruct>
 JSONParser::parseNPCsList(const char *data, size_t length)
 {

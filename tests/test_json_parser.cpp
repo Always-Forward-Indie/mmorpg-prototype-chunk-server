@@ -151,3 +151,28 @@ TEST(JsonParser, NpcsList)
     EXPECT_FLOAT_EQ(npcs[0].position.positionX, 7.0f);
     EXPECT_TRUE(p.parseNPCsList("{}", 2).empty());
 }
+
+TEST(JsonParser, WorldObjectsList)
+{
+    // Game setWorldObjects push shape (see game handleGetWorldObjectsEvent):
+    // body.worldObjects[]. currentState maps to initialState; entries
+    // without id are skipped, garbage returns empty (never throws).
+    JSONParser p;
+    nlohmann::json j;
+    j["body"]["worldObjects"] = nlohmann::json::array(
+        {{{"id", 9001}, {"slug", "dev_examine_stone"}, {"objectType", "examine"},
+            {"scope", "global"}, {"posX", 1}, {"posY", 2}, {"posZ", 200},
+            {"interactionRadius", 50000}, {"minLevel", 1},
+            {"currentState", "active"}, {"conditionGroup", nullptr}},
+            {{"slug", "noid"}}}); // invalid: skipped
+    std::string raw = j.dump();
+    auto objs = p.parseWorldObjectsList(raw.c_str(), raw.size());
+    ASSERT_EQ(objs.size(), 1u);
+    EXPECT_EQ(objs[0].id, 9001);
+    EXPECT_EQ(objs[0].objectType, "examine");
+    EXPECT_FLOAT_EQ(objs[0].position.positionX, 1.0f);
+    EXPECT_FLOAT_EQ(objs[0].interactionRadius, 50000.0f);
+    EXPECT_EQ(objs[0].initialState, "active");
+    EXPECT_TRUE(p.parseWorldObjectsList("{}", 2).empty());
+    EXPECT_TRUE(p.parseWorldObjectsList("not json", 8).empty());
+}
