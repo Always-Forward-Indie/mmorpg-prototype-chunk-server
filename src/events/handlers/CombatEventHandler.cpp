@@ -687,3 +687,28 @@ CombatEventHandler::handleCombatResult(const Event &event)
     // В новой архитектуре это обрабатывается через CombatSystem
     log_->info("handleCombatResult - using new architecture");
 }
+
+void
+CombatEventHandler::handleAdminKillMob(const Event &event)
+{
+#ifdef ADMIN_RPC
+    const auto &data = event.getData();
+    if (!std::holds_alternative<std::pair<int, int>>(data))
+    {
+        log_->error("[AdminKill] wrong payload type");
+        return;
+    }
+    const auto [mobUid, killerId] = std::get<std::pair<int, int>>(data);
+    auto &mobInstances = gameServices_.getMobInstanceManager();
+    if (mobInstances.getMobInstance(mobUid).uid != mobUid || !mobInstances.isMobAlive(mobUid))
+        return; // already dead/reaped between gate check and processing
+    if (gameServices_.getCharacterManager().getCharacterById(killerId).characterId != killerId)
+        return;
+    // Same pipeline the skill path runs on a lethal hit (see
+    // CombatSystem::adminKillMob): loot event + reward hooks, no dup logic.
+    combatSystem_->adminKillMob(mobUid, killerId);
+#else
+    (void)event;
+    log_->error("[AdminKill] attempt on non-ADMIN build (rejected)");
+#endif
+}

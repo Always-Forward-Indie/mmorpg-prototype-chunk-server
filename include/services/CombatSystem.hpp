@@ -113,6 +113,17 @@ class CombatSystem
      */
     void restoreSkillCooldown(int characterId, const std::string &skillSlug, int64_t remainingMs);
 
+    /**
+     * @brief Admin-RPC kill (DEV only, called from CombatEventHandler).
+     *
+     * Lethal damage + the genuine death pipeline: the same two calls the
+     * skill path makes on a lethal hit (loot event, then handleMobDeath
+     * with its XP/quest/bestiary/champion/reputation hooks). No duplicated
+     * logic. Setup-only (corpse/harvest states); kill mechanics are proven
+     * via playerAttack, never via this path. Callers validate uid/killer.
+     */
+    void adminKillMob(int mobUid, int killerId);
+
   private:
     GameServices *gameServices_;
     std::shared_ptr<spdlog::logger> log_;

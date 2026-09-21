@@ -117,6 +117,18 @@ class CharacterEventHandler : public BaseEventHandler
     void handleMoveCharacterEvent(const Event &event);
 
     /**
+     * @brief Admin-RPC teleport (DEV only, ADMIN_RPC).
+     *
+     * Payload json {characterId, x, y, z}. Runs the full move path on the
+     * event thread: authoritative position + lastValidated reset (srvMs=0,
+     * like respawn) + interest resubscribe with enter-snapshots for the
+     * destination cells and evict for vacated ones + immediate savePositions
+     * + positional broadcast (dest + source). Silent: the dispatcher already
+     * answered accepted:true; callers poll getState for the applied position.
+     */
+    void handleAdminTeleportEvent(const Event &event);
+
+    /**
      * @brief Handle get connected characters request
      *
      * Returns list of all currently connected characters

@@ -402,3 +402,139 @@ TEST_F(ChampFixture, SurvivalEvolveViaFakeClock)
     champ.tickSurvivalEvolution();
     EXPECT_TRUE(instances.getMobInstance(9001).hasEvolved);
 }
+
+// ── skipTime pins (admin-RPC time travel: composes onto injected clocks,
+// runs both ticks; non-positive values are ignored) ──────────────────────────
+
+TEST_F(ChampFixture, SkipTimeFiresTimedSpawn)
+{
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+
+    TimedChampionTemplate t;
+    t.slug = "alpha";
+    t.gameZoneId = 7;
+    t.mobTemplateId = 5;
+    t.intervalHours = 6;
+    t.nextSpawnAt = fakeEpoch + 3600;
+    champ.loadTimedChampions({t});
+    champ.tickTimedChampions();
+    ASSERT_EQ(liveChampions(), 0u); // not due yet
+
+    champ.skipTime(3600); // advances clock AND ticks: spawn fires
+    EXPECT_EQ(liveChampions(), 1u);
+}
+
+TEST_F(ChampFixture, SkipTimeAdvancesDespawn)
+{
+    auto t0 = std::chrono::steady_clock::now();
+    auto fakeSteady = t0;
+    champ.setSteadyFn([&] { return fakeSteady; });
+
+    for (int i = 0; i < 3; ++i)
+        champ.recordMobKill(7, 5);
+    ASSERT_EQ(liveChampions(), 1u);
+
+    champ.skipTime(31 * 60); // past default 30 min window -> despawned
+    EXPECT_EQ(liveChampions(), 0u);
+}
+
+TEST_F(ChampFixture, SkipTimeIgnoresNonPositive)
+{
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+
+    TimedChampionTemplate t;
+    t.slug = "alpha";
+    t.gameZoneId = 7;
+    t.mobTemplateId = 5;
+    t.intervalHours = 6;
+    t.nextSpawnAt = fakeEpoch + 3600;
+    champ.loadTimedChampions({t});
+
+    champ.skipTime(0);
+    champ.skipTime(-10);
+    champ.tickTimedChampions();
+    EXPECT_EQ(liveChampions(), 0u); // clocks unmoved, nothing due
+}
+
+TEST_F(ChampFixture, SkipTimeStacks)
+{
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+
+    TimedChampionTemplate t;
+    t.slug = "alpha";
+    t.gameZoneId = 7;
+    t.mobTemplateId = 5;
+    t.intervalHours = 6;
+    t.nextSpawnAt = fakeEpoch + 3600;
+    champ.loadTimedChampions({t});
+
+    champ.skipTime(1000);
+    champ.tickTimedChampions();
+    EXPECT_EQ(liveChampions(), 0u); // 2600 s still out
+
+    champ.skipTime(2600); // stacked: 3600 total -> due
+    EXPECT_EQ(liveChampions(), 1u);
+}
+
+TEST_F(ChampFixture, ResetThresholdStateClearsAndUnregisters)
+{
+    for (int i = 0; i < 3; ++i)
+        champ.recordMobKill(7, 5);
+    ASSERT_EQ(liveChampions(), 1u);
+    const int uid = instances.getAllLivingInstances()[0].uid;
+
+    champ.resetThresholdState();
+    EXPECT_EQ(liveChampions(), 0u); // active instance unregistered
+    EXPECT_EQ(instances.getMobInstance(uid).uid, 0);
+
+    for (int i = 0; i < 3; ++i) // counter cleared: fires fresh
+        champ.recordMobKill(7, 5);
+    EXPECT_EQ(liveChampions(), 1u);
+}
+
+TEST_F(ChampFixture, SpawnNotifyCallbackFires)
+{
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+    std::vector<int> notified;
+    champ.setSpawnNotifyCallback([&](const MobDataStruct &m) { notified.push_back(m.uid); });
+
+    TimedChampionTemplate t;
+    t.slug = "alpha";
+    t.gameZoneId = 7;
+    t.mobTemplateId = 5;
+    t.intervalHours = 6;
+    t.nextSpawnAt = fakeEpoch - 10; // due
+    champ.loadTimedChampions({t});
+    champ.tickTimedChampions();
+    ASSERT_EQ(liveChampions(), 1u);
+    ASSERT_EQ(notified.size(), 1u);
+    EXPECT_EQ(notified[0], instances.getAllLivingInstances()[0].uid);
+}
+
+TEST_F(ChampFixture, ResetRearmsTimedSchedule)
+{
+    int64_t fakeEpoch = 1700000000;
+    champ.setEpochSecFn([&] { return fakeEpoch; });
+
+    TimedChampionTemplate t;
+    t.slug = "alpha";
+    t.gameZoneId = 7;
+    t.mobTemplateId = 5;
+    t.intervalHours = 6;
+    t.nextSpawnAt = fakeEpoch - 10; // due
+    champ.loadTimedChampions({t});
+    champ.tickTimedChampions();
+    ASSERT_EQ(liveChampions(), 1u);
+
+    champ.resetThresholdState(); // culls instance, re-arms schedule
+    EXPECT_EQ(liveChampions(), 0u);
+
+    // Spawn had advanced nextSpawnAt by the interval; skip past it and the
+    // re-armed schedule refires (reset+skip composition).
+    champ.skipTime(6 * 3600 + 1);
+    EXPECT_EQ(liveChampions(), 1u);
+}

@@ -1,6 +1,11 @@
 #include "events/EventDispatcher.hpp"
+#include "services/AdminGate.hpp"
+#include "utils/AdminResponse.hpp"
+#include "utils/Generators.hpp"
 #include "utils/JSONParser.hpp"
 #include <boost/asio.hpp>
+#include <chrono>
+#include <ctime>
 #include <spdlog/logger.h>
 
 EventDispatcher::EventDispatcher(
@@ -226,6 +231,10 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     else if (context.eventType == "worldObjectChannelCancel")
     {
         handleWorldObjectChannelCancel(context, socket);
+    }
+    else if (context.eventType == "adminCommand")
+    {
+        handleAdminCommand(context, socket);
     }
     else
     {
@@ -1950,6 +1959,17 @@ EventDispatcher::handlePlayerReady(const EventContext &context,
 
     CharacterDataStruct charData;
     charData.characterId = context.characterData.characterId;
+    // Brief join (test fast-path): optional client flag, defaults to the
+    // full flood. Parsed silently like other optional body fields.
+    try
+    {
+        const auto joinJson = nlohmann::json::parse(context.fullMessage);
+        charData.briefJoin =
+            joinJson.value("body", nlohmann::json::object()).value("brief", false);
+    }
+    catch (...)
+    {
+    }
 
     eventsBatch_.push_back(Event(Event::PLAYER_READY,
         context.clientData.clientId,
@@ -2183,4 +2203,366 @@ EventDispatcher::handleWorldObjectChannelCancel(const EventContext &context, std
     {
         log_->error("[EventDispatcher] worldObjectChannelCancel parse error: {}", ex.what());
     }
+}
+
+// ── adminCommand (DEV test hook, instant test-state setup) ───────────────────
+// Defense in depth: (1) GM allowlist `admin.gm_client_ids`, (2) config gate
+// `admin.enabled`, (3) `#ifdef ADMIN_RPC` (no such code in prod builds),
+// (4) audit — every served command at warn, every rejection at error.
+// Direct-response handler (no EventQueue): reuses managers synchronously,
+// exactly like handleGetCharacterExperience does. Responses are `\n`
+// terminated and carry header.eventType="adminCommand" so the python harness
+// can wait_for() them.
+namespace
+{
+
+void sendAdminResponse(ChunkServer *chunkServer,
+    const std::shared_ptr<boost::asio::ip::tcp::socket> &socket,
+    const EventContext &context,
+    const std::string &status,
+    const std::string &op,
+    const nlohmann::json &body,
+    const std::string &message)
+{
+    // Single envelope shape (see utils/AdminResponse.hpp); queued event
+    // handlers never answer — the dispatcher always responds synchronously.
+    if (!chunkServer)
+        return;
+    ::sendAdminResponse(chunkServer->getNetworkManager(), socket,
+        context.clientData.clientId, context.timestamps, status, op, body, message);
+}
+
+} // namespace
+
+void
+EventDispatcher::handleAdminCommand(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+#ifdef ADMIN_RPC
+    const int callerId = context.clientData.clientId;
+    nlohmann::json body;
+    try
+    {
+        body = nlohmann::json::parse(context.fullMessage)
+                   .value("body", nlohmann::json::object());
+    }
+    catch (const std::exception &e)
+    {
+        log_->error("ADMIN rejected: parse error from client={} ({})", callerId, e.what());
+        sendAdminResponse(chunkServer_, socket, context, "error", "", {{"ok", false}}, "parse error");
+        return;
+    }
+    const std::string op = body.value("op", std::string{});
+
+    // Layers 1+2: authenticated caller (mirrors ClientEventHandler) + config
+    // gate + GM allowlist (chunk has no DB; the allowlist is the role layer
+    // here — bot accounts are never listed, only gm_bot).
+    if (callerId <= 0 || context.clientData.hash.empty())
+    {
+        log_->error("ADMIN rejected: unauthenticated op={} client={}", op, callerId);
+        sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "forbidden");
+        return;
+    }
+    const bool enabled =
+        gameServices_.getGameConfigService().getBool("admin.enabled", false);
+    const std::string gmIds =
+        gameServices_.getGameConfigService().getString("admin.gm_client_ids", "");
+    if (!admin_gate::allows(enabled, callerId, gmIds))
+    {
+        log_->error("ADMIN rejected: op={} client={} enabled={} (not GM or disabled)",
+            op, callerId, enabled);
+        sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "forbidden");
+        return;
+    }
+    if (!admin_gate::isKnownOp(op))
+    {
+        log_->warn("ADMIN rejected: unknown op={} client={}", op, callerId);
+        sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_op");
+        return;
+    }
+    const int targetId = body.value("characterId", 0);
+    if (targetId <= 0)
+    {
+        log_->warn("ADMIN rejected: op={} missing characterId client={}", op, callerId);
+        sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+        return;
+    }
+    if (gameServices_.getCharacterManager().getCharacterById(targetId).characterId != targetId)
+    {
+        log_->warn("ADMIN rejected: op={} unknown character={} client={}", op, targetId, callerId);
+        sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "unknown_character");
+        return;
+    }
+
+    auto &charMgr = gameServices_.getCharacterManager();
+    auto &invMgr = gameServices_.getInventoryManager();
+    auto &expMgr = gameServices_.getExperienceManager();
+    nlohmann::json out;
+    out["op"] = op;
+    out["characterId"] = targetId;
+
+    if (op == "teleport")
+    {
+        // Queued (ADMIN_TELEPORT) so the full move path runs on the event
+        // thread: validation state, interest resubscribe WITH enter
+        // snapshots (without them the client only ever sees thin deltas
+        // without slug/name), evict, savePositions, broadcast. The answer
+        // is accepted:true; callers poll getState for the applied position.
+        if (!body.contains("x") || !body.contains("y") || !body.contains("z"))
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        nlohmann::json payload;
+        payload["characterId"] = targetId;
+        payload["x"] = body.value("x", 0.0f);
+        payload["y"] = body.value("y", 0.0f);
+        payload["z"] = body.value("z", 90.0f);
+        eventsBatch_.push_back(Event(Event::ADMIN_TELEPORT, callerId,
+            EventData{std::in_place_type<nlohmann::json>, payload}, context.timestamps));
+        out["x"] = payload["x"];
+        out["y"] = payload["y"];
+        out["z"] = payload["z"];
+        out["accepted"] = true;
+    }
+    else if (op == "getState")
+    {
+        const auto ch = charMgr.getCharacterData(targetId);
+        const auto pos = charMgr.getCharacterPosition(targetId);
+        out["position"] = {{"x", pos.positionX}, {"y", pos.positionY}, {"z", pos.positionZ}};
+        out["level"] = ch.characterLevel;
+        out["exp"] = ch.characterExperiencePoints;
+        out["hp"] = ch.characterCurrentHealth;
+        out["hpMax"] = ch.characterMaxHealth;
+        out["mana"] = ch.characterCurrentMana;
+        out["manaMax"] = ch.characterMaxMana;
+        out["freeSkillPoints"] = charMgr.getCharacterFreeSkillPoints(targetId);
+        nlohmann::json attrs = nlohmann::json::array();
+        for (const auto &a : charMgr.getCharacterAttributes(targetId))
+            attrs.push_back({{"slug", a.slug}, {"value", a.value}});
+        out["attributes"] = attrs;
+        nlohmann::json skills = nlohmann::json::array();
+        for (const auto &s : charMgr.getCharacterSkills(targetId))
+            skills.push_back({{"slug", s.skillSlug}, {"name", s.skillName}, {"level", s.skillLevel}, {"isPassive", s.isPassive}});
+        out["skills"] = skills;
+        nlohmann::json items = nlohmann::json::array();
+        for (const auto &it : invMgr.getPlayerInventory(targetId))
+            items.push_back(invMgr.inventoryItemToJson(it));
+        out["inventory"] = items;
+        out["gold"] = invMgr.getGoldAmount(targetId);
+        nlohmann::json quests = nlohmann::json::array();
+        for (const auto &q : ch.quests)
+            quests.push_back({{"questSlug", q.questSlug}, {"state", q.state}, {"currentStep", q.currentStep}});
+        out["quests"] = quests;
+        nlohmann::json flags = nlohmann::json::array();
+        for (const auto &f : ch.flags)
+        {
+            nlohmann::json fj;
+            fj["flagKey"] = f.flagKey;
+            fj["boolValue"] = f.boolValue.has_value() ? nlohmann::json(f.boolValue.value()) : nlohmann::json(nullptr);
+            fj["intValue"] = f.intValue.has_value() ? nlohmann::json(f.intValue.value()) : nlohmann::json(nullptr);
+            flags.push_back(fj);
+        }
+        out["flags"] = flags;
+    }
+    else if (op == "grantXP")
+    {
+        const int xp = body.value("xp", 0);
+        if (xp <= 0)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        // Via the real pipeline (SP/stats/titles accrue normally).
+        expMgr.grantExperience(targetId, xp, "admin_grant");
+        const auto ch = charMgr.getCharacterData(targetId);
+        out["grantedXp"] = xp;
+        out["level"] = ch.characterLevel;
+        out["exp"] = ch.characterExperiencePoints;
+    }
+    else if (op == "grantLevel")
+    {
+        const int level = body.value("level", 0);
+        if (level <= 1 || level > 100)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        const auto cur = charMgr.getCharacterData(targetId);
+        int granted = 0;
+        if (cur.characterLevel < level)
+        {
+            // Server table (ExperienceCacheManager), NOT the static formula
+            // (they differ: static L8 ~= 358xp lands only L3 on the server
+            // table). grantExperience runs the genuine level-up path.
+            const int need =
+                expMgr.getExperienceForLevelFromGameServer(level) - cur.characterExperiencePoints;
+            if (need > 0)
+            {
+                expMgr.grantExperience(targetId, need, "admin_grant");
+                granted = need;
+            }
+        }
+        const auto ch = charMgr.getCharacterData(targetId);
+        out["grantedXp"] = granted;
+        out["level"] = ch.characterLevel;
+        out["exp"] = ch.characterExperiencePoints;
+    }
+    else if (op == "grantItem")
+    {
+        const int itemId = body.value("itemId", 0);
+        const int qty = body.value("qty", 1);
+        if (itemId <= 0 || qty <= 0)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        // Via InventoryManager (quest hooks, weight — normally).
+        if (!invMgr.addItemToInventory(targetId, itemId, qty))
+        {
+            log_->warn("ADMIN op={} grant failed item={} char={}", op, itemId, targetId);
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "grant_failed");
+            return;
+        }
+        out["itemId"] = itemId;
+        out["qty"] = qty;
+        out["quantity"] = invMgr.getItemQuantity(targetId, itemId);
+    }
+    else if (op == "setHP")
+    {
+        const int value = body.value("value", -1);
+        if (value < 0)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        const auto cur = charMgr.getCharacterData(targetId);
+        const int maxHp = cur.characterMaxHealth > 0 ? cur.characterMaxHealth : value;
+        const int clamped = value > maxHp ? maxHp : value;
+        charMgr.updateCharacterHealth(targetId, clamped);
+        if (clamped > 0 && cur.isDead)
+            charMgr.clearDeathState(targetId);
+        out["hp"] = clamped;
+        out["hpMax"] = maxHp;
+    }
+    else if (op == "skipTime")
+    {
+        const int64_t seconds = body.value("seconds", 0);
+        if (seconds <= 0 || seconds > 604800)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        // Via the injected clocks (ChampionManager seam) + immediate ticks.
+        // Wall-clock spots are untouched by design.
+        gameServices_.getChampionManager().skipTime(seconds);
+        out["skippedSec"] = seconds;
+    }
+    else if (op == "spawnMob")
+    {
+        // Queued (ADMIN_SPAWN): registration happens on the event thread and
+        // subscribers get a real spawn list (thin deltas carry no slug/name,
+        // so a dispatcher-side register would leave tests blind). Uids are
+        // generated here (pure), so the sync answer already carries them.
+        const std::string slug = body.value("mobSlug", std::string{});
+        const int templateId = body.value("mobTemplateId", 0);
+        const int zoneId = body.value("zoneId", 0);
+        int count = body.value("count", 1);
+        const bool hasTemplate = !slug.empty() || templateId > 0;
+        if (!hasTemplate || zoneId <= 0 || count <= 0 || count > 20 ||
+            !body.contains("x") || !body.contains("y") || !body.contains("z"))
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        auto &mobMgr = gameServices_.getMobManager();
+        MobDataStruct tpl = slug.empty() ? mobMgr.getMobById(templateId) : mobMgr.getMobBySlug(slug);
+        if (tpl.id == 0)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_template");
+            return;
+        }
+        nlohmann::json uids = nlohmann::json::array();
+        for (int i = 0; i < count; ++i)
+            uids.push_back(Generators::generateUniqueMobUID());
+        nlohmann::json payload;
+        payload["uids"] = uids;
+        payload["templateId"] = tpl.id;
+        payload["zoneId"] = zoneId;
+        payload["x"] = body.value("x", 0.0f);
+        payload["y"] = body.value("y", 0.0f);
+        payload["z"] = body.value("z", 90.0f);
+        eventsBatch_.push_back(Event(Event::ADMIN_SPAWN, callerId,
+            EventData{std::in_place_type<nlohmann::json>, payload}, context.timestamps));
+        out["uids"] = uids;
+        out["accepted"] = true;
+    }
+    else if (op == "killMob")
+    {
+        // Queued (ADMIN_KILL_MOB) so the genuine pipeline runs on the event
+        // thread: loot event + CombatSystem::handleMobDeath (XP/quest/
+        // bestiary/champion/reputation). Response is accepted:true; the test
+        // waits for the mobDeath broadcast like with real kills. Setup-only:
+        // kill mechanics are proven via playerAttack, never via this path.
+        const int uid = body.value("uid", 0);
+        const int killerId = body.value("killerCharacterId", 0);
+        auto &mobInstances = gameServices_.getMobInstanceManager();
+        if (uid <= 0 || killerId <= 0 ||
+            charMgr.getCharacterById(killerId).characterId != killerId)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        if (mobInstances.getMobInstance(uid).uid != uid)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "unknown_uid");
+            return;
+        }
+        if (!mobInstances.isMobAlive(uid))
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "already_dead");
+            return;
+        }
+        eventsBatch_.push_back(Event(Event::ADMIN_KILL_MOB, callerId,
+            EventData{std::in_place_type<std::pair<int, int>>, std::make_pair(uid, killerId)},
+            context.timestamps));
+        out["uid"] = uid;
+        out["accepted"] = true;
+    }
+    else if (op == "resetWorld")
+    {
+        // Hermetic-test reset, global state only (per-character state is
+        // solved by ephemeral bots). Champion scope: counters + active
+        // instances + timed re-arm, plus a cull of leftover test-zone mobs
+        // (the arena accumulates admin-spawned foxes across runs; clients
+        // would chase ghosts). mobDied() is safe for foreign uids (floors,
+        // no-ops); ambient refills via the respawn task. Timed needs no DB
+        // reset (kill reschedules, skip refires). Between-tests only: no
+        // evict broadcast is sent.
+        const std::string scope = body.value("scope", std::string{});
+        const int zoneId = body.value("zoneId", 0);
+        if (scope != "champion" || zoneId <= 0)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_scope");
+            return;
+        }
+        gameServices_.getChampionManager().resetThresholdState();
+        int culled = 0;
+        for (const auto &m : gameServices_.getMobInstanceManager().getMobInstancesInZone(zoneId))
+        {
+            gameServices_.getSpawnZoneManager().mobDied(zoneId, m.uid);
+            ++culled;
+        }
+        out["scope"] = scope;
+        out["culled"] = culled;
+    }
+
+    out["ok"] = true;
+    log_->warn("ADMIN char={} op={} by client={}", targetId, op, callerId);
+    sendAdminResponse(chunkServer_, socket, context, "success", op, out, "ok");
+#else
+    // Layer 3: no such code in prod builds. Any attempt is an error (Watch
+    // SEAM pattern), the session stays alive (tolerant reader).
+    log_->error("ADMIN attempt on non-ADMIN build: op? client={} (rejected)", context.clientData.clientId);
+    sendAdminResponse(chunkServer_, socket, context, "error", "", {{"ok", false}}, "forbidden");
+#endif
 }

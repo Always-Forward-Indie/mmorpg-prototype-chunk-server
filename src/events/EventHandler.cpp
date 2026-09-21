@@ -51,6 +51,12 @@ EventHandler::EventHandler(
 
     // Wire character event handler reference for pending join request cleanup on disconnect
     clientEventHandler_->setCharacterEventHandler(characterEventHandler_.get());
+
+    // Visibility for server-spawned mobs (timed/threshold champions): thin
+    // deltas carry no slug/name, so push a real spawn list to subscribers.
+    // Same sender the admin spawn path uses (MobEventHandler::pushSpawnSnapshot).
+    gameServices_.getChampionManager().setSpawnNotifyCallback(
+        [this](const MobDataStruct &mob) { mobEventHandler_->pushSpawnSnapshot(mob); });
 }
 
 void
@@ -265,6 +271,15 @@ EventHandler::dispatchEvent(const Event &event)
         // New Attack Events
         case Event::PLAYER_ATTACK:
             combatEventHandler_->handlePlayerAttack(event);
+            break;
+        case Event::ADMIN_KILL_MOB:
+            combatEventHandler_->handleAdminKillMob(event);
+            break;
+        case Event::ADMIN_TELEPORT:
+            characterEventHandler_->handleAdminTeleportEvent(event);
+            break;
+        case Event::ADMIN_SPAWN:
+            mobEventHandler_->handleAdminSpawnEvent(event);
             break;
         case Event::AI_ATTACK:
             // Legacy no-op: AI attacks are now driven entirely by

@@ -133,6 +133,17 @@ class ChampionManager
     /// Must be called from ChunkServer constructor before any tick.
     void setSendToGameServerCallback(std::function<void(const std::string &)> cb);
 
+    /// Set the callback fired after every successful champion spawn (timed,
+    /// threshold, survival-evolved materializations go through spawnChampion).
+    /// Production wires it to push a real spawn list to the spawn cell's
+    /// subscribers — thin deltas carry no slug/name, so without this clients
+    /// never learn server-spawned mobs until an opportunistic snapshot.
+    /// Null by default (unit tests opt in).
+    void setSpawnNotifyCallback(std::function<void(const MobDataStruct &)> cb)
+    {
+        spawnNotifyCb_ = std::move(cb);
+    }
+
     // ── Test seam: injectable clocks ──────────────────────────────────────────
     // Defaults are the wall clocks; unit tests override them to drive
     // timed/despawn/survival paths in milliseconds without DB or bots.
@@ -142,6 +153,24 @@ class ChampionManager
     {
         steadyFn_ = std::move(fn);
     }
+
+    // ── Admin-RPC time travel (DEV only) ────────────────────────────────────
+    // Advances BOTH injected clocks by `seconds` (composing onto any
+    // previously injected fns, including unit-test fakes) and runs both
+    // public ticks immediately. Reuses tick logic — no duplicated paths.
+    // seconds must be > 0 (backwards travel breaks despawn/evolve
+    // monotonicity); non-positive values are ignored.
+    void skipTime(int64_t seconds);
+
+    // ── Admin-RPC hermetic reset (DEV only) ─────────────────────────────────
+    // Clears threshold kill counters, unregisters all ACTIVE champion
+    // instances (releases the spawn block), and re-arms timed schedules
+    // (spawned=false; next_spawn_at untouched — skipTime drives the rest).
+    // Timed schedules need no DB reset (kill reschedules, skip refires);
+    // per-character state is solved by ephemeral test bots, not scrubbing.
+    // Call between tests only: no evict broadcast is sent, live sessions
+    // would keep ghosts (fresh joins snapshot clean state).
+    void resetThresholdState();
 
     // ── Internal spawn helper (also callable by tickTimedChampions) ──────────
 
@@ -247,4 +276,8 @@ class ChampionManager
 
     /// Callback wired to GameServerWorker::sendDataToGameServer
     std::function<void(const std::string &)> sendToGameServerCb_;
+
+    /// Spawn-visibility callback (wired by EventHandler to push a real spawn
+    /// list to subscribers). Null in unit tests unless set.
+    std::function<void(const MobDataStruct &)> spawnNotifyCb_;
 };

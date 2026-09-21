@@ -1,6 +1,8 @@
 #include "events/handlers/MobEventHandler.hpp"
 #include "events/EventData.hpp"
 #include "utils/TimestampUtils.hpp"
+#include <algorithm>
+#include <ctime>
 #include <spdlog/logger.h>
 
 MobEventHandler::MobEventHandler(
@@ -626,5 +628,103 @@ MobEventHandler::handleMobMoveUpdateEvent(const Event &event)
     catch (const std::bad_variant_access &ex)
     {
         gameServices_.getLogger().logError("Error in handleMobMoveUpdateEvent: " + std::string(ex.what()));
+    }
+}
+
+void
+MobEventHandler::handleAdminSpawnEvent(const Event &event)
+{
+#ifdef ADMIN_RPC
+    const auto &data = event.getData();
+    if (!std::holds_alternative<nlohmann::json>(data))
+    {
+        log_->error("[AdminSpawn] wrong payload type");
+        return;
+    }
+    const auto j = std::get<nlohmann::json>(data);
+    const int templateId = j.value("templateId", 0);
+    const int zoneId = j.value("zoneId", 0);
+    const float x = j.value("x", 0.0f);
+    const float y = j.value("y", 0.0f);
+    const float z = j.value("z", 90.0f);
+    if (templateId <= 0 || zoneId <= 0 || !j.contains("uids") || !j["uids"].is_array())
+        return; // dispatcher pre-validated; race-safe no-op
+    auto tpl = gameServices_.getMobManager().getMobById(templateId);
+    if (tpl.id == 0)
+        return;
+    int registered = 0;
+    std::vector<MobDataStruct> fresh;
+    for (const auto &u : j["uids"])
+    {
+        const int uid = u.get<int>();
+        MobDataStruct mob = tpl;
+        mob.uid = uid;
+        mob.zoneId = zoneId;
+        mob.position.positionX = x;
+        mob.position.positionY = y;
+        mob.position.positionZ = z;
+        mob.spawnEpochSec = static_cast<int64_t>(std::time(nullptr));
+        if (gameServices_.getMobInstanceManager().registerMobInstance(mob))
+        {
+            fresh.push_back(mob);
+            ++registered;
+        }
+    }
+    if (registered == 0)
+        return;
+    for (const auto &mob : fresh)
+        pushSpawnSnapshot(mob);
+    log_->warn("ADMIN op=spawnMob zone={} count={} by client={}", zoneId, registered, event.getClientID());
+#else
+    (void)event;
+    log_->error("[AdminSpawn] attempt on non-ADMIN build (rejected)");
+#endif
+}
+
+void
+MobEventHandler::pushSpawnSnapshot(const MobDataStruct &mob)
+{
+    // Recipients mirror the unified tick's filter: subscribers of the mob's
+    // cell + fail-open (untracked or still loading) clients.
+    try
+    {
+        auto &interest = gameServices_.getInterestManager();
+        const float cs = interest.cellSize();
+        if (!interest.isEnabled())
+        {
+            for (const auto &c : gameServices_.getClientManager().getClientsListReadOnly())
+            {
+                if (c.clientId > 0)
+                    sendCellMobsSnapshot(c.clientId, mob.position.positionX, mob.position.positionY, cs * 0.75f);
+            }
+            return;
+        }
+        std::vector<int> recipients;
+        const auto snap = interest.snapshot();
+        const auto cell = InterestManager::cellFor(
+            mob.position.positionX, mob.position.positionY, cs);
+        const auto it = snap.members.find(cell);
+        if (it != snap.members.end())
+            recipients.assign(it->second.begin(), it->second.end());
+        for (const auto &c : gameServices_.getClientManager().getClientsListReadOnly())
+        {
+            if (c.clientId <= 0)
+                continue;
+            if (!c.isWorldReady || snap.tracked.count(c.clientId) == 0)
+            {
+                if (std::find(recipients.begin(), recipients.end(), c.clientId) == recipients.end())
+                    recipients.push_back(c.clientId);
+            }
+        }
+        for (int rid : recipients)
+            sendCellMobsSnapshot(rid, mob.position.positionX, mob.position.positionY, cs * 0.75f);
+    }
+    catch (const std::exception &e)
+    {
+        log_->debug("[AdminSpawn] snapshot push failed ({}), spawn itself stands", e.what());
+    }
+    catch (...)
+    {
+        log_->debug("[AdminSpawn] snapshot push failed (unknown), spawn itself stands");
     }
 }

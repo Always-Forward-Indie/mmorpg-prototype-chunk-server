@@ -449,6 +449,11 @@ struct CharacterDataStruct
     // to CharacterManager (set by handleSetCharacterDataEvent / addCharacter).
     // Zero-initialized = no timestamp recorded (legacy compatibility).
     std::chrono::steady_clock::time_point joinTimestamp = {};
+
+    // Brief join (test fast-path): client asks Phase 4 to skip the heavy
+    // mob/NPC flood (teleport flows re-add what's needed via snapshots).
+    // Carried playerReady -> PLAYER_READY event only; never persisted.
+    bool briefJoin = false;
 };
 
 struct ClientDataStruct

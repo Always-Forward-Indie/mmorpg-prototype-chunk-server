@@ -1204,6 +1204,13 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
 }
 
 void
+CombatSystem::adminKillMob(int mobUid, int killerId)
+{
+    gameServices_->getMobInstanceManager().applyDamageToMob(mobUid, 2000000000, killerId);
+    handleMobDeath(mobUid, killerId);
+}
+
+void
 CombatSystem::handleMobAggro(int attackerId, int targetId, int damage)
 {
     if (damage > 0)

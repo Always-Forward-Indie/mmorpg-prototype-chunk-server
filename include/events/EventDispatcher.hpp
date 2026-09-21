@@ -72,6 +72,9 @@ class EventDispatcher
     // World Interactive Objects (client → chunk, migration 043)
     void handleWorldObjectInteract(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleWorldObjectChannelCancel(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // Admin-RPC test hook (DEV only, behind ADMIN_RPC + admin.enabled + GM allowlist).
+    // Direct-response handler (no EventQueue): reuses managers synchronously.
+    void handleAdminCommand(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;

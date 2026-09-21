@@ -10,6 +10,7 @@ if(GTest_FOUND)
     add_compile_options(-ffunction-sections -fdata-sections)
     add_link_options(-Wl,--gc-sections)
     add_executable(unit_tests
+        test_admin.cpp
         test_interest.cpp
         test_event_queue.cpp
         test_trade_session.cpp

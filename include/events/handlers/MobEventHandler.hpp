@@ -42,6 +42,27 @@ class MobEventHandler : public BaseEventHandler
     void sendCellMobsSnapshot(int clientId, float cx, float cy, float halfDiag);
 
     /**
+     * @brief Push a real spawn list for one mob to its cell subscribers +
+     * fail-open clients (thin deltas carry no slug/name).
+     *
+     * Single home for spawn visibility: used by the admin spawn path and by
+     * the ChampionManager spawn-notify callback (timed/threshold spawns).
+     * Client-safe: SpawnMOB skips existing UIDs.
+     */
+    void pushSpawnSnapshot(const MobDataStruct &mob);
+
+    /**
+     * @brief Admin-RPC spawn (DEV only, ADMIN_RPC).
+     *
+     * Payload json {uids[], templateId, zoneId, x, y, z}. Registers the
+     * instances (same fields SpawnZoneManager sets) and pushes a real
+     * spawn list to the spawn cell's subscribers + fail-open clients — so
+     * tests see slug/name immediately instead of thin deltas. Silent: the
+     * dispatcher already answered with the uids. Setup-only for tests.
+     */
+    void handleAdminSpawnEvent(const Event &event);
+
+    /**
      * @brief Handle mob death event
      *
      * Sends notification to clients about mob death/removal

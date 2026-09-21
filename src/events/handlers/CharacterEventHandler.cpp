@@ -1197,7 +1197,27 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     }
 
     // 1. NPCs in range
-    if (npcEventHandler_)
+    // Brief join (test fast-path): skip the heavy mob/NPC flood. Teleport
+    // flows re-add what's needed via enter-snapshots; an empty spawnMobsInZone
+    // keeps the client's Phase-4 shape checks green. Everything else
+    // (inventory/skills/quests/players/equipment/titles/WIO) is intact.
+    const bool briefJoin = std::get<CharacterDataStruct>(data).briefJoin;
+    if (briefJoin)
+    {
+        nlohmann::json empty;
+        empty["header"]["eventType"] = "spawnMobsInZone";
+        empty["header"]["clientId"] = clientID;
+        empty["header"]["status"] = "success";
+        empty["header"]["message"] = "brief join: mob/NPC flood trimmed";
+        empty["header"]["version"] = "1.0";
+        empty["body"]["zoneId"] = -1;
+        empty["body"]["mobs"] = nlohmann::json::array();
+        networkManager_.sendResponse(clientSocket,
+            std::make_shared<const std::string>(empty.dump() + "\n"));
+        log_->info("[PLAYER_READY] brief join for clientId=" +
+                   std::to_string(clientID) + " char=" + std::to_string(characterId));
+    }
+    else if (npcEventHandler_)
     {
         npcEventHandler_->sendNPCSpawnDataToClient(clientID, characterData.characterPosition, 50000.0f);
         // 1b. NPC ambient speech pools (filtered per player context)
@@ -1209,13 +1229,16 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     }
 
     // 2. Mob spawn zones with live mob instances
-    if (mobEventHandler_)
+    if (!briefJoin)
     {
-        mobEventHandler_->sendSpawnZonesToClient(clientID, clientSocket);
-    }
-    else
-    {
-        log_->error("[PLAYER_READY] MobEventHandler not set");
+        if (mobEventHandler_)
+        {
+            mobEventHandler_->sendSpawnZonesToClient(clientID, clientSocket);
+        }
+        else
+        {
+            log_->error("[PLAYER_READY] MobEventHandler not set");
+        }
     }
 
     // 3. Ground items snapshot
@@ -1829,4 +1852,108 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
         gameServices_.getLogger().logError("[RESPAWN] exception for character " +
                                            std::to_string(characterId) + ": " + ex.what());
     }
+}
+
+void
+CharacterEventHandler::handleAdminTeleportEvent(const Event &event)
+{
+#ifdef ADMIN_RPC
+    const auto &data = event.getData();
+    if (!std::holds_alternative<nlohmann::json>(data))
+    {
+        log_->error("[AdminTeleport] wrong payload type");
+        return;
+    }
+    const auto j = std::get<nlohmann::json>(data);
+    const int targetId = j.value("characterId", 0);
+    if (targetId <= 0)
+        return; // dispatcher pre-validated; race-safe no-op
+    auto &charMgr = gameServices_.getCharacterManager();
+    if (charMgr.getCharacterById(targetId).characterId != targetId)
+        return;
+    PositionStruct dest;
+    dest.positionX = j.value("x", 0.0f);
+    dest.positionY = j.value("y", 0.0f);
+    dest.positionZ = j.value("z", 90.0f);
+
+    // 1. Authoritative position + validation reset (respawn pattern).
+    const PositionStruct old = charMgr.getCharacterPosition(targetId);
+    charMgr.setCharacterPosition(targetId, dest);
+    charMgr.setLastValidatedMovement(targetId, dest, 0);
+
+    // 2. Target session (the GM caller acts on an arbitrary character).
+    const auto targetClient =
+        gameServices_.getClientManager().getClientDataByCharacterId(targetId);
+    auto targetSocket = (targetClient.clientId > 0)
+                            ? gameServices_.getClientManager().getClientSocket(targetClient.clientId)
+                            : nullptr;
+
+    // 3. Interest resubscribe + enter-snapshots + evict (move-path pattern).
+    // WITHOUT this the client stays subscribed to the old cells and only
+    // ever sees thin deltas (no slug/name) for the destination area.
+    try
+    {
+        auto &interest = gameServices_.getInterestManager();
+        auto diff = interest.onPlayerMoved(
+            targetClient.clientId, targetId, dest.positionX, dest.positionY);
+        if (!diff.entered.empty())
+        {
+            if (interest.snapshotAllowed(targetClient.clientId))
+            {
+                const float cs = interest.cellSize();
+                for (const auto &cell : diff.entered)
+                    sendCellSnapshot(targetClient.clientId,
+                        (cell.cx + 0.5f) * cs, (cell.cy + 0.5f) * cs, cs * 0.75f);
+            }
+            sendCellLeftEvict(targetClient.clientId, targetSocket, diff);
+        }
+    }
+    catch (const std::exception &e)
+    {
+        log_->debug("[AdminTeleport] interest hook failed for char {} ({})", targetId, e.what());
+    }
+    catch (...)
+    {
+        log_->debug("[AdminTeleport] interest hook failed for char {} (unknown)", targetId);
+    }
+
+    // 4. Persist position (skill-teleport pattern).
+    {
+        nlohmann::json savePos;
+        savePos["header"]["eventType"] = "savePositions";
+        savePos["header"]["clientId"] = 0;
+        savePos["header"]["hash"] = "";
+        savePos["body"]["characters"] = nlohmann::json::array();
+        nlohmann::json posEntry;
+        posEntry["characterId"] = targetId;
+        posEntry["posX"] = dest.positionX;
+        posEntry["posY"] = dest.positionY;
+        posEntry["posZ"] = dest.positionZ;
+        posEntry["rotZ"] = dest.rotationZ;
+        savePos["body"]["characters"].push_back(posEntry);
+        gameServerWorker_.sendDataToGameServer(savePos.dump() + "\n");
+    }
+
+    // 5. Positional broadcast, dest + source (skill-teleport pattern).
+    {
+        nlohmann::json posBroadcast;
+        posBroadcast["header"]["eventType"] = "characterMoved";
+        posBroadcast["body"]["characterId"] = targetId;
+        posBroadcast["body"]["posX"] = dest.positionX;
+        posBroadcast["body"]["posY"] = dest.positionY;
+        posBroadcast["body"]["posZ"] = dest.positionZ;
+        posBroadcast["body"]["rotZ"] = dest.rotationZ;
+        const std::string raw = posBroadcast.dump() + "\n";
+        sendPositionalRaw(raw, dest.positionX, dest.positionY, {}, event.getClientID());
+        const float cs = gameServices_.getInterestManager().cellSize();
+        if (!(InterestManager::cellFor(dest.positionX, dest.positionY, cs) ==
+              InterestManager::cellFor(old.positionX, old.positionY, cs)))
+            sendPositionalRaw(raw, old.positionX, old.positionY, {}, event.getClientID());
+    }
+
+    log_->warn("ADMIN char={} op=teleport by client={}", targetId, event.getClientID());
+#else
+    (void)event;
+    log_->error("[AdminTeleport] attempt on non-ADMIN build (rejected)");
+#endif
 }

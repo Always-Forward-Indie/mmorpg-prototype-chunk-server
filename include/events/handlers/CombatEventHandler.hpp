@@ -37,6 +37,17 @@ class CombatEventHandler : public BaseEventHandler
     void handlePlayerAttack(const Event &event);
 
     /**
+     * @brief Admin-RPC kill (DEV only): lethal damage + genuine death pipeline.
+     *
+     * Payload std::pair<int,int>{mobUid, killerCharacterId}. Runs on the event
+     * thread: applyDamageToMob (loot event) + CombatSystem::handleMobDeath
+     * (XP/quest/bestiary/champion/reputation hooks) — the same calls the skill
+     * path makes, no duplicated logic. Setup-only (corpse/harvest states);
+     * kill mechanics are proven via playerAttack, never via this path.
+     */
+    void handleAdminKillMob(const Event &event);
+
+    /**
      * @brief Handle skill usage event
      */
     void handleSkillUsage(const Event &event);

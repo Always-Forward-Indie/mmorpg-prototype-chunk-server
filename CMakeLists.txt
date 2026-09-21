@@ -9,6 +9,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Build type is set via -DCMAKE_BUILD_TYPE=Debug|Release (defaults to none if omitted)
 # AddressSanitizer is active only in Debug builds (CMAKE_CXX_FLAGS_DEBUG / CMAKE_LINKER_FLAGS_DEBUG)
 
+# Admin-RPC test hook (DEV only): -DADMIN_RPC=ON compiles in the adminCommand
+# handler (EventDispatcher::handleAdminCommand). Prod builds leave it OFF, so
+# the code physically does not exist there (defense layer 3).
+option(ADMIN_RPC "Compile the DEV-only admin-RPC test hook" OFF)
+if(ADMIN_RPC)
+    add_compile_definitions(ADMIN_RPC)
+endif()
+
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -fno-omit-frame-pointer -g")
 set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")

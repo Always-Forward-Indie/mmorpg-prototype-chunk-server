@@ -2,6 +2,7 @@
 FROM ubuntu:22.04
 
 ARG BUILD_TYPE=Debug
+ARG ADMIN_RPC=ON
 
 # Install required dependencies
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://ua.archive.ubuntu.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://ua.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list \
@@ -51,7 +52,8 @@ RUN mkdir -p build
 WORKDIR /usr/src/app/build
 
 # ✅ Build the project (capped -j8: -j$(nproc) pegs the Windows host via VmmemWSL)
-RUN cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} .. && make -j8
+# ADMIN_RPC=ON: DEV-only admin test hook (no such code in prod images).
+RUN cmake -DADMIN_RPC=${ADMIN_RPC} -DCMAKE_BUILD_TYPE=${BUILD_TYPE} .. && make -j8
 
 # ✅ Debug: Ensure the binary exists before running
 RUN ls -lh /usr/src/app/build/MMOChunkServer || (echo "❌ ERROR: Binary not built!" && exit 1)

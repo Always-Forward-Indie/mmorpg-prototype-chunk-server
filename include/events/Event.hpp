@@ -189,7 +189,23 @@ class Event
         WORLD_OBJECT_CHANNEL_CANCEL, ///< Client cancels an in-progress channeled interaction
 
         // ── Analytics system (migration 058) ──────────────────────────────
-        SEND_ANALYTICS_EVENT ///< Chunk-server forwards a game analytics event to game-server for DB persistence
+        SEND_ANALYTICS_EVENT, ///< Chunk-server forwards a game analytics event to game-server for DB persistence
+
+        // ── Admin-RPC kill (DEV only, ADMIN_RPC): queued so the genuine
+        // combat pipeline (CombatSystem::handleMobDeath) runs on the event
+        // thread. Payload: std::pair<int,int>{mobUid, killerCharacterId}.
+        ADMIN_KILL_MOB,
+        // ── Admin-RPC teleport (DEV only, ADMIN_RPC): queued so the full
+        // move path runs (validation state, interest resubscribe, enter
+        // snapshots, evict, savePositions, broadcast). Payload: json
+        // {characterId, x, y, z}. The dispatcher answers accepted:true;
+        // callers poll getState for the applied position.
+        ADMIN_TELEPORT,
+        // ── Admin-RPC spawn (DEV only, ADMIN_RPC): queued so subscribers
+        // get a real spawn list (not just thin deltas without slug/name).
+        // Payload: json {uids[], templateId, zoneId, x, y, z}. Uids are
+        // generated in the dispatcher, so the sync answer carries them.
+        ADMIN_SPAWN
     }; // Define more event types as needed
 
     Event() = default; // Default constructor

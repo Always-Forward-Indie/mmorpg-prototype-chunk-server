@@ -43,6 +43,42 @@ ChampionManager::setSendToGameServerCallback(std::function<void(const std::strin
     sendToGameServerCb_ = std::move(cb);
 }
 
+void
+ChampionManager::skipTime(int64_t seconds)
+{
+    if (seconds <= 0)
+        return; // backwards travel breaks despawn/evolve monotonicity
+    auto prevEpoch = epochSecFn_;
+    auto prevSteady = steadyFn_;
+    epochSecFn_ = [prevEpoch, seconds] { return prevEpoch() + seconds; };
+    steadyFn_ = [prevSteady, seconds] { return prevSteady() + std::chrono::seconds(seconds); };
+    tickTimedChampions(); // opens with checkDespawnedChampions()
+    tickSurvivalEvolution();
+}
+
+void
+ChampionManager::resetThresholdState()
+{
+    {
+        std::lock_guard<std::mutex> lk(activeMutex_);
+        for (const auto &c : active_)
+            mobInstances_.unregisterMobInstance(c.uid);
+        active_.clear();
+    }
+    {
+        std::lock_guard<std::mutex> ck(counterMutex_);
+        zoneKillCounters_.clear();
+    }
+    {
+        // Re-arm timed schedules orphaned by the cull above (a culled
+        // instance would otherwise wedge spawned=true with no live mob).
+        // nextSpawnAt keeps DB truth; skipTime drives the next fire.
+        std::lock_guard<std::mutex> tlk(timedMutex_);
+        for (auto &state : timedStates_)
+            state.spawned = false;
+    }
+}
+
 // ── Threshold Champion ────────────────────────────────────────────────────────
 
 void
@@ -362,6 +398,16 @@ ChampionManager::spawnChampion(int mobTemplateId,
     broadcastToGameZone(gameZoneId, "champion_spawned", nlohmann::json{{"mobSlug", base.slug}, {"uid", base.uid}});
 
     log_->info("[Champion] Spawned uid={} '{}' in gameZone={}", base.uid, base.name, gameZoneId);
+    if (spawnNotifyCb_)
+    {
+        try
+        {
+            spawnNotifyCb_(base);
+        }
+        catch (...)
+        {
+        }
+    }
     return base.uid;
 }
 
