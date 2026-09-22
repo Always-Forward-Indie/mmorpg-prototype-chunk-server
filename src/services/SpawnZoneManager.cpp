@@ -129,6 +129,13 @@ SpawnZoneManager::loadMobsInSpawnZones(
             mobData.attackCooldown = row.attackCooldown;
             mobData.chaseMultiplier = row.chaseMultiplier;
             mobData.patrolSpeed = row.patrolSpeed;
+            mobData.patrolRadius = row.patrolRadius;
+
+            // Flee / archetype (migration 016): must stay in sync with
+            // MobManager template copy above.
+            mobData.fleeHpThreshold = row.fleeHpThreshold;
+            mobData.aiArchetype = row.aiArchetype;
+            mobData.archetypeType = row.archetypeType;
 
             // Social behaviour (migration 012)
             mobData.isSocial = row.isSocial;

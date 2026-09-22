@@ -67,6 +67,24 @@ TEST_F(MobChainFixture, MobCatalogLookup)
     EXPECT_FALSE(mobs.getMobs().empty());
 }
 
+TEST_F(MobChainFixture, AiFieldsSurviveTemplateCopy)
+{
+    // Regression: flee/archetype/patrolRadius were parsed from game-server
+    // JSON but dropped in the template copy, so flee never triggered and
+    // every mob behaved as MELEE.
+    MobDataStruct caster = makeMob(7, "skeleton_mage");
+    caster.patrolRadius = 500.0f;
+    caster.fleeHpThreshold = 0.25f;
+    caster.aiArchetype = "caster";
+    caster.archetypeType = MobArchetype::CASTER;
+    mobs.setListOfMobs({caster});
+    const auto got = mobs.getMobById(7);
+    EXPECT_FLOAT_EQ(got.patrolRadius, 500.0f);
+    EXPECT_FLOAT_EQ(got.fleeHpThreshold, 0.25f);
+    EXPECT_EQ(got.aiArchetype, "caster");
+    EXPECT_EQ(got.archetypeType, MobArchetype::CASTER);
+}
+
 TEST_F(MobChainFixture, WeaknessesResistances)
 {
     mobs.setWeaknessesResistances({{1, {"fire"}}}, {{1, {"ice"}}});
