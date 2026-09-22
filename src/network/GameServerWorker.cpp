@@ -256,7 +256,8 @@ void
 GameServerWorker::processGameServerData(std::string_view data)
 {
     // CRITICAL-7: data is now a string_view — no fixed-size copy, no truncation.
-    log_->info("Received data from Game Server: " + std::string(data));
+    // debug-level: full packet payload (catalog pushes are megabytes).
+    log_->debug("Received data from Game Server: " + std::string(data));
 
     // Parse only the header fields that are always required.
     std::string eventType = jsonParser_.parseEventType(data.data(), data.size());

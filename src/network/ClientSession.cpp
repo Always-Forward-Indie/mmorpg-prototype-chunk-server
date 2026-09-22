@@ -109,7 +109,7 @@ ClientSession::doRead()
                         continue;
                     }
 
-                    log_->info("Received data from Client: " + message);
+                    log_->debug("Received data from Client: " + message);
                     processMessage(message);
                     accumulatedData_.erase(0, pos + delimiter.size());
                     processed_messages++;

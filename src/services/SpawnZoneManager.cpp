@@ -304,7 +304,7 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
         {
             MobDataStruct mob = mobManager_.getMobById(entry.mobId);
 
-            logger_.log("[DEBUG] Template mob from MobManager - ID: " + std::to_string(mob.id) +
+            logger_.debug("Template mob from MobManager - ID: " + std::to_string(mob.id) +
                         ", isDead: " + (mob.isDead ? "true" : "false") +
                         ", currentHealth: " + std::to_string(mob.currentHealth) +
                         ", maxHealth: " + std::to_string(mob.maxHealth) +

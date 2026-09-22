@@ -114,7 +114,7 @@ MobManager::setListOfMobsSkills(std::vector<std::pair<int, std::vector<SkillStru
 {
     try
     {
-        logger_.log("[DEBUG] setListOfMobsSkills called with " + std::to_string(mobSkillsMapping.size()) + " mob types");
+        logger_.debug("setListOfMobsSkills called with " + std::to_string(mobSkillsMapping.size()) + " mob types");
 
         if (mobSkillsMapping.empty())
         {
@@ -130,7 +130,7 @@ MobManager::setListOfMobsSkills(std::vector<std::pair<int, std::vector<SkillStru
             int mobId = mobSkills.first;
             const auto &skills = mobSkills.second;
 
-            logger_.log("[DEBUG] Processing skills for mob ID " + std::to_string(mobId) + " - " + std::to_string(skills.size()) + " skills");
+            logger_.debug("Processing skills for mob ID " + std::to_string(mobId) + " - " + std::to_string(skills.size()) + " skills");
 
             if (mobs_.find(mobId) == mobs_.end())
             {
@@ -144,7 +144,7 @@ MobManager::setListOfMobsSkills(std::vector<std::pair<int, std::vector<SkillStru
             // Логируем каждый скил
             for (const auto &skill : skills)
             {
-                log_->info("[DEBUG] - Skill: " + skill.skillName + " (" + skill.skillSlug + ")");
+                log_->debug("- Skill: " + skill.skillName + " (" + skill.skillSlug + ")");
             }
         }
 
@@ -185,7 +185,7 @@ MobManager::getMobById(int mobId) const
     auto mob = mobs_.find(mobId);
     if (mob != mobs_.end())
     {
-        logger_.log("[DEBUG] getMobById(" + std::to_string(mobId) + ") - found mob with " +
+        logger_.debug("getMobById(" + std::to_string(mobId) + ") - found mob with " +
                     std::to_string(mob->second.skills.size()) + " skills");
         return mob->second;
     }
@@ -231,7 +231,7 @@ MobManager::updateMobMana(const int mobUid, int newMana)
         if (mobData.uid == mobUid)
         {
             mobData.currentMana = newMana;
-            logger_.log("Updated mob " + std::to_string(mobUid) + " mana to " + std::to_string(newMana));
+            logger_.debug("Updated mob " + std::to_string(mobUid) + " mana to " + std::to_string(newMana));
             return;
         }
     }

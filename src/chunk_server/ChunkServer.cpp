@@ -424,7 +424,7 @@ ChunkServer::mainEventLoopCH()
             int totalInitialSpawns = 0;
             for (const auto &zone : spawnZones)
             {
-                gameServices_.getLogger().log("[DEBUG] Checking zone " + std::to_string(zone.second.zoneId) +
+                gameServices_.getLogger().debug("Checking zone " + std::to_string(zone.second.zoneId) +
                                               " - spawnEnabled: " + (zone.second.spawnEnabled ? "true" : "false") +
                                               ", hasSpawnConfig: " + (zone.second.hasSpawnConfig() ? "true" : "false"));
 
@@ -442,13 +442,13 @@ ChunkServer::mainEventLoopCH()
                     }
                     else
                     {
-                        gameServices_.getLogger().log("[DEBUG] Zone " + std::to_string(zone.second.zoneId) +
+                        gameServices_.getLogger().debug("Zone " + std::to_string(zone.second.zoneId) +
                                                       " - no mobs spawned (zone may be full or mob template not loaded)");
                     }
                 }
                 else
                 {
-                    gameServices_.getLogger().log("[DEBUG] Zone " + std::to_string(zone.second.zoneId) +
+                    gameServices_.getLogger().debug("Zone " + std::to_string(zone.second.zoneId) +
                                                   " - skipped (spawn disabled or no mob ID)");
                 }
             }
@@ -504,7 +504,7 @@ ChunkServer::mainEventLoopCH()
                         auto now = std::chrono::steady_clock::now();
                         if (std::chrono::duration_cast<std::chrono::minutes>(now - lastFullZoneLog).count() >= 5)
                         {
-                            gameServices_.getLogger().log("[DEBUG] Zone " + std::to_string(zone.second.zoneId) +
+                            gameServices_.getLogger().debug("Zone " + std::to_string(zone.second.zoneId) +
                                                           " is full (" + std::to_string(currentMobCount) + "/" +
                                                           std::to_string(zone.second.totalSpawnCount()) + ")");
                             lastFullZoneLog = now;
@@ -513,7 +513,7 @@ ChunkServer::mainEventLoopCH()
                 }
                 else
                 {
-                    log_->info("[DEBUG] Skipping zone " + std::to_string(zone.second.zoneId) +
+                    log_->debug("Skipping zone " + std::to_string(zone.second.zoneId) +
                                " - spawn disabled or no mob entries");
                 }
             }

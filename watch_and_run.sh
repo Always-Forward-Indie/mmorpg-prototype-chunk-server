@@ -31,14 +31,16 @@ echo "🔄 Watching for changes, rebuilding, and restarting MMOChunkServer if ne
 exec watchexec -r -e cpp,h,hpp \
     --ignore /usr/src/app/build \
     --ignore /usr/src/app/build/MMOChunkServer \
-    --ignore /usr/src/app/build/*.o \
-    --ignore /usr/src/app/build/*.log \
+    --ignore '/usr/src/app/build/*.o' \
+    --ignore '/usr/src/app/build/*.log' \
     --ignore /usr/src/app/build/CMakeCache.txt \
     --ignore /usr/src/app/build/CMakeFiles \
     --ignore /usr/src/app/build/Makefile \
-    --ignore /usr/src/app/build/*.cmake \
+    --ignore '/usr/src/app/build/*.cmake' \
     --ignore /usr/src/app/build/install_manifest.txt \
     --ignore /usr/src/app/tests \
+    --ignore '/usr/src/app/include/boost/**' \
+    --ignore '/usr/src/app/include/nlohmann/**' \
     -- \
     bash -c "
         cd /usr/src/app/build && \

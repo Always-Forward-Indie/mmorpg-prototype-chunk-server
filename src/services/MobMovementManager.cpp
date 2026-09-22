@@ -189,7 +189,7 @@ MobMovementManager::runMobTick(
             std::uniform_real_distribution<float> moveTime(params.moveTimeMin, params.moveTimeMax);
             movementData.nextMoveTime = currentTime + moveTime(RandomUtils::engine());
             updateMobMovementData(mob.uid, movementData);
-            log_->info("[DEBUG] Fixed non-aggressive mob UID: " + std::to_string(mob.uid) + " movement timing");
+            log_->debug("Fixed non-aggressive mob UID: " + std::to_string(mob.uid) + " movement timing");
         }
     }
 
@@ -382,8 +382,9 @@ MobMovementManager::runMobTick(
                     if (ZoneBounds::contains(zone, randPos))
                     {
                         mobInstanceManager_->updateMobPosition(mob.uid, randPos);
-                        logger_.log("[STUCK-GUARD] Mob UID " + std::to_string(mob.uid) +
-                                    " teleported after " + std::to_string(stuckData.stuckCount) +
+                        // Self-heal, not an alert: info (was shouty tag at info).
+                        logger_.info("Stuck-guard teleported mob UID " + std::to_string(mob.uid) +
+                                    " after " + std::to_string(stuckData.stuckCount) +
                                     " consecutive stuck cycles in zone " + std::to_string(zone.zoneId));
                         teleported = true;
                         break;
@@ -391,8 +392,9 @@ MobMovementManager::runMobTick(
                 }
                 if (!teleported)
                 {
-                    logger_.log("[STUCK-GUARD] Mob UID " + std::to_string(mob.uid) +
-                                " failed to find teleport position after " +
+                    // No valid teleport found: actionable for world design, keep visible.
+                    logger_.warn("Stuck-guard failed to find teleport position for mob UID " +
+                                std::to_string(mob.uid) + " after " +
                                 std::to_string(stuckData.stuckCount) + " stuck cycles");
                 }
                 stuckData.stuckCount = 0;
@@ -475,7 +477,7 @@ MobMovementManager::calculateNewPosition(
         // Сохраняем обновленный stepMultiplier
         updateMobMovementData(mob.uid, movementData);
 
-        logger_.log("[DEBUG] Mob UID: " + std::to_string(mob.uid) + " initialized stepMultiplier: " +
+        logger_.debug("Mob UID: " + std::to_string(mob.uid) + " initialized stepMultiplier: " +
                     std::to_string(movementData.stepMultiplier) + " for normal patrol");
     }
 

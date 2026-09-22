@@ -171,7 +171,8 @@ MobInstanceManager::updateMobPosition(int mobUID, const PositionStruct &position
         float &lastLog = positionLogThrottleMap_[mobUID];
         if (lastLog == 0.0f || (currentTime - lastLog) > 30.0f) // Log every 30 seconds max
         {
-            logger_.log("[DEBUG] Updated mob " + std::to_string(mobUID) + " position to (" +
+            // debug-level: hot path (100+ mobs); info would spam at any scale.
+            logger_.debug("Updated mob " + std::to_string(mobUID) + " position to (" +
                         std::to_string(position.positionX) + ", " +
                         std::to_string(position.positionY) + ", " +
                         std::to_string(position.positionZ) + ")");
@@ -201,12 +202,12 @@ MobInstanceManager::updateMobHealth(int mobUID, int health)
     // Don't process any health updates on already dead mobs
     if (wasAlreadyDead)
     {
-        log_->info("[WARNING] Attempted to update health on already dead mob " + std::to_string(mobUID));
+        log_->warn("Attempted to update health on already dead mob " + std::to_string(mobUID));
         return {false, false, true};
     }
 
     it->second.currentHealth = health;
-    logger_.log("[DEBUG] Updated mob " + std::to_string(mobUID) + " health to " + std::to_string(health));
+    logger_.debug("Updated mob " + std::to_string(mobUID) + " health to " + std::to_string(health));
 
     bool mobDied = false;
     // Check if mob died
@@ -215,12 +216,12 @@ MobInstanceManager::updateMobHealth(int mobUID, int health)
         it->second.isDead = true;
         it->second.deathTimestamp = std::chrono::steady_clock::now();
         mobDied = true;
-        log_->info("[INFO] Mob " + std::to_string(mobUID) + " has died");
+        log_->info("Mob " + std::to_string(mobUID) + " has died");
 
         // Send event for loot generation
         if (eventQueue_)
         {
-            logger_.log("[DEBUG] Sending loot generation event for mob ID " + std::to_string(it->second.id) +
+            logger_.debug("Sending loot generation event for mob ID " + std::to_string(it->second.id) +
                         " (UID " + std::to_string(mobUID) + ") at position (" +
                         std::to_string(it->second.position.positionX) + ", " +
                         std::to_string(it->second.position.positionY) + ")");
@@ -251,7 +252,7 @@ MobInstanceManager::updateMobMana(int mobUID, int mana)
     if (it != mobInstances_.end())
     {
         it->second.currentMana = mana;
-        logger_.log("[DEBUG] Updated mob " + std::to_string(mobUID) + " mana to " + std::to_string(mana));
+        logger_.debug("Updated mob " + std::to_string(mobUID) + " mana to " + std::to_string(mana));
         return true;
     }
 

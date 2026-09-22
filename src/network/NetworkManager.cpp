@@ -340,7 +340,7 @@ NetworkManager::generateResponseMessage(const std::string &status, const nlohman
     response["body"] = message["body"];
 
     std::string responseString = response.dump();
-    log_->info("Response generated: " + responseString);
+    log_->debug("Response generated: " + responseString);
     return responseString + "\n";
 }
 
@@ -362,7 +362,7 @@ NetworkManager::generateResponseMessage(const std::string &status, const nlohman
     response["body"] = message["body"];
 
     std::string responseString = response.dump();
-    log_->info("Response with timestamps generated: " + responseString);
+    log_->debug("Response with timestamps generated: " + responseString);
     return responseString + "\n";
 }
 
