@@ -85,20 +85,20 @@ GameServerWorker::connect(boost::asio::ip::tcp::resolver::results_type endpoints
                 receiveDataFromGameServer(); // Receive data from the Game Server
             } else {
                 log_->error("Error connecting to the Game Server: " + ec.message());
-                if (currentRetryCount < MAX_RETRY_COUNT) {
-                    // Exponential backoff for retrying connection
-                    int waitTime = RETRY_TIMEOUT * (1 << currentRetryCount);
-                    retry_timer_.expires_after(std::chrono::seconds(waitTime));
-                    retry_timer_.async_wait([this, endpoints, currentRetryCount](const boost::system::error_code &ecTimer) {
-                        if (!ecTimer) {
-                            log_->info("Retrying connection to Game Server...");
-                            connect(endpoints, currentRetryCount + 1);
-                        }
-                    });
-                } else {
-                    log_->error("Max retry count reached. Exiting...");
-                    exit(1);
-                }
+                // Infinite capped backoff: a chunk server must never suicide
+                // on a game outage (in-memory world + outbox survive; the
+                // heartbeat re-registers on success, onReconnect_ restores
+                // online state). Cap the shift to avoid UB on long outages.
+                const int shift = std::min(currentRetryCount, 5);
+                const int waitTime = std::min(RETRY_TIMEOUT * (1 << shift), MAX_RETRY_WAIT_SEC);
+                log_->info("Retrying connection to Game Server in " + std::to_string(waitTime) +
+                    "s (attempt " + std::to_string(currentRetryCount + 1) + ")");
+                retry_timer_.expires_after(std::chrono::seconds(waitTime));
+                retry_timer_.async_wait([this, endpoints, currentRetryCount](const boost::system::error_code &ecTimer) {
+                    if (!ecTimer) {
+                        connect(endpoints, currentRetryCount + 1);
+                    }
+                });
             } });
 }
 

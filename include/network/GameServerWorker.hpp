@@ -44,8 +44,10 @@ class GameServerWorker
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
     int retryCount = 0;
-    static constexpr int MAX_RETRY_COUNT = 5;
     static constexpr int RETRY_TIMEOUT = 5;
+    // Infinite-reconnect ceiling: backoff never exceeds this (was: exit(1)
+    // after MAX_RETRY_COUNT — a game outage wiped the in-memory world).
+    static constexpr int MAX_RETRY_WAIT_SEC = 60;
     JSONParser jsonParser_;
     GameServerConfig &gameServerConfig_;
     ChunkServerConfig &chunkServerConfig_;
