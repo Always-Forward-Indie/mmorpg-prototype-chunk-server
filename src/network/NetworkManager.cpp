@@ -475,4 +475,9 @@ NetworkManager::setupSessionCallback(std::shared_ptr<ClientSession> session)
     // This is safe because session lifetime is shorter than NetworkManager
     session->setCleanupCallback([this](std::shared_ptr<ClientSession> s)
         { removeActiveSession(s); });
+    // Strand-safe error path for framing failures (CRITICAL queue: errors
+    // must never wait behind bulk mob traffic). See setSendCallback.
+    session->setSendCallback(
+        [this](std::shared_ptr<boost::asio::ip::tcp::socket> s, const std::string &data)
+        { sendResponse(std::move(s), data); });
 }

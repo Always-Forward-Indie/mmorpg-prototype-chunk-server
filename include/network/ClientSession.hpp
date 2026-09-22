@@ -35,6 +35,13 @@ class ClientSession : public std::enable_shared_from_this<ClientSession>
     // Set cleanup callback to notify NetworkManager when session ends
     void setCleanupCallback(std::function<void(std::shared_ptr<ClientSession>)> callback);
 
+    // Strand-safe error path: NetworkManager installs this at session setup
+    // so framing failures (oversize/malformed) get an explicit wire ERR_*
+    // instead of a silent drop. Routed to the CRITICAL queue (errors must
+    // never wait behind bulk mob traffic). Same lifetime pattern as the
+    // cleanup callback (NetworkManager outlives sessions).
+    void setSendCallback(std::function<void(std::shared_ptr<boost::asio::ip::tcp::socket>, const std::string &)> callback);
+
     // Check if socket is open and valid
     bool isSocketOpen() const
     {
@@ -73,6 +80,7 @@ class ClientSession : public std::enable_shared_from_this<ClientSession>
 
     // Cleanup callback for NetworkManager
     std::function<void(std::shared_ptr<ClientSession>)> cleanupCallback_;
+    std::function<void(std::shared_ptr<boost::asio::ip::tcp::socket>, const std::string &)> sendCallback_;
 
     // references
     EventQueue &eventQueue_;

@@ -6,6 +6,33 @@
 #include "utils/TimestampUtils.hpp"
 #include <spdlog/logger.h>
 
+namespace {
+
+// Best-effort eventType so the client can correlate a framing error.
+std::string probeEventType(const std::string &message) {
+    try {
+        auto probe = nlohmann::json::parse(message.substr(0, 512), nullptr, false);
+        if (!probe.is_discarded() && probe.is_object() && probe.contains("header") &&
+            probe["header"].is_object() && probe["header"].contains("eventType") &&
+            probe["header"]["eventType"].is_string())
+            return probe["header"]["eventType"].get<std::string>();
+    } catch (...) {}
+    return "unknown";
+}
+
+std::string framingError(const std::string &eventType, const char *code) {
+    nlohmann::json err;
+    err["header"]["eventType"] = eventType;
+    err["header"]["message"] = code;
+    err["header"]["status"] = "error";
+    err["header"]["timestamp"] = TimestampUtils::getCurrentTimestamp();
+    err["header"]["version"] = protocol::kProtocolVersion;
+    err["body"] = nlohmann::json::object();
+    return err.dump() + "\n";
+}
+
+} // namespace
+
 ClientSession::ClientSession(std::shared_ptr<boost::asio::ip::tcp::socket> socket,
     ChunkServer *chunkServer,
     GameServices &gameServices,
@@ -62,14 +89,21 @@ ClientSession::doRead()
                     std::string message = accumulatedData_.substr(0, pos);
 
                     // 8KB/message matches proto/mmo_proto.py + login-server.
-                    // Oversize is dropped with an explicit ERR_OVERSIZE log
-                    // (wire ERR_* reply needs NetworkManager strand path — Phase 1).
+                    // Oversize gets an explicit wire ERR_OVERSIZE (previously
+                    // log-only drop => client hung until timeout).
                     if (message.size() > protocol::kMaxMessageBytes)
                     {
                         gameServices_.getLogger().logError(
                             std::string(protocol::kErrOversize) + ": message too large, skipping: " +
                                 std::to_string(message.size()) + " bytes",
                             RED);
+                        if (sendCallback_)
+                        {
+                            try {
+                                sendCallback_(socket_,
+                                    framingError(probeEventType(message), protocol::kErrOversize));
+                            } catch (...) {}
+                        }
                         accumulatedData_.erase(0, pos + delimiter.size());
                         processed_messages++;
                         continue;
@@ -283,11 +317,23 @@ ClientSession::processMessage(const std::string &message)
     {
         gameServices_.getLogger().logError(
             std::string(protocol::kErrMalformed) + ": JSON parsing error: " + std::string(e.what()), RED);
+        if (sendCallback_)
+        {
+            try {
+                sendCallback_(socket_, framingError("unknown", protocol::kErrMalformed));
+            } catch (...) {}
+        }
     }
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError(
             std::string(protocol::kErrMalformed) + ": message handling error: " + std::string(e.what()), RED);
+        if (sendCallback_)
+        {
+            try {
+                sendCallback_(socket_, framingError("unknown", protocol::kErrMalformed));
+            } catch (...) {}
+        }
     }
 }
 
@@ -400,6 +446,13 @@ void
 ClientSession::setCleanupCallback(std::function<void(std::shared_ptr<ClientSession>)> callback)
 {
     cleanupCallback_ = callback;
+}
+
+void
+ClientSession::setSendCallback(
+    std::function<void(std::shared_ptr<boost::asio::ip::tcp::socket>, const std::string &)> callback)
+{
+    sendCallback_ = std::move(callback);
 }
 
 void
