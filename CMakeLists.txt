@@ -1,10 +1,13 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
 
 project(MMOChunkServer)
 
-# Set C++ standard
-set(CMAKE_CXX_STANDARD 17)
+# C++20 (was 17): invoke_result, concepts-ready.
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_compile_options(-Wall -Wextra -Wswitch -Wimplicit-fallthrough)
 
 # Build type is set via -DCMAKE_BUILD_TYPE=Debug|Release (defaults to none if omitted)
 # AddressSanitizer is active only in Debug builds (CMAKE_CXX_FLAGS_DEBUG / CMAKE_LINKER_FLAGS_DEBUG)
@@ -165,8 +168,32 @@ set(HEADER_FILES
     include/services/VendorManager.hpp
     include/services/TrainerManager.hpp
     include/services/TradeSessionManager.hpp
+    include/services/EquipmentManager.hpp
     include/services/RespawnZoneManager.hpp
     include/services/GameZoneManager.hpp
+    include/services/GameConfigService.hpp
+    include/services/InterestManager.hpp
+    include/services/ExperienceCacheManager.hpp
+    include/services/StatusEffectTemplateManager.hpp
+    include/services/PityManager.hpp
+    include/services/BestiaryManager.hpp
+    include/services/ChampionManager.hpp
+    include/services/ReputationManager.hpp
+    include/services/MasteryManager.hpp
+    include/services/TitleManager.hpp
+    include/services/EmoteManager.hpp
+    include/services/AmbientSpeechManager.hpp
+    include/services/ZoneEventManager.hpp
+    include/services/WorldObjectManager.hpp
+    include/services/CombatTargetResolver.hpp
+    include/services/MobMovementMath.hpp
+    include/services/OngoingActionStore.hpp
+    include/services/ItemCooldownStore.hpp
+    include/services/JoinFlushPolicy.hpp
+    include/services/RespawnResolver.hpp
+    include/services/VendorDiscountPolicy.hpp
+    include/services/FactOutbox.hpp
+    include/services/AdminGate.hpp
     include/network/GameServerWorker.hpp
     include/network/NetworkManager.hpp
     include/network/ClientSession.hpp
@@ -187,7 +214,11 @@ set(HEADER_FILES
     include/events/handlers/HarvestEventHandler.hpp
     include/events/handlers/DialogueEventHandler.hpp
     include/events/handlers/VendorEventHandler.hpp
+    include/events/handlers/EquipmentEventHandler.hpp
     include/events/handlers/ChatEventHandler.hpp
+    include/events/handlers/EmoteEventHandler.hpp
+    include/events/handlers/WorldObjectEventHandler.hpp
+    include/events/handlers/NPCEventHandler.hpp
     include/events/ExperienceEventHandler.hpp
     include/data/DataStructs.hpp
     include/data/SkillStructs.hpp
@@ -206,8 +237,12 @@ set(HEADER_FILES
     include/utils/Logger.hpp
     include/utils/TerminalColors.hpp
     include/utils/Config.hpp
+    include/utils/ProtocolLimits.hpp
     include/utils/TimeUtils.hpp
     include/utils/TimestampUtils.hpp
+    include/utils/SpawnGeometry.hpp
+    include/utils/JsonAssertFix.hpp
+    include/utils/AdminResponse.hpp
     include/handlers/MessageHandler.hpp
     # ... other header files
 )

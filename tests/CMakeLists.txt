@@ -66,6 +66,7 @@ if(GTest_FOUND)
         test_join_respawn.cpp
         test_spawn_geometry.cpp
         test_outbox.cpp
+        test_config.cpp
         stubs/WorldStubs.cpp
         ../src/services/InterestManager.cpp
         ../src/services/TradeSessionManager.cpp
@@ -120,6 +121,7 @@ if(GTest_FOUND)
         ../src/utils/ThreadPool.cpp
         ../src/utils/TimestampUtils.cpp
         ../src/utils/JSONParser.cpp
+        ../src/utils/Config.cpp
         ../src/utils/Scheduler.cpp
         ../src/utils/TimeUtils.cpp
         ../src/utils/Generators.cpp

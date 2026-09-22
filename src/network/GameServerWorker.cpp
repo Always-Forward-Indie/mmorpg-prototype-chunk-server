@@ -21,7 +21,7 @@ GameServerWorker::GameServerWorker(EventQueue &eventQueue,
       chunkServerConfig_(std::get<1>(configs))
 {
     log_ = logger.getSystem("network");
-    short port = std::get<0>(configs).port;
+    std::uint16_t port = std::get<0>(configs).port;
     std::string host = std::get<0>(configs).host;
 
     boost::asio::ip::tcp::resolver resolver(io_context_game_server_);

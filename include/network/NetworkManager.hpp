@@ -5,6 +5,7 @@
 #include "services/GameServices.hpp"
 #include "utils/Config.hpp"
 #include "utils/JSONParser.hpp"
+#include "utils/ProtocolLimits.hpp"
 #include <array>
 #include <boost/asio.hpp>
 #include <deque>
@@ -94,7 +95,7 @@ class NetworkManager
     std::unordered_map<boost::asio::ip::tcp::socket *, std::shared_ptr<SocketWriteQueue>> writeQueues_;
     mutable std::mutex writeQueuesMutex_;
 
-    static constexpr size_t max_length = 1024;
+    static constexpr size_t max_length = protocol::kMaxMessageBytes;
     boost::asio::io_context io_context_;
     boost::asio::ip::tcp::acceptor acceptor_;
     std::vector<std::thread> threadPool_;

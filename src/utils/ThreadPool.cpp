@@ -12,8 +12,8 @@ ThreadPool::ThreadPool(size_t numThreads, size_t maxTasks) : maxTasks_(maxTasks)
                 std::function<void()> task;
                 {
                     std::unique_lock<std::mutex> lock(this->queueMutex);
-                    condition.wait(lock, [this]() { return stop || !tasks.empty(); });
-                    if (stop && tasks.empty())
+                    condition.wait(lock, [this]() { return stop.load() || !tasks.empty(); });
+                    if (stop.load() && tasks.empty())
                         return;
                     task = std::move(tasks.front());
                     tasks.pop();
@@ -33,7 +33,7 @@ ThreadPool::~ThreadPool()
 {
     {
         std::unique_lock<std::mutex> lock(queueMutex);
-        stop = true;
+        stop.store(true);
     }
     condition.notify_all();
     for (std::thread &worker : workers)
@@ -51,7 +51,7 @@ ThreadPool::enqueueTaskInternal(std::function<void()> task)
 {
     {
         std::unique_lock<std::mutex> lock(queueMutex);
-        if (stop)
+        if (stop.load())
             throw std::runtime_error("enqueue on stopped ThreadPool");
 
         // Prevent task queue from growing too large

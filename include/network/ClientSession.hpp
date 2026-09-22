@@ -4,6 +4,7 @@
 #include "services/GameServices.hpp"
 #include "utils/JSONParser.hpp"
 #include "utils/Logger.hpp"
+#include "utils/ProtocolLimits.hpp"
 #include <array>
 #include <boost/asio.hpp>
 #include <functional>
@@ -67,7 +68,7 @@ class ClientSession : public std::enable_shared_from_this<ClientSession>
     void notifyCleanup(); // Called when session is ending
 
     std::shared_ptr<boost::asio::ip::tcp::socket> socket_;
-    std::array<char, 1024> dataBuffer_;
+    std::array<char, protocol::kReadChunkBytes> dataBuffer_;
     std::string accumulatedData_;
 
     // Cleanup callback for NetworkManager

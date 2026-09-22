@@ -1,0 +1,22 @@
+name: chunk-server CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-unit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake pkg-config libspdlog-dev libgtest-dev
+          sudo mkdir -p /tmp/gtest-build && cd /tmp/gtest-build && sudo cmake /usr/src/googletest -DCMAKE_BUILD_TYPE=Release && sudo make -j$(nproc) && sudo make install
+      - name: Configure (Debug enables ASan)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DADMIN_RPC=ON
+      - name: Build
+        run: cmake --build build -j$(nproc)
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure

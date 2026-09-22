@@ -21,9 +21,9 @@ NetworkManager::NetworkManager(
     log_ = gameServices_.getLogger().getSystem("network");
     boost::system::error_code ec;
 
-    short customPort = std::get<1>(configs).port;
+    std::uint16_t customPort = std::get<1>(configs).port;
     std::string customIP = std::get<1>(configs).host;
-    short maxClients = std::get<1>(configs).max_clients;
+    int maxClients = std::get<1>(configs).max_clients;
 
     boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(customIP), customPort);
     acceptor_.open(endpoint.protocol(), ec);
@@ -336,7 +336,7 @@ NetworkManager::generateResponseMessage(const std::string &status, const nlohman
     response["header"] = message["header"];
     response["header"]["status"] = status;
     response["header"]["timestamp"] = currentTimestamp;
-    response["header"]["version"] = "1.0";
+    response["header"]["version"] = protocol::kProtocolVersion;
     response["body"] = message["body"];
 
     std::string responseString = response.dump();
@@ -352,7 +352,7 @@ NetworkManager::generateResponseMessage(const std::string &status, const nlohman
     response["header"] = message["header"];
     response["header"]["status"] = status;
     response["header"]["timestamp"] = currentTimestamp;
-    response["header"]["version"] = "1.0";
+    response["header"]["version"] = protocol::kProtocolVersion;
 
     // Add lag compensation timestamps to header
     TimestampStruct finalTimestamps = timestamps;

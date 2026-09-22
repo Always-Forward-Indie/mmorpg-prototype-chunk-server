@@ -2,6 +2,7 @@
 #include "chunk_server/ChunkServer.hpp"
 #include "events/EventDispatcher.hpp"
 #include "handlers/MessageHandler.hpp"
+#include "utils/ProtocolLimits.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <spdlog/logger.h>
 
@@ -40,9 +41,8 @@ ClientSession::doRead()
         {
             if (!ec)
             {
-                // Check for accumulated buffer size limit to prevent memory leaks
-                constexpr size_t MAX_BUFFER_SIZE = 64 * 1024; // 64KB limit
-                if (accumulatedData_.size() + bytes_transferred > MAX_BUFFER_SIZE)
+                // Framing DoS guard (see utils/ProtocolLimits.hpp).
+                if (accumulatedData_.size() + bytes_transferred > protocol::kMaxAccumulatedBytes)
                 {
                     log_->error("Buffer overflow detected, disconnecting client");
                     handleClientDisconnect();
@@ -61,11 +61,15 @@ ClientSession::doRead()
                 {
                     std::string message = accumulatedData_.substr(0, pos);
 
-                    // Check message size limit
-                    constexpr size_t MAX_MESSAGE_SIZE = 8 * 1024; // 8KB per message
-                    if (message.size() > MAX_MESSAGE_SIZE)
+                    // 8KB/message matches proto/mmo_proto.py + login-server.
+                    // Oversize is dropped with an explicit ERR_OVERSIZE log
+                    // (wire ERR_* reply needs NetworkManager strand path — Phase 1).
+                    if (message.size() > protocol::kMaxMessageBytes)
                     {
-                        gameServices_.getLogger().logError("Message too large, skipping: " + std::to_string(message.size()) + " bytes", RED);
+                        gameServices_.getLogger().logError(
+                            std::string(protocol::kErrOversize) + ": message too large, skipping: " +
+                                std::to_string(message.size()) + " bytes",
+                            RED);
                         accumulatedData_.erase(0, pos + delimiter.size());
                         processed_messages++;
                         continue;
@@ -78,14 +82,14 @@ ClientSession::doRead()
                 }
 
                 // If accumulated buffer is getting large without complete messages, clear it
-                if (accumulatedData_.size() > MAX_BUFFER_SIZE / 2 && accumulatedData_.find(delimiter) == std::string::npos)
+                if (accumulatedData_.size() > protocol::kMaxAccumulatedBytes / 2 && accumulatedData_.find(delimiter) == std::string::npos)
                 {
                     log_->error("Clearing large incomplete buffer to prevent memory leak");
                     accumulatedData_.clear();
                 }
 
                 // Periodically shrink the buffer to prevent memory fragmentation
-                if (accumulatedData_.capacity() > MAX_BUFFER_SIZE && accumulatedData_.size() < MAX_BUFFER_SIZE / 4)
+                if (accumulatedData_.capacity() > protocol::kMaxAccumulatedBytes && accumulatedData_.size() < protocol::kMaxAccumulatedBytes / 4)
                 {
                     std::string temp = accumulatedData_;
                     accumulatedData_.clear();
@@ -277,7 +281,13 @@ ClientSession::processMessage(const std::string &message)
     }
     catch (const nlohmann::json::parse_error &e)
     {
-        gameServices_.getLogger().logError("JSON parsing error: " + std::string(e.what()), RED);
+        gameServices_.getLogger().logError(
+            std::string(protocol::kErrMalformed) + ": JSON parsing error: " + std::string(e.what()), RED);
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError(
+            std::string(protocol::kErrMalformed) + ": message handling error: " + std::string(e.what()), RED);
     }
 }
 
