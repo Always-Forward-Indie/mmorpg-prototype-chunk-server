@@ -457,6 +457,14 @@ ChunkServer::mainEventLoopCH()
         }
     }
 
+    // Scheduler intervals are config-driven (game_config `scheduler.*_ms`,
+    // sampled once at schedule time; compiled literal = fallback when the
+    // key is absent). First-run delays below stay fixed phase offsets.
+    auto schedMs = [&](const char *key, int fallbackMs)
+    {
+        return gameServices_.getGameConfigService().getInt(key, fallbackMs);
+    };
+
     // Task for spawning mobs in the zone
     Task spawnMobInZoneTask(
         [&]
@@ -524,7 +532,7 @@ ChunkServer::mainEventLoopCH()
                 log_->info("[SPAWN_SUMMARY] Total mobs spawned this cycle: " + std::to_string(totalMobsSpawned));
             }
         },
-        300000, // Increased to 5 minutes (300 seconds) - less frequent safety checks
+        schedMs("scheduler.spawn_safety_ms", 300000), // Increased to 5 minutes (300 seconds) - less frequent safety checks
         std::chrono::steady_clock::now(),
         1 // unique task ID
     );
@@ -562,7 +570,7 @@ ChunkServer::mainEventLoopCH()
                 }
             }
         },
-        30000,                                                                   // Every 30 seconds - more frequent than safety check but respects respawn times
+        schedMs("scheduler.respawn_ms", 30000),                                                             // Every 30 seconds - more frequent than safety check but respects respawn times
         std::chrono::steady_clock::now() + std::chrono::milliseconds(10 * 1000), // Start after initial spawn
         8                                                                        // unique task ID
     );
@@ -812,7 +820,7 @@ ChunkServer::mainEventLoopCH()
             if (useInterest)
                 interest.recordFanout(tickBuilt, clientUpdates.size());
         },
-        50, // 50ms scheduling resolution; actual mob movement is gated internally
+        schedMs("scheduler.mob_tick_ms", 50), // 50ms scheduling resolution; actual mob movement is gated internally
         std::chrono::steady_clock::now(),
         2 // task ID (reuses slot 2, previously moveMobInZoneTask)
     );
@@ -834,7 +842,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("Error updating combat actions: " + std::string(ex.what()));
             }
         },
-        100, // Every 100 ms — needed for responsive instant-skill execution and cast-time resolution
+        schedMs("scheduler.combat_ms", 100), // Every 100 ms — needed for responsive instant-skill execution and cast-time resolution
         std::chrono::steady_clock::now(),
         6 // unique task ID
     );
@@ -903,7 +911,7 @@ ChunkServer::mainEventLoopCH()
                 log_->error("Event queues are getting large - potential memory leak!");
             }
         },
-        10000, // Run every 10 seconds (more frequent cleanup)
+        schedMs("scheduler.cleanup_ms", 10000), // Run every 10 seconds (more frequent cleanup)
         std::chrono::steady_clock::now(),
         3 // unique task ID
     );
@@ -927,7 +935,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("Error updating harvest progress: " + std::string(ex.what()));
             }
         },
-        1000, // Run every 1 second for responsive harvest updates
+        schedMs("scheduler.harvest_ms", 1000), // Run every 1 second for responsive harvest updates
         std::chrono::steady_clock::now(),
         7 // unique task ID
     );
@@ -949,7 +957,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("Error cleaning up dropped items: " + std::string(ex.what()));
             }
         },
-        60000, // Run every 60 seconds
+        schedMs("scheduler.drop_cleanup_ms", 60000), // Run every 60 seconds
         std::chrono::steady_clock::now(),
         17 // unique task ID
     );
@@ -1047,7 +1055,7 @@ ChunkServer::mainEventLoopCH()
                            " dead mobs across all zones");
             }
         },
-        5000,                                                                    // Every 5 seconds - check if corpse duration has expired
+        schedMs("scheduler.dead_mob_ms", 5000),                                                       // Every 5 seconds - check if corpse duration has expired
         std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000), // Start after 30 seconds
         9                                                                        // unique task ID
     );
@@ -1074,7 +1082,7 @@ ChunkServer::mainEventLoopCH()
                 statusFile.close();
             }
         },
-        5000, // Run every 5 seconds
+        schedMs("scheduler.mem_monitor_ms", 5000), // Run every 5 seconds
         std::chrono::steady_clock::now(),
         4 // unique task ID
     );
@@ -1144,7 +1152,7 @@ ChunkServer::mainEventLoopCH()
                 statusFile.close();
             }
         },
-        30000, // Run every 30 seconds - aggressive but not too frequent
+        schedMs("scheduler.aggressive_cleanup_ms", 30000), // Run every 30 seconds - aggressive but not too frequent
         std::chrono::steady_clock::now(),
         5 // unique task ID
     );
@@ -1191,7 +1199,7 @@ ChunkServer::mainEventLoopCH()
                     " position(s) to game server",
                 GREEN);
         },
-        30000,                                                                   // Every 30 seconds
+        schedMs("scheduler.save_positions_ms", 30000),                                             // Every 30 seconds
         std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000), // First run after 30s
         10                                                                       // unique task ID
     );
@@ -1204,7 +1212,7 @@ ChunkServer::mainEventLoopCH()
         {
             gameServices_.getDialogueSessionManager().cleanupExpiredSessions();
         },
-        60000,
+        schedMs("scheduler.dialogue_cleanup_ms", 60000),
         std::chrono::steady_clock::now() + std::chrono::milliseconds(60 * 1000),
         11
     );
@@ -1216,7 +1224,7 @@ ChunkServer::mainEventLoopCH()
         {
             gameServices_.getTradeSessionManager().cleanupExpiredSessions();
         },
-        30000,
+        schedMs("scheduler.trade_cleanup_ms", 30000),
         std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000),
         27
     );
@@ -1254,7 +1262,7 @@ ChunkServer::mainEventLoopCH()
                 // Best effort: next minute retries. Never break the scheduler.
             }
         },
-        60000,
+        schedMs("scheduler.rep_snapshot_ms", 60000),
         std::chrono::steady_clock::now() + std::chrono::milliseconds(60 * 1000),
         28 // unique task ID
     );
@@ -1266,7 +1274,7 @@ ChunkServer::mainEventLoopCH()
         {
             gameServices_.getQuestManager().flushDirtyProgress();
         },
-        5000,                                                                   // Every 5 seconds
+        schedMs("scheduler.quest_flush_ms", 5000),                                                   // Every 5 seconds
         std::chrono::steady_clock::now() + std::chrono::milliseconds(5 * 1000), // First run after 5s
         12                                                                      // unique task ID
     );
@@ -1287,7 +1295,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("[Scheduler] cleanupDeadSockets error: " + std::string(ex.what()));
             }
         },
-        30000,                                                                   // Every 30 seconds
+        schedMs("scheduler.dead_sockets_ms", 30000),                                             // Every 30 seconds
         std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000), // First run after 30s
         13                                                                       // unique task ID
     );
@@ -1331,7 +1339,7 @@ ChunkServer::mainEventLoopCH()
                     " character(s)",
                 GREEN);
         },
-        10000,                                                                   // Every 10 seconds
+        schedMs("scheduler.save_hp_mana_ms", 10000),                                             // Every 10 seconds
         std::chrono::steady_clock::now() + std::chrono::milliseconds(10 * 1000), // First run after 10s
         14                                                                       // unique task ID
     );
@@ -1375,7 +1383,7 @@ ChunkServer::mainEventLoopCH()
                     " character(s)",
                 GREEN);
         },
-        60000,                                                                   // Every 60 seconds
+        schedMs("scheduler.save_playtime_ms", 60000),                                             // Every 60 seconds
         std::chrono::steady_clock::now() + std::chrono::milliseconds(60 * 1000), // First run after 60s
         20                                                                       // unique task ID
     );
@@ -1417,7 +1425,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("[Champion] tickTimedChampions error: " + std::string(ex.what()));
             }
         },
-        30000,
+        schedMs("scheduler.timed_champion_ms", 30000),
         std::chrono::steady_clock::now() + std::chrono::seconds(30),
         16 // unique task ID
     );
@@ -1436,7 +1444,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("[Champion] tickSurvivalEvolution error: " + std::string(ex.what()));
             }
         },
-        300000,
+        schedMs("scheduler.survival_evo_ms", 300000),
         std::chrono::steady_clock::now() + std::chrono::seconds(300),
         18 // unique task ID
     );
@@ -1455,7 +1463,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("[ZoneEvent] tickEventScheduler error: " + std::string(ex.what()));
             }
         },
-        30000,
+        schedMs("scheduler.zone_event_ms", 30000),
         std::chrono::steady_clock::now() + std::chrono::seconds(30),
         19 // unique task ID
     );
@@ -1513,7 +1521,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("[Scheduler] pingTimeoutTask error: " + std::string(ex.what()));
             }
         },
-        15000,
+        schedMs("scheduler.ping_sweep_ms", 15000),
         std::chrono::steady_clock::now() + std::chrono::seconds(30),
         21 // unique task ID
     );
@@ -1568,7 +1576,7 @@ ChunkServer::mainEventLoopCH()
                 gameServices_.getLogger().logError("[Scheduler] ghostCharacterCleanupTask error: " + std::string(ex.what()));
             }
         },
-        30000,
+        schedMs("scheduler.ghost_cleanup_ms", 30000),
         std::chrono::steady_clock::now() + std::chrono::seconds(60),
         22 // unique task ID
     );
