@@ -28,6 +28,7 @@ std::string framingError(const std::string &eventType, const char *code) {
     err["header"]["timestamp"] = TimestampUtils::getCurrentTimestamp();
     err["header"]["version"] = protocol::kProtocolVersion;
     err["body"] = nlohmann::json::object();
+    err["body"]["errorCode"] = code;
     return err.dump() + "\n";
 }
 

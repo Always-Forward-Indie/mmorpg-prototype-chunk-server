@@ -338,6 +338,18 @@ NetworkManager::generateResponseMessage(const std::string &status, const nlohman
     response["header"]["timestamp"] = currentTimestamp;
     response["header"]["version"] = protocol::kProtocolVersion;
     response["body"] = message["body"];
+    // Protocol: every error response carries a machine-readable
+    // `body.errorCode` mirroring `header.message` (additive: old clients
+    // ignore unknown body keys). Explicit errorCode set by a handler
+    // (dialogue/harvest/WIO) wins.
+    if (status == "error" && response["header"].contains("message") &&
+        response["header"]["message"].is_string() &&
+        (!response["body"].is_object() || !response["body"].contains("errorCode")))
+    {
+        if (!response["body"].is_object())
+            response["body"] = nlohmann::json::object();
+        response["body"]["errorCode"] = response["header"]["message"];
+    }
 
     std::string responseString = response.dump();
     log_->debug("Response generated: " + responseString);
@@ -360,6 +372,15 @@ NetworkManager::generateResponseMessage(const std::string &status, const nlohman
     TimestampUtils::addTimestampsToHeader(response, finalTimestamps);
 
     response["body"] = message["body"];
+    // Protocol: mirror header.message into body.errorCode on errors (see above).
+    if (status == "error" && response["header"].contains("message") &&
+        response["header"]["message"].is_string() &&
+        (!response["body"].is_object() || !response["body"].contains("errorCode")))
+    {
+        if (!response["body"].is_object())
+            response["body"] = nlohmann::json::object();
+        response["body"]["errorCode"] = response["header"]["message"];
+    }
 
     std::string responseString = response.dump();
     log_->debug("Response with timestamps generated: " + responseString);

@@ -21,6 +21,12 @@ inline constexpr std::size_t kReadChunkBytes = 8 * 1024;
 inline constexpr const char *kErrOversize = "ERR_OVERSIZE";
 inline constexpr const char *kErrMalformed = "ERR_MALFORMED";
 
+/// Error-shape convention (additive, old clients ignore unknown body keys):
+/// every `status:error` response carries `body.errorCode` mirroring
+/// `header.message` (injected centrally in `generateResponseMessage`;
+/// framing paths set it directly). Handlers that already set errorCode
+/// explicitly (dialogue/harvest/WIO) keep theirs.
+
 /// Protocol version echoed in `header.version`.
 inline constexpr const char *kProtocolVersion = "1.0";
 
