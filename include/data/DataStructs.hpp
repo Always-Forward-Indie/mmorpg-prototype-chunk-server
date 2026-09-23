@@ -646,6 +646,10 @@ struct EventContext
     MessageStruct messageStruct;
     std::string fullMessage;    // For storing the complete JSON message
     TimestampStruct timestamps; // Lag compensation timestamps
+    // Single-parse wire object (parsed once in ClientSession::processMessage).
+    // Hot handlers read optional body fields from here instead of re-parsing
+    // fullMessage (moveCharacter is the hottest path: 2 parses -> 1).
+    nlohmann::json json;
 };
 
 struct EventDataStruct

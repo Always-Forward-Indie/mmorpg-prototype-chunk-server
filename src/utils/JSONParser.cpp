@@ -457,6 +457,12 @@ ChunkInfoStruct
 JSONParser::parseChunkInfo(const char *data, size_t length)
 {
     nlohmann::json jsonData = nlohmann::json::parse(data, data + length);
+    return parseChunkInfo(jsonData);
+}
+
+ChunkInfoStruct
+JSONParser::parseChunkInfo(const nlohmann::json &jsonData)
+{
     ChunkInfoStruct chunkInfo;
 
     if (jsonData.contains("body") && jsonData["body"].is_object() &&

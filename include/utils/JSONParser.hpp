@@ -23,6 +23,7 @@ class JSONParser
     std::string parseEventType(const char *data, size_t length);
     std::string parseEventType(const nlohmann::json &jsonData);
     ChunkInfoStruct parseChunkInfo(const char *data, size_t length);
+    ChunkInfoStruct parseChunkInfo(const nlohmann::json &jsonData);
     std::vector<SpawnZoneStruct> parseSpawnZonesList(const char *data, size_t length);
     std::vector<RespawnZoneStruct> parseRespawnZonesList(const char *data, size_t length);
     std::vector<ClassSpawnZoneStruct> parseClassSpawnZonesList(const char *data, size_t length);

@@ -259,9 +259,15 @@ GameServerWorker::processGameServerData(std::string_view data)
     // debug-level: full packet payload (catalog pushes are megabytes).
     log_->debug("Received data from Game Server: " + std::string(data));
 
-    // Parse only the header fields that are always required.
-    std::string eventType = jsonParser_.parseEventType(data.data(), data.size());
-    ClientDataStruct clientData = jsonParser_.parseClientData(data.data(), data.size());
+    // Single parse of the wire bytes (was 2 header parses + 1-2 lazy branch
+    // parses per message; MB-scale catalog pushes paid 3-4 full parses).
+    // Header fields come from the shared json; list-branches below keep
+    // their (data,size) parsers (one extra parse each) except setChunkData
+    // and setCharacterData, which use the json overloads (1 parse total).
+    const nlohmann::json jsonData =
+        nlohmann::json::parse(data.data(), data.data() + data.size());
+    std::string eventType = jsonParser_.parseEventType(jsonData);
+    ClientDataStruct clientData = jsonParser_.parseClientData(jsonData);
 
     std::vector<Event> eventsBatch;
     constexpr int BATCH_SIZE = 10;
@@ -270,13 +276,13 @@ GameServerWorker::processGameServerData(std::string_view data)
     // event type, avoiding 10+ unnecessary parse calls per message.
     if (eventType == "setChunkData")
     {
-        ChunkInfoStruct chunkInfo = jsonParser_.parseChunkInfo(data.data(), data.size());
+        ChunkInfoStruct chunkInfo = jsonParser_.parseChunkInfo(jsonData);
         eventsBatch.emplace_back(Event::SET_CHUNK_DATA, clientData.clientId, chunkInfo);
     }
     else if (eventType == "setCharacterData")
     {
-        CharacterDataStruct characterData = jsonParser_.parseCharacterData(data.data(), data.size());
-        PositionStruct positionData = jsonParser_.parsePositionData(data.data(), data.size());
+        CharacterDataStruct characterData = jsonParser_.parseCharacterData(jsonData);
+        PositionStruct positionData = jsonParser_.parsePositionData(jsonData);
         characterData.characterPosition = positionData;
         characterData.clientId = clientData.clientId;
         eventsBatch.emplace_back(Event::SET_CHARACTER_DATA, clientData.clientId, characterData);

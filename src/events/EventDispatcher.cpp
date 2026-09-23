@@ -409,15 +409,13 @@ EventDispatcher::handleMoveCharacter(const EventContext &context, std::shared_pt
     // isFalling is an OPTIONAL field (old clients don't send it): any parse
     // failure keeps the default. Deliberately silent — this is the hottest
     // event path and a log line per move would drown real signals.
-    try
+    // Reads the single-parse context json (no re-parse of fullMessage).
+    const auto &moveJson = context.json;
+    if (moveJson.is_object() && moveJson.contains("body") && moveJson["body"].is_object() &&
+        moveJson["body"].contains("isFalling") && moveJson["body"]["isFalling"].is_boolean())
     {
-        auto jsonData = nlohmann::json::parse(context.fullMessage);
-        if (jsonData.contains("body") && jsonData["body"].is_object() && jsonData["body"].contains("isFalling"))
-        {
-            movementData.isFalling = jsonData["body"]["isFalling"].get<bool>();
-        }
+        movementData.isFalling = moveJson["body"]["isFalling"].get<bool>();
     }
-    catch (...) {}
 
     // Log character data for debugging
     log_->info("Creating MOVE_CHARACTER event with movement data:");
@@ -1960,15 +1958,15 @@ EventDispatcher::handlePlayerReady(const EventContext &context,
     CharacterDataStruct charData;
     charData.characterId = context.characterData.characterId;
     // Brief join (test fast-path): optional client flag, defaults to the
-    // full flood. Parsed silently like other optional body fields.
-    try
+    // full flood. Reads the single-parse context json (no re-parse).
+    // Explicit type guards: a mistyped field keeps the default instead of
+    // throwing out of the dispatcher (old code swallowed all parse errors).
+    charData.briefJoin = false;
+    if (context.json.is_object() && context.json.contains("body") &&
+        context.json["body"].is_object() && context.json["body"].contains("brief") &&
+        context.json["body"]["brief"].is_boolean())
     {
-        const auto joinJson = nlohmann::json::parse(context.fullMessage);
-        charData.briefJoin =
-            joinJson.value("body", nlohmann::json::object()).value("brief", false);
-    }
-    catch (...)
-    {
+        charData.briefJoin = context.json["body"]["brief"].get<bool>();
     }
 
     eventsBatch_.push_back(Event(Event::PLAYER_READY,
