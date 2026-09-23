@@ -1,3 +1,34 @@
+v0.2.55
+22.09.2026
+================
+
+New:
+
+**Scheduler intervals from game_config (24 tasks).**
+- `scheduler.*_ms` sampled once at schedule time via `getInt` with the
+  previous literal as fallback (first-run phase offsets unchanged).
+  Seeded by migration 086. Behavior unchanged on defaults
+  (verified: JOIN entries=24 failed=0).
+
+**Single-parse threading (client 2->1, bootstrap 3-4->1).**
+- `EventContext::json` carries the once-parsed wire object;
+  `handleMoveCharacter`/`handlePlayerReady` read optional body fields
+  from it (explicit type guards, same silent-default semantics).
+- `GameServerWorker` parses bootstrap bytes once; `setChunkData` /
+  `setCharacterData` use `json` overloads (new `parseChunkInfo(json)`).
+
+**body.errorCode on every error response (central injection).**
+- Same convention as game/login; explicit dialogue/harvest/WIO codes win.
+
+Docs:
+
+**MobAI plan reconciliation (`docs/mob-ai-plans-reconciliation.md`).**
+- V1/V2/MOB_SYSTEM verdicts vs code/DB (threat decay 0.95^(10dt),
+  chase_duration default 10.0, flee-propagation fix); root plan docs
+  stay history-only.
+
+---
+
 v0.2.54
 19.09.2026
 ================
