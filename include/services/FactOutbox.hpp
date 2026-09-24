@@ -83,7 +83,7 @@ class FactOutbox
         return kFacts.count(eventType) > 0;
     }
 
-    /// Store a fact, return its key ("{characterId}:{factType}:{seq}").
+    /// Store a fact, return its key ("{characterId}:{factType}:{bootId}:{seq}").
     /// Mint a fresh key ("{characterId}:{factType}:{bootId}:{seq}").
     /// Caller stamps it into the payload, then store()s the stamped copy
     /// (retries must carry the same key the game dedups on).
