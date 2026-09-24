@@ -65,8 +65,37 @@ skillbar/titles/cooldown/analytics); остальное — legacy fire-and-forg
 Побочка для тестов: дельта-тесты на онлайн-персонаже флапают —
 отсюда hermetic-фикстура выше.
 
+## High-watermark (фаза B, построено)
+
+Каждый applied-факт атомарно пишет high-water в `outbox_seq_watermark`
+(`chunk_id, character_id → last_seq`, GREATEST-wins) в той же транзакции,
+что и claim + бизнес-запись — watermark никогда не впереди эффектов.
+При новом линке game отдаёт глобальный `MAX(last_seq)` в `setChunkData`-ack
+(`body.outboxGlobalSeq`); чанк fast-forward'ит свой счётчик (только вперёд).
+`bootId` в ключах сохранён — stale watermark безвреден.
+Heartbeat-ack'и поля не несут (иначе чанк reconcile'ился бы каждые 60с).
+
+## Reconcile handshake (фаза C, построено)
+
+- UP: `chunkServerConnection` несёт `header.bootId/nextSeq` (observability;
+  heartbeat'ы тоже — game их игнорирует кроме логирования).
+- DOWN: только новый линк получает `outboxGlobalSeq` в ack'е.
+- Diff: чанк после такого ack'а шлёт `outboxUnacked{bootId, keys[]}`
+  (батчи ~120 ключей — лимит 8KB game inbound); game отвечает
+  `outboxDiff{applied[], unknown[]}` (point PK-lookups) на живой chunk-сокет.
+  Чанк: applied → drop, unknown → poke + немедленный resend (флаш 5с — backstop).
+  На DB-ошибку game молчит (claim −1 семантика) — чанк ретраит флашом.
+
+## Ретеншн dedup-таблицы (построено)
+
+Окно дедупликации покрывает только 1h DLQ/retry-горизонт; дальше
+`fact_keys_applied` чистится game-свипом: `delete_old_fact_keys(days, limit)`
+(30 дней, батчи по 1000, индекс `ix_fact_keys_applied(applied_at)`).
+Без этого PK-btree рос бы вечно на units/sec трафика.
+
 ## Открыто (не построено)
 
-- High-watermark persist (seq рестартует с нуля каждый boot; спасает только `bootId`).
-- Handshake reconcile при JOIN (чанк шлёт watermark, game отвечает diff'ами) + catch-up send.
+- Chunk-crash амнезия: unacked-факты + породившие их in-memory дельты гибнут
+  вместе с процессом — reconcile воскрешать не умеет (только convergence proof).
+  Восстановление — регидрация из game-БД при JOIN'е.
 - Live e2e retry-proof ботами (рестарт чанка mid-flow → unacked прилетает после реконнекта). Покрыта только идемпотентность, не crash-retry.

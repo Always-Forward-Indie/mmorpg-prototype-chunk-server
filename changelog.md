@@ -1,3 +1,19 @@
+v0.2.56
+24.09.2026
+================
+
+New:
+
+**Outbox phases B-D, chunk side.**
+- `FactOutbox::{bootId,nextSeq,setHighWater(forward-only),unackedKeys(120),poke}` + unit pins.
+- Handshake advertises `bootId/nextSeq`; `setChunkData` ack with
+  `outboxGlobalSeq` fast-forwards seq + triggers `outboxUnacked`;
+  `outboxDiff` branch (applied→drop, unknown→poke+immediate resend,
+  5s flush as backstop).
+- Fixed stale `assignKey` format comment (4-part with bootId).
+
+---
+
 v0.2.55
 22.09.2026
 ================

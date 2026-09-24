@@ -129,6 +129,15 @@ NetworkManager::~NetworkManager()
             thread.join();
     }
 
+    // ASan-found UAF fix (same class as game/login): SocketWriteQueue holds
+    // a strand bound to io_context_'s service, but writeQueues_ is declared
+    // BEFORE io_context_ — clear here (threads joined, io alive) so strands
+    // die before the service does.
+    {
+        std::lock_guard<std::mutex> lock(writeQueuesMutex_);
+        writeQueues_.clear();
+    }
+
     log_->info("Network Manager cleanup completed.");
 }
 
