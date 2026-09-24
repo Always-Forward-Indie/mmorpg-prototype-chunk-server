@@ -110,6 +110,12 @@ GameServerWorker::buildHandshakeMessage() const
     handshake["header"]["id"] = 1;
     handshake["header"]["ip"] = chunkServerConfig_.publicHost;
     handshake["header"]["port"] = chunkServerConfig_.port;
+    // Outbox phases B-D: advertise where this boot's numbering stands so the
+    // game can log/observe it (reconcile itself is key-driven, see
+    // outboxUnacked/outboxDiff). Heartbeats reuse this message; extra header
+    // fields are ignored by old game builds (tolerant reader).
+    handshake["header"]["bootId"] = outbox_.bootId();
+    handshake["header"]["nextSeq"] = outbox_.nextSeq();
     return handshake.dump() + "\n";
 }
 
@@ -176,6 +182,24 @@ GameServerWorker::scheduleFlush()
                     f.key, f.attempts);
             scheduleFlush();
         }));
+}
+
+void
+GameServerWorker::sendOutboxUnacked()
+{
+    // Strand context only (touches outbox_ + sendQueue_).
+    // ~120 keys * ~50B/key ~= 6KB < 8KB game inbound cap.
+    auto keys = outbox_.unackedKeys(120);
+    if (keys.empty())
+        return;
+    nlohmann::json pkt;
+    pkt["header"]["eventType"] = "outboxUnacked";
+    pkt["header"]["id"] = 1;
+    pkt["body"]["bootId"] = outbox_.bootId();
+    pkt["body"]["keys"] = keys;
+    // Not a fact type: passes through unstamped. Posts back onto the strand
+    // (queued after this handler) — safe from strand context.
+    sendDataToGameServer(pkt.dump() + "\n");
 }
 
 void
@@ -278,6 +302,20 @@ GameServerWorker::processGameServerData(std::string_view data)
     {
         ChunkInfoStruct chunkInfo = jsonParser_.parseChunkInfo(jsonData);
         eventsBatch.emplace_back(Event::SET_CHUNK_DATA, clientData.clientId, chunkInfo);
+        // Outbox phases B-D: new links carry the global high-water mark in
+        // the ack body (heartbeats and error acks don't). Fast-forward the
+        // local counter (forward-only) and trigger reconcile below.
+        if (jsonData.contains("body") && jsonData["body"].is_object() &&
+            jsonData["body"].contains("outboxGlobalSeq") &&
+            jsonData["body"]["outboxGlobalSeq"].is_number_unsigned())
+        {
+            const uint64_t highWater = jsonData["body"]["outboxGlobalSeq"].get<uint64_t>();
+            boost::asio::post(strand_, [this, highWater]()
+                {
+                    outbox_.setHighWater(highWater);
+                    sendOutboxUnacked();
+                });
+        }
     }
     else if (eventType == "setCharacterData")
     {
@@ -516,6 +554,49 @@ GameServerWorker::processGameServerData(std::string_view data)
         catch (const std::exception &)
         {
             // Malformed ack: ignore (the fact stays pending and retries).
+        }
+    }
+    else if (eventType == "outboxDiff")
+    {
+        // Reconcile answer (game splits our unacked keys into applied vs
+        // unknown). Handled inline on the strand like factAck. Applied keys
+        // drop (game is durable); unknown keys resend immediately, with the
+        // 5s flush as backstop. Reads the already-parsed jsonData (no re-parse).
+        try
+        {
+            std::vector<std::string> applied;
+            std::vector<std::string> unknown;
+            if (jsonData.contains("body") && jsonData["body"].is_object())
+            {
+                const auto &body = jsonData["body"];
+                if (body.contains("applied") && body["applied"].is_array())
+                    for (const auto &k : body["applied"])
+                        if (k.is_string())
+                            applied.push_back(k.get<std::string>());
+                if (body.contains("unknown") && body["unknown"].is_array())
+                    for (const auto &k : body["unknown"])
+                        if (k.is_string())
+                            unknown.push_back(k.get<std::string>());
+            }
+            boost::asio::post(strand_,
+                [this, applied = std::move(applied), unknown = std::move(unknown)]()
+                {
+                    for (const auto &key : applied)
+                        outbox_.ack(key);
+                    if (unknown.empty())
+                        return;
+                    outbox_.poke(unknown, steadyMs());
+                    for (auto &f : outbox_.dueFlush(steadyMs()))
+                    {
+                        sendQueue_.push(f.payload);
+                        if (!writePending_)
+                            doNextWrite();
+                    }
+                });
+        }
+        catch (const std::exception &)
+        {
+            // Malformed diff: ignore (flush retries cover it).
         }
     }
     else

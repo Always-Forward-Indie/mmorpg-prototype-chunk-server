@@ -65,6 +65,9 @@ class GameServerWorker
     void processGameServerData(std::string_view data);
     /// Dequeue and async_write the next pending message; must run on strand_.
     void doNextWrite();
+    /// Reconcile sender (strand context): report unacked keys to game after
+    /// a new-link setChunkData ack carried outboxGlobalSeq. Bounded batches.
+    void sendOutboxUnacked();
 
   public:
     GameServerWorker(EventQueue &eventQueue,
