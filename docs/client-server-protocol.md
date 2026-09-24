@@ -1,5 +1,12 @@
 # MMORPG Network Protocol Reference
 
+> **SUPERSEDED (2026-09-24).** Этот монолит устарел и не поддерживается:
+> нет `factKey/factAck`, `body.errorCode`, `interest.*`, `scheduler.*`,
+> `adminCommand`, новых save-семейств. Актуальный источник wire-протокола —
+> `mmorpg-prototype-integration-tests/docs/protocol/00–13` (+ `docs/api/`
+> здесь — их зеркало), геймплейные детали — в остальных файлах `docs/`.
+> Оставлен как история.
+
 Документ описывает полный сетевой протокол проекта на основе текущего кода:
 - Login Server ↔ Client
 - Chunk Server ↔ Client

@@ -10,7 +10,7 @@ kept as history and must not be used as build instructions.
 
 | # | Claim | Reality |
 |---|---|---|
-| 1 | V2 header says "V1 реализован" | False. V1 checklist is all `[ ] не начато`, and most V1 items (EVADING state, threat table as designed, spatial index, leash regen packet) were never built. What exists instead: `MobAIController` + `MobAIFormulas` (threat as ints with decay, no V1 `map<int,float>` table). |
+| 1 | V2 header says "V1 реализован" | False. V1 checklist is all `[ ] не начато`, and most V1 items were never built as designed. What exists instead: `MobAIController` + `MobAIFormulas` (threat as ints with decay, no V1 `map<int,float>` table). **Update 2026-09-24:** EVADING since landed (`MobAIController.cpp:928-954`: 2s invulnerability on reaching spawn, then back to PATROLLING) + RETURNING leash regen 10%/s — V1 items §3.1/§3.2 now exist in simplified form (no V1 `mobHealthUpdate` packet / `isEvading` wire flag). |
 | 2 | V1 threat decay "5%/сек" | Wrong unit. Code: `threatDecayFactor = 0.95^(dt*10)` (`MobAIFormulas.hpp:155`) ≈ −40%/s, not −5%/s. Comments saying "50%/halved" are also inaccurate. |
 | 3 | V2 `chase_duration` default 30 | Wrong. DB default is **10.0** (`mob.chase_duration`), code fallback `10.0f` (`DataStructs.hpp:518`). |
 | 4 | V1 migration `011_mob_ai_config` | Superseded. Real migrations are `013–029` range; `011/012` never applied as written. Per-mob AI tuning lives in `mob` table columns + `game_config`, not V1's proposed columns. |
@@ -34,7 +34,7 @@ kept as history and must not be used as build instructions.
 
 - Which mobs are casters / cowards (`aiArchetype`, `fleeHpThreshold` values in DB) — game-design decision.
 - Rank multiplier stacking audit (MOB_SYSTEM internal contradiction).
-- V1 items never built (EVADING, leash-regen packet, spatial index for players — the latter superseded by InterestManager subscriptions).
+- V1 items never built (leash-regen packet, spatial index for players — the latter superseded by InterestManager subscriptions). EVADING + RETURNING regen landed 2026-09-24 (see row 1).
 
 ## Rule
 

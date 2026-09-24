@@ -289,7 +289,7 @@
 | `attackRange` | `150 units` | Дистанция атаки (переход CHASING → PREPARING_ATTACK) |
 | `attackCooldown` | `2.0 с` | Базовый кулдаун (используется если у скилла `cooldownMs=0`) |
 | `chaseMultiplier` | `2.0×` | `aggroRange × chaseMultiplier` = макс. дистанция преследования |
-| `chaseDuration` | `30.0 с` | Максимальное время преследования до принудительного leash |
+| `chaseDuration` | `10.0 с` | Максимальное время преследования до принудительного leash (дефолт; в БД `mob.chase_duration`) |
 | `patrolSpeed` | `1.0` | Множитель скорости патруля (влияет на интервал шагов) |
 | `isSocial` | `false` | Включить групповую агрессию (см. раздел 11) |
 | `fleeHpThreshold` | `0.0` | Порог HP для бегства (0.0 = никогда не убегает) |
@@ -455,7 +455,7 @@ velocity.speed = chaseSpeedUnitsPerSec  (units/sec)
 - Если threat нет — выбирается ближайший игрок в `aggroRange`.
 
 **Decay (затухание)**:
-- Каждые 100 мс: для игроков **вне** `aggroRange` threat умножается на `0.95^(deltaTime×10)` (≈ −50%/сек).
+- Каждые 100 мс: для игроков **вне** `aggroRange` threat умножается на `0.95^(deltaTime×10)` (≈ −40%/сек: `0.95^10 ≈ 0.60`).
 - Когда threat падает до 0 — игрок удаляется из таблицы.
 
 **Сброс**: при переходе в RETURNING / EVADING — `threatTable` и `attackerTimestamps` очищаются.
