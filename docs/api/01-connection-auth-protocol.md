@@ -30,8 +30,14 @@
   │◄── zone_entered ───────────────────────────────┤ зона (уведомление)
   │◄── getPlayerInventory ─────────────────────────┤ инвентарь (async от DB)
   │◄── equipmentState ─────────────────────────────┤ экипировка
+  │◄── EQUIPMENT_STATE ────────────────────────────┤ экипировка (снапшот)
+  │◄── WEIGHT_STATUS ──────────────────────────────┤ нагрузка
   │◄── stats_update ───────────────────────────────┤ полные статы
-  │◄── questUpdate / flagsUpdate ──────────────────┤ квесты, флаги (async)
+  │◄── QUEST_UPDATE ───────────────────────────────┤ квесты (upper-case!)
+  │◄── skillBarState ──────────────────────────────┤ панель скиллов
+  │◄── getBestiaryOverview ────────────────────────┤ бестиарий (обзор)
+  │◄── NPC_AMBIENT_POOLS ──────────────────────────┤ ambient-пулы NPC
+  │◄── spawnWorldObjects ──────────────────────────┤ объекты мира
   │◄── reputations / masteries ────────────────────┤ репутация, мастерство
   │                                                 │
   │  ── ФАЗА 3: ACK от клиента ────────────────────────────────
@@ -315,7 +321,12 @@ OnWorldReady / BeginPlay / LoadingScreenFinished → send playerReady
 
 ---
 
-## 1.4. pingClient / pongClient — Keep-alive
+## 1.4. pingClient — Keep-alive
+
+Ответ приходит с **тем же** `eventType: "pingClient"` (не `pongClient`!) и
+`header.message == "Pong!"`. Клиент шлёт пинг каждые 10с; сервер считает
+клиента мёртвым после 30с тишины (`PING_TIMEOUT_SEC=30`, свип каждые 15с).
+Клиенты, ещё не приславшие `playerReady` (льётся F4-flood), не режутся.
 
 ### Клиент → Сервер
 
@@ -339,7 +350,8 @@ OnWorldReady / BeginPlay / LoadingScreenFinished → send playerReady
 ```json
 {
   "header": {
-    "eventType": "pongClient",
+    "eventType": "pingClient",
+    "message": "Pong!",
     "clientId": 42,
     "status": "success"
   },
@@ -459,6 +471,7 @@ if (actualDist > maxAllowedDist) → positionCorrection
 ## 1.6. disconnectClient — Отключение клиента
 
 Триггерится при закрытии сокета клиентом. Нет отдельного запроса от клиента.
+Тело broadcast'а **пустое** (`body{"":""}`) — ушедшего в списке уже нет.
 
 ### Сервер → Broadcast
 
@@ -470,8 +483,7 @@ if (actualDist > maxAllowedDist) → positionCorrection
     "message": "Client disconnected"
   },
   "body": {
-    "clientId": 42,
-    "characterId": 7
+    "": ""
   }
 }
 ```
@@ -504,38 +516,43 @@ if (actualDist > maxAllowedDist) → positionCorrection
 
 ### Сервер → Unicast
 
+Ответ приходит с **другим** именем: `eventType: "getConnectedClients"`
+(запрос называется `getConnectedCharacters`):
+
 ```json
 {
   "header": {
-    "eventType": "getConnectedCharacters",
+    "eventType": "getConnectedClients",
     "status": "success",
     "clientId": 42
   },
   "body": {
-    "characters": [
-      {
-        "clientId": 42,
-        "character": {
-          "id": 7,
-          "name": "Aragorn",
-          "class": "Warrior",
-          "race": "Human",
-          "level": 5,
-          "position": { "x": 143.5, "y": 88.2, "z": 0.0, "rotationZ": 1.57 }
-        }
-      },
-      {
-        "clientId": 43,
-        "character": {
-          "id": 8,
-          "name": "Legolas",
-          "class": "Ranger",
-          "race": "Elf",
-          "level": 5,
-          "position": { "x": 150.0, "y": 95.0, "z": 0.0, "rotationZ": 0.0 }
-        }
-      }
+    "clientsList": [
+      { "clientId": 42, "characterId": 7, "status": "connected" },
+      { "clientId": 43, "characterId": 8, "status": "connected" }
     ]
   }
 }
 ```
+
+---
+
+## 1.8. Game ↔ Chunk: JOIN-каталог и setGameConfig (server-to-server)
+
+Чанк in-memory и без БД: всю статику он получает от game при старте
+линка (`chunkServerConnection` → 24 `set*`-пуша → `chunkServerData`).
+Каждая запись каталога считается отдельно; итог виден в логе game:
+`[join] full catalog push chunk=1 entries=24 failed=0 tookMs=84`.
+
+- `failed > 0` → game роняет регистрацию чанка, следующий heartbeat
+  (чанк шлёт каждые 60с) делает полный ретрай; клиент в это время видит
+  `ERR_JOIN_CATALOG_INCOMPLETE` (с `body.errorCode`).
+- Heartbeat с того же сокета — пропуск повторного пуша (skip), с нового —
+  полный пуш заново (покрывает рестарт чанка).
+- Вместе со статикой едет `game_config` (запись каталога `GET_GAME_CONFIG`):
+  весь `game_config` (~81 ключ: `scheduler.*`, `interest.*`, `regen.*`,
+  `economy.*`, `mastery.*`, `durability.*`, `bestiary.*`, `movement.*`,
+  `combat.*`, `drop/corpse TTL`). Чанк семплирует значения в свой
+  конфиг-сервис; cadence-ключи читаются один раз при планировании задач
+  (фолбэк = скомпилированный литерал), TTL/amount-ключи — живьём каждый
+  тик. Смена значения требует рестарта чанка (game — перечитки `reload`).

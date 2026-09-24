@@ -43,16 +43,9 @@
   },
   "body": {
     "attackerId": 7,
-    "actionId": 0,
     "targetId": 100,
-    "targetPosition": {
-      "x": 150.0,
-      "y": 95.0,
-      "z": 0.0,
-      "rotationZ": 0.0
-    },
-    "useAI": false,
-    "strategy": "closest"
+    "skillSlug": "basic_attack",
+    "targetType": 3
   }
 }
 ```
@@ -60,11 +53,13 @@
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `attackerId` | int | ID персонажа-атакующего |
-| `actionId` | int | `0` = авто-выбор скилла, `>0` = конкретный `skill.id` |
-| `targetId` | int | UID цели (моба). `0` = авто-выбор цели |
-| `targetPosition` | object | Позиция для AoE-атак |
-| `useAI` | bool | Использовать AI для выбора цели/скилла |
-| `strategy` | string | `"closest"`, `"lowestHP"`, `"random"` |
+| `targetId` | int | UID цели. `0` = авто-выбор цели |
+| `skillSlug` | string | Слаг скилла (первый нескрытый из `initializePlayerSkills`, иначе `basic_attack`) |
+| `targetType` | int | Тип цели: `1=SELF, 2=PLAYER, 3=MOB, 4=AREA, 5=NONE` |
+
+> Чаще 1 запроса в 100мс (`COMBAT_RATE_LIMIT_MS=100`) — сервер отвечает
+> ошибкой `Request too fast, slow down!` (с `body.errorCode`). Нормальный
+> темп — ≤1/с; боты жмут ~2–3/с пачками.
 
 ---
 
@@ -127,6 +122,7 @@
     "status": "error"
   },
   "body": {
+    "errorCode": "Skill Fireball initiated",
     "skillInitiation": {
       "success": false,
       "casterId": 7,
@@ -144,7 +140,7 @@
 | `success` | bool | Успех валидации |
 | `casterId` | int | ID кастера |
 | `targetId` | int | ID цели |
-| `targetType` | int | `0`=SELF, `1`=PLAYER, `2`=MOB, `3`=AREA, `4`=NONE |
+| `targetType` | int | `1`=SELF, `2`=PLAYER, `3`=MOB, `4`=AREA, `5`=NONE |
 | `targetTypeString` | string | Строковое имя типа цели |
 | `casterType` | int | `1`=PLAYER, `2`=MOB, `0`=UNKNOWN |
 | `casterTypeString` | string | Строковое имя типа кастера |
@@ -229,7 +225,7 @@
       "success": true,
       "casterId": 7,
       "targetId": 7,
-      "targetType": 0,
+      "targetType": 1,
       "targetTypeString": "SELF",
       "casterType": 1,
       "casterTypeString": "PLAYER",

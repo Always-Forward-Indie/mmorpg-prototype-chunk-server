@@ -84,6 +84,10 @@
 
 **Сервер → Broadcast** (при каждом получении XP)
 
+> Параллельно `ExperienceManager` шлёт snake-case дубль `experience_update`
+> тем же получателям (broadcast-callback) — то же тело + `levelUp`-флаг.
+> Клиент слушает любой из двух; канонический для level-up — `levelUp`-пакет ниже.
+
 ```json
 {
   "header": {
@@ -389,7 +393,7 @@ newValue = min(currentValue + delta, 100.0)
 
 ### mastery_update — Дельта обновления
 
-**Сервер → Unicast** (при каждом flush в БД: каждые 10 ударов или при пересечении тира)
+**Сервер → Unicast** (при каждом flush в БД: каждые 25 ударов (`mastery.db_flush_every_hits`) или при пересечении тира)
 
 ```json
 {
@@ -410,8 +414,8 @@ newValue = min(currentValue + delta, 100.0)
 
 ### Персистентность мастерства
 
-- Сохранение каждые **10 ударов** или при пересечении тира
-- Пакет на game-server: `saveMastery`
+- Сохранение каждые **25 ударов** (`mastery.db_flush_every_hits`) или при пересечении тира
+- Пакет: `saveMastery{factKey}` → game-server → `factAck{applied|duplicate}` (см. [13](13-reliability-delivery.md))
 
 ---
 
@@ -465,6 +469,10 @@ newValue = min(currentValue + delta, 100.0)
 ### reputation_update — Дельта при изменении репутации
 
 **Сервер → Unicast** (при каждом изменении через `ReputationManager::changeReputation`)
+
+> Персистентность — отдельно: чанк шлёт на game `saveReputation{characterId,
+> factionSlug, delta, factKey}` → `factAck{applied|duplicate}`
+> (см. [13](13-reliability-delivery.md)); плюс legacy 60s абсолютный снапшот.
 
 ```json
 {

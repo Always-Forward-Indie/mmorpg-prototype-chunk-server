@@ -10,8 +10,8 @@
 
 Отправляется в следующих случаях:
 - **При `joinGameCharacter`** — unicast новому клиенту, все зоны с их мобами
-- **Respawn-задача (каждые 30 сек)** — всем подключённым клиентам, когда в зоне появились новые мобы
-- **Safety spawn-задача (каждые 5 мин)** — всем подключённым клиентам, защита от нехватки мобов
+- **Respawn-задача** (`scheduler.respawn_ms`, default 30 сек) — всем подключённым клиентам, когда в зоне появились новые мобы
+- **Safety spawn-задача** (`scheduler.spawn_safety_ms`, default 5 мин) — всем подключённым клиентам, защита от нехватки мобов
 
 ### Сервер → Unicast
 
@@ -420,7 +420,7 @@ CHASING / PREPARING_ATTACK / ATTACKING → [HP < fleeHpThreshold] → FLEEING (�
 |---------|---------------------|
 | Расстояние до цели > `aggroRange × chaseMultiplier` | ≈ 800 ед. ||
 | Дистанция выхода за край спавн-зоны > `maxChaseFromZoneEdge` | 1500 ед. |
-| Время преследования > `chaseDuration` (per-mob) | 30 сек |
+| Время преследования > `chaseDuration` (per-mob) | 10 сек (дефолт; в БД `mob.chase_duration`) |
 
 ### Melee slot queuing (crowding prevention)
 

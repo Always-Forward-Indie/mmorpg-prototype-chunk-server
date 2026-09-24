@@ -16,6 +16,8 @@
 | 09 | [Смерть и респавн](09-death-respawn-protocol.md) | Смерть, штрафы, респавн, воскрешение |
 | 10 | [Бестиарий](10-bestiary-protocol.md) | Тиры бестиария, отслеживание убийств |
 | 11 | [Чат и уведомления](11-chat-notifications-protocol.md) | Система чата, мировые уведомления |
+| 12 | [Admin-RPC (DEV ONLY)](12-admin-rpc-protocol.md) | Тестовый крюк: teleport/spawn/grant/read, защита, brief-join |
+| 13 | [Надёжная доставка фактов](13-reliability-delivery.md) | factKey, factAck, claim 1/0/-1, ретраи, снапшоты |
 
 ---
 
@@ -43,6 +45,37 @@
 {"header":{...},"body":{...}}\n
 {"header":{...},"body":{...}}\n
 ```
+
+### Ошибки фрейминга (явные, соединение живёт)
+
+Оверсайз и мусор не роняются молча (раньше клиент висел до таймаута) —
+сервер отвечает ошибкой и ждёт дальше:
+
+| Условие | `header.message` / `body.errorCode` |
+|---------|--------------------------------------|
+| Сообщение > 8 КБ | `ERR_OVERSIZE` |
+| Не-JSON / оборванный JSON | `ERR_MALFORMED` |
+| Буфер без `\n` > 64 КБ (DoS-гард) | `ERR_OVERSIZE`, буфер сброшен |
+
+За цикл чтения разбирается не более 10 сообщений, остаток ждёт следующего
+цикла (защита от starvation io-потока).
+
+### Версионирование
+
+- `header.version` ответа всегда `"1.0"` (wire v1, аддитивный: новые поля
+  только добавляются в `body`, старые клиенты их игнорируют).
+- `body.clientVersion` (`"major.minor.patch"`) гейтит **только login-сервер**
+  на `authentificationClient`/`registerAccount`: вне `[min_client_version,
+  max_client_version]` (dev: `0.1.2–0.1.4`, конфиг + `MIN/MAX_CLIENT_VERSION`)
+  отвечает `status:error`:
+  - ниже минимума / мусор → `ERR_VERSION_OUTDATED`;
+  - выше максимума → `ERR_VERSION_TOO_NEW`;
+  - тело reject'а несёт подсказки: `body.errorCode` (= код),
+    `body.serverVersion` (`"1.0"`), `body.minClientVersion`,
+    `body.maxClientVersion`.
+- **Game/chunk версию игнорируют**: `joinGameClient`/`moveCharacter` с любым
+  (или без) `clientVersion` работают как обычно — старые и будущие клиенты
+  не ломаются (пины: `test_tolerant.py`, `test_protocol_errors.py`).
 
 ---
 
@@ -158,6 +191,14 @@
 | `getBestiaryEntry` | Детали записи бестиария | [10](10-bestiary-protocol.md) |
 | `chatMessage` | Отправка сообщения в чат | [11](11-chat-notifications-protocol.md) |
 | `getConnectedCharacters` | Список игроков онлайн | [01](01-connection-auth-protocol.md) |
+| `skillUsage` | Использование скилла (формат — как `playerAttack`: `skillSlug`/`targetType`) | [02](02-combat-skills-protocol.md) |
+| `openSkillShop` / `requestLearnSkill` | UI тренера: список → изучение скилла | [05](05-npc-dialogue-quests-protocol.md) |
+| `getTitles` / `equipTitle` | Титулы: список → экипировать | [08](08-progression-stats-protocol.md) |
+| `setSkillBarSlot` | Слот панели скиллов | [08](08-progression-stats-protocol.md) |
+| `useEmote` | Эмоция | [11](11-chat-notifications-protocol.md) |
+| `worldObjectInteract` / `worldObjectChannelCancel` | Взаимодействие с объектами мира | [05](05-npc-dialogue-quests-protocol.md) |
+| `getSpawnZones` | Legacy-вызов: сервер игнорирует, сессия живёт | [01](01-connection-auth-protocol.md) |
+| `adminCommand` | Админ-RPC (только DEV-сборка) | [12](12-admin-rpc-protocol.md) |
 
 ---
 
@@ -168,12 +209,13 @@
 | `joinGameClient` | Broadcast | Новый клиент подключился |
 | `joinGameCharacter` | Broadcast | Персонаж вошёл в мир |
 | `playerReady` | Unicast | ACK: сцена загружена, world-state отправлен |
-| `pongClient` | Unicast | Ответ на пинг |
-| `disconnectClient` | Broadcast | Клиент отключился |
+| `pingClient` | Unicast | Ответ на пинг: `header.message == "Pong!"` (имя то же, что запрос) |
+| `disconnectClient` | Broadcast | Клиент отключился (тело пустое; ушедшего в списке уже нет) |
 | `moveCharacter` | Broadcast | Обновление позиции игрока |
 | `positionCorrection` | Unicast | Серверная коррекция позиции |
 | `spawnMobsInZone` | Unicast | Данные мобов зоны |
 | `mobMoveUpdate` | Unicast | Пакет движения мобов |
+| `mobCellLeft` | Unicast | Моб ушёл из подписанной ячейки (interest v2, evict) |
 | `mobDeath` | Broadcast | Смерть моба |
 | `mobHealthUpdate` | Broadcast | Обновление HP моба |
 | `mobTargetLost` | Broadcast | Моб потерял цель |
@@ -212,14 +254,19 @@
 | `tradeDeclined` | Unicast | Торговля отклонена |
 | `tradeCancelled` | Unicast | Торговля отменена |
 | `harvestStarted` | Unicast | Сбор начат |
+| `harvestStartBroadcast` | Broadcast | Сбор начат (наблюдателям) |
 | `harvestComplete` | Unicast | Сбор завершён |
+| `harvestCompleteBroadcast` | Broadcast | Сбор завершён (наблюдателям) |
 | `harvestCancelled` | Unicast | Сбор отменён |
+| `harvestCancelBroadcast` | Broadcast | Сбор отменён (наблюдателям) |
 | `harvestError` | Unicast | Ошибка сбора |
+| `factAck` | Unicast | Квитанция факта: `body{key, status: applied\|duplicate}` |
 | `nearbyCorpsesResponse` | Unicast | Список трупов рядом |
 | `corpseLootInspect` | Unicast | Превью лута трупа |
 | `corpseLootPickup` | Unicast | Результат подбора лута |
-| `experienceUpdate` | Broadcast | Обновление опыта (содержит `levelUp: true` при повышении уровня) |
-| `levelUp` | Broadcast | Отдельный пакет левел-апа (отправляется сразу после `experienceUpdate`) |
+| `experience_update` | Broadcast | Обновление опыта — шлёт `ExperienceManager` через broadcast-callback (содержит `levelUp: true` при повышении уровня) |
+| `experienceUpdate` | Broadcast | Дублирующий пакет от `ExperienceEventHandler` тем же получателям |
+| `levelUp` | Broadcast | Отдельный пакет левел-апа сразу после (всем подключённым) |
 | `characterExperience` | Unicast | Данные опыта (ответ на `getCharacterExperience`) |
 | `stats_update` | Unicast | Полное обновление статов (включая тик регенерации) |
 | `initializePlayerSkills` | Unicast | Инициализация скиллов |
@@ -244,24 +291,31 @@
 
 ## Обработка ошибок
 
-Любой запрос может вернуть ошибку:
+Любой запрос может вернуть ошибку. Машиночитаемый код — всегда
+`body.errorCode`, дублирующий `header.message` (серверы инжектят его
+центрально в `generateResponseMessage`; явный код хендлера — например
+диалоги/harvest/WIO — побеждает). Клиент матчится по `body.errorCode`:
 
 ```json
 {
   "header": {
-    "eventType": "string (тот же eventType что и запрос или специальный)",
+    "eventType": "pingClient",
     "status": "error",
-    "message": "описание_ошибки",
-    "clientId": 42
+    "message": "ERR_MALFORMED",
+    "clientId": 42,
+    "version": "1.0"
   },
   "body": {
-    "error": {
-      "success": false,
-      "errorMessage": "описание"
-    }
+    "errorCode": "ERR_MALFORMED"
   }
 }
 ```
+
+Коды фрейминга/версий — в разделах выше. Коды механик — в документах
+02–11 (все ответы `status:error` несут `errorCode`). Особые случаи:
+`worldObjectInteractResult` приходит с `status:success` даже при
+`success:false` — ошибку читать из `body.errorCode` (`OBJECT_NOT_FOUND`,
+`TOO_FAR`, …).
 
 ---
 

@@ -87,16 +87,22 @@
   "header": {
     "eventType": "chatMessage",
     "clientId": 42,
+    "status": "error",
     "message": "Player 'NonExistentPlayer' not found"
   },
-  "body": null
+  "body": {
+    "errorCode": "Player 'NonExistentPlayer' not found"
+  }
 }
 ```
 
+> Невалидный текст (пустой / >255 символов) и whisper без `targetName`
+> дропаются **молча** (warn в лог, пакета нет) — это не ошибка выше.
+
 ### Rate-limiting
 
-- Скользящее окно: `RATE_LIMIT_WINDOW_MS` (настраивается)
-- Максимум сообщений за окно: `RATE_LIMIT_MAX` (настраивается)
+- Фиксированное окно 2000мс, hardcoded (`ChatEventHandler`: `MAX=3`, `WINDOW=2000`)
+- Превышение — тихий дроп + warn (пакета нет)
 - Отдельный bucket на каждый `clientId`
 - При превышении: сообщение игнорируется
 
