@@ -98,3 +98,41 @@ TEST(FactOutbox, CountersSnapshot)
     EXPECT_EQ(snap.expired, 0u);
     EXPECT_GE(snap.sent, snap.acked); // invariant: sends >= acks
 }
+
+TEST(FactOutbox, SetHighWaterForwardOnly)
+{
+    FactOutbox box;
+    box.assignKey(7, "saveReputation"); // seq=1
+    box.assignKey(7, "saveReputation"); // seq=2
+    EXPECT_EQ(box.nextSeq(), 3u);
+    box.setHighWater(100);
+    EXPECT_EQ(box.nextSeq(), 101u);
+    box.setHighWater(50); // stale/low ignored
+    EXPECT_EQ(box.nextSeq(), 101u);
+    EXPECT_FALSE(box.bootId().empty());
+}
+
+TEST(FactOutbox, UnackedKeysBoundedRespectsLimit)
+{
+    FactOutbox box;
+    for (int i = 0; i < 5; ++i)
+        box.store("k" + std::to_string(i), "p", 0);
+    auto all = box.unackedKeys(100);
+    EXPECT_EQ(all.size(), 5u);
+    auto capped = box.unackedKeys(3);
+    EXPECT_EQ(capped.size(), 3u);
+    // ~120 keys * ~50B/key ~= 6KB < 8KB game inbound cap.
+    for (int i = 0; i < 200; ++i)
+        box.store("x" + std::to_string(i), "p", 0);
+    EXPECT_LE(box.unackedKeys(120).size(), 120u);
+}
+
+TEST(FactOutbox, PokeReschedulesOnlyKnown)
+{
+    FactOutbox box;
+    box.store("known", "p", 0);
+    box.dueFlush(0); // next due at +5000
+    EXPECT_TRUE(box.dueFlush(1000).empty());
+    box.poke({"known", "unknown"}, 1000); // unknown ignored
+    EXPECT_EQ(box.dueFlush(1000).size(), 1u); // known resent now
+}

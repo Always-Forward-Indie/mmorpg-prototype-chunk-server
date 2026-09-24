@@ -190,6 +190,48 @@ class FactOutbox
 
     size_t size() const { return pendingCount_.load(std::memory_order_relaxed); }
 
+    /// This boot's id (stamped into every key; restarts must not collide).
+    const std::string &bootId() const { return bootId_; }
+
+    /// Next seq WITHOUT consuming it (handshake advertises where we are).
+    uint64_t nextSeq() const { return seq_ + 1; }
+
+    /// Fast-forward the global counter to the game-side high-water mark
+    /// (from setChunkData ack, new links only). Forward-only: a stale/low
+    /// value is ignored, so bootId-retained keys can never collide.
+    void setHighWater(uint64_t seq)
+    {
+        if (seq > seq_)
+            seq_ = seq;
+    }
+
+    /// Keys currently awaiting ack, bounded (reconcile batches must fit the
+    /// 8KB game inbound cap: ~50B/key -> caller caps at ~120).
+    std::vector<std::string> unackedKeys(size_t limit) const
+    {
+        std::vector<std::string> out;
+        out.reserve(std::min(limit, pending_.size()));
+        for (const auto &kv : pending_)
+        {
+            if (out.size() >= limit)
+                break;
+            out.push_back(kv.first);
+        }
+        return out;
+    }
+
+    /// Reschedule known unacked keys for immediate resend (reconcile path).
+    /// Unknown keys are ignored (already acked/applied game-side).
+    void poke(const std::vector<std::string> &keys, int64_t nowMs)
+    {
+        for (const auto &key : keys)
+        {
+            auto it = pending_.find(key);
+            if (it != pending_.end())
+                it->second.nextMs = nowMs;
+        }
+    }
+
   private:
     static int64_t backoffFor(int attempts)
     {
