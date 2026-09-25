@@ -188,7 +188,8 @@ class ChampionManager
         int gameZoneId,
         const std::string &namePrefix,
         float lootMult,
-        const std::string &slug = "");
+        const std::string &slug = "",
+        int windowMinutes = 0);
 
   private:
     // Single source of truth for the survival-evolution fallback (Wave 2.5).

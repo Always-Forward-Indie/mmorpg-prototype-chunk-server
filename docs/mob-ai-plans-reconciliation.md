@@ -16,7 +16,7 @@ kept as history and must not be used as build instructions.
 | 4 | V1 migration `011_mob_ai_config` | Superseded. Real migrations are `013–029` range; `011/012` never applied as written. Per-mob AI tuning lives in `mob` table columns + `game_config`, not V1's proposed columns. |
 | 5 | V1/V2 `fleeHpThreshold` / `aiArchetype` / `patrolRadius` per-mob tuning | Parsed from game-server JSON but **lost in copies** — flee never fired, every mob behaved MELEE. Fixed in chunk `MobManager` + `SpawnZoneManager` (propagate fields on template copy) + regression pin `AiFieldsSurviveTemplateCopy`. Behavior unchanged in prod (DB values are all defaults) — the feature is unblocked, content tuning is open. |
 | 6 | V2 "skill-driven combat timing, social aggro, passive mobs" | Partially true: combat timing reads skill data; social aggro / passive archetypes exist in code paths but were unreachable before fix #5 (all MELEE). |
-| 7 | MOB_SYSTEM depth (rank/champion interplay) | Rank/champion evolution implemented via `ChampionManager` + survival evolution tick; doc's internal rank contradictions (multipliers stacking) unresolved — see open items. |
+| 7 | MOB_SYSTEM depth (rank/champion interplay) | Rank/champion evolution implemented via `ChampionManager` + survival evolution tick. **Stacking resolved 2026-09-25 (add-then-multiply):** single combined multiplier — champion bonus ADDS to template rank (`rankMult = template.rankMult + (hpMult − 1)`), HP/mana scaled once by it. Normal template (1.0) unchanged; XP uses the same `rankMult`, so HP/XP stay consistent. |
 
 ## Numeric ground truth (code/DB, not docs)
 
@@ -32,8 +32,8 @@ kept as history and must not be used as build instructions.
 
 ## Open (content tuning, not code)
 
-- Which mobs are casters / cowards (`aiArchetype`, `fleeHpThreshold` values in DB) — game-design decision.
-- Rank multiplier stacking audit (MOB_SYSTEM internal contradiction).
+- Which mobs are casters (`aiArchetype` values in DB) — game-design decision.
+  Flee content done 2026-09-25 (small beasts 0.3, migration 092).
 - V1 items never built (leash-regen packet, spatial index for players — the latter superseded by InterestManager subscriptions). EVADING + RETURNING regen landed 2026-09-24 (see row 1).
 
 ## Rule

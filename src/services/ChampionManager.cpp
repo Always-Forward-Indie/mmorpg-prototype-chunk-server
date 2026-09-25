@@ -230,7 +230,8 @@ ChampionManager::tickTimedChampions()
                     state.tmpl.gameZoneId,
                     "[!] ",
                     2.0f,
-                    state.tmpl.slug);
+                    state.tmpl.slug,
+                    state.tmpl.windowMinutes);
                 if (uid > 0)
                 {
                     state.spawned = true;
@@ -332,7 +333,8 @@ ChampionManager::spawnChampion(int mobTemplateId,
     int gameZoneId,
     const std::string &namePrefix,
     float lootMult,
-    const std::string &slug)
+    const std::string &slug,
+    int windowMinutes)
 {
     const auto &cfg = gameConfig_;
     const float hpMult = cfg.getFloat("champion.hp_multiplier", 3.0f);
@@ -347,13 +349,18 @@ ChampionManager::spawnChampion(int mobTemplateId,
 
     base.uid = Generators::generateUniqueMobUID();
     base.name = namePrefix + base.name;
-    base.maxHealth = static_cast<int>(base.maxHealth * hpMult);
+    // Rank stacking (add-then-multiply, single combined multiplier): the
+    // champion bonus ADDS to the template rank instead of replacing it, so
+    // an elite-template champion keeps its elite scaling. Normal template
+    // (rankMult 1.0) is unchanged: 1.0 + (hpMult - 1.0) == hpMult.
+    const float combinedMult = base.rankMult + (hpMult - 1.0f);
+    base.maxHealth = static_cast<int>(base.maxHealth * combinedMult);
     base.currentHealth = base.maxHealth;
-    base.maxMana = static_cast<int>(base.maxMana * hpMult);
+    base.maxMana = static_cast<int>(base.maxMana * combinedMult);
     base.currentMana = base.maxMana;
     base.baseExperience = static_cast<int>(base.baseExperience * 2.0f);
     base.rankCode = "champion";
-    base.rankMult = hpMult;
+    base.rankMult = combinedMult;
     base.isChampion = true;
     base.lootMultiplier = lootMult;
     base.spawnEpochSec = epochSecFn_();
@@ -388,11 +395,18 @@ ChampionManager::spawnChampion(int mobTemplateId,
 
     mobInstances_.registerMobInstance(base);
 
-    const int despawnMin = cfg.getInt("champion.despawn_minutes", 30);
+    // Despawn window: per-template minutes when provided (timed champions),
+    // else the global default. Non-positive = immortal (survival default).
+    int windowMin = windowMinutes > 0
+        ? windowMinutes
+        : cfg.getInt("champion.despawn_minutes", 30);
     const auto now = steadyFn_();
     {
-        std::lock_guard<std::mutex> lk(activeMutex_);
-        active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, now + std::chrono::minutes(despawnMin)});
+        std::unique_lock<std::mutex> lk(activeMutex_);
+        if (windowMin > 0)
+            active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, now + std::chrono::minutes(windowMin)});
+        else
+            active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, std::chrono::steady_clock::time_point::max()});
     }
 
     broadcastToGameZone(gameZoneId, "champion_spawned", nlohmann::json{{"mobSlug", base.slug}, {"uid", base.uid}});
