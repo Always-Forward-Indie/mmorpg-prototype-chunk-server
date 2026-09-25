@@ -232,10 +232,12 @@ MobMovementManager::runMobTick(
 
     if (movementData.isFleeing || movementData.isBackpedaling)
     {
-        // Fleeing prey runs at 0.8x return speed (slower than players):
-        // it CAN be run down and killed; stopping pursuit lets it leash
-        // back and recover (intended MMO behavior, not an exploit).
-        const float fleeSpeedMult = movementData.isFleeing ? 0.8f : 1.0f;
+        // Fleeing prey runs at 0.5x return speed: visibly flees, but a
+        // pursuing player (full speed) closes the gap and melee range checks
+        // use live positions, so the prey stays killable. At 0.8x+ the prey
+        // outran both pursuers and position broadcasts (unkillable kiting,
+        // broke fox-kill quests). Backpedal keeps full speed (short hop).
+        const float fleeSpeedMult = movementData.isFleeing ? 0.5f : 1.0f;
         movementResult = calculateReturnToSpawnMovement(
             mob, zone, mobPositions, movementData.fleeTargetPosition, params, fleeSpeedMult);
         if (!movementResult.has_value())
