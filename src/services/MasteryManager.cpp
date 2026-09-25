@@ -129,9 +129,9 @@ MasteryManager::reapplyMilestoneEffects(int characterId)
         if (value >= tiers.t4)
         {
             ActiveEffectStruct eff;
-            eff.effectSlug = masterySlug + "_t4_parry";
+            eff.effectSlug = masterySlug + "_t4_accuracy";
             eff.effectTypeSlug = "buff";
-            eff.attributeSlug = "parry_chance";
+            eff.attributeSlug = "accuracy";
             eff.value = 2.0f;
             eff.sourceType = "mastery";
             eff.expiresAt = 0;
@@ -318,7 +318,7 @@ MasteryManager::checkAndApplyMilestone(int characterId,
     if (oldValue < tiers.t3 && newValue >= tiers.t3)
         applyEffect(masterySlug + "_t3_crit", "crit_chance", 3.0f, 3);
     if (oldValue < tiers.t4 && newValue >= tiers.t4)
-        applyEffect(masterySlug + "_t4_parry", "parry_chance", 2.0f, 4);
+        applyEffect(masterySlug + "_t4_accuracy", "accuracy", 2.0f, 4);
 }
 
 // ── Persistence ────────────────────────────────────────────────────────────

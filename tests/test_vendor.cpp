@@ -104,6 +104,34 @@ TEST_F(VendorFixture, UpdateStockCount)
     EXPECT_EQ(inv.getItemQuantity(1, kPotion), 0);
 }
 
+TEST_F(VendorFixture, TickRestockRefillsDueSlots)
+{
+    // Deplete potion to 1/5 with 60s interval, then tick past it.
+    vendor.updateStockCount(kVendor, kPotion, 1);
+    // Configure restock via a fresh dataset (struct carries the params).
+    VendorNPCDataStruct v = makeVendor();
+    for (auto &slot : v.items)
+    {
+        if (slot.itemId == kPotion)
+        {
+            slot.stockCurrent = 1;
+            slot.stockMax = 5;
+            slot.restockAmount = 2;
+            slot.restockIntervalSec = 60;
+        }
+    }
+    vendor.setVendorData({v});
+    EXPECT_EQ(vendor.tickRestock(59 * 1000), 0); // not due yet
+    EXPECT_EQ(vendor.tickRestock(61 * 1000), 1); // +2 -> 3/5
+    auto shop = vendor.buildShopJson(kVendor, 0.0f);
+    ASSERT_TRUE(shop.is_array());
+    ASSERT_GE(shop.size(), 1u);
+    EXPECT_EQ(shop[0]["stockCurrent"], 3);
+    // Unlimited sword untouched; full slots re-arm without refill.
+    EXPECT_EQ(vendor.tickRestock(500 * 1000), 1); // 3+2 -> 5/5 (clamped)
+    EXPECT_EQ(vendor.tickRestock(600 * 1000), 0); // full: no-op
+}
+
 TEST_F(VendorFixture, BuySuccessDeductsGoldAndStock)
 {
     giveGold(1, 1000);

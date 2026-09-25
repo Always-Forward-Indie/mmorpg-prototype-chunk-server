@@ -1424,6 +1424,7 @@ struct VendorInventoryItemStruct
     int restockIntervalSec = 3600;
     int priceOverrideBuy = 0;  // 0 = use item.vendorPriceBuy
     int priceOverrideSell = 0; // 0 = use item.vendorPriceSell
+    int64_t lastRestockMs = 0; // steady-clock ms of last restock (0 = due on next tick)
 };
 
 /// Vendor NPC data loaded from DB at chunk startup

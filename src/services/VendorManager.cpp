@@ -40,6 +40,36 @@ VendorManager::updateStockCount(int npcId, int itemId, int newStock)
     }
 }
 
+int
+VendorManager::tickRestock(int64_t nowMs)
+{
+    std::unique_lock lock(mutex_);
+    int refilled = 0;
+    for (auto &[npcId, vendor] : vendors_)
+    {
+        for (auto &slot : vendor.items)
+        {
+            if (slot.restockAmount <= 0 || slot.stockMax <= 0)
+                continue; // unlimited or non-restocking
+            if (slot.stockCurrent >= slot.stockMax)
+            {
+                slot.lastRestockMs = nowMs; // full: re-arm the timer
+                continue;
+            }
+            const int64_t intervalMs =
+                static_cast<int64_t>(slot.restockIntervalSec) * 1000;
+            if (intervalMs <= 0 || nowMs - slot.lastRestockMs < intervalMs)
+                continue;
+            slot.stockCurrent = std::min(slot.stockMax, slot.stockCurrent + slot.restockAmount);
+            slot.lastRestockMs = nowMs;
+            ++refilled;
+            log_->debug("[VendorManager] Restock NPC {} item {} -> {}/{}",
+                npcId, slot.itemId, slot.stockCurrent, slot.stockMax);
+        }
+    }
+    return refilled;
+}
+
 // ── Shop queries ──────────────────────────────────────────────────────────────
 
 int

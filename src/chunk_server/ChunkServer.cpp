@@ -1469,6 +1469,54 @@ ChunkServer::mainEventLoopCH()
     );
     scheduler_.scheduleTask(zoneEventTickTask);
 
+    // WIO tick — completes finished channeled interactions + respawns
+    // depleted global objects. Was unwired (tick() had no callers, so
+    // channels never completed and globals never respawned). Own 1s cadence:
+    // channels are second-scale casts, 30s zone granularity would stall them.
+    Task wioTickTask(
+        [this]
+        {
+            try
+            {
+                eventHandler_.getWorldObjectEventHandler().tick();
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[WIO] tick error: " + std::string(ex.what()));
+            }
+        },
+        schedMs("scheduler.wio_tick_ms", 1000),
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(1000),
+        23 // unique task ID
+    );
+    scheduler_.scheduleTask(wioTickTask);
+
+    // Vendor restock tick — refills depleted shop slots per
+    // restockAmount/restockIntervalSec (runtime stock is chunk-owned;
+    // chunk restart reloads DB seeds).
+    Task vendorRestockTask(
+        [this]
+        {
+            try
+            {
+                const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                                              .count();
+                const int refilled = gameServices_.getVendorManager().tickRestock(nowMs);
+                if (refilled > 0)
+                    log_->info("[Vendor] Restocked {} slots", refilled);
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[Vendor] tickRestock error: " + std::string(ex.what()));
+            }
+        },
+        schedMs("scheduler.vendor_restock_ms", 60000),
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(60 * 1000),
+        24 // unique task ID
+    );
+    scheduler_.scheduleTask(vendorRestockTask);
+
     // Ping timeout task: disconnect clients that haven't sent a ping for >30 seconds.
     // Catches crashed clients that never sent a clean TCP RST/EOF.
     Task pingTimeoutTask(

@@ -219,6 +219,15 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
                 droppedItem.dropTime = std::chrono::steady_clock::now();
                 droppedItem.droppedByMobUID = mobUID;
                 droppedItem.canBePickedUp = true;
+                // Killer reservation: the killer gets a head start before the
+                // drop goes public (reservation check + expiry respected by
+                // pickup and cleanup paths). Player drops stay public.
+                if (killerId > 0)
+                {
+                    droppedItem.reservedForCharacterId = killerId;
+                    droppedItem.reservationExpiry =
+                        droppedItem.dropTime + std::chrono::seconds(kKillReservationSec);
+                }
 
                 // Store in our dropped items map
                 {

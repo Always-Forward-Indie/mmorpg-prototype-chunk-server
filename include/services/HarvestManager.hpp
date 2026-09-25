@@ -69,6 +69,11 @@ class HarvestManager
      */
     void cancelHarvest(int characterId, const std::string &reason = "");
 
+    /** Cancel an active harvest if the character moved beyond maxMoveDistance
+     *  from where harvesting started. Returns true when a harvest was
+     *  cancelled (cancel broadcast already sent). Never throws. */
+    bool cancelIfMovedBeyond(int characterId, const PositionStruct &newPosition);
+
     /**
      * @brief Check if a character is currently harvesting
      * @param characterId ID of character to check

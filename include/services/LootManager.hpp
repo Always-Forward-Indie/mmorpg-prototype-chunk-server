@@ -19,6 +19,8 @@ class IStatsNotifier;
 class LootManager
 {
   public:
+    /// Killer head-start on mob drops before they go public.
+    static constexpr int kKillReservationSec = 30;
     /// Explicit dependencies (no GameServices). statsNotify is optional and
     /// may be null (pity_hint skipped) — same pattern as
     /// ChampionManager::statsNotify_.

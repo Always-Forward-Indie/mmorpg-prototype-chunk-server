@@ -4,9 +4,12 @@
 #include "services/MobManager.hpp"
 #include "utils/Logger.hpp"
 #include "utils/TimeConverter.hpp"
+#include <chrono>
+#include <cstdint>
 #include <map>
 #include <random>
 #include <shared_mutex>
+#include <unordered_map>
 
 // Forward declaration to avoid circular dependency
 class MobInstanceManager;
@@ -52,6 +55,10 @@ class SpawnZoneManager
 
     // Store the mob spawn zones in memory with zoneId as key
     std::map<int, SpawnZoneStruct> mobSpawnZones_;
+
+    // Last death per (zoneId, mobId) for per-entry respawnTime gating.
+    // Key: (int64_t(zoneId) << 32) | mobId. Empty = no deaths yet (spawn freely).
+    std::unordered_map<int64_t, std::chrono::steady_clock::time_point> lastDeathByType_;
 
     // Mutex for the mob spawn zones map
     mutable std::shared_mutex mutex_;

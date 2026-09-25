@@ -812,6 +812,24 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
             gameServices_.getCharacterManager().setCharacterPosition(
                 movementData.characterId, movementData.position);
 
+            // Harvest move-gate: walking away from the corpse cancels the
+            // harvest (maxMoveDistance, default 50u). Never fails the move.
+            try
+            {
+                gameServices_.getHarvestManager().cancelIfMovedBeyond(
+                    movementData.characterId, movementData.position);
+            }
+            catch (const std::exception &e)
+            {
+                log_->debug("Harvest move hook failed for character {} ({}), move accepted anyway",
+                    movementData.characterId, e.what());
+            }
+            catch (...)
+            {
+                log_->debug("Harvest move hook failed for character {} (unknown), move accepted anyway",
+                    movementData.characterId);
+            }
+
             // Interest v2 (phase 5a): update spatial subscription; every newly
             // entered cell gets an enter-snapshot (mobs + corpses + NPCs) so
             // returning clients recreate entities instead of seeing ghosts.

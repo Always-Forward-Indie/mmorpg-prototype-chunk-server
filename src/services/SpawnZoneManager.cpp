@@ -295,11 +295,21 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
     };
 
     // Process each mob-type entry independently.
+    const auto spawnNow = std::chrono::steady_clock::now();
     for (const auto &entry : zone->second.mobEntries)
     {
         int alive = aliveByType[entry.mobId];
         int needed = entry.maxCount - alive;
         if (needed <= 0)
+            continue;
+
+        // Per-entry respawn gate: a type wiped recently waits out its own
+        // respawnTime (previously every type refilled on the global 30s tick,
+        // so long-timer entries like bosses respawned far too fast).
+        const int64_t typeKey =
+            (static_cast<int64_t>(zoneId) << 32) | static_cast<uint32_t>(entry.mobId);
+        auto deathIt = lastDeathByType_.find(typeKey);
+        if (deathIt != lastDeathByType_.end() && spawnNow - deathIt->second < entry.respawnTime)
             continue;
 
         logger_.log("[SPAWN_DEBUG] Zone " + std::to_string(zoneId) +
@@ -457,6 +467,20 @@ SpawnZoneManager::mobDied(int zoneId, int mobUID)
             // based on the actual alive mob count, not this legacy counter
         }
     } // Release SpawnZoneManager mutex before calling MobInstanceManager
+
+    // Stamp last-death for the per-entry respawn gate (resolve template id
+    // before unregistering the instance below).
+    if (mobInstanceManager_)
+    {
+        const int deadMobId = mobInstanceManager_->getMobInstance(mobUID).id;
+        if (deadMobId > 0)
+        {
+            const int64_t typeKey =
+                (static_cast<int64_t>(zoneId) << 32) | static_cast<uint32_t>(deadMobId);
+            std::unique_lock<std::shared_mutex> lock(mutex_);
+            lastDeathByType_[typeKey] = std::chrono::steady_clock::now();
+        }
+    }
 
     // Unregister from MobInstanceManager outside of lock to avoid deadlock
     if (mobInstanceManager_)

@@ -287,6 +287,29 @@ HarvestManager::isCharacterHarvesting(int characterId) const
     return it != activeHarvests_.end() && it->second.isActive;
 }
 
+bool
+HarvestManager::cancelIfMovedBeyond(int characterId, const PositionStruct &newPosition)
+{
+    // Read-only probe first (hot move path: activeHarvests_ is usually empty).
+    PositionStruct start{};
+    float maxDist = 0.0f;
+    {
+        std::shared_lock<std::shared_mutex> lock(harvestsMutex_);
+        auto it = activeHarvests_.find(characterId);
+        if (it == activeHarvests_.end() || !it->second.isActive)
+            return false;
+        start = it->second.startPosition;
+        maxDist = it->second.maxMoveDistance;
+    }
+    // XY plane only (same convention as movement validation).
+    const float dx = newPosition.positionX - start.positionX;
+    const float dy = newPosition.positionY - start.positionY;
+    if (dx * dx + dy * dy <= maxDist * maxDist)
+        return false;
+    cancelHarvest(characterId, "moved_too_far");
+    return true;
+}
+
 HarvestProgressStruct
 HarvestManager::getHarvestProgress(int characterId) const
 {

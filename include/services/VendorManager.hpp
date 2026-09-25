@@ -13,8 +13,11 @@ class ItemManager;
  * @brief In-memory vendor NPC store.
  *
  * Holds the inventory of every vendor/blacksmith NPC.  Data is populated
- * once at chunk startup via setVendorData() and updated by the game-server
- * restock scheduler via updateStockCount().  All public methods are thread-safe.
+ * once at chunk startup via setVendorData().  Runtime stock is owned
+ * entirely chunk-side: buys decrement in memory, tickRestock() refills per
+ * restockAmount/restockIntervalSec, chunk restart reloads DB seeds.
+ * updateStockCount() applies explicit game-server overrides.  All public
+ * methods are thread-safe.
  */
 class VendorManager
 {
@@ -33,6 +36,10 @@ class VendorManager
 
     /** Apply a single stock-count update from the restock scheduler. */
     void updateStockCount(int npcId, int itemId, int newStock);
+
+    /** Refill due slots (restockAmount>0, below max, interval elapsed).
+     *  Unlimited (-1) slots untouched. Returns refilled slot count. */
+    int tickRestock(int64_t nowMs);
 
     // ── Shop queries ─────────────────────────────────────────────────────────
 
