@@ -227,13 +227,16 @@ class MobMovementManager
 
     /**
      * @brief Calculate movement back to spawn zone
+     * @param speedMultiplier scales returnSpeed (fleeing prey runs at 0.8:
+     *        slower than players so pursuit can catch it; returns use 1.0)
      */
     std::optional<MobMovementResult> calculateReturnToSpawnMovement(
         const MobDataStruct &mob,
         const SpawnZoneStruct &zone,
         const std::vector<std::pair<int, PositionStruct>> &otherMobs,
         const PositionStruct &spawnPosition,
-        const MobMovementParams &params);
+        const MobMovementParams &params,
+        float speedMultiplier = 1.0f);
 
     /**
      * @brief Initialize movement data for a mob with AI config

@@ -232,7 +232,12 @@ MobMovementManager::runMobTick(
 
     if (movementData.isFleeing || movementData.isBackpedaling)
     {
-        movementResult = calculateReturnToSpawnMovement(mob, zone, mobPositions, movementData.fleeTargetPosition, params);
+        // Fleeing prey runs at 0.8x return speed (slower than players):
+        // it CAN be run down and killed; stopping pursuit lets it leash
+        // back and recover (intended MMO behavior, not an exploit).
+        const float fleeSpeedMult = movementData.isFleeing ? 0.8f : 1.0f;
+        movementResult = calculateReturnToSpawnMovement(
+            mob, zone, mobPositions, movementData.fleeTargetPosition, params, fleeSpeedMult);
         if (!movementResult.has_value())
         {
             movementData.isBackpedaling = false;
@@ -1192,10 +1197,11 @@ MobMovementManager::calculateChaseMovement(
 std::optional<MobMovementResult>
 MobMovementManager::calculateReturnToSpawnMovement(
     const MobDataStruct &mob,
-    const SpawnZoneStruct & /*zone*/,
+    const SpawnZoneStruct &zone,
     const std::vector<std::pair<int, PositionStruct>> & /*otherMobs*/,
     const PositionStruct &spawnPosition,
-    const MobMovementParams &params)
+    const MobMovementParams &params,
+    float speedMultiplier)
 {
     // Вектор к точке спавна
     float dx = spawnPosition.positionX - mob.position.positionX;
@@ -1204,7 +1210,7 @@ MobMovementManager::calculateReturnToSpawnMovement(
 
     // Use the configured return speed (units/sec) so the mob walks back at a
     // controlled pace instead of using the raw baseSpeedMax patrol step.
-    const float returnSpeed = aiConfig_.returnSpeedUnitsPerSec;
+    const float returnSpeed = aiConfig_.returnSpeedUnitsPerSec * speedMultiplier;
     float stepSize = returnSpeed * aiConfig_.returnMovementInterval;
 
     // Проверяем, находится ли моб уже очень близко к точке спавна

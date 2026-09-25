@@ -398,7 +398,7 @@ velocity.speed = chaseSpeedUnitsPerSec  (units/sec)
 **Алгоритм**:
 1. Вектор бегства = нормализованный `(mobPos - attackerPos)`.
 2. `fleeTargetPosition = mobPos + fleeVector × (aggroRange × chaseMultiplier × 1.1)`.
-3. Моб движется к `fleeTargetPosition` по той же логике, что и RETURNING (функция `calculateReturnToSpawnMovement`).
+3. Моб движется к `fleeTargetPosition` по той же логике, что и RETURNING (функция `calculateReturnToSpawnMovement`), но со скоростью **0.8×** — медленнее игрока, догон и добивание возможны. Перестал преследовать — моб отлипает, возвращается и лечится (штатно).
 4. Длительность бегства ≤ `chaseDuration / 3` секунд.
 5. По истечении или если атакующий мёртв → RETURNING.
 
