@@ -188,6 +188,26 @@ QuestStore::offerQuest(int characterId, const std::string &questSlug)
             log_->info("[QuestManager] Quest '" + questSlug + "' already in state " + currentState);
             return false;
         }
+        // Terminal states: re-offer only when repeatable, and only after
+        // cooldownSec elapsed since finish (updatedAt is untouched after
+        // turned_in/failed, so it marks finish time in practice).
+        if (currentState == "turned_in" || currentState == "failed")
+        {
+            if (!quest.repeatable)
+            {
+                log_->info("[QuestManager] Quest '" + questSlug + "' not repeatable");
+                return false;
+            }
+            if (quest.cooldownSec > 0)
+            {
+                const auto elapsed = std::chrono::steady_clock::now() - pit->second.updatedAt;
+                if (elapsed < std::chrono::seconds(quest.cooldownSec))
+                {
+                    log_->info("[QuestManager] Quest '" + questSlug + "' on cooldown");
+                    return false;
+                }
+            }
+        }
     }
 
     // Create / overwrite progress record
@@ -610,6 +630,11 @@ QuestStore::checkStepCompletion(int characterId, PlayerQuestProgressStruct &pq)
     else if (step.stepType == "talk" || step.stepType == "reach")
     {
         stepDone = pq.progress.value("done", false);
+    }
+    else if (step.stepType == "interact")
+    {
+        int required = step.params.value("count", 1);
+        stepDone = (pq.progress.value("interacted", 0) >= required);
     }
 
     if (stepDone)

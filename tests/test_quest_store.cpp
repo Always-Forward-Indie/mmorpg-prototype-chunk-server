@@ -255,17 +255,38 @@ TEST_F(StoreFixture, FailQuestTerminalAndRep)
     EXPECT_FALSE(store->failQuest(1, "doomed")); // terminal
 }
 
-TEST_F(StoreFixture, InteractTriggerNoAutoComplete)
+TEST_F(StoreFixture, InteractTriggerAutoCompletes)
 {
     QuestStruct q = makeQuest(11, "touch", {interactStep(9, 2)});
     store->setQuests({q});
     ASSERT_TRUE(store->offerQuest(1, "touch"));
     store->onWorldObjectInteracted(1, 9);
+    EXPECT_EQ(stateOf(1, "touch"), "active"); // 1/2: not yet
     store->onWorldObjectInteracted(1, 9);
-    // interact steps have no auto-complete branch (1-1): still active
-    EXPECT_EQ(stateOf(1, "touch"), "active");
-    store->advanceQuestStepBySlug(1, "touch"); // manual advance completes (last step)
-    EXPECT_EQ(stateOf(1, "touch"), "completed");
+    EXPECT_EQ(stateOf(1, "touch"), "completed"); // 2/2 auto mode
+}
+
+TEST_F(StoreFixture, RepeatableCooldownEnforced)
+{
+    QuestStruct q = makeQuest(12, "daily", {killStep(7, 1)});
+    q.repeatable = true;
+    q.cooldownSec = 3600;
+    store->setQuests({q});
+    ASSERT_TRUE(store->offerQuest(1, "daily"));
+    store->onMobKilled(1, 7);
+    PlayerQuestProgressStruct pq;
+    QuestStruct qs;
+    ASSERT_TRUE(store->beginTurnIn(1, "daily", pq, qs));
+    EXPECT_EQ(stateOf(1, "daily"), "turned_in");
+    EXPECT_FALSE(store->offerQuest(1, "daily")); // cooldown active
+    // Non-repeatable can never re-offer.
+    QuestStruct once = makeQuest(13, "once", {killStep(7, 1)});
+    once.repeatable = false;
+    store->setQuests({once});
+    ASSERT_TRUE(store->offerQuest(1, "once"));
+    store->onMobKilled(1, 7);
+    ASSERT_TRUE(store->beginTurnIn(1, "once", pq, qs));
+    EXPECT_FALSE(store->offerQuest(1, "once"));
 }
 
 TEST_F(StoreFixture, FillContextAndFlagsLoaded)
