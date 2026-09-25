@@ -227,7 +227,7 @@ class MobMovementManager
 
     /**
      * @brief Calculate movement back to spawn zone
-     * @param speedMultiplier scales returnSpeed (fleeing prey runs at 0.8:
+     * @param speedMultiplier scales returnSpeed (fleeing prey runs at 0.5:
      *        slower than players so pursuit can catch it; returns use 1.0)
      */
     std::optional<MobMovementResult> calculateReturnToSpawnMovement(
