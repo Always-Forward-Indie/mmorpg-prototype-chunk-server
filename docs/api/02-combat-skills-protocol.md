@@ -60,6 +60,13 @@
 > Чаще 1 запроса в 100мс (`COMBAT_RATE_LIMIT_MS=100`) — сервер отвечает
 > ошибкой `Request too fast, slow down!` (с `body.errorCode`). Нормальный
 > темп — ≤1/с; боты жмут ~2–3/с пачками.
+>
+> **PvP выключен by design:** любой урон/дебафф по игроку (`targetType 2`) —
+> `"PvP is not available"` (пин: `test_reg_pvp.py`). Флаги `isPvp/isSafeZone`
+> в пакетах — display-only.
+>
+> **Касты несбиваемы** (урон/движение не прерывают чтение; `interruptCombatAction`
+> не зарегистрирован). Вернёмся к вопросу с классами контроля.
 
 ---
 

@@ -222,6 +222,16 @@ Only one `learn_skill` action should exist per action group.
 
 ## Client Packets
 
+### Skill levels (max 5, +10% effect/level)
+
+Повторный `requestLearnSkill` с явным `body.targetLevel == current+1`
+повышает уровень (до 5; дальше `max_level_reached`, пропуск — `invalid_level`).
+Цена: SP × новый уровень (книга + золото — разовые, только первое изучение).
+Без `targetLevel` повтор — `already_learned` без списаний (ретраи безопасны).
+Эффект масштабируется в `CombatCalculator`: `× (1 + 0.1 × (level − 1))`.
+Уровень персистится (`character_skills.current_level`, GREATEST-wins) и
+возвращается в `skillData.skillLevel` / `skill_learned.skillLevel`.
+
 ### `skill_learned` (chunk server → client)
 
 Sent when the skill is successfully learned and saved to the database.
@@ -305,7 +315,9 @@ Sent when a skill purchase attempt fails validation.
 
 | Code | Meaning |
 |------|---------|
-| `already_learned` | Player already knows this skill |
+| `already_learned` | Player already knows this skill (no `targetLevel`, or `targetLevel` ≤ current — repeats are idempotent, never charged) |
+| `invalid_level` | `targetLevel` skips levels (must be exactly current+1) |
+| `max_level_reached` | Skill already at max level (5) |
 | `insufficient_level` | Character level below `requiredLevel` |
 | `missing_prerequisite` | Prerequisite skill not yet learned |
 | `insufficient_sp` | Not enough free skill points |

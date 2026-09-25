@@ -3,6 +3,17 @@
 #include <algorithm>
 #include <cmath>
 
+namespace
+{
+// Skill levels (max 5): +10% effect per level above 1. Mobs and level-1
+// skills evaluate to exactly 1.0 (no behavior change for them).
+float skillLevelMultiplier(const SkillStruct &skill)
+{
+    const int level = skill.skillLevel < 1 ? 1 : skill.skillLevel;
+    return 1.0f + 0.1f * static_cast<float>(level - 1);
+}
+} // namespace
+
 CombatCalculator::CombatCalculator(GameConfigService *configService)
     : gameConfig_(configService)
 {
@@ -236,7 +247,8 @@ CombatCalculator::calculateHealAmount(
     // A separate heal-variance config key (default 0.10 = ±10%) ensures heals are
     // slightly randomised but more predictable than damage.
     int scaleStat = getAttributeValue(casterAttributes, skill.scaleStat);
-    int rawHeal = static_cast<int>(std::lround(skill.flatAdd + (scaleStat * skill.coeff)));
+    int rawHeal = static_cast<int>(std::lround(
+        (skill.flatAdd + (scaleStat * skill.coeff)) * skillLevelMultiplier(skill)));
     rawHeal = std::max(1, rawHeal);
 
     const float variance = cfg("combat.heal_variance", kDefaultHealVariance);
@@ -250,7 +262,8 @@ CombatCalculator::calculateBaseDamage(
     const std::vector<CharacterAttributeStruct> &attackerAttributes)
 {
     int scaleStatValue = getAttributeValue(attackerAttributes, skill.scaleStat);
-    int rawDamage = static_cast<int>(std::lround(skill.flatAdd + (scaleStatValue * skill.coeff)));
+    int rawDamage = static_cast<int>(std::lround(
+        (skill.flatAdd + (scaleStatValue * skill.coeff)) * skillLevelMultiplier(skill)));
     rawDamage = std::max(1, rawDamage);
 
     // Разброс урона ±N%: каждый удар не должен быть детерминированным числом
@@ -265,7 +278,8 @@ CombatCalculator::calculateBaseDamage(
     const std::vector<MobAttributeStruct> &attackerAttributes)
 {
     int scaleStatValue = getAttributeValue(attackerAttributes, skill.scaleStat);
-    int rawDamage = static_cast<int>(std::lround(skill.flatAdd + (scaleStatValue * skill.coeff)));
+    int rawDamage = static_cast<int>(std::lround(
+        (skill.flatAdd + (scaleStatValue * skill.coeff)) * skillLevelMultiplier(skill)));
     rawDamage = std::max(1, rawDamage);
 
     const float variance = cfg("combat.damage_variance", kDefaultDamageVariance);

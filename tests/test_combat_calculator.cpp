@@ -130,6 +130,29 @@ TEST(CombatCalculator, BaseDamageMobOverloadSameBand)
     }
 }
 
+TEST(CombatCalculator, SkillLevelScalesDamageTenPercentPerLevel)
+{
+    CombatCalculator calc(nullptr);
+    // Level 1 (and 0) = exactly the old band (no behavior change).
+    SkillStruct l1 = damageSkill();
+    l1.skillLevel = 1;
+    SkillStruct l0 = damageSkill();
+    l0.skillLevel = 0;
+    // Level 5 = x1.4: raw 150*1.4=210, variance 12% -> [184, 236].
+    SkillStruct l5 = damageSkill();
+    l5.skillLevel = 5;
+    std::vector<CharacterAttributeStruct> attrs = {attr("strength", 50)};
+    for (int i = 0; i < 30; ++i)
+    {
+        EXPECT_GE(calc.calculateBaseDamage(l1, attrs), 125);
+        EXPECT_LE(calc.calculateBaseDamage(l1, attrs), 175);
+        EXPECT_GE(calc.calculateBaseDamage(l0, attrs), 125);
+        EXPECT_LE(calc.calculateBaseDamage(l0, attrs), 175);
+        EXPECT_GE(calc.calculateBaseDamage(l5, attrs), 175);
+        EXPECT_LE(calc.calculateBaseDamage(l5, attrs), 245);
+    }
+}
+
 TEST(CombatCalculator, BaseDamageFloorIsOne)
 {
     CombatCalculator calc(nullptr);

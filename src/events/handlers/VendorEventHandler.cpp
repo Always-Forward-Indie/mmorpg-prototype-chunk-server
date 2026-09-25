@@ -687,6 +687,12 @@ VendorEventHandler::handleOpenRepairShopEvent(const Event &event)
             sendErrorResponseWithTimestamps(socket, "npc_not_found", "repairShop", req.clientId, req.timestamps);
             return;
         }
+        // Only blacksmiths repair (other NPCs politely refuse).
+        if (npc.npcType != "blacksmith")
+        {
+            sendErrorResponseWithTimestamps(socket, "not_a_blacksmith", "repairShop", req.clientId, req.timestamps);
+            return;
+        }
         const auto playerPos = gameServices_.getCharacterManager().getCharacterPosition(req.characterId);
         if (!isPlayerInRange(playerPos, npc.position, npc.radius + 2.0f))
         {

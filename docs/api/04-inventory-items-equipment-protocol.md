@@ -440,6 +440,8 @@
 }
 ```
 
+Перегруз замедляет, но не останавливает: множитель скорости `max(0.3, limit/carried)` (линейно от 1.0 на лимите до пола 0.3).
+
 ---
 
 ## Экипировка
@@ -709,3 +711,12 @@
 ## Валюта (золото)
 
 Золото хранится как специальный предмет с slug `"gold_coin"` в инвентаре. Поле `gold` в ответе `getPlayerInventory` — это суммарное количество `gold_coin` в инвентаре для удобства.
+
+---
+
+## Сетовые бонусы (item sets)
+
+Надето N вещей из набора → бонусы набора (`set_bonus` CTE в `get_character_attributes`:
+считает надетые вещи по `item_set_members`, сверяет `pieces_required`).
+Первый набор: **Wayfarer garb** (`worn_old_sword` + `leather_chestguard` + `leather_boots`):
+2 вещи → +3 `physical_attack`, 3 вещи → +2 `crit_chance`.

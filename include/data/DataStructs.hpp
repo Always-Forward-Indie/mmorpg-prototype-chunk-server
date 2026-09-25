@@ -1904,6 +1904,10 @@ struct RequestLearnSkillRequestStruct
     int clientId = 0;
     int npcId = 0;
     std::string skillSlug;
+    // Explicit level-up request (0/absent = fresh learn). Without it a repeat
+    // is already_learned (idempotent: retries never charge twice). With
+    // targetLevel == current+1 (and <= kMaxSkillLevel) the skill levels up.
+    int targetLevel = 0;
     PositionStruct playerPosition;
     TimestampStruct timestamps;
 };

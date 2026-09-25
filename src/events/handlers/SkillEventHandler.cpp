@@ -407,14 +407,33 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
 
         // Build learned-set for validation
         std::unordered_set<std::string> learnedSlugs;
+        int currentSkillLevel = 0;
         for (const auto &s : charData.skills)
-            learnedSlugs.insert(s.skillSlug);
-
-        // Guard: already learned
-        if (learnedSlugs.count(req.skillSlug))
         {
-            sendFailed("already_learned");
-            return;
+            learnedSlugs.insert(s.skillSlug);
+            if (s.skillSlug == req.skillSlug)
+                currentSkillLevel = std::max(currentSkillLevel, s.skillLevel);
+        }
+
+        // Skill levels (max 5, +10% effect/level): an EXPLICIT targetLevel ==
+        // current+1 levels the skill up (SP x newLevel; book + gold were
+        // one-time learning costs). Without targetLevel a repeat stays
+        // already_learned — idempotent, so retries never charge twice.
+        static constexpr int kMaxSkillLevel = 5;
+        const bool isLevelUp = learnedSlugs.count(req.skillSlug) > 0;
+        const int newSkillLevel = isLevelUp ? currentSkillLevel + 1 : 1;
+        if (isLevelUp)
+        {
+            if (req.targetLevel <= currentSkillLevel)
+            {
+                sendFailed("already_learned");
+                return;
+            }
+            if (req.targetLevel != newSkillLevel || newSkillLevel > kMaxSkillLevel)
+            {
+                sendFailed(newSkillLevel > kMaxSkillLevel ? "max_level_reached" : "invalid_level");
+                return;
+            }
         }
 
         // Guard: level requirement
@@ -432,50 +451,53 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
             return;
         }
 
-        // Guard: SP
-        if (charData.freeSkillPoints < entry->spCost)
+        // Guard: SP (level-ups cost spCost x newLevel)
+        const int spPrice = isLevelUp ? entry->spCost * newSkillLevel : entry->spCost;
+        if (charData.freeSkillPoints < spPrice)
         {
             sendFailed("insufficient_sp");
             return;
         }
 
-        // Guard: gold
-        if (entry->goldCost > 0)
+        // Guard: gold + book apply to fresh learns only (one-time costs).
+        if (!isLevelUp)
         {
-            int goldBalance = gameServices_.getInventoryManager().getGoldAmount(req.characterId);
-            if (goldBalance < entry->goldCost)
+            if (entry->goldCost > 0)
             {
-                sendFailed("insufficient_gold");
-                return;
-            }
-        }
-
-        // Guard: skill book
-        if (entry->requiresBook && entry->bookItemId > 0)
-        {
-            const auto &inv = gameServices_.getInventoryManager().getPlayerInventory(req.characterId);
-            bool hasBook = false;
-            for (const auto &slot : inv)
-                if (slot.itemId == entry->bookItemId && slot.quantity > 0)
+                int goldBalance = gameServices_.getInventoryManager().getGoldAmount(req.characterId);
+                if (goldBalance < entry->goldCost)
                 {
-                    hasBook = true;
-                    break;
+                    sendFailed("insufficient_gold");
+                    return;
                 }
-            if (!hasBook)
+            }
+
+            if (entry->requiresBook && entry->bookItemId > 0)
             {
-                sendFailed("missing_skill_book");
-                return;
+                const auto &inv = gameServices_.getInventoryManager().getPlayerInventory(req.characterId);
+                bool hasBook = false;
+                for (const auto &slot : inv)
+                    if (slot.itemId == entry->bookItemId && slot.quantity > 0)
+                    {
+                        hasBook = true;
+                        break;
+                    }
+                if (!hasBook)
+                {
+                    sendFailed("missing_skill_book");
+                    return;
+                }
             }
         }
 
         // ── All checks passed: consume resources ──────────────────────────────────
 
-        // Consume skill book
-        if (entry->requiresBook && entry->bookItemId > 0)
+        // Consume skill book (fresh learns only)
+        if (!isLevelUp && entry->requiresBook && entry->bookItemId > 0)
             gameServices_.getInventoryManager().removeItemFromInventory(req.characterId, entry->bookItemId, 1);
 
-        // Consume gold
-        if (entry->goldCost > 0)
+        // Consume gold (fresh learns only)
+        if (!isLevelUp && entry->goldCost > 0)
         {
             const ItemDataStruct *goldItem =
                 gameServices_.getItemManager().getItemBySlug("gold_coin");
@@ -485,7 +507,7 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         }
 
         // Deduct SP
-        gameServices_.getCharacterManager().modifyFreeSkillPoints(req.characterId, -entry->spCost);
+        gameServices_.getCharacterManager().modifyFreeSkillPoints(req.characterId, -spPrice);
 
         // Queue saveLearnedSkill to game server — game server will respond with
         // setLearnedSkill which calls EventHandler::handleSetLearnedSkillEvent() and
@@ -500,6 +522,7 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         packet["body"]["characterId"] = req.characterId;
         packet["body"]["clientId"] = req.clientId;
         packet["body"]["skillSlug"] = req.skillSlug;
+        packet["body"]["skillLevel"] = newSkillLevel;
         packet["body"]["freeSkillPoints"] =
             gameServices_.getCharacterManager().getCharacterFreeSkillPoints(req.characterId);
         gameServerWorker_.sendDataToGameServer(packet.dump() + "\n");
@@ -513,6 +536,7 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         SkillStruct optimistic;
         optimistic.skillSlug = req.skillSlug;
         optimistic.skillName = entry->skillName;
+        optimistic.skillLevel = newSkillLevel;
         optimistic.isPassive = entry->isPassive;
         gameServices_.getCharacterManager().addCharacterSkill(req.characterId, optimistic);
         gameServices_.getStatsNotificationService().sendStatsUpdate(req.characterId);
@@ -521,6 +545,7 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         notif["type"] = "skill_learned";
         notif["skillSlug"] = req.skillSlug;
         notif["skillName"] = entry->skillName;
+        notif["skillLevel"] = newSkillLevel;
         notif["isPassive"] = entry->isPassive;
         notif["newFreeSkillPoints"] =
             gameServices_.getCharacterManager().getCharacterFreeSkillPoints(req.characterId);

@@ -1326,6 +1326,7 @@ EventDispatcher::handleRequestLearnSkill(const EventContext &context, std::share
         req.clientId = context.clientData.clientId;
         req.npcId = j["body"].value("npcId", 0);
         req.skillSlug = j["body"].value("skillSlug", "");
+        req.targetLevel = j["body"].value("targetLevel", 0);
         req.playerPosition = context.positionData;
         req.timestamps = context.timestamps;
         if (req.skillSlug.empty())

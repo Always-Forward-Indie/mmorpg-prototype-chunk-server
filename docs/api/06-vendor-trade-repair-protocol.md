@@ -431,11 +431,14 @@ cost = ceil(100.0 × 30 / 50) = ceil(60.0) = 60 gold
 
 ### Ошибки ремонта
 
+Проверено по коду (`VendorEventHandler::repairOne`, `handleRepair*Event`): чинит **только** NPC с типом `blacksmith` (в контенте — Varan, id 1); экипировка не требуется.
+
 | Код | Причина |
 |-----|---------|
-| `not_a_blacksmith` | NPC не является кузнецом |
-| `out_of_range` | Далеко от NPC |
-| `item_not_equipped` | Предмет не экипирован |
+| `npc_not_found` | NPC не найден |
+| `not_a_blacksmith` | NPC не кузнец |
+| `out_of_range` | Далеко от NPC (по серверной позиции!) |
+| `item_not_found` | Нет такого слота инвентаря |
 | `not_durable` | Предмет не имеет прочности |
 | `already_full` | Прочность уже максимальная |
 | `insufficient_gold` | Не хватает золота |
