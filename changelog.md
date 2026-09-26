@@ -1,3 +1,17 @@
+v0.2.59
+26.09.2026
+================
+
+Fixes:
+
+**Quest getState truth + despawn uid.**
+- `QuestStore::getPlayerProgressSnapshot` / `QuestManager::
+  getPlayerQuestStates`: admin getState quests[] reads the store
+  (`CharacterDataStruct::quests` was never populated — always `[]`).
+- `champion_despawned` carries `{uid, mobSlug}` (was `{}`).
+
+---
+
 v0.2.58
 26.09.2026
 ================
