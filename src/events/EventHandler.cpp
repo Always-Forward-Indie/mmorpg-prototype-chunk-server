@@ -949,6 +949,12 @@ EventHandler::handleInventoryItemIdSyncEvent(const Event &event)
         log_->info("[INVENTORY_ID_SYNC] char=" + std::to_string(characterId) +
                    " itemId=" + std::to_string(itemId) +
                    " assignedId=" + std::to_string(newId));
+
+        // Flush equip/unequip persists stashed while this row awaited its
+        // id (they now carry the real id assigned above).
+        for (const auto &s : gameServices_.getInventoryManager().drainPendingEquipSaves())
+            equipmentEventHandler_->sendPendingEquipSave(s.characterId, s.action,
+                s.slotSlug, s.inventoryItemId, s.itemId);
     }
     catch (const std::exception &e)
     {

@@ -93,7 +93,9 @@ EquipmentEventHandler::saveEquipmentChange(
     int characterId,
     const std::string &action,
     int inventoryItemId,
-    const std::string &slotSlug)
+    const std::string &slotSlug,
+    int itemId,
+    uint64_t syncToken)
 {
     nlohmann::json pkt;
     pkt["header"]["eventType"] = "saveEquipmentChange";
@@ -103,7 +105,38 @@ EquipmentEventHandler::saveEquipmentChange(
     pkt["body"]["action"] = action;
     pkt["body"]["inventoryItemId"] = inventoryItemId;
     pkt["body"]["equipSlotSlug"] = slotSlug;
+    // Identity for the game-side fallback: a save for a row that still
+    // awaits its DB id (syncToken != 0) is resolved by (character, token)
+    // instead of being silently dropped.
+    pkt["body"]["itemId"] = itemId;
+    pkt["body"]["syncToken"] = syncToken;
     gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+}
+
+void
+EquipmentEventHandler::sendPendingEquipSave(int characterId,
+    const std::string &action, const std::string &slotSlug,
+    int inventoryItemId, int itemId)
+{
+    // Flushed saves always carry real ids (filled at sync time); the token
+    // already served its purpose, so no deferral check is needed here.
+    saveEquipmentChange(characterId, action, inventoryItemId, slotSlug, itemId, 0);
+}
+
+void
+EquipmentEventHandler::persistEquipSave(int characterId,
+    const std::string &action, const std::string &slotSlug,
+    int inventoryItemId, int itemId, uint64_t syncToken)
+{
+    if (syncToken != 0)
+    {
+        // Row has no DB id yet: stashing beats sending — the game drops
+        // id==0 saves silently. Flushed with the real id on the sync echo.
+        gameServices_.getInventoryManager().deferEquipSave(
+            syncToken, characterId, action, slotSlug, itemId);
+        return;
+    }
+    saveEquipmentChange(characterId, action, inventoryItemId, slotSlug, itemId, 0);
 }
 
 void
@@ -171,12 +204,19 @@ EquipmentEventHandler::handleEquipItemEvent(const Event &event)
         }
 
         // ── Persist equip ────────────────────────────────────────────────────
-        saveEquipmentChange(characterId, "equip", req.inventoryItemId, result.equipSlotSlug);
+        // Deferred when the row still awaits its DB id (syncToken != 0):
+        // the game silently drops id==0 saves.
+        persistEquipSave(characterId, "equip", result.equipSlotSlug,
+            req.inventoryItemId, result.itemId, result.syncToken);
 
-        // If a swap-out happened persist unequip too
-        if (result.swappedOutInventoryItemId != 0)
+        // If a swap-out happened persist unequip too (both swap paths now
+        // report identity, including the two-handed off_hand auto-swap that
+        // previously persisted nothing).
+        if (result.swappedOutInventoryItemId != 0 || !result.swappedOutSlotSlug.empty())
         {
-            saveEquipmentChange(characterId, "unequip", result.swappedOutInventoryItemId, result.equipSlotSlug);
+            persistEquipSave(characterId, "unequip", result.swappedOutSlotSlug,
+                result.swappedOutInventoryItemId, result.swappedOutItemTemplateId,
+                result.swappedOutSyncToken);
         }
 
         // ── Trigger attribute refresh ────────────────────────────────────────
@@ -253,7 +293,8 @@ EquipmentEventHandler::handleUnequipItemEvent(const Event &event)
         }
 
         // ── Persist unequip ──────────────────────────────────────────────────
-        saveEquipmentChange(characterId, "unequip", result.inventoryItemId, req.equipSlotSlug);
+        persistEquipSave(characterId, "unequip", req.equipSlotSlug,
+            result.inventoryItemId, result.itemId, result.syncToken);
 
         // ── Trigger attribute refresh ────────────────────────────────────────
         triggerAttributesRefresh(characterId, clientId);

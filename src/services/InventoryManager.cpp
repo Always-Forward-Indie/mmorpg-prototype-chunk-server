@@ -2,7 +2,31 @@
 #include "events/Event.hpp"
 #include "events/EventQueue.hpp"
 #include "services/QuestManager.hpp"
+#include <algorithm>
+#include <random>
 #include <spdlog/logger.h>
+
+namespace
+{
+// Next token: monotonic, random start per process (never the reserved 0).
+// Masked to int63: tokens cross JSON numbers and a pqxx int64 param, and
+// the game keys idempotency on them — sign flips would still work, but
+// staying positive keeps every layer boring.
+uint64_t mintSyncToken(uint64_t &counter, bool &seeded)
+{
+    if (!seeded)
+    {
+        std::random_device rd;
+        counter = ((static_cast<uint64_t>(rd()) << 32) | rd()) & 0x7FFFFFFFFFFFFFFFULL;
+        seeded = true;
+    }
+    do
+    {
+        ++counter;
+    } while (counter == 0);
+    return counter;
+}
+} // namespace
 
 InventoryManager::InventoryManager(ItemManager &itemManager, Logger &logger)
     : itemManager_(itemManager), logger_(logger), eventQueue_(nullptr)
@@ -75,9 +99,7 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
         // pending-sync token now so the game-side inventoryItemIdSync echo
         // can match this exact instance even when several id==0 rows share
         // the same itemId (syncToken 0 is reserved = no pending sync).
-        newItem.syncToken = ++nextSyncToken_;
-        if (newItem.syncToken == 0) // wrapped past 2^64: skip the reserved value
-            newItem.syncToken = ++nextSyncToken_;
+        newItem.syncToken = mintSyncToken(nextSyncToken_, syncTokenSeeded_);
         newItem.syncNextMs = 0; // due immediately if a retry sweep runs first
 
         playerInventories_[characterId].push_back(newItem);
@@ -260,8 +282,16 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
 
     ItemDataStruct itemInfo = itemManager_.getItemById(itemId);
     int remainingToRemove = quantity;
-    int lastInvItemId = 0;
-    int finalQty = 0;
+
+    // Remove from multiple stacks if needed, remembering every touched
+    // stack: each needs its own save packet, otherwise the game only learns
+    // about the last stack and resurrects the others on the next login.
+    struct TouchedStack
+    {
+        int inventoryItemId = 0;
+        int finalQty = 0;
+    };
+    std::vector<TouchedStack> touched;
 
     // Remove from multiple stacks if needed
     for (auto it = inventory.begin(); it != inventory.end() && remainingToRemove > 0; )
@@ -272,18 +302,19 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
             continue;
         }
 
-        lastInvItemId = it->id;
+        const int stackId = it->id;
         int deduct = std::min(it->quantity, remainingToRemove);
         it->quantity -= deduct;
         remainingToRemove -= deduct;
-        finalQty = it->quantity;
 
         if (it->quantity == 0)
         {
+            touched.push_back({stackId, 0});
             it = inventory.erase(it);
         }
         else
         {
+            touched.push_back({stackId, it->quantity});
             ++it;
         }
     }
@@ -295,15 +326,19 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
     // Persist item change to game server DB immediately
     if (saveInventoryCallback_)
     {
-        nlohmann::json savePacket;
-        savePacket["header"]["eventType"] = "saveInventoryChange";
-        savePacket["header"]["clientId"] = 0;
-        savePacket["header"]["hash"] = "";
-        savePacket["body"]["characterId"] = characterId;
-        savePacket["body"]["itemId"] = itemId;
-        savePacket["body"]["quantity"] = finalQty;
-        savePacket["body"]["inventoryItemId"] = lastInvItemId; // >0 = UPDATE by id; 0 = fallback DELETE by itemId
-        saveInventoryCallback_(savePacket.dump() + "\n");
+        for (const auto &t : touched)
+        {
+            nlohmann::json savePacket;
+            savePacket["header"]["eventType"] = "saveInventoryChange";
+            savePacket["header"]["clientId"] = 0;
+            savePacket["header"]["hash"] = "";
+            savePacket["body"]["characterId"] = characterId;
+            savePacket["body"]["itemId"] = itemId;
+            savePacket["body"]["quantity"] = t.finalQty;
+            savePacket["body"]["inventoryItemId"] = t.inventoryItemId; // >0 = by id; 0 = fallback DELETE by itemId
+            savePacket["body"]["syncToken"] = uint64_t(0);
+            saveInventoryCallback_(savePacket.dump() + "\n");
+        }
     }
 
     // Send inventory update event to notify clients
@@ -735,6 +770,10 @@ InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t new
     if (it == playerInventories_.end())
         return;
     bool updated = false;
+    // Whichever token got cleared by this echo owns stashed equip saves:
+    // fill them with the real id now (drained by the caller afterwards).
+    // Covers the mixed-version case too (legacy echo clearing a token).
+    uint64_t clearedToken = 0;
     if (syncToken != 0)
     {
         // Exact-instance match: the sync echo carries the token stamped at
@@ -746,6 +785,7 @@ InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t new
                 item.id = static_cast<int>(newId);
                 item.syncToken = 0;
                 item.syncNextMs = 0;
+                clearedToken = syncToken;
                 log_->info("[INVENTORY] Updated in-memory id for char=" + std::to_string(characterId) +
                            " itemId=" + std::to_string(itemId) + " newId=" + std::to_string(newId));
                 updated = true;
@@ -767,6 +807,7 @@ InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t new
             if (item.itemId == itemId && item.id == 0)
             {
                 item.id = static_cast<int>(newId);
+                clearedToken = item.syncToken;
                 item.syncToken = 0;
                 item.syncNextMs = 0;
                 log_->info("[INVENTORY] Updated in-memory id for char=" + std::to_string(characterId) +
@@ -777,6 +818,13 @@ InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t new
         }
         if (!updated)
             return;
+    }
+    if (clearedToken != 0)
+    {
+        auto pendIt = pendingEquipSaves_.find(clearedToken);
+        if (pendIt != pendingEquipSaves_.end())
+            for (auto &s : pendIt->second)
+                s.inventoryItemId = static_cast<int>(newId);
     }
 
     // Send INVENTORY_UPDATE to client so it learns the correct inventoryItemId.
@@ -794,6 +842,49 @@ InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t new
         lock.unlock();
         eventQueue_->push(std::move(inventoryUpdateEvent));
     }
+}
+
+void
+InventoryManager::deferEquipSave(uint64_t syncToken, int characterId,
+    const std::string &action, const std::string &slotSlug, int itemId)
+{
+    if (syncToken == 0)
+        return;
+    std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
+    PendingEquipSave s;
+    s.characterId = characterId;
+    s.action = action;
+    s.slotSlug = slotSlug;
+    s.inventoryItemId = 0; // filled when the sync echo lands
+    s.itemId = itemId;
+    s.syncToken = syncToken;
+    pendingEquipSaves_[syncToken].push_back(std::move(s));
+}
+
+std::vector<InventoryManager::PendingEquipSave>
+InventoryManager::drainPendingEquipSaves()
+{
+    std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
+    std::vector<PendingEquipSave> out;
+    for (auto &[token, vec] : pendingEquipSaves_)
+    {
+        (void)token;
+        for (auto &s : vec)
+            if (s.inventoryItemId > 0)
+                out.push_back(s);
+    }
+    // Drop flushed buckets; keep still-unsynced ones for the next echo.
+    for (auto it = pendingEquipSaves_.begin(); it != pendingEquipSaves_.end();)
+    {
+        it->second.erase(std::remove_if(it->second.begin(), it->second.end(),
+                             [](const PendingEquipSave &s) { return s.inventoryItemId > 0; }),
+            it->second.end());
+        if (it->second.empty())
+            it = pendingEquipSaves_.erase(it);
+        else
+            ++it;
+    }
+    return out;
 }
 
 int
@@ -819,6 +910,18 @@ InventoryManager::dueSyncResend(int64_t nowMs)
             // was dead). Synced rows (id>0 or token==0) never resend.
             if (item.id != 0 || item.syncToken == 0 || item.syncNextMs > nowMs)
                 continue;
+            ++item.syncAttempts;
+            if (item.syncAttempts > kSyncMaxAttempts)
+            {
+                // Give up: legacy matching takes over. One warn — a row
+                // unsynced for ~5 min means the save path is broken.
+                log_->warn("[INVENTORY] Sync retry budget exhausted for char=" +
+                           std::to_string(item.characterId) + " itemId=" +
+                           std::to_string(item.itemId) + "; clearing token");
+                item.syncToken = 0;
+                item.syncNextMs = 0;
+                continue;
+            }
             item.syncNextMs = nowMs + kSyncRetryMs;
             due.push_back(item);
         }

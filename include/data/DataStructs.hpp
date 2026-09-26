@@ -276,6 +276,9 @@ struct PlayerInventoryItemStruct
     uint64_t syncToken = 0;
     // Next retry deadline (chunk steady-ms) for rows still awaiting their id.
     int64_t syncNextMs = 0;
+    // Sync resend attempts (see dueSyncResend cap): gives up back to the
+    // legacy first-id==0 matching instead of retrying forever.
+    int syncAttempts = 0;
 };
 
 // Item pickup request structure
@@ -1659,6 +1662,9 @@ struct EquipmentSlotItemStruct
     int durabilityMax = 0;
     bool isDurabilityWarning = false;
     bool blockedByTwoHanded = false; // only meaningful on off_hand when empty
+    // Chunk-local id-sync token of the row (0 = synced). Carried so equip /
+    // unequip persists can wait for the DB id instead of being dropped.
+    uint64_t syncToken = 0;
 };
 
 /// In-memory equipment state for one character

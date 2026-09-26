@@ -163,7 +163,35 @@ class InventoryManager
     *        double-counting). nowMs is chunk steady-ms (fake clocks in tests).
     */
     static constexpr int64_t kSyncRetryMs = 5000;
+    // Give-up: ~5 min of unacked retries, then clear the token (legacy
+    // first-id==0 matching takes over). A permanently unsynced row is a
+    // real bug — it deserves one warn, not infinite 5s noise.
+    static constexpr int kSyncMaxAttempts = 60;
     std::vector<PlayerInventoryItemStruct> dueSyncResend(int64_t nowMs);
+
+    /** One deferred equip/unequip persist, flushed once its row syncs. */
+    struct PendingEquipSave
+    {
+        int characterId = 0;
+        std::string action;   // "equip" | "unequip"
+        std::string slotSlug; // equip only ("" for unequip)
+        int inventoryItemId = 0; // real DB id, filled at flush time
+        int itemId = 0;
+        uint64_t syncToken = 0;
+    };
+
+    /**
+    * @brief Stash an equip/unequip persist until its row syncs (no-op when
+    *        syncToken == 0 — caller must send immediately instead).
+    */
+    void deferEquipSave(uint64_t syncToken, int characterId,
+        const std::string &action, const std::string &slotSlug, int itemId);
+
+    /**
+    * @brief Take deferred saves whose rows just synced (clears the queue).
+    *        Called right after updateInventoryItemId; the caller emits them.
+    */
+    std::vector<PendingEquipSave> drainPendingEquipSaves();
 
     /**
      * @brief Get the current gold (gold_coin) amount for a character.
@@ -185,7 +213,16 @@ class InventoryManager
     std::map<int, std::vector<PlayerInventoryItemStruct>> playerInventories_;
 
     // Monotonic pending-sync token source (0 is reserved = no pending sync).
+    // Random start per process: tokens must not collide with a previous
+    // boot's tokens (game keys idempotency on them after the sync_token
+    // migration), same rationale as FactOutbox::bootId_.
     uint64_t nextSyncToken_ = 0;
+    bool syncTokenSeeded_ = false;
+
+    // Equip/unequip persists stashed while their row awaits its DB id,
+    // keyed by the row's syncToken. Flushed with the real id once the
+    // inventoryItemIdSync echo lands (see drainPendingEquipSaves).
+    std::map<uint64_t, std::vector<PendingEquipSave>> pendingEquipSaves_;
 
     // Thread safety
     mutable std::shared_mutex inventoryMutex_;

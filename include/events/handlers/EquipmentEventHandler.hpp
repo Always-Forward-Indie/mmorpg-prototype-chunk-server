@@ -44,7 +44,25 @@ class EquipmentEventHandler : public BaseEventHandler
         int characterId,
         const std::string &action,
         int inventoryItemId,
-        const std::string &slotSlug);
+        const std::string &slotSlug,
+        int itemId,
+        uint64_t syncToken);
+
+  public:
+    /** Emit a previously deferred persist (row synced since). */
+    void sendPendingEquipSave(int characterId,
+        const std::string &action, const std::string &slotSlug,
+        int inventoryItemId, int itemId);
+
+  private:
+    /**
+    * @brief Send now or defer until the row syncs (syncToken != 0).
+    *        Deferred saves flush with the real id on the sync echo —
+    *        the game silently drops id==0 saves, so sending is loss.
+    */
+    void persistEquipSave(int characterId,
+        const std::string &action, const std::string &slotSlug,
+        int inventoryItemId, int itemId, uint64_t syncToken);
 
     /** Ask game server to re-query character attributes (re-applies equip bonuses). */
     void triggerAttributesRefresh(int characterId, int clientId);

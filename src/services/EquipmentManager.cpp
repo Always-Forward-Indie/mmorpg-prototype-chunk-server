@@ -39,6 +39,7 @@ EquipmentManager::slotFromInventoryItem(
     slot.inventoryItemId = invItem.id;
     slot.itemId = invItem.itemId;
     slot.itemSlug = itemData.slug;
+    slot.syncToken = invItem.syncToken;
     slot.durabilityCurrent = invItem.durabilityCurrent;
     slot.durabilityMax = itemData.durabilityMax;
     slot.blockedByTwoHanded = false;
@@ -193,6 +194,10 @@ EquipmentManager::equipItem(int characterId, int inventoryItemId)
         auto offIt = equip.slots.find("off_hand");
         if (offIt != equip.slots.end() && offIt->second.inventoryItemId != 0)
         {
+            result.swappedOutInventoryItemId = offIt->second.inventoryItemId;
+            result.swappedOutItemTemplateId = offIt->second.itemId;
+            result.swappedOutSyncToken = 0;
+            result.swappedOutSlotSlug = "off_hand";
             inventoryManager_.setItemEquipped(characterId, offIt->second.inventoryItemId, false);
             equip.slots.erase(offIt);
             // Note: caller (handler) must persist this swap-out as well
@@ -204,6 +209,9 @@ EquipmentManager::equipItem(int characterId, int inventoryItemId)
     if (existingIt != equip.slots.end() && existingIt->second.inventoryItemId != 0)
     {
         result.swappedOutInventoryItemId = existingIt->second.inventoryItemId;
+        result.swappedOutItemTemplateId = existingIt->second.itemId;
+        result.swappedOutSyncToken = 0;
+        result.swappedOutSlotSlug = targetSlug;
         inventoryManager_.setItemEquipped(characterId, existingIt->second.inventoryItemId, false);
         equip.slots.erase(existingIt);
     }
@@ -219,6 +227,8 @@ EquipmentManager::equipItem(int characterId, int inventoryItemId)
         equip.twoHandedActive = itemData.isTwoHanded;
 
     result.equipSlotSlug = targetSlug;
+    result.itemId = invItem.itemId;
+    result.syncToken = (invItem.id == 0) ? invItem.syncToken : 0;
     log_->info("[EquipmentManager] equipItem: char=" + std::to_string(characterId) +
                " item=" + std::to_string(inventoryItemId) + " slot=" + targetSlug);
     return result;
@@ -239,7 +249,11 @@ EquipmentManager::unequipItem(int characterId, const std::string &slotSlug)
 
     CharacterEquipmentStruct &equip = equipIt->second;
     auto slotIt = equip.slots.find(slotSlug);
-    if (slotIt == equip.slots.end() || slotIt->second.inventoryItemId == 0)
+    // Pending (id==0) rows are real equips awaiting their DB id — only
+    // reject truly empty slots (no row ever placed). The result carries
+    // the token so the handler defers the unequip persist until sync.
+    if (slotIt == equip.slots.end() ||
+        (slotIt->second.inventoryItemId == 0 && slotIt->second.itemId == 0))
     {
         result.error = UnequipError::SLOT_EMPTY;
         return result;
@@ -247,6 +261,8 @@ EquipmentManager::unequipItem(int characterId, const std::string &slotSlug)
 
     result.inventoryItemId = slotIt->second.inventoryItemId;
     result.equipSlotSlug = slotSlug;
+    result.itemId = slotIt->second.itemId;
+    result.syncToken = (slotIt->second.inventoryItemId == 0) ? slotIt->second.syncToken : 0;
 
     inventoryManager_.setItemEquipped(characterId, result.inventoryItemId, false);
     equip.slots.erase(slotIt);

@@ -23,6 +23,10 @@ struct OutboxFact
     int64_t firstMs = 0;
     int64_t nextMs = 0;
     int attempts = 0;
+    // Insertion order: flushes go out oldest-first (per-character FIFO in
+    // practice), so concurrent absolute saves apply in send order instead
+    // of unordered_map order (last-writer-wins window, A5).
+    uint64_t order = 0;
 };
 
 struct OutboxSnapshot
@@ -110,7 +114,7 @@ class FactOutbox
             pending_.erase(oldest);
             ++expired_;
         }
-        pending_.emplace(key, OutboxFact{key, std::move(payload), nowMs, nowMs, 0});
+        pending_.emplace(key, OutboxFact{key, std::move(payload), nowMs, nowMs, 0, ++order_});
         pendingCount_.store(pending_.size(), std::memory_order_relaxed);
     }
 
@@ -126,6 +130,8 @@ class FactOutbox
     }
 
     /// Facts due for (re)send; bumps attempts/nextMs with backoff.
+    /// Returned oldest-first (insertion order), so same-character saves
+    /// apply in send order.
     std::vector<OutboxFact> dueFlush(int64_t nowMs)
     {
         std::vector<OutboxFact> due;
@@ -138,6 +144,8 @@ class FactOutbox
             due.push_back(f);
             ++sent_;
         }
+        std::sort(due.begin(), due.end(),
+            [](const OutboxFact &a, const OutboxFact &b) { return a.order < b.order; });
         return due;
     }
 
@@ -242,6 +250,9 @@ class FactOutbox
     }
 
     uint64_t seq_ = 0;
+    // Insertion-order counter for flush ordering (independent of seq_,
+    // which the handshake advertises and setHighWater fast-forwards).
+    uint64_t order_ = 0;
     std::string bootId_;
     std::unordered_map<std::string, OutboxFact> pending_;
     std::atomic<size_t> pendingCount_{0};

@@ -136,3 +136,33 @@ TEST_F(EquipFixture, CarryWeightLimit)
     chars.replaceCharacterAttributes(1, {a});
     EXPECT_FLOAT_EQ(eq.getCarryWeightLimit(1), 150.0f);
 }
+
+TEST_F(EquipFixture, UnsyncedRowCarriesTokenForDeferral)
+{
+    // Fresh row (id==0, sync echo not yet seen): the result carries the
+    // exact token + template id so the handler defers the persist instead
+    // of sending an id==0 save the game would silently drop.
+    EXPECT_TRUE(inv.addItemToInventory(1, 200, 1));
+    auto r = eq.equipItem(1, 0);
+    EXPECT_EQ(r.error, EquipmentManager::EquipError::NONE);
+    EXPECT_EQ(r.itemId, 200);
+    EXPECT_NE(r.syncToken, 0u);
+    auto u = eq.unequipItem(1, "main_hand");
+    EXPECT_EQ(u.error, EquipmentManager::UnequipError::NONE);
+    EXPECT_EQ(u.itemId, 200);
+    EXPECT_EQ(u.syncToken, r.syncToken);
+}
+
+TEST_F(EquipFixture, TwoHandedOffHandSwapReportsIdentity)
+{
+    // The off_hand auto-swap previously persisted nothing (no identity
+    // reached the handler). Now both swaps report ids for the persist.
+    int sh = giveSynced(202, 14);
+    EXPECT_EQ(eq.equipItem(1, sh).error, EquipmentManager::EquipError::NONE);
+    int gs = giveSynced(201, 13);
+    auto r = eq.equipItem(1, gs);
+    EXPECT_EQ(r.error, EquipmentManager::EquipError::NONE);
+    EXPECT_EQ(r.swappedOutInventoryItemId, sh);
+    EXPECT_EQ(r.swappedOutItemTemplateId, 202);
+    EXPECT_EQ(r.swappedOutSlotSlug, "off_hand");
+}

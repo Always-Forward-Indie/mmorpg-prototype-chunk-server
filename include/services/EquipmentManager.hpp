@@ -50,6 +50,15 @@ class EquipmentManager
         EquipError error = EquipError::NONE;
         std::string equipSlotSlug;
         int swappedOutInventoryItemId = 0; // 0 = slot was empty before equip
+        // Exact row identity for persist decisions (no id==0 lookup races).
+        int itemId = 0;
+        uint64_t syncToken = 0; // !=0: row still awaiting its DB id
+        // Same identity for swapped-out occupants (unequip persist).
+        // Pending (id==0) occupants are overwritten, not swapped (their
+        // equip was never persisted, so no unequip persist is owed).
+        int swappedOutItemTemplateId = 0;
+        uint64_t swappedOutSyncToken = 0; // always 0 (swaps need real ids)
+        std::string swappedOutSlotSlug;
     };
 
     struct UnequipResult
@@ -57,6 +66,8 @@ class EquipmentManager
         UnequipError error = UnequipError::NONE;
         int inventoryItemId = 0; // item that was removed from the slot
         std::string equipSlotSlug;
+        int itemId = 0;
+        uint64_t syncToken = 0; // !=0: row still awaiting its DB id
     };
 
     EquipmentManager(

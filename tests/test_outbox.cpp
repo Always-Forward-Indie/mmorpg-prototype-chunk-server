@@ -160,3 +160,25 @@ TEST(FactOutbox, CrashSimRekeyedResendNeverCollides)
     // And the re-keyed facts are immediately due (convergence, not sleep).
     EXPECT_EQ(after.dueFlush(0).size(), 2u);
 }
+
+TEST(FactOutbox, DueFlushOldestFirst)
+{
+    // Same-character absolute saves must apply in send order: unordered_map
+    // iteration would last-writer-win at random. Insert out of alphabetical
+    // key order to prove ordering comes from insertion, not the map.
+    FactOutbox box;
+    box.store("z-last", "p3", 0);
+    box.store("a-first", "p1", 0);
+    box.store("m-middle", "p2", 0);
+    auto due = box.dueFlush(0);
+    ASSERT_EQ(due.size(), 3u);
+    EXPECT_EQ(due[0].key, "z-last");
+    EXPECT_EQ(due[1].key, "a-first");
+    EXPECT_EQ(due[2].key, "m-middle");
+    // Coalesced re-store keeps its original slot (absolute SET semantics).
+    box.store("a-first", "p1b", 100000);
+    auto due2 = box.dueFlush(100000);
+    ASSERT_EQ(due2.size(), 3u);
+    EXPECT_EQ(due2[0].key, "z-last");
+    EXPECT_EQ(due2[0].payload, "p3");
+}

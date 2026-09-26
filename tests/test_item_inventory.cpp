@@ -244,3 +244,99 @@ TEST_F(ShopFixture, DueSyncResendHonoursDeadline)
     inv.updateInventoryItemId(1, 100, 77, due0[0].syncToken);
     EXPECT_TRUE(inv.dueSyncResend(100000).empty());
 }
+
+TEST_F(ShopFixture, DeferredEquipSaveFlushesOnSync)
+{
+    EXPECT_TRUE(inv.addItemToInventory(1, 200, 1));
+    uint64_t tok = 0;
+    for (const auto &r : inv.getPlayerInventory(1))
+        if (r.itemId == 200 && r.id == 0)
+            tok = r.syncToken;
+    ASSERT_NE(tok, 0u);
+    // Zero token is a no-op (caller sends immediately instead).
+    inv.deferEquipSave(0, 1, "equip", "main_hand", 200);
+    EXPECT_TRUE(inv.drainPendingEquipSaves().empty());
+    inv.deferEquipSave(tok, 1, "equip", "main_hand", 200);
+    // Nothing to emit before the echo (id still unknown).
+    EXPECT_TRUE(inv.drainPendingEquipSaves().empty());
+    inv.updateInventoryItemId(1, 200, 77, tok);
+    auto out = inv.drainPendingEquipSaves();
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].characterId, 1);
+    EXPECT_EQ(out[0].action, "equip");
+    EXPECT_EQ(out[0].inventoryItemId, 77);
+    EXPECT_EQ(out[0].itemId, 200);
+    EXPECT_EQ(out[0].syncToken, tok);
+    // Drained: second call is empty (exactly-once flush).
+    EXPECT_TRUE(inv.drainPendingEquipSaves().empty());
+}
+
+TEST_F(ShopFixture, LegacyEchoAlsoFlushesDeferredSaves)
+{
+    // Mixed-version path: a token-less echo clears the pending row —
+    // stashed saves for its token must still flush with the real id.
+    EXPECT_TRUE(inv.addItemToInventory(1, 100, 5));
+    uint64_t tok = 0;
+    for (const auto &r : inv.getPlayerInventory(1))
+        if (r.itemId == 100 && r.id == 0)
+            tok = r.syncToken;
+    ASSERT_NE(tok, 0u);
+    inv.deferEquipSave(tok, 1, "unequip", "main_hand", 100);
+    inv.updateInventoryItemId(1, 100, 78); // legacy: token 0
+    auto out = inv.drainPendingEquipSaves();
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].inventoryItemId, 78);
+    EXPECT_EQ(out[0].action, "unequip");
+}
+
+TEST_F(ShopFixture, MultiStackRemoveSendsOneSavePerStack)
+{
+    // Two non-stackable instances (separate rows, same template — the A4
+    // shape): removing both must persist EACH row, or the game resurrects
+    // the unreported ones on the next login.
+    PlayerInventoryItemStruct a, b;
+    a.id = 5;
+    a.characterId = 1;
+    a.itemId = 200;
+    a.quantity = 1;
+    b.id = 6;
+    b.characterId = 1;
+    b.itemId = 200;
+    b.quantity = 1;
+    inv.loadPlayerInventory(1, {a, b});
+    std::vector<std::pair<int, int>> sent; // (inventoryItemId, quantity)
+    inv.setSaveInventoryCallback([&sent](const std::string &data)
+        {
+            auto j = nlohmann::json::parse(data);
+            sent.emplace_back(j["body"].value("inventoryItemId", -1),
+                j["body"].value("quantity", -1));
+        });
+    EXPECT_TRUE(inv.removeItemFromInventory(1, 200, 2));
+    ASSERT_EQ(sent.size(), 2u);
+    EXPECT_EQ(sent[0], std::make_pair(5, 0));
+    EXPECT_EQ(sent[1], std::make_pair(6, 0));
+    EXPECT_EQ(inv.getItemQuantity(1, 200), 0);
+}
+
+TEST_F(ShopFixture, SyncRetryGivesUpToLegacyAfterBudget)
+{
+    EXPECT_TRUE(inv.addItemToInventory(1, 100, 5));
+    // Burn the whole retry budget with fake clocks (no sleeping).
+    int64_t nowMs = 0;
+    for (int i = 0; i < InventoryManager::kSyncMaxAttempts; ++i)
+    {
+        auto due = inv.dueSyncResend(nowMs);
+        ASSERT_EQ(due.size(), 1u);
+        nowMs += InventoryManager::kSyncRetryMs;
+    }
+    // One more: budget exhausted -> token cleared, nothing returned.
+    EXPECT_TRUE(inv.dueSyncResend(nowMs).empty());
+    bool cleared = true;
+    for (const auto &r : inv.getPlayerInventory(1))
+        if (r.itemId == 100 && r.id == 0 && r.syncToken != 0)
+            cleared = false;
+    EXPECT_TRUE(cleared);
+    // Row still id==0: legacy first-id==0 echo still heals it.
+    inv.updateInventoryItemId(1, 100, 55);
+    EXPECT_EQ(inv.getPlayerInventory(1)[0].id, 55);
+}
