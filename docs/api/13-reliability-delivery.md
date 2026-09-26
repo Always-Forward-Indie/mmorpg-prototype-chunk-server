@@ -97,5 +97,21 @@ Heartbeat-ack'и поля не несут (иначе чанк reconcile'илс�
 
 - Chunk-crash амнезия: unacked-факты + породившие их in-memory дельты гибнут
   вместе с процессом — reconcile воскрешать не умеет (только convergence proof).
-  Восстановление — регидрация из game-БД при JOIN'е.
+  Восстановление — регидрация из game-БД при JOIN'е. Persistent WAL отклонён
+  сознательно: чанк stateless in-memory без Postgres (смена архитектуры ради
+  5-секундного окна). Пин: `FactOutbox.CrashSimRekeyedResendNeverCollides`
+  (unit) + `contracts/test_crash_reconverge_sim.py` (cross-boot diff,
+  fast-батч).
 - Live e2e retry-proof ботами (рестарт чанка mid-flow → unacked прилетает после реконнекта). Покрыта только идемпотентность, не crash-retry.
+
+## Синхронизация id строк инвентаря (построено, S-батч)
+
+Прямая сторона (`saveInventoryChange`) идёт через outbox надёжно; дыра была
+в обратной — fire-and-forget `inventoryItemIdSync` (game → chunk).
+Закрыта токеном (`syncToken`, эхо чинит ровно свой экземпляр), ретраем
+(`dueSyncResend` + `scheduler.inv_sync_retry_ms`, миграция 095),
+абсолютным upsert'ом game-стороны и max-wins JOIN-аудитом
+(`loadPlayerInventory`). Пины: unit (`ShopFixture.*Sync*`, `*Load*`) +
+`contracts/test_inventory_sync_sim.py` (fast). Открыто из того же семейства:
+equip с `inventoryItemId==0` game молча дропает; ordered refresh чинён для
+equip (внутри хендлера), для durability — следующим заходом.

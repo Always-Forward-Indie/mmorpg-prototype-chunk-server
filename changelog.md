@@ -1,3 +1,24 @@
+v0.2.57
+26.09.2026
+================
+
+New:
+
+**Inventory id-sync convergence (S-batch).**
+- `PlayerInventoryItemStruct::{syncToken,syncNextMs}`: save stamps the
+  token, `updateInventoryItemId` matches it exactly (legacy first-id==0
+  fallback kept), `dueSyncResend(nowMs)` re-emits missing echoes on the
+  `scheduler.inv_sync_retry_ms` sweep (5s, migration 095).
+- `loadPlayerInventory` merges pending rows max-wins (JOIN audit).
+- Refresh handler emits `sendStatsUpdate` after applying recomputed
+  attributes (set/durability bonuses reached clients only incidentally).
+- `MovementValidation::overweightFactor` pure (handler feeds it).
+- Unit pins: token disambiguation, retry deadlines, JOIN merge cases,
+  crash-sim rekey, overweight floor, harvest 50u leash, loot reservation,
+  per-entry respawn gate.
+
+---
+
 v0.2.56
 24.09.2026
 ================
