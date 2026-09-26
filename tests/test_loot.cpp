@@ -140,3 +140,26 @@ TEST_F(LootFixture, CleanupOldDrops)
     loot.cleanupOldDroppedItems(0); // everything is older than 0s
     EXPECT_TRUE(loot.getAllDroppedItems().empty());
 }
+
+TEST_F(LootFixture, MobDropReservedForKiller)
+{
+    items.setMobLootInfo({lootEntry(7, 100, 1.0f, 2)});
+    auto drops = loot.generateLootOnMobDeath(7, 1, pos(10, 20), 5);
+    ASSERT_EQ(drops.size(), 1u);
+    // Killer id stamped at generation (30s reservation window).
+    EXPECT_EQ(drops[0].reservedForCharacterId, 5);
+    // Stranger is rejected while the reservation is active...
+    EXPECT_FALSE(loot.pickupDroppedItem(drops[0].uid, 6, pos(10, 20)));
+    EXPECT_NE(loot.getDroppedItemByUID(drops[0].uid).uid, 0); // still there
+    // ...killer picks up fine.
+    EXPECT_TRUE(loot.pickupDroppedItem(drops[0].uid, 5, pos(10, 20)));
+    EXPECT_EQ(inv.getItemQuantity(5, 100), 2);
+}
+
+TEST_F(LootFixture, PlayerDropHasNoReservation)
+{
+    DroppedItemStruct d = loot.dropItemByPlayer(1, 0, 100, 1, pos(0, 0));
+    ASSERT_NE(d.uid, 0);
+    EXPECT_EQ(d.reservedForCharacterId, 0);
+    EXPECT_TRUE(loot.pickupDroppedItem(d.uid, 999, pos(0, 0)));
+}

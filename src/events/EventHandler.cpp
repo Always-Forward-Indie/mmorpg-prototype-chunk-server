@@ -1035,6 +1035,12 @@ EventHandler::handleSetCharacterAttributesRefreshEvent(const Event &event)
                                           " refreshed attributes to clientId=" + std::to_string(clientId) +
                                           " (characterId=" + std::to_string(characterId) + ")",
             GREEN);
+
+        // The recomputed base values change effective stats (equip/set
+        // bonuses, durability tiers): push a fresh stats_update so the
+        // client (and its UI) learns the new effective values promptly
+        // instead of waiting for the next incidental stats trigger.
+        gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
     }
     catch (const std::exception &e)
     {

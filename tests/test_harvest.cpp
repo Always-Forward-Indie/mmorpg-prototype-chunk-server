@@ -75,6 +75,22 @@ TEST_F(HarvestFixture, StartCancelHarvestState)
     harvest.cancelHarvest(1, "idempotent"); // must not crash
 }
 
+TEST_F(HarvestFixture, CancelIfMovedBeyondKillsOnlyPastLeash)
+{
+    EXPECT_TRUE(harvest.startHarvest(1, 1001, pos(500, 500)));
+    // Small steps inside the 50u leash: harvest survives.
+    EXPECT_FALSE(harvest.cancelIfMovedBeyond(1, pos(520, 500)));
+    EXPECT_TRUE(harvest.isCharacterHarvesting(1));
+    EXPECT_FALSE(harvest.cancelIfMovedBeyond(1, pos(500, 549)));
+    EXPECT_TRUE(harvest.isCharacterHarvesting(1));
+    // A step past the leash cancels with moved_too_far semantics.
+    EXPECT_TRUE(harvest.cancelIfMovedBeyond(1, pos(600, 500)));
+    EXPECT_FALSE(harvest.isCharacterHarvesting(1));
+    // No active harvest: no-op, never crashes.
+    EXPECT_FALSE(harvest.cancelIfMovedBeyond(1, pos(99999, 99999)));
+    EXPECT_FALSE(harvest.cancelIfMovedBeyond(424242, pos(500, 500)));
+}
+
 TEST_F(HarvestFixture, StartHarvestFailsWhenInvalid)
 {
     EXPECT_FALSE(harvest.startHarvest(1, 424242, pos(500, 500))); // no corpse
