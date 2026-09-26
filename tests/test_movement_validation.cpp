@@ -116,3 +116,15 @@ TEST(MovementValidation, WindowWrapsAroundRingHead)
     v = MovementValidation::checkWindow(w, 5, 3, 5, pos(10.0f, 0.0f), 1000, 40.0f, 1.0f);
     EXPECT_FALSE(v.passed);
 }
+
+TEST(MovementValidation, OverweightFactorFloorsAtPointThree)
+{
+    EXPECT_FLOAT_EQ(MovementValidation::overweightFactor(50.0f, 100.0f), 1.0f);
+    EXPECT_FLOAT_EQ(MovementValidation::overweightFactor(100.0f, 100.0f), 1.0f);
+    EXPECT_FLOAT_EQ(MovementValidation::overweightFactor(200.0f, 100.0f), 0.5f);
+    EXPECT_FLOAT_EQ(MovementValidation::overweightFactor(1000.0f, 100.0f), 0.3f);
+    EXPECT_FLOAT_EQ(MovementValidation::overweightFactor(10000.0f, 100.0f), 0.3f);
+    // Degenerate limits never slow (and never divide by zero).
+    EXPECT_FLOAT_EQ(MovementValidation::overweightFactor(500.0f, 0.0f), 1.0f);
+    EXPECT_FLOAT_EQ(MovementValidation::overweightFactor(500.0f, -5.0f), 1.0f);
+}

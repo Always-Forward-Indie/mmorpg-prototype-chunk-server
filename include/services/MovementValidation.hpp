@@ -65,6 +65,17 @@ struct MovementValidation
         return moveSpeedUnits * (effectiveDelta / 1000.0f) * speedBuffer;
     }
 
+    // Overweight slow factor: 1.0 at/below the limit, linear down to a 0.3
+    // floor (a full pack slows to a crawl but never roots the character).
+    // Pure: unit-tested here; the move handler only feeds it manager values.
+    static float overweightFactor(float carried, float limit)
+    {
+        if (limit <= 0.0f || carried <= limit)
+            return 1.0f;
+        const float f = limit / carried;
+        return (f < 0.3f) ? 0.3f : f;
+    }
+
     struct WindowVerdict
     {
         bool passed = false;

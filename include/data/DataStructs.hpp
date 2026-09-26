@@ -4,6 +4,7 @@
 #include <boost/asio.hpp>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -268,6 +269,13 @@ struct PlayerInventoryItemStruct
     int durabilityCurrent = 0; // 0 = not applicable / full
     bool isEquipped = false;   // true when in character_equipment table
     int killCount = 0;         // Item Soul: accumulated kills with this weapon instance
+    // Chunk-local id-sync tracking (never serialized to client/DB):
+    // syncToken stamps the saveInventoryChange that created this row so the
+    // game-side inventoryItemIdSync echo can match the exact instance when
+    // several rows share the same itemId (0 = synced / DB-owned, no retry).
+    uint64_t syncToken = 0;
+    // Next retry deadline (chunk steady-ms) for rows still awaiting their id.
+    int64_t syncNextMs = 0;
 };
 
 // Item pickup request structure

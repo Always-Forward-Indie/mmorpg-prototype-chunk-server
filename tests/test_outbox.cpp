@@ -136,3 +136,27 @@ TEST(FactOutbox, PokeReschedulesOnlyKnown)
     box.poke({"known", "unknown"}, 1000); // unknown ignored
     EXPECT_EQ(box.dueFlush(1000).size(), 1u); // known resent now
 }
+
+TEST(FactOutbox, CrashSimRekeyedResendNeverCollides)
+{
+    // Simulates a chunk crash WITHOUT a WAL: the process dies with its
+    // pending map; only the flushed payloads (captured here via dueFlush)
+    // survive. A fresh instance (new bootId) re-keys them. Keys must differ
+    // (no false dedup game-side = no LOSS), payloads stay identical.
+    FactOutbox before;
+    before.store(before.assignKey(7, "saveReputation"), "{\"delta\":3}", 0);
+    before.store(before.assignKey(7, "saveReputation"), "{\"delta\":5}", 0);
+    auto flushed = before.dueFlush(0);
+    ASSERT_EQ(flushed.size(), 2u);
+    // Crash: `before` is gone. New boot, same payloads, fresh keys.
+    FactOutbox after;
+    EXPECT_NE(after.bootId(), before.bootId());
+    std::vector<std::string> newKeys;
+    for (auto &f : flushed)
+        newKeys.push_back(after.enqueue(7, "saveReputation", f.payload, 0));
+    EXPECT_NE(newKeys[0], flushed[0].key);
+    EXPECT_NE(newKeys[1], flushed[1].key);
+    EXPECT_NE(newKeys[0], newKeys[1]);
+    // And the re-keyed facts are immediately due (convergence, not sleep).
+    EXPECT_EQ(after.dueFlush(0).size(), 2u);
+}

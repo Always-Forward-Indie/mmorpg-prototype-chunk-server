@@ -148,10 +148,22 @@ class InventoryManager
     float getTotalWeight(int characterId) const;
 
     /**
-     * @brief Update the in-memory DB row ID for an inventory item after server-side upsert.
-     *        Called when the game server responds with the assigned player_inventory.id.
-     */
-    void updateInventoryItemId(int characterId, int itemId, int64_t newId);
+    * @brief Update the in-memory DB row ID for an inventory item after server-side upsert.
+    *        Called when the game server responds with the assigned player_inventory.id.
+    *        When syncToken != 0 the entry carrying that exact token is fixed
+    *        (disambiguates several id==0 rows with the same itemId); 0 keeps
+    *        the legacy first-id==0 fallback for token-less echoes.
+    */
+    void updateInventoryItemId(int characterId, int itemId, int64_t newId, uint64_t syncToken = 0);
+
+    /**
+    * @brief Rows still awaiting their DB id whose retry deadline has passed.
+    *        The caller re-emits saveInventoryChange with the SAME syncToken
+    *        (game-side upsert is absolute-SET, so resends converge instead of
+    *        double-counting). nowMs is chunk steady-ms (fake clocks in tests).
+    */
+    static constexpr int64_t kSyncRetryMs = 5000;
+    std::vector<PlayerInventoryItemStruct> dueSyncResend(int64_t nowMs);
 
     /**
      * @brief Get the current gold (gold_coin) amount for a character.
@@ -171,6 +183,9 @@ class InventoryManager
 
     // Store inventories (characterId -> vector of inventory items)
     std::map<int, std::vector<PlayerInventoryItemStruct>> playerInventories_;
+
+    // Monotonic pending-sync token source (0 is reserved = no pending sync).
+    uint64_t nextSyncToken_ = 0;
 
     // Thread safety
     mutable std::shared_mutex inventoryMutex_;

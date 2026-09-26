@@ -938,11 +938,13 @@ EventHandler::handleInventoryItemIdSyncEvent(const Event &event)
         int characterId = j.value("characterId", 0);
         int itemId = j.value("itemId", 0);
         int64_t newId = j.value("inventoryItemId", (int64_t)0);
+        // Pending-sync token echo (0 = token-less legacy packet -> fallback).
+        uint64_t syncToken = j.value("syncToken", (uint64_t)0);
 
         if (characterId <= 0 || itemId <= 0 || newId <= 0)
             return;
 
-        gameServices_.getInventoryManager().updateInventoryItemId(characterId, itemId, newId);
+        gameServices_.getInventoryManager().updateInventoryItemId(characterId, itemId, newId, syncToken);
 
         log_->info("[INVENTORY_ID_SYNC] char=" + std::to_string(characterId) +
                    " itemId=" + std::to_string(itemId) +

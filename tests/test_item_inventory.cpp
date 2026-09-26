@@ -148,15 +148,99 @@ TEST_F(ShopFixture, TotalWeight)
     EXPECT_DOUBLE_EQ(inv.getTotalWeight(1), 51.0);
 }
 
-TEST_F(ShopFixture, LoadReplacesInventory)
+TEST_F(ShopFixture, LoadReplacesSyncedRows)
 {
+    // Synced rows (real DB ids) are replaced by the push wholesale.
     EXPECT_TRUE(inv.addItemToInventory(1, 100, 5));
+    EXPECT_EQ(syncRowId(inv, 1, 100, 7), 7);
     PlayerInventoryItemStruct row;
-    row.id = 7;
+    row.id = 9;
     row.characterId = 1;
     row.itemId = 200;
     row.quantity = 1;
     inv.loadPlayerInventory(1, {row});
     EXPECT_EQ(inv.getItemQuantity(1, 100), 0);
     EXPECT_EQ(inv.getItemQuantity(1, 200), 1);
+}
+
+TEST_F(ShopFixture, LoadPreservesPendingSyncRows)
+{
+    // JOIN audit: a row still awaiting its id echo (save in flight) survives
+    // the DB push instead of vanishing until the next mutation.
+    EXPECT_TRUE(inv.addItemToInventory(1, 100, 5)); // id==0, token stamped
+    PlayerInventoryItemStruct sword;
+    sword.id = 7;
+    sword.characterId = 1;
+    sword.itemId = 200;
+    sword.quantity = 1;
+    inv.loadPlayerInventory(1, {sword});
+    EXPECT_EQ(inv.getItemQuantity(1, 100), 5); // pending kept
+    EXPECT_EQ(inv.getItemQuantity(1, 200), 1);
+    EXPECT_EQ(rowId(inv, 1, 100), 0); // still awaiting sync
+}
+
+TEST_F(ShopFixture, LoadAbsorbsPendingWhenDbIsNewer)
+{
+    // Max-wins: the push already contains the picked-up quantity (save
+    // applied before the push) -> pending folds into the DB row, no double.
+    EXPECT_TRUE(inv.addItemToInventory(1, 100, 5)); // id==0, token stamped
+    PlayerInventoryItemStruct dbRow;
+    dbRow.id = 42;
+    dbRow.characterId = 1;
+    dbRow.itemId = 100;
+    dbRow.quantity = 5;
+    inv.loadPlayerInventory(1, {dbRow});
+    EXPECT_EQ(inv.getItemQuantity(1, 100), 5); // not 10
+    EXPECT_EQ(rowId(inv, 1, 100), 42);         // DB id wins
+    EXPECT_TRUE(inv.dueSyncResend(0).empty()); // nothing left to retry
+}
+
+TEST_F(ShopFixture, SyncTokenDisambiguatesIdenticalPendings)
+{
+    // Two pending rows with the same itemId: the echo fixes exactly its own.
+    ItemDataStruct herb = makeItem(300, "bitter_herb", 1); // non-stackable
+    items.setItemsList({makeItem(999, "gold_coin", 1000000),
+        makeItem(100, "health_potion", 64),
+        makeItem(200, "iron_sword", 1), herb});
+    EXPECT_TRUE(inv.addItemToInventory(1, 300, 1));
+    EXPECT_TRUE(inv.addItemToInventory(1, 300, 1));
+    uint64_t first = 0;
+    for (const auto &r : inv.getPlayerInventory(1))
+        if (r.itemId == 300 && r.id == 0)
+        {
+            first = r.syncToken;
+            break;
+        }
+    ASSERT_NE(first, 0u);
+    inv.updateInventoryItemId(1, 300, 101, first);
+    int synced = 0, pending = 0;
+    for (const auto &r : inv.getPlayerInventory(1))
+        if (r.itemId == 300)
+        {
+            if (r.id == 101)
+                ++synced;
+            else if (r.id == 0)
+                ++pending;
+        }
+    EXPECT_EQ(synced, 1);
+    EXPECT_EQ(pending, 1);
+    // Stale echo for the same token is now a no-op (already synced).
+    inv.updateInventoryItemId(1, 300, 999, first);
+    EXPECT_EQ(rowId(inv, 1, 300), 101);
+}
+
+TEST_F(ShopFixture, DueSyncResendHonoursDeadline)
+{
+    EXPECT_TRUE(inv.addItemToInventory(1, 100, 5)); // syncNextMs == 0: due now
+    auto due0 = inv.dueSyncResend(0);
+    ASSERT_EQ(due0.size(), 1u);
+    EXPECT_EQ(due0[0].itemId, 100);
+    EXPECT_EQ(due0[0].quantity, 5);
+    EXPECT_NE(due0[0].syncToken, 0u);
+    // Next deadline pushed by kSyncRetryMs: silent until then, due after.
+    EXPECT_TRUE(inv.dueSyncResend(4999).empty());
+    EXPECT_EQ(inv.dueSyncResend(5000).size(), 1u);
+    // Syncing clears the row from the retry set.
+    inv.updateInventoryItemId(1, 100, 77, due0[0].syncToken);
+    EXPECT_TRUE(inv.dueSyncResend(100000).empty());
 }

@@ -735,16 +735,15 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                         moveSpeedUnits);
 
                     const float speedBuffer = gameServices_.getGameConfigService().getFloat("movement.speed_buffer_multiplier", 1.3f);
-                    // Overweight slows but never stops: linear factor from
-                    // 1.0 at the limit down to a 0.3 floor (no full stop).
+                    // Overweight slows but never stops (pure math in
+                    // MovementValidation::overweightFactor, unit-tested).
                     float overweightFactor = 1.0f;
                     {
                         const float carried =
                             gameServices_.getInventoryManager().getTotalWeight(movementData.characterId);
                         const float limit =
                             gameServices_.getEquipmentManager().getCarryWeightLimit(movementData.characterId);
-                        if (limit > 0.0f && carried > limit)
-                            overweightFactor = std::max(0.3f, limit / carried);
+                        overweightFactor = MovementValidation::overweightFactor(carried, limit);
                     }
                     const float maxDist = MovementValidation::maxDistanceFor(
                         moveSpeedUnits * overweightFactor, deltaMs, speedBuffer);

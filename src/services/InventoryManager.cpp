@@ -71,7 +71,14 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
         newItem.characterId = characterId;
         newItem.itemId = itemId;
         newItem.quantity = quantity;
-        // ID will be set when syncing with database later
+        // ID will be set when syncing with database later. Stamp a
+        // pending-sync token now so the game-side inventoryItemIdSync echo
+        // can match this exact instance even when several id==0 rows share
+        // the same itemId (syncToken 0 is reserved = no pending sync).
+        newItem.syncToken = ++nextSyncToken_;
+        if (newItem.syncToken == 0) // wrapped past 2^64: skip the reserved value
+            newItem.syncToken = ++nextSyncToken_;
+        newItem.syncNextMs = 0; // due immediately if a retry sweep runs first
 
         playerInventories_[characterId].push_back(newItem);
         // Re-find itemIt — push_back may invalidate iterators, so locate the
@@ -97,6 +104,9 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
             savePacket["body"]["itemId"] = itemId;
             savePacket["body"]["quantity"] = itemIt->quantity;
             savePacket["body"]["inventoryItemId"] = itemIt->id; // 0 = new row (INSERT), >0 = UPDATE
+            // Pending-sync token: game echoes it in inventoryItemIdSync so
+            // the reply matches this exact instance (0 = synced, no echo).
+            savePacket["body"]["syncToken"] = itemIt->syncToken;
             saveInventoryCallback_(savePacket.dump() + "\n");
         }
     }
@@ -481,7 +491,40 @@ void
 InventoryManager::loadPlayerInventory(int characterId, const std::vector<PlayerInventoryItemStruct> &items)
 {
     std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
+    // JOIN audit (convergence): keep in-memory rows still awaiting their DB
+    // id (save in flight, sync echo not yet seen). A blind replace would drop
+    // a just-picked-up item until some later mutation re-sends it.
+    std::vector<PlayerInventoryItemStruct> pending;
+    auto memIt = playerInventories_.find(characterId);
+    if (memIt != playerInventories_.end())
+        for (const auto &row : memIt->second)
+            if (row.id == 0 && row.syncToken != 0)
+                pending.push_back(row);
     playerInventories_[characterId] = items;
+    auto &inv = playerInventories_[characterId];
+    for (auto &p : pending)
+    {
+        // Max-wins: memory holds the newest absolute quantity; the DB push
+        // may predate the in-flight save. Never sum (that double-counts).
+        // Non-stackable instances are never absorbed (each is a new row).
+        ItemDataStruct info = itemManager_.getItemById(p.itemId);
+        const bool canStack = (info.id != 0 && info.stackMax > 1);
+        bool absorbed = false;
+        if (canStack)
+        {
+            for (auto &row : inv)
+            {
+                if (row.itemId != p.itemId || row.id == 0)
+                    continue;
+                if (row.quantity < p.quantity)
+                    row.quantity = p.quantity;
+                absorbed = true;
+                break; // (character_id, item_id) is unique in DB: one row max
+            }
+        }
+        if (!absorbed)
+            inv.push_back(std::move(p));
+    }
     consolidateInventory(characterId);
     log_->info("[INVENTORY] Loaded " + std::to_string(items.size()) +
                " items from DB for character " + std::to_string(characterId));
@@ -685,30 +728,56 @@ InventoryManager::getTotalWeight(int characterId) const
 }
 
 void
-InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t newId)
+InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t newId, uint64_t syncToken)
 {
     std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
     auto it = playerInventories_.find(characterId);
     if (it == playerInventories_.end())
         return;
     bool updated = false;
-    for (auto &item : it->second)
+    if (syncToken != 0)
     {
-        // Only update items with placeholder id==0 (awaiting DB sync).
-        // Non-stackable items (stackMax=1) can have multiple entries per
-        // template itemId; the sync always corresponds to the most recently
-        // inserted row, which still has id==0.
-        if (item.itemId == itemId && item.id == 0)
+        // Exact-instance match: the sync echo carries the token stamped at
+        // pickup, so two pending rows with the same itemId never cross.
+        for (auto &item : it->second)
         {
-            item.id = static_cast<int>(newId);
-            updated = true;
-            log_->info("[INVENTORY] Updated in-memory id for char=" + std::to_string(characterId) +
-                       " itemId=" + std::to_string(itemId) + " newId=" + std::to_string(newId));
-            break;
+            if (item.itemId == itemId && item.id == 0 && item.syncToken == syncToken)
+            {
+                item.id = static_cast<int>(newId);
+                item.syncToken = 0;
+                item.syncNextMs = 0;
+                log_->info("[INVENTORY] Updated in-memory id for char=" + std::to_string(characterId) +
+                           " itemId=" + std::to_string(itemId) + " newId=" + std::to_string(newId));
+                updated = true;
+                break;
+            }
         }
+        if (!updated)
+            return; // stale/duplicate echo for an already-synced row: ignore
     }
-    if (!updated)
-        return;
+    else
+    {
+        for (auto &item : it->second)
+        {
+            // Legacy token-less echo: only update items with placeholder
+            // id==0 (awaiting DB sync). Non-stackable items (stackMax=1) can
+            // have multiple entries per template itemId; the sync always
+            // corresponds to the most recently inserted row, which still
+            // has id==0.
+            if (item.itemId == itemId && item.id == 0)
+            {
+                item.id = static_cast<int>(newId);
+                item.syncToken = 0;
+                item.syncNextMs = 0;
+                log_->info("[INVENTORY] Updated in-memory id for char=" + std::to_string(characterId) +
+                           " itemId=" + std::to_string(itemId) + " newId=" + std::to_string(newId));
+                updated = true;
+                break;
+            }
+        }
+        if (!updated)
+            return;
+    }
 
     // Send INVENTORY_UPDATE to client so it learns the correct inventoryItemId.
     // Without this, the client retains the placeholder id=0 and equip/lookup
@@ -734,4 +803,25 @@ InventoryManager::getGoldAmount(int characterId) const
     if (!goldItem)
         return 0;
     return getItemQuantity(characterId, goldItem->id);
+}
+
+std::vector<PlayerInventoryItemStruct>
+InventoryManager::dueSyncResend(int64_t nowMs)
+{
+    std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
+    std::vector<PlayerInventoryItemStruct> due;
+    for (auto &[characterId, inv] : playerInventories_)
+    {
+        (void)characterId;
+        for (auto &item : inv)
+        {
+            // Only rows still awaiting their DB id (sync echo lost or socket
+            // was dead). Synced rows (id>0 or token==0) never resend.
+            if (item.id != 0 || item.syncToken == 0 || item.syncNextMs > nowMs)
+                continue;
+            item.syncNextMs = nowMs + kSyncRetryMs;
+            due.push_back(item);
+        }
+    }
+    return due;
 }

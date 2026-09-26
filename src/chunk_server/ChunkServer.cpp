@@ -1517,6 +1517,45 @@ ChunkServer::mainEventLoopCH()
     );
     scheduler_.scheduleTask(vendorRestockTask);
 
+    // Inventory id-sync retry: rows still carrying a pending syncToken missed
+    // their inventoryItemIdSync echo (dead link at save time). Re-emit the
+    // save with the SAME token and latest absolute quantity — the game-side
+    // upsert is absolute-SET, so resends converge instead of double-counting
+    // (fault-injection friendly: dueSyncResend takes fake clocks in tests).
+    Task invSyncRetryTask(
+        [this]
+        {
+            try
+            {
+                const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                                              .count();
+                for (const auto &row :
+                    gameServices_.getInventoryManager().dueSyncResend(nowMs))
+                {
+                    nlohmann::json pkt;
+                    pkt["header"]["eventType"] = "saveInventoryChange";
+                    pkt["header"]["clientId"] = 0;
+                    pkt["header"]["hash"] = "";
+                    pkt["body"]["characterId"] = row.characterId;
+                    pkt["body"]["itemId"] = row.itemId;
+                    pkt["body"]["quantity"] = row.quantity;
+                    pkt["body"]["inventoryItemId"] = 0; // id still unknown
+                    pkt["body"]["syncToken"] = row.syncToken;
+                    gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+                }
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError("[Scheduler] invSyncRetry error: " + std::string(ex.what()));
+            }
+        },
+        schedMs("scheduler.inv_sync_retry_ms", 5000),
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(5 * 1000),
+        29 // unique task ID
+    );
+    scheduler_.scheduleTask(invSyncRetryTask);
+
     // Ping timeout task: disconnect clients that haven't sent a ping for >30 seconds.
     // Catches crashed clients that never sent a clean TCP RST/EOF.
     Task pingTimeoutTask(
