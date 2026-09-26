@@ -150,6 +150,23 @@ QuestStore::getQuestStateBySlug(int characterId, const std::string &questSlug) c
     return questIt->second.state;
 }
 
+std::vector<PlayerQuestProgressStruct>
+QuestStore::getPlayerProgressSnapshot(int characterId) const
+{
+    std::vector<PlayerQuestProgressStruct> out;
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto charIt = playerProgress_.find(characterId);
+    if (charIt == playerProgress_.end())
+        return out;
+    out.reserve(charIt->second.size());
+    for (const auto &[questId, pq] : charIt->second)
+    {
+        (void)questId;
+        out.push_back(pq);
+    }
+    return out;
+}
+
 // =============================================================================
 // Quest logic
 // =============================================================================

@@ -2349,7 +2349,9 @@ EventDispatcher::handleAdminCommand(const EventContext &context, std::shared_ptr
         out["inventory"] = items;
         out["gold"] = invMgr.getGoldAmount(targetId);
         nlohmann::json quests = nlohmann::json::array();
-        for (const auto &q : ch.quests)
+        // Progress truth lives in QuestStore (CharacterDataStruct::quests is
+        // never populated — reading it here returned [] forever).
+        for (const auto &q : gameServices_.getQuestManager().getPlayerQuestStates(targetId))
             quests.push_back({{"questSlug", q.questSlug}, {"state", q.state}, {"currentStep", q.currentStep}});
         out["quests"] = quests;
         nlohmann::json flags = nlohmann::json::array();
@@ -2553,6 +2555,22 @@ EventDispatcher::handleAdminCommand(const EventContext &context, std::shared_ptr
         }
         out["scope"] = scope;
         out["culled"] = culled;
+    }
+    else if (op == "reloadWorldContent")
+    {
+        // Test precondition without restarts: ask game to re-push the
+        // live-editable catalog slices (vendors, world objects, dialogues,
+        // quests, timed templates) on the current link. Chunk handlers
+        // merge by id/slug (same as reconnect re-push). Accepted here;
+        // the caller polls for the content (pushes are async). Between-
+        // tests only: vendor runtime stock and WIO ephemeral states reset
+        // to DB content on every reload.
+        nlohmann::json req;
+        req["header"]["eventType"] = "requestCatalogReload";
+        req["header"]["id"] = 1;
+        req["body"] = nlohmann::json::object();
+        chunkServer_->sendToGameServer(req.dump() + "\n");
+        out["requested"] = true;
     }
 
     out["ok"] = true;

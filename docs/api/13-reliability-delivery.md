@@ -112,6 +112,8 @@ Heartbeat-ack'и поля не несут (иначе чанк reconcile'илс�
 (`dueSyncResend` + `scheduler.inv_sync_retry_ms`, миграция 095),
 абсолютным upsert'ом game-стороны и max-wins JOIN-аудитом
 (`loadPlayerInventory`). Пины: unit (`ShopFixture.*Sync*`, `*Load*`) +
-`contracts/test_inventory_sync_sim.py` (fast). Открыто из того же семейства:
-equip с `inventoryItemId==0` game молча дропает; ordered refresh чинён для
-equip (внутри хендлера), для durability — следующим заходом.
+  `contracts/test_inventory_sync_sim.py` (fast). A-batch (096) закрыл
+  остаток: equip/unequip для id==0 строк деферятся до sync echo (game
+  добивает по токену); строки владеют токеном, template-pair unique снят;
+  мультистек-remove шлёт сейв на стек; flush oldest-first; ретрай с
+  потолком 60. Ordered refresh чинён и для durability (внутри persist).

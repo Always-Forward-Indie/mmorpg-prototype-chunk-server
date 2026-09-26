@@ -102,6 +102,12 @@ QuestManager::fillQuestContext(int characterId, PlayerContextStruct &ctx) const
     store_.fillQuestContext(characterId, ctx);
 }
 
+std::vector<PlayerQuestProgressStruct>
+QuestManager::getPlayerQuestStates(int characterId) const
+{
+    return store_.getPlayerProgressSnapshot(characterId);
+}
+
 std::string
 QuestManager::getQuestStateBySlug(int characterId, const std::string &questSlug) const
 {

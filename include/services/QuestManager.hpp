@@ -59,6 +59,11 @@ class QuestManager
      */
     void fillQuestContext(int characterId, PlayerContextStruct &ctx) const;
 
+    /**
+     * @brief Snapshot of all progress rows for a character (admin getState).
+     */
+    std::vector<PlayerQuestProgressStruct> getPlayerQuestStates(int characterId) const;
+
     // === Quest logic ===
 
     /**

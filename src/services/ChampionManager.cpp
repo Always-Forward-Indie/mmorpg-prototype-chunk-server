@@ -469,7 +469,8 @@ ChampionManager::checkDespawnedChampions()
         if (now >= it->despawnAt)
         {
             mobInstances_.unregisterMobInstance(it->uid);
-            broadcastToGameZone(it->gameZoneId, "champion_despawned", nlohmann::json::object());
+            broadcastToGameZone(it->gameZoneId, "champion_despawned",
+                nlohmann::json{{"uid", it->uid}, {"mobSlug", it->slug}});
 
             // Halve the kill counter (Threshold champions)
             if (it->slug.empty())

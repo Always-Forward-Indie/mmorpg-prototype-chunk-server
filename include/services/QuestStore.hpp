@@ -62,6 +62,13 @@ class QuestStore
     void unloadPlayerQuests(int characterId);
     void fillQuestContext(int characterId, PlayerContextStruct &ctx) const;
     std::string getQuestStateBySlug(int characterId, const std::string &questSlug) const;
+    /**
+    * @brief Snapshot of all progress rows for a character (read-only copy).
+    *        Used by admin getState: CharacterDataStruct::quests is never
+    *        populated, so the store is the only truth (found live: getState
+    *        quests[] was always empty).
+    */
+    std::vector<PlayerQuestProgressStruct> getPlayerProgressSnapshot(int characterId) const;
 
     // === Quest logic ===
     bool offerQuest(int characterId, const std::string &questSlug);

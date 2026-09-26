@@ -1,3 +1,24 @@
+v0.2.58
+26.09.2026
+================
+
+New:
+
+**A-batch convergence + test preconditions.**
+- Equip/unequip persists for id==0 rows defer to a token-keyed queue,
+  flushed with the real id on sync echo (results/slots carry exact
+  token+itemId; pending-slot unequip allowed; off_hand auto-swap identity
+  fixed — it persisted nothing before).
+- Multi-stack remove: one save per touched stack. Outbox flush:
+  oldest-first. Sync retry: give-up after 60 tries to legacy matching.
+- `reloadWorldContent` admin op (game re-pushes NPC/vendors/WIO/dialogues/
+  quests/timed on the live link, merged chunk-side) + `sendToGameServer`.
+- `champion_despawned` now carries `{uid, mobSlug}` (was `{}`).
+- Units: defer/flush (both echo kinds), unsynced token propagation,
+  off-hand swap identity, per-stack saves, flush ordering, retry budget.
+
+---
+
 v0.2.57
 26.09.2026
 ================

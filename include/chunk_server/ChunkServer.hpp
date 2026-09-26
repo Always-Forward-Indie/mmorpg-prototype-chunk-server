@@ -47,6 +47,13 @@ class ChunkServer
         return networkManager_;
     }
 
+    /// Send a raw packet to game server (strand-posted, thread-safe).
+    /// Used by admin ops that need game-side action (e.g. catalog reload).
+    void sendToGameServer(const std::string &data)
+    {
+        gameServerWorker_.sendDataToGameServer(data);
+    }
+
   private:
     std::atomic<bool> running_{true};
 
