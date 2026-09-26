@@ -320,6 +320,58 @@ TEST_F(MobChainFixture, MobDiedCounterFloorsAtZero)
     EXPECT_GE(zones.getMobSpawnZoneByID(7).spawnedMobsCount, 0);
 }
 
+TEST_F(MobChainFixture, PerEntryRespawnGateHoldsWipedTypes)
+{
+    // M1 wiring: a wiped type waits out its OWN respawnTime instead of
+    // refilling on the next tick (the old global-30s behavior respawned
+    // bosses as fast as trash). Long-timer entry stays empty immediately
+    // after the wipe; a zero-timer entry in the same zone refills at once
+    // (per-entry, not a global block). No sleeping: the long timer (1h)
+    // cannot elapse inside the test, the zero timer is already due.
+    zones.setMobInstanceManager(&instances);
+    SpawnZoneStruct z;
+    z.zoneId = 7;
+    z.minX = 0;
+    z.maxX = 1000;
+    z.minY = 0;
+    z.maxY = 1000;
+    SpawnZoneMobEntry slow;
+    slow.mobId = 1;
+    slow.maxCount = 2;
+    slow.respawnTime = std::chrono::seconds(3600);
+    SpawnZoneMobEntry instant;
+    instant.mobId = 2;
+    instant.maxCount = 1;
+    instant.respawnTime = std::chrono::seconds(0);
+    z.mobEntries = {slow, instant};
+    zones.loadMobSpawnZones({z});
+
+    RandomUtils::seedForTests(99u);
+    ASSERT_EQ(zones.spawnMobsInZone(7).size(), 3u);
+    std::vector<int> slowUids;
+    for (const auto &m : zones.getMobsInZone(7))
+        if (m.id == 1)
+            slowUids.push_back(m.uid);
+    ASSERT_EQ(slowUids.size(), 2u);
+
+    for (int uid : slowUids)
+        zones.mobDied(7, uid);
+    // Wiped slow type: gate holds (would refill under the old global tick).
+    // Instant type is already full (1/1 alive): nothing to refill either.
+    EXPECT_TRUE(zones.spawnMobsInZone(7).empty());
+
+    // Kill the instant type too: it refills immediately (timer already due).
+    int fastUid = 0;
+    for (const auto &m : zones.getMobsInZone(7))
+        if (m.id == 2)
+            fastUid = m.uid;
+    ASSERT_NE(fastUid, 0);
+    zones.mobDied(7, fastUid);
+    auto refilled = zones.spawnMobsInZone(7);
+    ASSERT_EQ(refilled.size(), 1u);
+    EXPECT_EQ(refilled[0].id, 2);
+}
+
 TEST_F(MobChainFixture, LoadMobsRoutesIntoOwnZone)
 {
     // loadMobsInSpawnZones must file each mob under its own row.zoneId —
