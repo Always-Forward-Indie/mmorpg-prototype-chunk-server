@@ -274,7 +274,10 @@ MobKillRewardPipeline::grantFellowshipBonus(int mobId, int killerId)
 
                 const int personalBaseXp = ExperienceManager::calculateMobExperience(
                     mobData.level, playerData.characterLevel, scaledBaseXp);
-                int bonus = static_cast<int>(std::lround(static_cast<float>(personalBaseXp) * share * bonusPct));
+                // Floor of 1 XP: on low-XP mobs the 7% share rounds to zero
+                // and fellowship silently never happens (fox: 20*0.5*0.07).
+                int bonus = std::max(1, static_cast<int>(std::lround(
+                    static_cast<float>(personalBaseXp) * share * bonusPct)));
                 if (bonus > 0)
                 {
                     experience_.grantExperience(playerId, bonus, "fellowship_bonus", mobId);
