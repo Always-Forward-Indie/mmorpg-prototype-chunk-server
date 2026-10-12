@@ -1,3 +1,50 @@
+v0.2.60
+12.10.2026
+================
+
+New:
+
+**Tunable reputation tiers + faction rep fix.**
+- Tier thresholds (`enemy/neutral/friendly/ally`) fed from `game_config`
+  via `setThresholds` on catalog sync; dialogue gates use the same ladder.
+- `setListOfMobs` dropped `factionSlug`/`repDeltaPerKill` on copy: no mob
+  kill ever granted faction rep (DB held quest rows only). Fixed.
+
+**Combat evasion cap + DoT clamp + soul crit.**
+- `combat.evasion_cap` enforced in both `rollMiss` overloads.
+- `clampDotTick`: tick floor `dot_min_tick_ms`, max `dot_max_ticks`.
+- Item Soul tier crit (`tier2/3_crit_pct`) now applied to `crit_chance`.
+
+**Champion trophy keys + rare-spawn roll.**
+- `champion_spawned[_soon]` carry `trophySlug`/`trophyPrice` (locale keys +
+  numbers, resolved from the guaranteed loot entry).
+- Respawn ticker rolls the bound rare (`rare_of_mob_id`, percent chance)
+  instead of the common template; `rare_mob_spawned` announce. Pinned by
+  `test_rare_spawn` (+ `setListOfMobs` full-replace fix for ghost ids).
+
+**Admin ban ops + GM audit facts.**
+- `banUser`/`unbanUser` (reason required, bounded fact-ack wait),
+  every served op emits `saveGmAction`.
+
+Fixes:
+
+**Fellowship bonus floor of 1 XP.**
+- 7% shares on low-XP mobs rounded to zero: fellowship never fired.
+
+**CatalogSyncService extraction, StatsResolver single source, CC/DR.**
+- `SET_*` handling moved out of `EventHandler`/`EventDispatcher`.
+- `StatsResolver` single effective map; atomic exp/regen/stats updates.
+- Mob/player CC with DR (x1/0.5/0.25 + immune), AoE full pipeline.
+- Skill/vendor/quest/harvest/wio/interest/movement convergence fixes.
+- Dead `SpawnManager` stub dropped.
+
+Docs:
+
+- api 00–13 + client specs synced to code/DB (slugs, packets, thresholds,
+  session codes, CC/DR table, WIO 2D+Z check).
+
+---
+
 v0.2.59
 26.09.2026
 ================
