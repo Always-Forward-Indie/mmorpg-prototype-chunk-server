@@ -205,7 +205,7 @@ Sent when the player presses the interaction key on a WIO actor.
 }
 ```
 
-Send this only when the player is within the visible interaction radius of the object (client-side distance check as first gate). The server will perform an authoritative radius check and may reject with `TOO_FAR`.
+Send this only when the player is within the visible interaction radius of the object (client-side distance check as first gate). The server performs the authoritative check in 2D + Z tolerance: `(dx²+dy²) <= interactionRadius²` **and** `|dz| <= zTol` (`game_config interaction.z_tolerance_wio`, default **400**); otherwise rejects with `TOO_FAR`. Strict 3D is intentionally not used — the server knows nothing about client collision/terrain snap.
 
 ---
 

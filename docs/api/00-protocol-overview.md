@@ -312,7 +312,10 @@
 ```
 
 Коды фрейминга/версий — в разделах выше. Коды механик — в документах
-02–11 (все ответы `status:error` несут `errorCode`). Особые случаи:
+02–11 (все ответы `status:error` несут `errorCode`). Коды сессий game:
+`ERR_SESSION_INVALID` (login-токен неизвестен/протух/чужой account — game сверяет
+`search_user(hash)` + привязку к account, обрыв БД — `ERR_DB`, никогда не висит),
+`Authentication failed for user!` (пустой `clientId`/`hash`). Особые случаи:
 `worldObjectInteractResult` приходит с `status:success` даже при
 `success:false` — ошибку читать из `body.errorCode` (`OBJECT_NOT_FOUND`,
 `TOO_FAR`, …).
