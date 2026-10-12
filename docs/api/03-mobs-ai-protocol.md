@@ -24,37 +24,15 @@
     "eventType": "spawnMobsInZone"
   },
   "body": {
-    "spawnZone": {
-      "id": 1,
-      "name": "Forest Clearing",
-      "shape": "RECT",
-      "bounds": {
-        "minX": 0.0,
-        "maxX": 2000.0,
-        "minY": 0.0,
-        "maxY": 2000.0,
-        "minZ": 0.0,
-        "maxZ": 100.0
-      },
-      "center": { "x": 1000.0, "y": 1000.0 },
-      "innerRadius": 0.0,
-      "outerRadius": 0.0,
-      "mobEntries": [
-        { "mobId": 5, "maxCount": 10 }
-      ],
-      "totalSpawnCount": 10,
-      "spawnedMobsCount": 8,
-      "respawnTimeSec": 30,
-      "spawnEnabled": true
-    },
+    "zoneId": 1,
     "mobs": [
       {
         "id": 5,
         "uid": 1001,
         "zoneId": 1,
-        "name": "Forest Wolf",
-        "slug": "forest_wolf",
-        "race": "Beast",
+        "name": "Простой волк",
+        "slug": "ForestWolf",
+        "race": "Animal",
         "level": 3,
         "isAggressive": true,
         "isDead": false,
@@ -106,7 +84,9 @@
 | `attributes` | array | Массив атрибутов |
 | `combatState` | int | Состояние AI (см. ниже) |
 
-### Поля зоны спавна
+### Поля зоны спавна (внутренняя модель; в клиентский пакет не входят — клиент получает только `body.zoneId` + `body.mobs[]`)
+
+На проводе GS→chunk синк плоский: `id, name, minX…maxZ / centerX…, inner/outerRadius, shape, mobEntries[{mobId, maxCount, respawnTimeSec}]`. Здесь — та же семантика в структурированном виде:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -505,8 +485,9 @@ stepSize = min(stepSize, distance − attackRange) // без перелёта в
 | `canEvolve` | bool | Может эволюционировать |
 | `lootMultiplier` | float | Множитель лута |
 | `isRare` | bool | Редкий моб |
-| `rareSpawnChance` | float | Шанс появления редкого [0..1] |
-| `rareSpawnCondition` | string | `"night"`, `"day"`, `"zone_event"` |
+| `rareSpawnChance` | float | Шанс замены в процентах (8 = 8%) — ролл при каждом респауне семейной записи |
+| `rareSpawnCondition` | string | Пока не используется (будущее: `"night"`, `"day"`, `"zone_event"`) |
+| `rareOfMobId` | int | ID обычного шаблона, который этот редкий заменяет (0 = не редкий; миграция 108) |
 | `factionSlug` | string | Фракция |
 | `repDeltaPerKill` | int | Дельта репутации за убийство |
 | `biomeSlug` | string | Биом (напр. `"forest"`, `"cave"`) |

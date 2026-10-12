@@ -591,7 +591,7 @@ body["rewards"] = resolveRewardsForClient(quest.rewards);
           "firstStep": {
             "clientStepKey": "kill_wolves",
             "stepType": "kill",
-            "target_slug": "forest_wolf",
+            "target_slug": "ForestFox",
             "count": 10
           },
           "rewards": [
@@ -631,7 +631,7 @@ body["rewards"] = resolveRewardsForClient(quest.rewards);
   "currentStep": {
     "clientStepKey": "kill_wolves",
     "stepType": "kill",
-    "target_slug": "forest_wolf",
+    "target_slug": "ForestFox",
     "count": 10,
     "current": 0
   },
@@ -668,7 +668,7 @@ body["rewards"] = resolveRewardsForClient(quest.rewards);
   "step": {
     "clientStepKey": "kill_wolves",
     "stepType": "kill",
-    "target_slug": "forest_wolf",
+    "target_slug": "ForestFox",
     "current": 3,
     "required": 10
   }
@@ -686,7 +686,7 @@ body["rewards"] = resolveRewardsForClient(quest.rewards);
   "currentStep": {
     "clientStepKey": "kill_wolves",
     "stepType": "kill",
-    "target_slug": "forest_wolf",
+    "target_slug": "ForestFox",
     "current": 3,
     "required": 10
   },

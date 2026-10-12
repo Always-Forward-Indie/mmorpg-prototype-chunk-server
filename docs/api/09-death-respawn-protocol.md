@@ -76,10 +76,11 @@ durabilityLoss = ceil(durabilityMax × 0.05)   // 5% от максимума
 5. Определяет точку респауна: `getZoneRespawnPoint(deathPosition)`
 6. Устанавливает:
    - `isDead = false`
-   - `currentHealth = maxHealth`
-   - `currentMana = maxMana`
+   - `currentHealth = 30% от эффективного maxHealth` (`respawn.hp_pct`, дефолт 0.30; болезнь воскрешения режет эффективный максимум)
+   - `currentMana = 30% от эффективного maxMana` (`respawn.mp_pct`, дефолт 0.30)
    - `position = respawnPosition`
-7. Применяет XP-штраф
+   - короткая неуязвимость после респауна (`respawn.invuln_sec`, дефолт 3с)
+7. Долг опыта НЕ трогает (начислен в момент смерти; здесь только персистит)
 8. Отправляет `respawnResult` клиенту
 9. Отправляет `moveCharacter` broadcast (телепортация к точке респауна)
 10. Отправляет `stats_update` с обновлёнными статами

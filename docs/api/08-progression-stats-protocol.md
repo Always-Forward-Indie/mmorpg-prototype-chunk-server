@@ -285,9 +285,14 @@ expForLevel(n) = BASE_EXP_PER_LEVEL × (EXP_MULTIPLIER ^ (n - 2))
 > **`freeSkillPoints`** — количество незатраченных скилл-поинтов персонажа. Передаётся в каждом `stats_update`. Клиент должен отображать это значение в UI (например, панель прокачки скиллов). Скилл-поинты тратятся через тренера (NPC action `learn_skill`) и начисляются при level-up.
 
 ```
-effective = base
-          + Σ(equipment bonuses)           // из attributes предметов с apply_on="equip"
-          + Σ(active effect bonuses)       // из activeEffects
+// Единственный источник правды — StatsResolver (display = бой = реген).
+// Хранимые атрибуты УЖЕ содержат equip/set/durability (считает БД) и
+// никогда не прибавляются повторно (старый double-count убран).
+effective = stored(DB incl. equip/set/durability)
+          + Σ(active effect bonuses)       // flat; тикающие/dot/hot скипаются
+          + Σ(percent of stored base)      // modifierType=percent, напр. +8% max_health
+          + conversions                    // agi→evasion 0.3, int→mag 0.5, str→phys 0.5
+                                           // (game_config stats.conv_*, 0 = выкл)
           + item_soul_bonus                // бонус за kill count оружия
           + mastery_tier_bonus             // бонус за тиры мастерства
 ```
@@ -335,7 +340,7 @@ newValue = min(currentValue + delta, 100.0)
 | T1 | 20.0 | +1% | `physical_attack` |
 | T2 | 50.0 | +4% (кумулятивно +5%) | `physical_attack` |
 | T3 | 80.0 | +3% | `crit_chance` |
-| T4 | 100.0 | +2% | `parry_chance` |
+| T4 | 100.0 | +2 | `accuracy` |
 
 При пересечении тира → `world_notification` типа `mastery_tier_up`:
 
@@ -452,8 +457,8 @@ newValue = min(currentValue + delta, 100.0)
   "body": {
     "characterId": 7,
     "entries": [
-      { "factionSlug": "bandits",  "value": 350,  "tier": "friendly" },
-      { "factionSlug": "guards",   "value": -120, "tier": "stranger" },
+      { "factionSlug": "hunters",  "value": 350,  "tier": "friendly" },
+      { "factionSlug": "city_guard",   "value": -120, "tier": "stranger" },
       { "factionSlug": "merchants","value": 0,    "tier": "neutral"  }
     ]
   }
@@ -482,7 +487,7 @@ newValue = min(currentValue + delta, 100.0)
   },
   "body": {
     "characterId": 7,
-    "factionSlug": "bandits",
+    "factionSlug": "hunters",
     "value": 400,
     "tier": "friendly"
   }
@@ -570,16 +575,16 @@ newMp   = min(currentMp + mpGain, maxMp)
 | `BASE_EXP_PER_LEVEL` | 100 | Базовый XP за уровень |
 | `EXP_MULTIPLIER` | 1.15 | Множитель XP таблицы |
 | `DEATH_PENALTY_PERCENT` | 0.1 | Штраф за смерть (10%) |
-| `MAX_LEVEL` | 70 | Максимальный уровень |
+| `MAX_LEVEL` | 100 (код); фактически 10 | Кап в коде; таблица `exp_for_level` кончается на 10 уровне |
 | `regen.tickIntervalMs` | 4000 | Интервал тика регенерации (мс) |
 | `regen.baseHpRegen` | 2 | Базовый HP за тик |
 | `regen.baseMpRegen` | 1 | Базовый MP за тик |
 | `regen.hpRegenConCoeff` | 0.3 | CON → HP per tick |
 | `regen.mpRegenWisCoeff` | 0.5 | WIS → MP per tick |
 | `regen.disableInCombatMs` | 8000 | Задержка после боя для начала регена |
-| `mastery.base_delta` | 0.5 | Базовый прирост мастерства |
+| `mastery.base_delta` | 0.02 | Базовый прирост мастерства |
 | `mastery.tier1_value` ... `tier4_value` | 20/50/80/100 | Пороги тиров |
-| `mastery.db_flush_every_hits` | 10 | Интервал сохранения |
+| `mastery.db_flush_every_hits` | 25 | Интервал сохранения |
 | `item_soul.tier1_kills` ... `tier3_kills` | 50/200/500 | Пороги Kill Count |
 | `item_soul.tier1_bonus_flat` ... `tier3_bonus_flat` | 1/2/3 | Бонусы Item Soul |
 
@@ -604,17 +609,18 @@ newMp   = min(currentMp + mpGain, maxMp)
 | Бонусы в runtime | `TitleManager` применяет как `ActiveEffectStruct` с `sourceType="title"`, `expiresAt=0` |
 | Выдача нового титула | Через `TitleManager::grantTitle()` — вызывается из game-logic (например, при убийстве N мобов) |
 
-### Пример записи в `title_definitions`
+### Пример записи в `title_definitions` (текущий формат; условия — см. миграцию 101)
 ```sql
-INSERT INTO title_definitions (slug, display_name, description, earn_condition, bonuses)
-VALUES ('wolf_slayer', 'Wolf Slayer', 'Slain 100 wolves', 'kill_wolves_100',
-        '[{"attributeSlug":"physical_attack","value":2.0},{"attributeSlug":"move_speed","value":1.0}]');
+INSERT INTO title_definitions (slug, display_name, description, earn_condition, bonuses, condition_params)
+VALUES ('wolf_hunter', 'Охотник на волков', 'Достиг 3-го тира бестиария волка', 'bestiary',
+        '[{"attributeSlug":"physical_attack","value":1.0}]',
+        '{"minTier": 3, "mobSlug": "ForestWolf"}');
 ```
 
 ### Бонусы как ActiveEffects при экипировке
 
 ```
-effectSlug = "title_{titleSlug}_{attributeSlug}"  // напр. "title_wolf_slayer_physical_attack"
+effectSlug = "title_{titleSlug}_{attributeSlug}"  // напр. "title_wolf_hunter_physical_attack"
 effectTypeSlug = "title_bonus"
 sourceType = "title"
 expiresAt = 0   // постоянный эффект
@@ -653,33 +659,18 @@ value = bonusValue
   "body": {
     "characterId": 7,
     "equippedTitle": {
-      "slug": "wolf_slayer",
-      "displayName": "Wolf Slayer",
-      "description": "Slain 100 wolves",
-      "earnCondition": "kill_wolves",
+      "slug": "wolf_hunter",
+      "earnCondition": "bestiary",
       "bonuses": [
-        { "attributeSlug": "physical_attack", "value": 2.0 },
-        { "attributeSlug": "move_speed",      "value": 1.0 }
+        { "attributeSlug": "physical_attack", "value": 1.0 }
       ]
     },
     "earnedTitles": [
       {
-        "slug": "wolf_slayer",
-        "displayName": "Wolf Slayer",
-        "description": "Slain 100 wolves",
-        "earnCondition": "kill_wolves",
+        "slug": "wolf_hunter",
+        "earnCondition": "bestiary",
         "bonuses": [
-          { "attributeSlug": "physical_attack", "value": 2.0 },
-          { "attributeSlug": "move_speed",      "value": 1.0 }
-        ]
-      },
-      {
-        "slug": "first_blood",
-        "displayName": "First Blood",
-        "description": "First PvP kill",
-        "earnCondition": "pvp_kill",
-        "bonuses": [
-          { "attributeSlug": "crit_chance", "value": 0.5 }
+          { "attributeSlug": "physical_attack", "value": 1.0 }
         ]
       }
     ]
@@ -687,14 +678,15 @@ value = bonusValue
 }
 ```
 
+> Ключи, не текст: отображаемые имена живут в локали клиента
+> (`titles.{slug}.name/description`). `displayName`/`description` в пакете
+> больше не шлются (чистка дублей 2026-10).
+
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `equippedTitle` | object\|null | Полное описание надетого титула (null = ничего не надето) |
-| `equippedTitle.slug` | string | Slug надетого титула |
-| `earnedTitles` | array | Все заработанные титулы с описаниями и бонусами |
-| `earnedTitles[].slug` | string | Уникальный идентификатор титула |
-| `earnedTitles[].displayName` | string | Отображаемое название |
-| `earnedTitles[].description` | string | Описание условия получения |
+| `equippedTitle` | object\|null | Надетый титул: `{slug, earnCondition, bonuses}` (null = ничего не надето) |
+| `earnedTitles` | array | Все заработанные титулы: `{slug, earnCondition, bonuses}` |
+| `earnedTitles[].slug` | string | Уникальный идентификатор титула (ключ локали) |
 | `earnedTitles[].bonuses` | array | Массив `{ attributeSlug, value }` |
 
 ---
@@ -712,7 +704,7 @@ value = bonusValue
   },
   "body": {
     "characterId": 7,
-    "titleSlug": "wolf_slayer"
+    "titleSlug": "wolf_hunter"
   }
 }
 ```
@@ -726,7 +718,7 @@ value = bonusValue
 ```json
 {
   "header": { "eventType": "equip_title_result", "status": "success" },
-  "body": { "characterId": 7, "titleSlug": "wolf_slayer" }
+  "body": { "characterId": 7, "titleSlug": "wolf_hunter" }
 }
 ```
 
@@ -743,33 +735,12 @@ value = bonusValue
 
 ---
 
-### title_granted — Серверная нотификация о получении нового титула
+### Выдача титула — отдельного уведомления нет
 
-**Сервер → Unicast** (когда game-server выдаёт новый титул через `grantTitle`)
-
-```json
-{
-  "header": {
-    "eventType": "world_notification",
-    "status": "success"
-  },
-  "body": {
-    "characterId": 7,
-    "notificationId": "title_granted_7_wolf_slayer",
-    "notificationType": "title_granted",
-    "priority": "high",
-    "channel": "toast",
-    "text": "",
-    "data": {
-      "titleSlug": "wolf_slayer",
-      "displayName": "Wolf Slayer"
-    }
-  }
-}
-```
-
-> После `title_granted` клиент должен перезапросить `getTitles` для обновления полного списка,
-> либо сервер отправит обновлённый `player_titles_update` автоматически.
+В коде нет `title_granted`-нотификации: когда титул выдается
+(`TitleManager::grantTitle` из бестиария/уровня/квеста/репутации/мастерства),
+клиент узнает об этом из ближайшего `player_titles_update` (пушится сразу
+после выдачи). Отдельного тоста не ждите — если нужен, это новая фича.
 
 ---
 

@@ -40,9 +40,9 @@
 
 #### LOCAL — Локальный чат
 
-- Радиус: **50.0 единиц** (3D евклидово расстояние)
+- Радиус: **50.0 единиц** (авторитетно 2D + допуск по Z)
 - Рассылка: только игрокам в радиусе
-- Формула: `sqrt(dx² + dy² + dz²) ≤ 50.0`
+- Формула: `(dx²+dy²) ≤ 50.0²` **и** `|dz| ≤ zTol`, `zTol = game_config interaction.z_tolerance_chat` (дефолт **400**)
 
 #### ZONE — Зональный чат
 
@@ -175,7 +175,7 @@
   "priority": "low",
   "channel": "silent",
   "data": {
-    "mobSlug": "forest_wolf",
+    "mobSlug": "ForestWolf",
     "killCount": 47
   }
 }
@@ -189,7 +189,7 @@
   "priority": "medium",
   "channel": "toast",
   "data": {
-    "mobSlug": "forest_wolf",
+    "mobSlug": "ForestWolf",
     "unlockedTier": 3,
     "killCount": 15,
     "categorySlug": "combat_info"
@@ -325,7 +325,7 @@
   "header": { "eventType": "reputationChanged" },
   "body": {
     "type": "reputationChanged",
-    "faction": "bandits",
+    "faction": "hunters",
     "delta": 50
   }
 }
@@ -358,7 +358,7 @@
       {
         "inventoryItemId": 123,
         "itemId": 7,
-        "itemName": "iron_sword",
+        "itemName": "sharp_sword",
         "durabilityCurrent": 45,
         "durabilityMax": 100,
         "repairCost": 150

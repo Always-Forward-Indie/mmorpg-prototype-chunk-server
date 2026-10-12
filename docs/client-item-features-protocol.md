@@ -156,7 +156,7 @@ Gold itself also appears as a normal item in the `items` array (slug `gold_coin`
 {
   "id": 42,
   "itemId": 42,
-  "slug": "potion_hp_small",
+  "slug": "small_health_potion",
   "isQuestItem": false,
   "isUsable": true,
   "itemType": 3,
@@ -301,8 +301,8 @@ One unit of the item is consumed from the inventory. The server validates:
     "skillResult": {
       "casterId": 15,
       "targetId": 15,
-      "skillName": "Health Potion",
-      "skillSlug": "potion_hp_small",
+      "skillName": "Healing Surge",
+      "skillSlug": "healing_surge",
       "skillEffectType": "heal",
       "healing": 150,
       "manaHealing": 0,
@@ -824,24 +824,24 @@ Harvest — механика сбора лута с трупов мобов. Т�
     "availableLoot": [
       {
         "itemId": 15,
-        "itemSlug": "wolf_pelt",
+        "itemSlug": "alpha_fang",
         "quantity": 2,
         "rarityId": 1,
         "raritySlug": "common",
-        "itemType": "Material",
-        "itemTypeSlug": "material",
+        "itemType": "Resource",
+        "itemTypeSlug": "resource",
         "weight": 0.5,
         "addedToInventory": false,
         "isHarvestItem": true
       },
       {
         "itemId": 16,
-        "itemSlug": "wolf_fang",
+        "itemSlug": "alpha_fang",
         "quantity": 1,
         "rarityId": 2,
         "raritySlug": "uncommon",
-        "itemType": "Material",
-        "itemTypeSlug": "material",
+        "itemType": "Resource",
+        "itemTypeSlug": "resource",
         "weight": 0.1,
         "addedToInventory": false,
         "isHarvestItem": true
@@ -901,8 +901,8 @@ Harvest — механика сбора лута с трупов мобов. Т�
   "body": {
     "success": true,
     "pickedUpItems": [
-      { "itemId": 15, "quantity": 2, "slug": "wolf_pelt" },
-      { "itemId": 16, "quantity": 1, "slug": "wolf_fang" }
+      { "itemId": 15, "quantity": 2, "slug": "alpha_fang" },
+      { "itemId": 16, "quantity": 1, "slug": "alpha_fang" }
     ]
   }
 }

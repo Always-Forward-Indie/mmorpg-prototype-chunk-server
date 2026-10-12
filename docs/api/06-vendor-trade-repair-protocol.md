@@ -46,19 +46,23 @@
 | `npcSlug` | string | Slug NPC-продавца |
 | `goldBalance` | int | Текущее золото игрока |
 | `items[].itemId` | int | ID шаблона предмета |
-| `items[].quantity` | int | Остаток на складе. **-1 = бесконечный** |
-| `items[].price` | int | Цена покупки (с учётом наценки и скидки за репутацию) |
+| `items[].priceBuy` | int | Цена покупки 1 шт (с наценкой и скидкой за репутацию) |
+| `items[].priceSell` | int | Цена выкупа 1 шт у игрока |
+| `items[].stockCurrent` | int | Остаток на складе. **-1 = бесконечный** |
+| `items[].stockMax` | int | Максимум склада (-1 = бесконечный) |
+
+> Проверено по коду (`VendorManager::buildShopJson`): ключи именно `priceBuy`/`priceSell`/`stockCurrent`/`stockMax`.
 
 #### Валидация
 
 - NPC существует и `isInteractable`
-- Расстояние: `sqrt(dx² + dy² + dz²) <= npc.radius + 2.0`
+- Расстояние (авторитетно 2D + допуск по Z): `withinRange2DWithZTolerance(player, npc, npc.radius + kVendorRadiusBonus /* 2.0 */, zTol)` — `(dx²+dy²) <= r²` **и** `|dz| <= zTol`, `zTol = game_config interaction.z_tolerance_vendor` (дефолт **400**). Сервер не знает коллизий/высот клиента (клиент снепает к земле сам) — строгая 3D-сфера давала бы ложный `out_of_range` на холмах.
 
-#### Ошибки
+#### Ошибки (событие `vendorShop` — open)
 
 | Код | Причина |
 |-----|---------|
-| `vendor_not_found` | NPC не найден |
+| `npc_not_found` | NPC не найден (именно `npc_not_found` для open; `vendor_not_found` — для `buyItem`/`sellItem`) |
 | `vendor_no_inventory` | У NPC нет товаров |
 | `out_of_range` | Слишком далеко |
 
@@ -223,6 +227,7 @@ if (reputation >= reputation.vendor_discount_threshold)  // default: 200
     discount = reputation.vendor_discount_pct            // default: 0.05 (5%)
 
 final_price = base_cost × (1.0 + markup - discount)
+unit_price = ceil(vendorPriceBuy × (1.0 + markup - discount))  // округление вверх на ШТУКУ
 ```
 
 #### Продажа (игрок получает)
@@ -276,7 +281,7 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
       {
         "inventoryItemId": 5678,
         "itemId": 50,
-        "slug": "iron_sword",
+        "slug": "sharp_sword",
         "durabilityMax": 100,
         "durabilityCurrent": 45,
         "repairCost": 55
@@ -295,7 +300,7 @@ goldReceived = floor(vendorPriceSell × quantity × (1.0 - effective_tax))
 }
 ```
 
-> Показываются только экипированные предметы с `isDurable == true` и `durabilityCurrent < durabilityMax`.
+> Показываются все предметы инвентаря с `isDurable == true` и `durabilityCurrent < durabilityMax` (не только экипированные).
 > `goldBalance` — текущий баланс золота игрока.
 
 ---
@@ -573,7 +578,7 @@ cost = ceil(100.0 × 30 / 50) = ceil(60.0) = 60 gold
           "inventoryItemId": 100,
           "itemId": 5,
           "quantity": 2,
-          "slug": "iron_sword"
+"slug": "sharp_sword"
         }
       ],
       "theirItems": [

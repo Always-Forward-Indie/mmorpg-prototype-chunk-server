@@ -77,7 +77,7 @@ enum class EquipSlot : int {
 };
 ```
 
-Слаги (для JSON пакетов и БД): `head`, `chest`, `legs`, `feet`, `hands`, `waist`, `necklace`, `ring_1`, `ring_2`, `main_hand`, `off_hand`, `cloak`.
+Слаги (для JSON пакетов и БД, таблица `equip_slot`, 11 слотов): `head`, `chest`, `legs`, `feet`, `hands`, `main_hand`, `off_hand`, `two_hand`, `ring`, `neck`, `trinket`.
 
 ### Таблица `equip_slots` (если ещё нет)
 
@@ -88,19 +88,10 @@ CREATE TABLE IF NOT EXISTS equip_slots (
     slug  varchar(64) NOT NULL UNIQUE
 );
 
-INSERT INTO equip_slots (id, name, slug) VALUES
-    (1,  'Head',      'head'),
-    (2,  'Chest',     'chest'),
-    (3,  'Legs',      'legs'),
-    (4,  'Feet',      'feet'),
-    (5,  'Hands',     'hands'),
-    (6,  'Waist',     'waist'),
-    (7,  'Necklace',  'necklace'),
-    (8,  'Ring 1',    'ring_1'),
-    (9,  'Ring 2',    'ring_2'),
-    (10, 'Main Hand', 'main_hand'),
-    (11, 'Off Hand',  'off_hand'),
-    (12, 'Cloak',     'cloak');
+Живые строки `equip_slot` (сверено с БД):
+    (1, 'head'), (2, 'chest'), (3, 'legs'), (4, 'feet'), (5, 'hands'),
+    (6, 'main_hand'), (7, 'off_hand'), (8, 'two_hand'), (9, 'ring'),
+    (10, 'neck'), (11, 'trinket');
 ```
 
 ---
@@ -184,7 +175,7 @@ INSERT INTO equip_slots (id, name, slug) VALUES
       "main_hand": {
         "inventoryItemId": 55,
         "itemId": 12,
-        "itemSlug": "iron_sword",
+        "itemSlug": "sharp_sword",
         "durabilityCurrent": 80,
         "durabilityMax": 100,
         "isDurabilityWarning": false
@@ -201,12 +192,10 @@ INSERT INTO equip_slots (id, name, slug) VALUES
       "legs": null,
       "feet": null,
       "hands": null,
-      "waist": null,
-      "necklace": null,
-      "ring_1": null,
-      "ring_2": null,
+      "neck": null,
+      "ring": null,
+      "trinket": null,
       "off_hand": null,
-      "cloak": null
     }
   }
 }

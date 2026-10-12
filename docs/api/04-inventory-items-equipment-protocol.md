@@ -54,7 +54,7 @@
         "durabilityMax": 100,
         "item": {
           "id": 5,
-          "slug": "iron_sword",
+          "slug": "sharp_sword",
           "itemTypeSlug": "weapon",
           "raritySlug": "common",
           "weight": 3.5,
@@ -450,19 +450,17 @@
 
 | Код | Slug | Описание |
 |-----|------|----------|
-| 0 | `none` | Нет |
 | 1 | `head` | Голова |
 | 2 | `chest` | Грудь |
 | 3 | `legs` | Ноги |
 | 4 | `feet` | Ступни |
 | 5 | `hands` | Руки |
-| 6 | `waist` | Пояс |
-| 7 | `necklace` | Ожерелье |
-| 8 | `ring_1` | Кольцо 1 |
-| 9 | `ring_2` | Кольцо 2 |
-| 10 | `main_hand` | Основная рука |
-| 11 | `off_hand` | Вторая рука |
-| 12 | `cloak` | Плащ |
+| 6 | `main_hand` | Основная рука |
+| 7 | `off_hand` | Вторая рука (атака `physical/magical_attack` оттуда считается 50% — бонус второй руки, не вторая атака; защита и прочие статы — полностью) |
+| 8 | `two_hand` | Двуручное |
+| 9 | `ring` | Кольцо (один слот) |
+| 10 | `neck` | Ожерелье |
+| 11 | `trinket` | Безделушка |
 
 ---
 
@@ -633,7 +631,7 @@
       "main_hand": {
         "inventoryItemId": 101,
         "itemId": 5,
-        "itemSlug": "iron_sword",
+        "itemSlug": "sharp_sword",
         "durabilityCurrent": 85,
         "durabilityMax": 100,
         "isDurabilityWarning": false,

@@ -212,7 +212,7 @@ Chunk → Client: SELL_RESULT
     "items": [
       {
         "itemId": 3,
-        "slug": "iron_sword",
+        "slug": "sharp_sword",
         "itemType": 1,
         "itemTypeSlug": "weapon",
         "rarityId": 1,
@@ -245,9 +245,9 @@ Chunk → Client: SELL_RESULT
       },
       {
         "itemId": 7,
-        "slug": "health_potion",
+        "slug": "small_health_potion",
         "itemType": 3,
-        "itemTypeSlug": "consumable",
+        "itemTypeSlug": "potion",
         "rarityId": 1,
         "raritySlug": "common",
         "isDurable": false,
@@ -557,7 +557,7 @@ Chunk → Client: SELL_RESULT
         {
           "id": 15,
           "itemId": 3,
-          "slug": "iron_sword",
+          "slug": "sharp_sword",
           "quantity": 1,
           "durabilityCurrent": 87,
           "durabilityMax": 100,
@@ -574,7 +574,7 @@ Chunk → Client: SELL_RESULT
         {
           "id": 89,
           "itemId": 7,
-          "slug": "health_potion",
+          "slug": "small_health_potion",
           "quantity": 5,
           "killCount": 0,
           "masterySlug": "",
@@ -626,7 +626,7 @@ Chunk → Client: SELL_RESULT
   "body": {
     "sessionId": "trade_101_205_1709834400000",
     "receivedItems": [
-      { "itemId": 7, "slug": "health_potion", "quantity": 5 }
+      { "itemId": 7, "slug": "small_health_potion", "quantity": 5 }
     ],
     "receivedGold": 0,
     "newGoldBalance": 0
@@ -759,7 +759,7 @@ Chunk → Client: SELL_RESULT
 ```json
 {
   "header": { "eventType": "ITEM_BROKEN", "clientId": 7 },
-  "body": { "inventorySlotId": 15, "itemId": 3, "slug": "iron_sword" }
+  "body": { "inventorySlotId": 15, "itemId": 3, "slug": "sharp_sword" }
 }
 ```
 
@@ -794,7 +794,7 @@ NPC с `npcType = "blacksmith"`. Ошибки: `NPC_NOT_FOUND`, `OUT_OF_RANGE`, 
       {
         "inventorySlotId": 15,
         "itemId": 3,
-        "slug": "iron_sword",
+        "slug": "sharp_sword",
         "durabilityCurrent": 45,
         "durabilityMax": 100,
         "repairCost": 110

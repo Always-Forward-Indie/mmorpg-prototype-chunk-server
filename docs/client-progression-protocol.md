@@ -216,7 +216,7 @@ System death-penalty: вместо потери набранного XP появ
 | T1 | 20 | +1% к `physical_attack` | permanent ActiveEffect |
 | T2 | 50 | +4% к `physical_attack` | permanent ActiveEffect |
 | T3 | 80 | +3% к `crit_chance` | permanent ActiveEffect |
-| T4 | 100 | +2% к `parry_chance` | permanent ActiveEffect |
+| T4 | 100 | +2 к `accuracy` | permanent ActiveEffect |
 
 Бонусы накапливаются: при T3 активны все T1+T2+T3 (итого +5% physical_attack + 3% crit_chance).
 
@@ -276,7 +276,7 @@ System death-penalty: вместо потери набранного XP появ
     "vendorId": 50,
     "items": [
       {
-        "itemSlug": "health_potion_small",
+        "itemSlug": "small_health_potion",
         "buyPrice": 95,
         "sellPrice": 20
       }
@@ -298,7 +298,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
   "header": { "eventType": "dialogueError" },
   "body": {
     "errorCode": "BLOCKED_BY_REPUTATION",
-    "factionSlug": "dark_cult"
+    "factionSlug": "hunters"
   }
 }
 ```
@@ -314,7 +314,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
   "header": { "eventType": "reputationChanged" },
   "body": {
     "type": "reputationChanged",
-    "faction": "dark_cult",
+    "faction": "hunters",
     "delta": -100
   }
 }
@@ -352,7 +352,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
 
 ```json
 {
-  "itemSlug": "iron_sword",
+  "itemSlug": "sharp_sword",
   "itemInstanceId": 1234,
   "quantity": 1,
   "killCount": 74,
@@ -390,9 +390,9 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
     "channel": "zone_banner",
     "text": "",
     "data": {
-      "zoneSlug":   "dark_forest",
-      "minLevel":   10,
-      "maxLevel":   20,
+      "zoneSlug":   "forest",
+      "minLevel":   3,
+      "maxLevel":   10,
       "isPvp":      false,
       "isSafeZone": false
     }
@@ -424,7 +424,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
     "channel": "toast",
     "text": "",
     "data": {
-      "zoneSlug": "dark_forest",
+      "zoneSlug": "forest",
       "xpGained": 300
     }
   }
@@ -482,9 +482,9 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
   "id": 5,
   "uid": 10023,
   "zoneId": 3,
-  "name": "[Чемпион] Матёрый Волк",
-  "slug": "wolf",
-  "race": "Beast",
+  "name": "[!] Древний медведь",
+  "slug": "AncientBear",
+  "race": "Animal",
   "level": 8,
   "isAggressive": true,
   "isDead": false,
@@ -523,7 +523,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
     "priority": "high",
     "channel": "zone_banner",
     "text": "",
-    "data": { "slug": "wolf" }
+    "data": { "slug": "ancient_bear", "trophySlug": "alpha_fang", "trophyPrice": 200 }
   }
 }
 ```
@@ -539,7 +539,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
     "priority": "high",
     "channel": "zone_banner",
     "text": "",
-    "data": { "mobSlug": "wolf", "uid": 10023 }
+    "data": { "mobSlug": "AncientBear", "uid": 10023, "trophySlug": "alpha_fang", "trophyPrice": 200 }
   }
 }
 ```
@@ -597,7 +597,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
     "channel": "zone_banner",
     "text": "",
     "data": {
-      "eventSlug": "goblin_invasion",
+      "eventSlug": "wolf_hour",
       "durationSec": 3600,
       "gameZoneId": 1
     }
@@ -616,7 +616,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
     "priority": "medium",
     "channel": "toast",
     "text": "",
-    "data": { "eventSlug": "goblin_invasion" }
+    "data": { "eventSlug": "wolf_hour" }
   }
 }
 ```
@@ -651,8 +651,8 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
   "body": {
     "characterId": 7,
     "entries": [
-      { "mobSlug": "forest_wolf", "killCount": 47 },
-      { "mobSlug": "cave_bat",    "killCount": 5  }
+      { "mobSlug": "ForestWolf", "killCount": 47 },
+      { "mobSlug": "ForestFox",    "killCount": 5  }
     ]
   }
 }
@@ -667,7 +667,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
   "header": { "eventType": "getBestiaryEntry", "clientId": 42, "hash": "" },
   "body": {
     "characterId": 7,
-    "mobSlug": "forest_wolf"
+    "mobSlug": "ForestWolf"
   }
 }
 ```
@@ -681,7 +681,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
   "body": {
     "characterId": 7,
     "entry": {
-      "mobSlug": "forest_wolf",
+      "mobSlug": "ForestWolf",
       "killCount": 47,
       "tiers": [
         {
@@ -768,7 +768,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
     "channel": "silent",
     "text": "",
     "data": {
-      "mobSlug": "forest_wolf",
+      "mobSlug": "ForestWolf",
       "killCount": 48
     }
   }
@@ -790,7 +790,7 @@ _(Стандартная цена 100g, с скидкой 5% = 95g — клие�
     "channel": "toast",
     "text": "",
     "data": {
-      "mobSlug": "forest_wolf",
+      "mobSlug": "ForestWolf",
       "unlockedTier": 4,
       "categorySlug": "loot_table",
       "killCount": 30

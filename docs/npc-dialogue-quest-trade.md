@@ -94,7 +94,7 @@ Chunk Server (in-memory)
         "isInteractable": true,
         "dialogueId": "1",
         "quests": [
-          { "slug": "wolf_hunt_intro", "status": "available" }
+          { "slug": "varan_fox_menace", "status": "available" }
         ],
         "stats": {
           "health": { "current": 100, "max": 100 },
@@ -154,7 +154,7 @@ Chunk Server (in-memory)
 ```json
 { "all": [
     { "type": "level", "gte": 5 },
-    { "type": "quest", "slug": "wolf_hunt", "state": "not_started" }
+    { "type": "quest", "slug": "varan_fox_menace", "state": "not_started" }
 ]}
 ```
 
@@ -167,13 +167,13 @@ Chunk Server (in-memory)
 ```
 
 ```json
-{ "type": "quest_step", "slug": "wolf_hunt_intro", "step": 1 }
+{ "type": "quest_step", "slug": "varan_fox_menace", "step": 1 }
 ```
 
 ```json
 { "all": [
-    { "type": "quest", "slug": "wolf_hunt_intro", "state": "active" },
-    { "type": "quest_step", "slug": "wolf_hunt_intro", "step": 0 }
+    { "type": "quest", "slug": "varan_fox_menace", "state": "active" },
+    { "type": "quest_step", "slug": "varan_fox_menace", "step": 0 }
 ]}
 ```
 
@@ -209,8 +209,8 @@ Chunk Server (in-memory)
 У одного NPC может быть несколько диалогов с разными приоритетами и условиями. Сервер перебирает от наибольшего приоритета к наименьшему и запускает первый подходящий.
 
 **Пример:** У Гримора три диалога:
-- Приоритет 10: "Сдача квеста на волков" — условие: `wolf_hunt` = `completed`
-- Приоритет 5: "Выдача квеста на волков" — условие: `wolf_hunt` = `not_started`, уровень ≥ 5
+- Приоритет 10: "Сдача квеста на лис" — условие: `varan_fox_menace` = `completed`
+- Приоритет 5: "Выдача квеста на лис" — условие: `varan_fox_menace` = `not_started`, уровень ≥ 5
 - Приоритет 1: "Общий разговор" — без условий
 
 ### Сессия диалога
@@ -273,11 +273,11 @@ Chunk Server (in-memory)
         "conditionMet": true,
         "questPreview": {
           "questId": 5,
-          "clientQuestKey": "quest.wolf_hunt",
+          "clientQuestKey": "quest.varan_fox_menace",
           "firstStep": {
-            "clientStepKey": "quest.wolf_hunt.step_0",
+            "clientStepKey": "quest.varan_fox_menace.step_0",
             "stepType": "kill",
-            "target_slug": "forest_wolf",
+            "target_slug": "ForestFox",
             "count": 5,
             "current": 0
           },
@@ -310,8 +310,8 @@ Chunk Server (in-memory)
   "clientChoiceKey": "ruins_dying_stranger.choice.accept",
   "conditionMet": true,
   "giftPreview": [
-    { "giftType": "item", "item_slug": "iron_sword",    "quantity": 1 },
-    { "giftType": "item", "item_slug": "health_potion", "quantity": 2 }
+    { "giftType": "item", "item_slug": "sharp_sword",    "quantity": 1 },
+    { "giftType": "item", "item_slug": "small_health_potion", "quantity": 2 }
   ]
 }
 ```
@@ -390,7 +390,7 @@ Chunk Server (in-memory)
 ```
 
 **2. Сервер проверяет:** NPC существует, `isInteractable=true`, дистанция 150 < 200 — ОК.  
-Диалог "Выдача квеста на волков" (приоритет 5) подходит: `wolf_hunt not_started` ✓, уровень 7 ≥ 5 ✓.  
+Диалог "Выдача квеста на лис" (приоритет 5) подходит: `varan_fox_menace not_started` ✓, уровень 7 ≥ 5 ✓.  
 Сессия создана, граф проходится до первого `line`-узла.
 
 **3. Ответ — первая реплика:**
@@ -437,7 +437,7 @@ Chunk Server (in-memory)
 { "header": { "eventType": "dialogueChoice" }, "body": { "sessionId": "dlg_7_1709834400000", "edgeId": 8, "characterId": 101 } }
 ```
 
-**7. Сервер выполняет `actionGroup` ребра:** `offer_quest("wolf_hunt")` → квест принят.
+**7. Сервер выполняет `actionGroup` ребра:** `offer_quest("varan_fox_menace")` → квест принят.
 
 **8. Ответы (уведомления + закрытие):**
 ```json
@@ -445,11 +445,11 @@ Chunk Server (in-memory)
   "header": { "eventType": "quest_offered" },
   "body": {
     "questId": 5,
-    "clientQuestKey": "quest.wolf_hunt",
+    "clientQuestKey": "quest.varan_fox_menace",
     "currentStep": {
-      "clientStepKey": "quest.wolf_hunt.step_0",
+      "clientStepKey": "quest.varan_fox_menace.step_0",
       "stepType": "kill",
-      "target_slug": "forest_wolf",
+      "target_slug": "ForestFox",
       "count": 5,
       "current": 0
     },
@@ -542,20 +542,20 @@ Chunk Server (in-memory)
   "header": { "eventType": "QUEST_UPDATE", "clientId": 7 },
   "body": {
     "questId": 5,
-    "questSlug": "wolf_hunt_intro",
-    "clientQuestKey": "quest.wolf_hunt",
+    "questSlug": "varan_fox_menace",
+    "clientQuestKey": "quest.varan_fox_menace",
     "state": "active",
     "currentStep": 0,
     "totalSteps": 2,
-    "clientStepKey": "quest.wolf_hunt.step_0",
+    "clientStepKey": "quest.varan_fox_menace.step_0",
     "stepType": "kill",
     "completionMode": "auto",
     "progress": { "killed": 0 },
     "required": { "mob_id": 2, "count": 5 },
     "currentStepEnriched": {
-      "clientStepKey": "quest.wolf_hunt.step_0",
+      "clientStepKey": "quest.varan_fox_menace.step_0",
       "stepType": "kill",
-      "target_slug": "forest_wolf",
+      "target_slug": "ForestFox",
       "count": 5,
       "current": 0
     },
@@ -573,20 +573,20 @@ Chunk Server (in-memory)
   "header": { "eventType": "QUEST_UPDATE" },
   "body": {
     "questId": 5,
-    "questSlug": "wolf_hunt_intro",
-    "clientQuestKey": "quest.wolf_hunt",
+    "questSlug": "varan_fox_menace",
+    "clientQuestKey": "quest.varan_fox_menace",
     "state": "active",
     "currentStep": 0,
     "totalSteps": 2,
-    "clientStepKey": "quest.wolf_hunt.step_0",
+    "clientStepKey": "quest.varan_fox_menace.step_0",
     "stepType": "kill",
     "completionMode": "auto",
     "progress": { "killed": 3 },
     "required": { "mob_id": 2, "count": 5 },
     "currentStepEnriched": {
-      "clientStepKey": "quest.wolf_hunt.step_0",
+      "clientStepKey": "quest.varan_fox_menace.step_0",
       "stepType": "kill",
-      "target_slug": "forest_wolf",
+      "target_slug": "ForestFox",
       "count": 5,
       "current": 3
     },
@@ -604,20 +604,20 @@ Chunk Server (in-memory)
   "header": { "eventType": "QUEST_UPDATE" },
   "body": {
     "questId": 5,
-    "questSlug": "wolf_hunt_intro",
-    "clientQuestKey": "quest.wolf_hunt",
+    "questSlug": "varan_fox_menace",
+    "clientQuestKey": "quest.varan_fox_menace",
     "state": "active",
     "currentStep": 1,
     "totalSteps": 2,
-    "clientStepKey": "quest.wolf_hunt.step_1",
+    "clientStepKey": "quest.varan_fox_menace.step_1",
     "stepType": "collect",
     "completionMode": "auto",
     "progress": { "have": 0 },
     "required": { "item_id": 9, "count": 3 },
     "currentStepEnriched": {
-      "clientStepKey": "quest.wolf_hunt.step_1",
+      "clientStepKey": "quest.varan_fox_menace.step_1",
       "stepType": "collect",
-      "target_slug": "wolf_pelt",
+      "target_slug": "animal_hide",
       "count": 3,
       "current": 0
     },
@@ -637,17 +637,17 @@ Chunk Server (in-memory)
   "header": { "eventType": "QUEST_UPDATE" },
   "body": {
     "questId": 5,
-    "questSlug": "wolf_hunt_intro",
-    "clientQuestKey": "quest.wolf_hunt",
+    "questSlug": "varan_fox_menace",
+    "clientQuestKey": "quest.varan_fox_menace",
     "state": "completed",
     "currentStep": 1,
     "totalSteps": 2,
-    "clientStepKey": "quest.wolf_hunt.step_1",
+    "clientStepKey": "quest.varan_fox_menace.step_1",
     "stepType": "kill",
     "completionMode": "auto",
     "progress": { "killed": 1 },
     "required": { "mob_id": 3, "count": 1 },
-    "currentStepEnriched": { "clientStepKey": "quest.wolf_hunt.step_1", "stepType": "kill", "target_slug": "wolf_alpha", "count": 1, "current": 1 },
+    "currentStepEnriched": { "clientStepKey": "quest.varan_fox_menace.step_1", "stepType": "kill", "target_slug": "AlphaWolf", "count": 1, "current": 1 },
     "rewards": [
       { "rewardType": "exp",  "isHidden": false, "amount": 500 },
       { "rewardType": "item", "isHidden": true }
@@ -664,8 +664,8 @@ Chunk Server (in-memory)
   "header": { "eventType": "QUEST_UPDATE" },
   "body": {
     "questId": 5,
-    "questSlug": "wolf_hunt_intro",
-    "clientQuestKey": "quest.wolf_hunt",
+    "questSlug": "varan_fox_menace",
+    "clientQuestKey": "quest.varan_fox_menace",
     "state": "turned_in",
     "currentStep": 1,
     "totalSteps": 2,
@@ -715,11 +715,11 @@ Chunk Server (in-memory)
   "header": { "eventType": "quest_offered" },
   "body": {
     "questId": 5,
-    "clientQuestKey": "quest.wolf_hunt",
+    "clientQuestKey": "quest.varan_fox_menace",
     "currentStep": {
-      "clientStepKey": "quest.wolf_hunt.step_0",
+      "clientStepKey": "quest.varan_fox_menace.step_0",
       "stepType": "kill",
-      "target_slug": "forest_wolf",
+      "target_slug": "ForestFox",
       "count": 5,
       "current": 0
     },
@@ -746,7 +746,7 @@ Chunk Server (in-memory)
   "header": { "eventType": "quest_turned_in" },
   "body": {
     "questId": 5,
-    "clientQuestKey": "quest.wolf_hunt",
+    "clientQuestKey": "quest.varan_fox_menace",
     "rewardsReceived": [
       { "rewardType": "exp",  "isHidden": false, "amount": 500 },
       { "rewardType": "gold", "isHidden": false, "amount": 100 },
@@ -792,11 +792,11 @@ Chunk Server (in-memory)
 
 ---
 
-### Полный пример: цикл квеста "Охота на волков"
+### Полный пример: цикл квеста "Охота на лис"
 
 **Принятие:** → `quest_offered { currentStep, rewards }` + `QUEST_UPDATE { state: "active", step: 0, currentStepEnriched, rewards }`  
-**Убийство 1 волка:** → `QUEST_UPDATE { progress: {"killed": 1} }`  
-**Убийство 5 волков:** → `QUEST_UPDATE { progress: {"killed": 5} }` → шаг 0 завершён, переход к шагу 1  
+**Убийство 1 лису:** → `QUEST_UPDATE { progress: {"killed": 1} }`  
+**Убийство 5 лис:** → `QUEST_UPDATE { progress: {"killed": 5} }` → шаг 0 завершён, переход к шагу 1  
 → `QUEST_UPDATE { step: 1, stepType: "kill", required: {"mob_id": 2, "count": 1} }`  
 
 *Диалог с Миладой на шаге 1: ребро с условием `quest_step = 1` становится видимым вместо шага 0.*  
@@ -953,11 +953,11 @@ NPC типа `vendor` полностью заблокирован при реп�
         "conditionMet": true,
         "questPreview": {
           "questId": 5,
-          "clientQuestKey": "quest.wolf_hunt",
+          "clientQuestKey": "quest.varan_fox_menace",
           "firstStep": {
-            "clientStepKey": "quest.wolf_hunt.step_0",
+            "clientStepKey": "quest.varan_fox_menace.step_0",
             "stepType": "kill",
-            "target_slug": "forest_wolf",
+            "target_slug": "ForestFox",
             "count": 5,
             "current": 0
           },
@@ -1014,7 +1014,7 @@ NPC типа `vendor` полностью заблокирован при реп�
         "conditionMet": true,
         "turnInPreview": {
           "questId": 5,
-          "clientQuestKey": "quest.wolf_hunt",
+          "clientQuestKey": "quest.varan_fox_menace",
           "rewards": [
             { "rewardType": "exp",  "isHidden": false, "amount": 500 },
             { "rewardType": "item", "isHidden": false, "item_slug": "wooden_staff", "quantity": 1 },
@@ -1031,12 +1031,12 @@ NPC типа `vendor` полностью заблокирован при реп�
 
 // 5. action-узел выполняет turn_in_quest → rewards → end-узел
 // --- пакеты уведомлений ---
-{ "header": { "eventType": "QUEST_UPDATE" }, "body": { "questId": 5, "questSlug": "wolf_hunt", "state": "turned_in" } }
+{ "header": { "eventType": "QUEST_UPDATE" }, "body": { "questId": 5, "questSlug": "varan_fox_menace", "state": "turned_in" } }
 {
   "header": { "eventType": "quest_turned_in" },
   "body": {
     "questId": 5,
-    "clientQuestKey": "quest.wolf_hunt",
+    "clientQuestKey": "quest.varan_fox_menace",
     "rewardsReceived": [
       { "rewardType": "exp",  "isHidden": false, "amount": 500 },
       { "rewardType": "item", "isHidden": false, "item_slug": "wooden_staff",  "quantity": 1 },
@@ -1057,7 +1057,7 @@ NPC типа `vendor` полностью заблокирован при реп�
 ```json
 {
   "actions": [
-    { "type": "turn_in_quest", "slug": "wolf_hunt" },
+    { "type": "turn_in_quest", "slug": "varan_fox_menace" },
     { "type": "set_flag", "key": "grimor_quest_done", "bool_value": true },
     { "type": "give_gold", "amount": 50 }
   ]
@@ -1083,16 +1083,16 @@ NPC типа `vendor` полностью заблокирован при реп�
 // Ребро видно только когда квест активен И игрок на шаге 0
 {
   "all": [
-    { "type": "quest", "slug": "wolf_hunt_intro", "state": "active" },
-    { "type": "quest_step", "slug": "wolf_hunt_intro", "step": 0 }
+    { "type": "quest", "slug": "varan_fox_menace", "state": "active" },
+    { "type": "quest_step", "slug": "varan_fox_menace", "step": 0 }
   ]
 }
 
 // Ребро видно только когда квест активен И игрок на шаге 1
 {
   "all": [
-    { "type": "quest", "slug": "wolf_hunt_intro", "state": "active" },
-    { "type": "quest_step", "slug": "wolf_hunt_intro", "step": 1 }
+    { "type": "quest", "slug": "varan_fox_menace", "state": "active" },
+    { "type": "quest_step", "slug": "varan_fox_menace", "step": 1 }
   ]
 }
 ```
@@ -1102,7 +1102,7 @@ NPC типа `vendor` полностью заблокирован при реп�
 ```json
 {
   "actions": [
-    { "type": "fail_quest", "slug": "wolf_hunt_intro" }
+    { "type": "fail_quest", "slug": "varan_fox_menace" }
   ]
 }
 ```

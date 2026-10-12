@@ -13,7 +13,7 @@
 | 1 | Allowlist GM `admin.gm_client_ids` (CSV clientId; у чанка нет DB — это и есть role-слой; боты никогда не в списке, только отдельный `gm_bot` с `users.role=1`) | `game_config`, пуш на handshake |
 | 2 | Мастер-выключатель `admin.enabled` (default `false`) | `game_config` |
 | 3 | Компиляция `#ifdef ADMIN_RPC` (в prod-сборках кода физически нет; попытка → `forbidden`, сессия жива) | `CMakeLists.txt` (`option` default OFF), `Dockerfile.dev` собирает `-DADMIN_RPC=ON`, prod `Dockerfile` — нет |
-| 4 | Аудит: исполненная команда — warn `ADMIN char= op=`, отказ — error | видно в `bin/watch_logs.sh` (на DEV ожидаемо, не FATAL) |
+| 4 | Аудит: исполненная команда — warn `ADMIN char= op=` + строка в `gm_action_log` (fire-and-forget факт `saveGmAction`); отказ — error | видно в `bin/watch_logs.sh` (на DEV ожидаемо, не FATAL) |
 
 Ни один слой не достаточен. Prod deploy: flag off + non-DEV build + zero `role>=1` аккаунтов (проверяется Preflight prod-gate перед apply).
 
@@ -66,6 +66,8 @@
 | `killMob` | `characterId`, `uid`, `killerCharacterId` | Queued (`ADMIN_KILL_MOB`): летальный урон + `CombatSystem::handleMobDeath` (лут + XP/квест/бестиарий/чемпион/реп — те же вызовы, что в скилл-пути). Ответ `accepted:true`; тест ждёт `mobDeath`. **Setup-only** (трупы/harvest): механика убийства доказывается только через `playerAttack` |
 | `resetWorld` | `characterId`, `scope="champion"`, `zoneId` | Сброс ГЛОБАЛЬНОГО состояния (персонажи решаются эфемерными ботами, не скрабом): счётчики + активные чемпионы + timed re-arm + cull лишних мобов зоны (безопасно для чужих uid: `mobDied` floors/no-op; амбиент добирает респаун-таск). Только между тестами (evict-бродкаста нет). Ответ: `scope`, `culled` |
 | `reloadWorldContent` | `characterId` (любой загруженный: uniformity гейта) | Перезагрузка мирового контента БЕЗ рестартов: чанк просит game перепушить срезы NPC/vendors/world-objects/dialogues/quests/timed по живому линку (`requestCatalogReload`); чанк мержит как при реконнекте (вендоры/WIO/квесты — замена, timed — merge-by-slug, спавн-зоны — с preserve рантайма). Ответ `accepted` сразу; готовность — поллингом контента (пуши асинхронны). Только между тестами: рантайм-стоки вендоров и эфемерные WIO-состояния сбрасываются к контенту. Зеркало: харнес матчит ответы по паре `(op, requestId)` — op-only матчинг однажды вернул stale-успех (см. интеграционную 12-ю спеку) |
+| `banUser` | `characterId`, `reason` (обязательно), `expiresAt` (ISO, пусто = навсегда) | Бан аккаунта-владельца с причиной (`user_bans`; вход показывает причину+срок). Синхронно с bounded-ожиданием факта (ответ `ack: applied/duplicate`, иначе `game_timeout`). Пин: `test_ban.py` |
+| `unbanUser` | `characterId` | Снятие активных банов (`is_active=false`). Тот же sync-путь. Пин: `test_ban.py` |
 
 ## 12.3. `brief` join (быстрый вход для teleport-flow тестов)
 

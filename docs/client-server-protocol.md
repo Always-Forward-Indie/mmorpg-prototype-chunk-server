@@ -377,7 +377,7 @@
         "quantity":         3,
         "isEquipped":       false,
         "durabilityCurrent": 80,
-        "slug":             "iron_sword",
+        "slug":             "sharp_sword",
         "isQuestItem":      false,
         "itemType":         2,
         "itemTypeName":     "Weapon",
@@ -457,13 +457,11 @@
 | `legs` | Ноги |
 | `feet` | Обувь |
 | `hands` | Перчатки |
-| `waist` | Пояс |
-| `necklace` | Ожерелье |
-| `ring_1` | Кольцо 1 |
-| `ring_2` | Кольцо 2 |
+| `neck` | Ожерелье |
+| `ring` | Кольцо (один слот) |
 | `main_hand` | Основная рука |
 | `off_hand` | Вспомогательная рука |
-| `cloak` | Плащ |
+| `trinket` | Безделушка |
 
 ### 3.1 Надеть предмет — клиент → сервер
 
@@ -579,7 +577,7 @@
       "main_hand": {
         "inventoryItemId":  101,
         "itemId":           5,
-        "itemSlug":         "iron_sword",
+        "itemSlug":         "sharp_sword",
         "durabilityCurrent": 80,
         "durabilityMax":    100,
         "isDurabilityWarning": false,
@@ -589,11 +587,9 @@
       "legs":      null,
       "feet":      null,
       "hands":     null,
-      "waist":     null,
-      "necklace":  null,
-      "ring_1":    null,
-      "ring_2":    null,
-      "cloak":     null
+      "neck":      null,
+      "ring":      null,
+      "trinket":   null
     }
   }
 }
@@ -724,7 +720,7 @@ weightLimit = carry_weight.base + strength * carry_weight.per_strength
       {
         "inventoryItemId": 101,
         "itemId":          5,
-        "name":            "Iron Sword",
+        "name":            "Острый меч",
         "durabilityMax":   100,
         "durabilityCurrent": 45,
         "repairCost":      75
@@ -828,7 +824,7 @@ weightLimit = carry_weight.base + strength * carry_weight.per_strength
       {
         "itemId":       5,
         "name":         "Iron Sword",
-        "slug":         "iron_sword",
+        "slug":         "sharp_sword",
         "itemTypeSlug": "weapon",
         "raritySlug":   "common",
         "stackMax":     1,
@@ -1012,7 +1008,7 @@ weightLimit = carry_weight.base + strength * carry_weight.per_strength
       "myConfirmed":   false,
       "theirConfirmed": false,
       "myItems": [
-        { "inventoryItemId": 101, "itemId": 5, "quantity": 1, "name": "Iron Sword", "slug": "iron_sword" }
+        { "inventoryItemId": 101, "itemId": 5, "quantity": 1, "name": "Iron Sword", "slug": "sharp_sword" }
       ],
       "theirItems": []
     }

@@ -51,9 +51,9 @@
   "body": {
     "characterId": 7,
     "entries": [
-      { "mobSlug": "forest_wolf", "killCount": 47 },
-      { "mobSlug": "cave_spider", "killCount": 12 },
-      { "mobSlug": "bandit_scout", "killCount": 105 }
+      { "mobSlug": "ForestWolf", "killCount": 47 },
+      { "mobSlug": "ForestFox", "killCount": 12 },
+      { "mobSlug": "AlphaWolf", "killCount": 105 }
     ]
   },
   "timestamps": { "serverRecvMs": 1711709400010, "serverSendMs": 1711709400020 }
@@ -78,7 +78,7 @@
   },
   "body": {
     "characterId": 7,
-    "mobSlug": "forest_wolf"
+    "mobSlug": "ForestWolf"
   }
 }
 ```
@@ -94,7 +94,7 @@
   },
   "body": {
     "characterId": 7,
-    "mobSlug": "forest_wolf",
+    "mobSlug": "ForestWolf",
     "killCount": 47,
     "tiers": [
       {
@@ -114,7 +114,7 @@
       {
         "tier": 2,
         "categorySlug": "lore",
-        "requiredKills": 10,
+        "requiredKills": 5,
         "unlocked": true,
         "data": {
           "loreKey": "bestiary_lore_forest_wolf"
@@ -123,7 +123,7 @@
       {
         "tier": 3,
         "categorySlug": "combat_info",
-        "requiredKills": 25,
+        "requiredKills": 15,
         "unlocked": true,
         "data": {
           "weaknesses": ["fire"],
@@ -134,7 +134,7 @@
       {
         "tier": 4,
         "categorySlug": "loot_table",
-        "requiredKills": 50,
+        "requiredKills": 30,
         "unlocked": false,
         "requiredKillsLeft": 3,
         "data": null
@@ -142,14 +142,14 @@
       {
         "tier": 5,
         "categorySlug": "drop_rates",
-        "requiredKills": 100,
+        "requiredKills": 75,
         "unlocked": false,
         "data": null
       },
       {
         "tier": 6,
         "categorySlug": "hunter_mastery",
-        "requiredKills": 300,
+        "requiredKills": 150,
         "unlocked": false,
         "data": null
       }
@@ -198,7 +198,7 @@
 
 ```json
 {
-  "items": ["wolf_pelt", "wolf_fang", "raw_meat"]
+  "items": ["animal_hide", "animal_bones", "animal_meat"]
 }
 ```
 
@@ -207,10 +207,10 @@
 ```json
 {
   "loot": [
-    { "itemSlug": "wolf_pelt", "chance": 0.75 },
-    { "itemSlug": "wolf_fang", "chance": 0.35 },
-    { "itemSlug": "raw_meat", "chance": 0.90 },
-    { "itemSlug": "rare_wolf_eye", "chance": 0.02 }
+    { "itemSlug": "animal_hide", "chance": 0.50 },
+    { "itemSlug": "animal_bones", "chance": 0.40 },
+    { "itemSlug": "animal_meat", "chance": 0.30 },
+    { "itemSlug": "rusty_arrowhead", "chance": 0.07 }
   ]
 }
 ```
@@ -250,7 +250,7 @@
     "channel": "silent",
     "text": "",
     "data": {
-      "mobSlug": "forest_wolf",
+      "mobSlug": "ForestWolf",
       "killCount": 47
     }
   }
@@ -277,7 +277,7 @@
     "channel": "toast",
     "text": "",
     "data": {
-      "mobSlug": "forest_wolf",
+      "mobSlug": "ForestWolf",
       "unlockedTier": 3,
       "killCount": 15,
       "categorySlug": "combat_info"

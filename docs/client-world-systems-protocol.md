@@ -69,8 +69,8 @@
 использовать поле `slug` как ключ локализации.
 
 ```
-items.slug  →  locale["items"]["iron_sword"]["name"]
-            →  locale["items"]["iron_sword"]["description"]
+items.slug  →  locale["items"]["sharp_sword"]["name"]
+            →  locale["items"]["sharp_sword"]["description"]
 ```
 
 Пример файла локализации (формат на усмотрение клиента):
@@ -78,13 +78,13 @@ items.slug  →  locale["items"]["iron_sword"]["name"]
 ```json
 {
   "items": {
-    "iron_sword": {
-      "name": "Iron Sword",
-      "description": "A sturdy iron sword forged from cold iron."
+    "sharp_sword": {
+      "name": "Острый меч",
+      "description": "Острый меч обычной ковки."
     },
-    "potion_hp_small": {
-      "name": "Minor Health Potion",
-      "description": "Restores 150 HP instantly."
+    "small_health_potion": {
+      "name": "Малое зелье лечения",
+      "description": "Восстанавливает здоровье."
     }
   }
 }
@@ -107,9 +107,9 @@ slug'и для категорий — используйте их для ико�
 
 | Поле | Пример значений |
 |------|----------------|
-| `itemTypeSlug` | `weapon`, `armor`, `consumable`, `material`, `quest` |
+| `itemTypeSlug` | `weapon`, `armor`, `potion`, `food`, `quest_item`, `resource`, `accessory`, `currency`, `container`, `skill_book` |
 | `raritySlug` | `common`, `uncommon`, `rare`, `epic`, `legendary` |
-| `equipSlotSlug` | `main_hand`, `off_hand`, `head`, `chest`, `legs`, `feet`, `hands`, `waist`, `necklace`, `ring_1`, `ring_2`, `cloak` |
+| `equipSlotSlug` | `main_hand`, `off_hand`, `two_hand`, `head`, `chest`, `legs`, `feet`, `hands`, `ring`, `neck`, `trinket` |
 
 ---
 
@@ -136,7 +136,7 @@ Pity — механика защиты от неудачи при дропе р�
 | Порог hint-уведомления | `pity.hint_threshold_kills` | 500 убийств |
 
 Счётчик per-character, per-item: если игрок убил 300+ мобов, которые могут дропнуть
-`glacial_sword`, и предмет так и не выпал — начинает нарастать soft pity. На 800-м
+`fallen_warrior_sword`, и предмет так и не выпал — начинает нарастать soft pity. На 800-м
 убийстве предмет выпадает гарантированно. Счётчик сбрасывается при получении предмета.
 
 ### Hint-уведомление — сервер → клиент
@@ -203,10 +203,10 @@ Pity — механика защиты от неудачи при дропе р�
 ```json
 {
   "mobs": {
-    "forest_wolf": {
-      "name": "Лесной волк",
-      "description": "Серый волк из древних лесов.",
-      "lore": "Серые волки Древнего леса держатся стаями по 3–5 особей. В полнолуние стаи объединяются и становятся агрессивны даже к вооружённым путникам."
+    "ForestWolf": {
+      "name": "Простой волк",
+      "description": "Волк из опушки леса.",
+      "lore": "Волки опушки держатся стаями по 3–5 особей."
     }
   },
   "bestiary_categories": {
@@ -246,8 +246,8 @@ Pity — механика защиты от неудачи при дропе р�
   "body": {
     "characterId": 42,
     "entries": [
-      { "mobSlug": "forest_wolf", "killCount": 23 },
-      { "mobSlug": "cave_bat",    "killCount": 5  }
+      { "mobSlug": "ForestWolf", "killCount": 23 },
+      { "mobSlug": "ForestFox",    "killCount": 5  }
     ]
   }
 }
@@ -279,7 +279,7 @@ Pity — механика защиты от неудачи при дропе р�
   },
   "body": {
     "characterId": 42,
-    "mobSlug": "forest_wolf"
+    "mobSlug": "ForestWolf"
   }
 }
 ```
@@ -305,7 +305,7 @@ Pity — механика защиты от неудачи при дропе р�
   "body": {
     "characterId": 42,
     "entry": {
-      "mobSlug": "forest_wolf",
+      "mobSlug": "ForestWolf",
       "killCount": 23,
       "tiers": [
         {
@@ -437,7 +437,7 @@ Pity — механика защиты от неудачи при дропе р�
     "channel": "silent",
     "text": "",
     "data": {
-      "mobSlug": "forest_wolf",
+      "mobSlug": "ForestWolf",
       "killCount": 24
     }
   }
@@ -465,7 +465,7 @@ Pity — механика защиты от неудачи при дропе р�
     "channel": "toast",
     "text": "",
     "data": {
-      "mobSlug": "forest_wolf",
+      "mobSlug": "ForestWolf",
       "unlockedTier": 3,
       "categorySlug": "combat_info",
       "killCount": 15
@@ -549,7 +549,7 @@ Pity — механика защиты от неудачи при дропе р�
     "channel": "zone_banner",
     "text": "",
     "data": {
-      "zoneSlug":   "dead_forest",
+      "zoneSlug":   "forest",
       "minLevel":   10,
       "maxLevel":   20,
       "isPvp":      false,
@@ -559,7 +559,7 @@ Pity — механика защиты от неудачи при дропе р�
 }
 ```
 
-> `text` всегда пуст — клиент строит название зоны через `locale.zones.dead_forest.name`.
+> `text` всегда пуст — клиент строит название зоны через `locale.zones.forest.name`.
 
 ### Пример: zone_explored
 
@@ -574,7 +574,7 @@ Pity — механика защиты от неудачи при дропе р�
     "channel": "toast",
     "text": "",
     "data": {
-      "zoneSlug": "dead_forest",
+      "zoneSlug": "forest",
       "xpGained": 250
     }
   }
@@ -630,7 +630,7 @@ Pity — механика защиты от неудачи при дропе р�
 ```json
 {
   "id": 5,
-  "slug": "iron_sword",
+  "slug": "sharp_sword",
   "isQuestItem": false,
   "itemType": 2,
   "itemTypeName": "Weapon",
@@ -755,15 +755,15 @@ Client                 Chunk Server
   | [открыл UI бестиария]  |
   |    (использует кэш overview с логина)
   | [открыл карточку моба]  |
-  |───getBestiaryEntry─────►|  { characterId: 42, mobSlug: "forest_wolf" }
-  |◄──getBestiaryEntry──────|  { entry: { mobSlug: "forest_wolf", killCount: 23, tiers: [...] } }
+  |───getBestiaryEntry─────►|  { characterId: 42, mobSlug: "ForestWolf" }
+  |◄──getBestiaryEntry──────|  { entry: { mobSlug: "ForestWolf", killCount: 23, tiers: [...] } }
 ```
 
 Если нужен рефреш списка:
 
 ```
   |───getBestiaryOverview──►|  { characterId: 42 }
-  |◄──getBestiaryOverview───|  { entries: [{ mobSlug: "forest_wolf", killCount: 23 }, ...] }
+  |◄──getBestiaryOverview───|  { entries: [{ mobSlug: "ForestWolf", killCount: 23 }, ...] }
 ```
 
 ### 6.4 Подбор предмета с земли
@@ -845,9 +845,9 @@ Pity загружается внутренне. `getBestiaryOverview` прихо
         "id": 5,
         "uid": 1001,
         "zoneId": 3,
-        "name": "Волк",
-        "slug": "wolf",
-        "race": "Beast",
+        "name": "Простой волк",
+        "slug": "ForestWolf",
+        "race": "Animal",
         "level": 6,
         "isAggressive": true,
         "isDead": false,
@@ -909,9 +909,9 @@ Pity загружается внутренне. `getBestiaryOverview` прихо
         "id": 5,
         "uid": 1001,
         "zoneId": 3,
-        "name": "Волк",
-        "slug": "wolf",
-        "race": "Beast",
+        "name": "Простой волк",
+        "slug": "ForestWolf",
+        "race": "Animal",
         "level": 6,
         "isAggressive": true,
         "isDead": false,
@@ -1115,11 +1115,11 @@ Broadcast. Отправляется каждую секунду пока моб 
     "npcsSpawn": [
       {
         "id": 10,
-        "name": "Мечник Торвальд",
-        "slug": "merchant_torvald",
+        "name": "Milaya",
+        "slug": "milaya",
         "race": "Human",
         "level": 1,
-        "npcType": "vendor",
+        "npcType": "quest_giver",
         "isInteractable": true,
         "dialogueId": 5,
         "quests": [],
@@ -1132,9 +1132,9 @@ Broadcast. Отправляется каждую секунду пока моб 
       },
       {
         "id": 11,
-        "name": "Кузнец Брагор",
-        "slug": "blacksmith_bragor",
-        "race": "Dwarf",
+        "name": "Varan",
+        "slug": "varan",
+        "race": "Human",
         "level": 1,
         "npcType": "blacksmith",
         "isInteractable": true,
@@ -1202,10 +1202,14 @@ Broadcast. Отправляется каждую секунду пока моб 
 
 ```
 1. world_notification (notificationType: "champion_spawned_soon") — предупреждение
-   data: { "slug": "wolf" }
+   data: { "slug": "ancient_bear", "trophySlug": "alpha_fang", "trophyPrice": 200 }
 
 2. world_notification (notificationType: "champion_spawned") — чемпион заспавнился
-   data: { "mobSlug": "wolf", "uid": 10023 }
+   data: { "mobSlug": "AncientBear", "uid": 10023, "trophySlug": "alpha_fang", "trophyPrice": 200 }
+
+> `trophySlug` — ключ локали трофея (гарантированный дроп, шанс 1.00);
+> `trophyPrice` — цена скупки числом. Полей может не быть, если у шаблона
+> нет гарантированного трофея. Проверено живьем (миграция 103).
 
 3. spawnMobsInZone — broadcast со стандартным mob JSON
    name: "[!] Матёрый Волк"  ← идентификатор для UI
@@ -1234,8 +1238,8 @@ Broadcast. Отправляется каждую секунду пока моб 
 | `zone_entered` | `zoneSlug`, `minLevel`, `maxLevel`, `isPvp`, `isSafeZone` | Только владельцу | Смена зоны (при каждом входе, вкл. первый логин) |
 | `zone_explored` | `zoneSlug`, `xpGained` | Только владельцу | Первое посещение зоны |
 | `mastery_tier_up` | `masterySlug`, `tier` (effectSlug) | Только владельцу | Повышение тира мастерства |
-| `champion_spawned_soon` | `slug` | Всем в игровой зоне | Чемпион вот-вот появится |
-| `champion_spawned` | `mobSlug`, `uid` | Всем в игровой зоне | Чемпион заспавнился |
+| `champion_spawned_soon` | `slug` + опционально `trophySlug`, `trophyPrice` | Всем в игровой зоне | Чемпион вот-вот появится |
+| `champion_spawned` | `mobSlug`, `uid` + опционально `trophySlug`, `trophyPrice` | Всем в игровой зоне | Чемпион заспавнился |
 | `champion_killed` | `killerCharId` | Всем в игровой зоне | Чемпион убит игроком |
 | `champion_despawned` | `{}` | Всем в игровой зоне | Чемпион исчез по таймауту |
 | `zone_event_start` | `eventSlug`, `durationSec`, `gameZoneId` | Всем в игровой зоне | Началось зональное событие |

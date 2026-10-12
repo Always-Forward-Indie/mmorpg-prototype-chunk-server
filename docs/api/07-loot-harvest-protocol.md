@@ -112,7 +112,7 @@ struct CorpseLootStruct {
 #### Серверная валидация
 
 1. Труп с `corpseUID` существует в `harvestableCorpses_`
-2. Расстояние ≤ 150.0 единиц (`DEFAULT_INTERACTION_RADIUS`)
+2. Расстояние ≤ 300.0 единиц (`HarvestManager::DEFAULT_INTERACTION_RADIUS`, авторитетно 2D: `dist2D(player, corpse) <= interactionRadius`)
 3. `hasBeenHarvested == false`
 4. `currentHarvesterCharacterId == 0` (никто другой не канализирует)
 
@@ -169,7 +169,7 @@ struct CorpseLootStruct {
 | Код | Причина |
 |-----|---------|
 | `CORPSE_NOT_FOUND` | Труп не существует или истёк |
-| `OUT_OF_RANGE` | Слишком далеко (> 150.0) |
+| `OUT_OF_RANGE` | Слишком далеко (> 300.0) |
 | `ALREADY_HARVESTED` | Труп уже собран |
 | `ALREADY_BEING_HARVESTED` | Кто-то другой уже собирает |
 
@@ -366,4 +366,8 @@ struct MobLootInfoStruct {
 |----------|---------|----------|
 | `harvest.duration` | 3.0 сек | Длительность каналки |
 | `harvest.max_move_distance` | 50.0 | Макс. расстояние от точки начала |
-| `harvest.interaction_radius` | 150.0 | Дистанция для начала харвеста |
+| `harvest.interaction_radius` | 300.0 | Константа `DEFAULT_INTERACTION_RADIUS` в `HarvestManager` (конфиг-оверрайда в коде нет) |
+| `pity.soft_pity_kills` | 300 | С этого числа убийств без дропа шанс растет |
+| `pity.soft_bonus_per_kill` | 0.00005 | Прибавка к шансу за каждое убийство после soft-порога |
+| `pity.hint_threshold_kills` | 500 | Клиенту показывают намек, что удача близко |
+| `pity.hard_pity_kills` | 800 | Гарантированный дроп; счетчик сбрасывается |

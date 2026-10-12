@@ -54,7 +54,7 @@ struct NPCDataStruct {
         "isInteractable": true,
         "dialogueId": "merchant_john_main",
         "quests": [
-          { "slug": "wolf_hunt", "status": "available" }
+          { "slug": "varan_fox_menace", "status": "available" }
         ],
         "stats": {
           "health": { "current": 100, "max": 100 },
@@ -64,7 +64,7 @@ struct NPCDataStruct {
         "attributes": []
       }
     ],
-    "spawnRadius": 50000.0,
+    "spawnRadius": "<halfDiag * 1.5 — динамически от interest-ячейки, см. CharacterEventHandler.cpp:102>",
     "npcCount": 1
   }
 }
@@ -121,7 +121,7 @@ struct NPCDataStruct {
 
 1. Проверяет что персонаж жив + ID валидны
 2. Находит NPC, проверяет `isInteractable`
-3. Проверяет дистанцию: `distance(playerPos, npcPos) <= npc.radius`
+3. Проверяет дистанцию (авторитетно 2D + допуск по Z): `(dx²+dy²) <= npc.radius²` **и** `|dz| <= zTol`, `zTol = game_config interaction.z_tolerance_dialogue` (дефолт **400**)
 4. Проверяет репутацию: `rep < -500` с фракцией NPC → блокировка
 5. Вызывает `questManager.onNPCTalked(characterId, npcId)` → обновляет квесты со степом `talk`
 6. Собирает `PlayerContextStruct` (флаги, квесты, уровень, репутация, мастерство, скилл-поинты)
@@ -249,7 +249,7 @@ struct NPCDataStruct {
 
 **Сначала**: Нотификации от actions (0+). Каждая нотификация оборачивается так: `header.eventType` = `body.type`, `header.status = "success"`:
 ```json
-{ "header": { "eventType": "quest_offered", "status": "success", "timestamp": "...", "version": "1.0" }, "body": { "type": "quest_offered", "questId": 10, "clientQuestKey": "quest_wolf_hunt" } }
+{ "header": { "eventType": "quest_offered", "status": "success", "timestamp": "...", "version": "1.0" }, "body": { "type": "quest_offered", "questId": 10, "clientQuestKey": "quest_varan_fox_menace" } }
 ```
 ```json
 { "header": { "eventType": "item_received", "status": "success", "timestamp": "...", "version": "1.0" }, "body": { "type": "item_received", "itemId": 7, "quantity": 3 } }
@@ -427,7 +427,7 @@ struct NPCDialogueMappingStruct {
 #### quest — Состояние квеста
 
 ```json
-{ "type": "quest", "slug": "wolf_hunt", "state": "active" }
+{ "type": "quest", "slug": "varan_fox_menace", "state": "active" }
 ```
 
 Допустимые значения `state`: `"not_started"`, `"offered"`, `"active"`, `"completed"`, `"turned_in"`, `"failed"`
@@ -437,10 +437,10 @@ struct NPCDialogueMappingStruct {
 #### quest_step — Текущий шаг квеста
 
 ```json
-{ "type": "quest_step", "slug": "wolf_hunt", "step": 1 }
+{ "type": "quest_step", "slug": "varan_fox_menace", "step": 1 }
 ```
 ```json
-{ "type": "quest_step", "slug": "wolf_hunt", "gte": 2 }
+{ "type": "quest_step", "slug": "varan_fox_menace", "gte": 2 }
 ```
 
 #### level — Уровень персонажа
@@ -458,12 +458,12 @@ struct NPCDialogueMappingStruct {
 #### reputation — Репутация с фракцией
 
 ```json
-{ "type": "reputation", "faction": "bandits", "gte": 200 }
+{ "type": "reputation", "faction": "hunters", "gte": 200 }
 ```
 
 Или по тиру:
 ```json
-{ "type": "reputation", "faction": "bandits", "tier": "friendly" }
+{ "type": "reputation", "faction": "hunters", "tier": "friendly" }
 ```
 
 Тиры репутации:
@@ -550,23 +550,23 @@ struct NPCDialogueMappingStruct {
 #### offer_quest
 
 ```json
-{ "type": "offer_quest", "slug": "wolf_hunt" }
+{ "type": "offer_quest", "slug": "varan_fox_menace" }
 ```
 
 **Нотификация**:
 ```json
-{ "type": "quest_offered", "questId": 10, "clientQuestKey": "quest_wolf_hunt" }
+{ "type": "quest_offered", "questId": 10, "clientQuestKey": "quest_varan_fox_menace" }
 ```
 
 #### turn_in_quest
 
 ```json
-{ "type": "turn_in_quest", "slug": "wolf_hunt" }
+{ "type": "turn_in_quest", "slug": "varan_fox_menace" }
 ```
 
 **Нотификации** (множественные):
 ```json
-{ "type": "quest_turned_in", "questId": 10, "clientQuestKey": "quest_wolf_hunt" }
+{ "type": "quest_turned_in", "questId": 10, "clientQuestKey": "quest_varan_fox_menace" }
 ```
 Плюс для каждой награды:
 ```json
@@ -578,18 +578,18 @@ struct NPCDialogueMappingStruct {
 #### fail_quest
 
 ```json
-{ "type": "fail_quest", "slug": "wolf_hunt" }
+{ "type": "fail_quest", "slug": "varan_fox_menace" }
 ```
 
 **Нотификация**:
 ```json
-{ "type": "quest_failed", "questId": 10, "clientQuestKey": "quest_wolf_hunt" }
+{ "type": "quest_failed", "questId": 10, "clientQuestKey": "quest_varan_fox_menace" }
 ```
 
 #### advance_quest_step
 
 ```json
-{ "type": "advance_quest_step", "slug": "wolf_hunt" }
+{ "type": "advance_quest_step", "slug": "varan_fox_menace" }
 ```
 
 **Нотификация**: Нет (отправляется `QUEST_UPDATE` отдельно — см. ниже)
@@ -646,12 +646,12 @@ struct NPCDialogueMappingStruct {
 #### change_reputation
 
 ```json
-{ "type": "change_reputation", "faction": "bandits", "delta": 50 }
+{ "type": "change_reputation", "faction": "hunters", "delta": 50 }
 ```
 
 **Нотификация**:
 ```json
-{ "type": "reputationChanged", "faction": "bandits", "delta": 50 }
+{ "type": "reputationChanged", "faction": "hunters", "delta": 50 }
 ```
 
 #### learn_skill
@@ -854,8 +854,8 @@ struct QuestStepStruct {
   },
   "body": {
     "questId": 10,
-    "questSlug": "wolf_hunt",
-    "clientQuestKey": "quest_wolf_hunt",
+    "questSlug": "varan_fox_menace",
+    "clientQuestKey": "quest_varan_fox_menace",
     "state": "active",
     "currentStep": 1,
     "progress": { "killed": 5 },

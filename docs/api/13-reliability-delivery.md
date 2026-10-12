@@ -43,8 +43,8 @@ skillbar/titles/cooldown/analytics); остальное — legacy fire-and-forg
 ```json
 // chunk → game (дважды, ретрай):
 {"header": {"eventType": "saveReputation", ...},
- "body": {"characterId": 10, "factionSlug": "bandits", "delta": 3,
-          "factKey": "10:saveReputation:42"}}
+  "body": {"characterId": 10, "factionSlug": "merchants", "delta": 3,
+           "factKey": "10:saveReputation:42"}}
 // game → chunk, первый раз:
 {"header": {"eventType": "factAck", "status": "success", ...},
  "body": {"key": "10:saveReputation:42", "status": "applied"}}
@@ -53,7 +53,7 @@ skillbar/titles/cooldown/analytics); остальное — legacy fire-and-forg
  "body": {"key": "10:saveReputation:42", "status": "duplicate"}}
 ```
 
-Итог в БД: `bandits` вырос ровно на +3. Пин: `test_factkey_idempotency.py`
+Итог в БД: `merchants` вырос ровно на +3. Пин: `test_factkey_idempotency.py`
 (hermetic-бот `bot_05` — он никогда не онлайн на чанке, поэтому 60s
 абсолютный снапшот не затирает дельты mid-test).
 
@@ -108,11 +108,17 @@ Heartbeat-ack'и поля не несут (иначе чанк reconcile'илс�
 
 Прямая сторона (`saveInventoryChange`) идёт через outbox надёжно; дыра была
 в обратной — fire-and-forget `inventoryItemIdSync` (game → chunk).
-Закрыта токеном (`syncToken`, эхо чинит ровно свой экземпляр), ретраем
-(`dueSyncResend` + `scheduler.inv_sync_retry_ms`, миграция 095),
-абсолютным upsert'ом game-стороны и max-wins JOIN-аудитом
-(`loadPlayerInventory`). Пины: unit (`ShopFixture.*Sync*`, `*Load*`) +
-  `contracts/test_inventory_sync_sim.py` (fast). A-batch (096) закрыл
+Закрыта токеном (`syncToken`, эхо чинит ровно свой экземпляр — пин
+`ShopFixture.SyncTokenDisambiguatesIdenticalPendings` + sync-sim на эхо),
+ретраем (`dueSyncResend` + `scheduler.inv_sync_retry_ms`, миграция 095, тот же
+токен и последнее абсолютное количество),
+абсолютным upsert'ом game-стороны (`SET quantity = EXCLUDED.quantity`, было
+аддитивное `+` — дрейфовало при повторах) и max-wins JOIN-аудитом
+(`loadPlayerInventory`: пины `LoadPreservesPendingSyncRows`,
+`LoadAbsorbsPendingWhenDbIsNewer`). Пины: unit (`ShopFixture.*Sync*`, `*Load*`) +
+  `contracts/test_inventory_sync_sim.py` (fast). Честно открыто из того же
+  семейства: read-your-write для equip-attr refresh чинён внутри equip-хендлера
+  (гонка двух очередей), для durability — следующим заходом. A-batch (096) закрыл
   остаток: equip/unequip для id==0 строк деферятся до sync echo (game
   добивает по токену); строки владеют токеном, template-pair unique снят;
   мультистек-remove шлёт сейв на стек; flush oldest-first; ретрай с

@@ -107,8 +107,7 @@
   "body": {
     "chunkServerData": {
       "chunkId": 1,
-      "chunkIp": "192.168.50.50",
-      "chunkPort": 27017,
+      "chunkIp": "192.168.50.50",      "chunkPort": 27017,
       "chunkPosX": 0.0,
       "chunkPosY": 0.0,
       "chunkPosZ": 0.0,
@@ -120,9 +119,11 @@
 }
 ```
 
+> `chunkIp` берется из `CHUNK_PUBLIC_HOST` (env, дефолт = `SERVER_HOST`) — game отдает публичный адрес чанка, а не внутренний `db`-хост.
+
 **Серверная логика (Game Server):**
-1. Валидация `clientId` и `hash`
-2. Получение адреса Chunk Server из `ChunkManager` по `chunkId=1`
+1. Валидация `clientId != 0` и непустого `hash`, затем проверка login-сессии по БД: `search_user(hash)` (живая строка `user_sessions`: `revoked_at IS NULL AND expires_at > now()`) + привязка сессии к account (`users.id == clientId`; следом `get_character` дополнительно сверяет `owner_id`). Неизвестная/протухшая/чуждая сессия → `status:error` + `body.errorCode=ERR_SESSION_INVALID`; обрыв БД → `ERR_DB` (fail-closed, никогда не висит).
+2. Роутинг чанка: `selectChunkForNewClient()` — детерминированно lowest-id (позиции на этом шаге ещё нет); позиционный `selectChunkForPosition(x,y)` по боксам `pos/size` — для будущих хэндоффов. Топология деплоя: single-chunk (routing helpers готовы, межчанковой миграции сессии нет).
 3. Загрузка данных персонажа из БД по `characterId`
 4. Отправка `setCharacterData` на Chunk Server (server-to-server push, асинхронно)
 5. Ответ клиенту с `chunkServerData`
@@ -285,6 +286,7 @@
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `characterId` | int | ID вашего персонажа (тот же что в `joinGameCharacter`) |
+| `brief` | bool, optional | Fast-path для тестов (см. спеку `12`, §12.3): Фаза 4 режет тяжёлый mob/NPC flood, вместо списков — один пустой `spawnMobsInZone`. Остальное (инвентарь/скиллы/квесты/игроки/экипировка) intact. Без флага — полный flood. Реальный клиент НЕ использует |
 
 ### Сервер → Unicast (ACK)
 
@@ -538,6 +540,14 @@ if (actualDist > maxAllowedDist) → positionCorrection
 ---
 
 ## 1.8. Game ↔ Chunk: JOIN-каталог и setGameConfig (server-to-server)
+
+Wire хендшейка (проверено по коду `GameServerWorker::buildHandshakeMessage`):
+чанк при старте коннектится к гейму и шлет `chunkServerConnection{id, ip=publicHost, port}`
+с `header.bootId` + `header.nextSeq` (outbox-эпоха для идемпотентных фактов) → гейм отвечает
+пачкой `set*` → чанк подтверждает one-way пакетом `chunkServerData`
+(`Init success/failed for chunk!`, `header.chunkId`; гейм его только логгирует —
+онлайн/сокет уже заведены хендшейком). Обрыв линка чанк переживает сам
+(экспоненциальный бэкофф; heartbeat каждые 60с делает полный ретрай каталога).
 
 Чанк in-memory и без БД: всю статику он получает от game при старте
 линка (`chunkServerConnection` → 24 `set*`-пуша → `chunkServerData`).
