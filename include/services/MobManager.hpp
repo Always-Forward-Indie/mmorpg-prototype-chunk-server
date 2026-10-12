@@ -21,6 +21,9 @@ class MobManager
     MobDataStruct getMobById(int mobId) const;
     MobDataStruct getMobBySlug(const std::string &slug) const;
     MobDataStruct getMobByUid(int mobUid) const;
+    /// Rare variant bound to a common template (rare_of_mob_id match).
+    /// Returns id==0 when the family has no rare (migration 108).
+    MobDataStruct getRareVariantOf(int commonMobId) const;
 
     // Update mob mana
     void updateMobMana(int mobUid, int newMana);

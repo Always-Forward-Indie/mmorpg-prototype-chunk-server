@@ -16,6 +16,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include <nlohmann/json.hpp>
 
@@ -23,6 +24,7 @@ namespace spdlog
 {
 class logger;
 }
+class ItemManager;
 
 /**
  * @brief Unified authority for all champion-type mob events (Stage 3).
@@ -144,6 +146,12 @@ class ChampionManager
         spawnNotifyCb_ = std::move(cb);
     }
 
+    /// Optional trophy source for champion announcements. When set (production
+    /// wires the ItemManager), spawn/pre-announce broadcasts carry the
+    /// guaranteed-drop trophy as keys only: trophySlug (client locale) +
+    /// trophyPrice (vendor buy-back number). Null by default (unit tests).
+    void setItemManager(const ItemManager *items) { items_ = items; }
+
     // ── Test seam: injectable clocks ──────────────────────────────────────────
     // Defaults are the wall clocks; unit tests override them to drive
     // timed/despawn/survival paths in milliseconds without DB or bots.
@@ -215,6 +223,7 @@ class ChampionManager
     MobManager &mobs_;
     SpawnZoneManager &spawnZones_;
     CharacterStatsNotificationService *statsNotify_; // optional, may be null
+    const ItemManager *items_ = nullptr; // optional trophy source (keys only)
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 
@@ -264,6 +273,10 @@ class ChampionManager
 
     /// Resolve a world spawn position within the given game zone.
     PositionStruct resolveChampionSpawnPoint(int gameZoneId) const;
+
+    /// Guaranteed-trophy lookup for announcements (keys + numbers only).
+    /// Returns {slug, vendorPriceSell} or {"", 0}.
+    std::pair<std::string, int> resolveTrophy(int mobTemplateId) const;
 
     /// Send a worldNotification to all players in a game zone.
     void broadcastToGameZone(int gameZoneId,

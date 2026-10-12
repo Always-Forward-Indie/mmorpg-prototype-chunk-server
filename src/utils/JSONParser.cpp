@@ -228,6 +228,8 @@ JSONParser::parseCharacterData(const nlohmann::json &jsonData)
                         ed.durationSeconds = eff["durationSeconds"].get<int>();
                     if (eff.contains("tickMs") && eff["tickMs"].is_number_integer())
                         ed.tickMs = eff["tickMs"].get<int>();
+                    if (eff.contains("modifierType") && eff["modifierType"].is_string())
+                        ed.modifierType = eff["modifierType"].get<std::string>();
                     skillData.effects.push_back(ed);
                 }
             }
@@ -715,6 +717,8 @@ JSONParser::parseMobsList(const char *data, size_t length)
                 mobData.rareSpawnChance = mob["rareSpawnChance"].get<float>();
             if (mob.contains("rareSpawnCondition") && mob["rareSpawnCondition"].is_string())
                 mobData.rareSpawnCondition = mob["rareSpawnCondition"].get<std::string>();
+            if (mob.contains("rareOfMobId") && mob["rareOfMobId"].is_number_integer())
+                mobData.rareOfMobId = mob["rareOfMobId"].get<int>();
 
             // Social systems (Stage 4, migration 039)
             if (mob.contains("factionSlug") && mob["factionSlug"].is_string())
@@ -1185,6 +1189,8 @@ JSONParser::parseMobsSkillsMapping(const char *data, size_t length)
                                     ed.durationSeconds = eff["durationSeconds"].get<int>();
                                 if (eff.contains("tickMs") && eff["tickMs"].is_number_integer())
                                     ed.tickMs = eff["tickMs"].get<int>();
+                                if (eff.contains("modifierType") && eff["modifierType"].is_string())
+                                    ed.modifierType = eff["modifierType"].get<std::string>();
                                 skill.effects.push_back(ed);
                             }
                         }
@@ -1923,6 +1929,7 @@ JSONParser::parsePlayerActiveEffects(const char *data, size_t length)
             eff.sourceType = ej.value("sourceType", std::string(""));
             eff.expiresAt = ej.value("expiresAt", int64_t(0));
             eff.tickMs = ej.value("tickMs", 0);
+            eff.modifierType = ej.value("modifierType", std::string(""));
             // Schedule first tick immediately on load; non-tick effects: nextTickAt stays default
             if (eff.tickMs > 0)
                 eff.nextTickAt = std::chrono::steady_clock::now();

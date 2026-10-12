@@ -3,6 +3,7 @@
 #include "services/CharacterStatsNotificationService.hpp"
 #include "services/GameConfigService.hpp"
 #include "services/GameZoneManager.hpp"
+#include "services/ItemManager.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/SpawnZoneManager.hpp"
@@ -35,6 +36,51 @@ ChampionManager::ChampionManager(GameZoneManager &gameZones,
       logger_(logger)
 {
     log_ = logger_.getSystem("champion");
+}
+
+// ── Guaranteed-trophy enrichment (announcements carry keys + numbers only) ──
+// Picks the highest-tier guaranteed (chance >= 1.0, non-harvest) loot entry
+// for the template: that is the champion trophy (e.g. alpha_fang).
+// Returns {"", 0} when no ItemManager is wired or no such entry exists.
+static int trophyTierRank(const std::string &tier)
+{
+    if (tier == "very_rare")
+        return 4;
+    if (tier == "rare")
+        return 3;
+    if (tier == "uncommon")
+        return 2;
+    return 1;
+}
+
+std::pair<std::string, int>
+ChampionManager::resolveTrophy(int mobTemplateId) const
+{
+    if (items_ == nullptr)
+        return {"", 0};
+    try
+    {
+        const auto table = items_->getLootForMob(mobTemplateId);
+        const MobLootInfoStruct *best = nullptr;
+        for (const auto &e : table)
+        {
+            if (e.dropChance < 0.999f || e.isHarvestOnly)
+                continue;
+            if (best == nullptr || trophyTierRank(e.lootTier) > trophyTierRank(best->lootTier))
+                best = &e;
+        }
+        if (best == nullptr)
+            return {"", 0};
+        const auto item = items_->getItemById(best->itemId);
+        if (item.slug.empty())
+            return {"", 0};
+        return {item.slug, item.vendorPriceSell};
+    }
+    catch (const std::exception &e)
+    {
+        log_->warn("[Champion] resolveTrophy failed for mob {}: {}", mobTemplateId, e.what());
+        return {"", 0};
+    }
 }
 
 void
@@ -217,9 +263,16 @@ ChampionManager::tickTimedChampions()
             // Pre-announce
             if (timeUntilSpawn <= preAnnounceSec && !state.preAnnounceSent)
             {
+                nlohmann::json soon{{"slug", state.tmpl.slug}};
+                const auto trophy = resolveTrophy(state.tmpl.mobTemplateId);
+                if (!trophy.first.empty())
+                {
+                    soon["trophySlug"] = trophy.first;
+                    soon["trophyPrice"] = trophy.second;
+                }
                 broadcastToGameZone(state.tmpl.gameZoneId,
                     "champion_spawned_soon",
-                    nlohmann::json{{"slug", state.tmpl.slug}});
+                    soon);
                 state.preAnnounceSent = true;
             }
 
@@ -409,7 +462,14 @@ ChampionManager::spawnChampion(int mobTemplateId,
             active_.push_back({base.uid, gameZoneId, mobTemplateId, slug, now, std::chrono::steady_clock::time_point::max()});
     }
 
-    broadcastToGameZone(gameZoneId, "champion_spawned", nlohmann::json{{"mobSlug", base.slug}, {"uid", base.uid}});
+    nlohmann::json spawned{{"mobSlug", base.slug}, {"uid", base.uid}};
+    const auto trophy = resolveTrophy(mobTemplateId);
+    if (!trophy.first.empty())
+    {
+        spawned["trophySlug"] = trophy.first;
+        spawned["trophyPrice"] = trophy.second;
+    }
+    broadcastToGameZone(gameZoneId, "champion_spawned", spawned);
 
     log_->info("[Champion] Spawned uid={} '{}' in gameZone={}", base.uid, base.name, gameZoneId);
     if (spawnNotifyCb_)

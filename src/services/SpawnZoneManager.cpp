@@ -1,11 +1,13 @@
 #include "services/SpawnZoneManager.hpp"
 #include "services/GameZoneManager.hpp"
+#include "services/IStatsNotifier.hpp"
 #include "services/MobInstanceManager.hpp"
 #include "utils/Generators.hpp"
 #include "utils/RandomUtils.hpp"
 #include "utils/SpawnGeometry.hpp"
 #include <algorithm>
 #include <ctime>
+#include <nlohmann/json.hpp>
 #include <spdlog/logger.h>
 
 SpawnZoneManager::SpawnZoneManager(
@@ -27,6 +29,12 @@ void
 SpawnZoneManager::setGameZoneManager(GameZoneManager *gameZoneManager)
 {
     gameZoneManager_ = gameZoneManager;
+}
+
+void
+SpawnZoneManager::setStatsNotifier(IStatsNotifier *statsNotify)
+{
+    statsNotify_ = statsNotify;
 }
 
 void
@@ -321,6 +329,22 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
         {
             MobDataStruct mob = mobManager_.getMobById(entry.mobId);
 
+            // Rare replacement (migration 108): when the common family mob
+            // is due, roll the rare variant's percent chance. The rare
+            // shares the spawn slot/position logic below; only the template
+            // (and the announce) differs.
+            bool isRareSpawn = false;
+            if (mob.id != 0)
+            {
+                const MobDataStruct rare = mobManager_.getRareVariantOf(mob.id);
+                if (rare.id != 0 && rare.rareSpawnChance > 0.0f &&
+                    RandomUtils::uniform01() * 100.0f < rare.rareSpawnChance)
+                {
+                    mob = rare;
+                    isRareSpawn = true;
+                }
+            }
+
             logger_.debug("Template mob from MobManager - ID: " + std::to_string(mob.id) +
                         ", isDead: " + (mob.isDead ? "true" : "false") +
                         ", currentHealth: " + std::to_string(mob.currentHealth) +
@@ -426,6 +450,24 @@ SpawnZoneManager::spawnMobsInZone(int zoneId)
 
             if (mobInstanceManager_)
                 mobInstanceManager_->registerMobInstance(mob);
+
+            if (isRareSpawn && statsNotify_ != nullptr)
+            {
+                try
+                {
+                    // Keys only (client resolves names via locale).
+                    nlohmann::json data;
+                    data["mobSlug"] = mob.slug;
+                    data["uid"] = mob.uid;
+                    statsNotify_->sendWorldNotificationToGameZone(
+                        zone->second.gameZoneId, "rare_mob_spawned", data,
+                        "medium", "toast");
+                }
+                catch (const std::exception &e)
+                {
+                    logger_.logError(std::string("rare announce failed: ") + e.what());
+                }
+            }
 
             logger_.log("[SPAWN_FIX] Spawned mob UID " + std::to_string(mob.uid) +
                         " - isDead: " + (mob.isDead ? "true" : "false") +

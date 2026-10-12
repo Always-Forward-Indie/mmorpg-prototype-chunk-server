@@ -22,6 +22,10 @@ MobManager::setListOfMobs(
         }
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
+        // Full replace, not upsert: the caller always sends the complete
+        // catalog (join / reload). Without this, templates deleted from
+        // the DB linger as ghosts and keep spawning.
+        mobs_.clear();
         for (const auto &row : selectMobs)
         {
             MobDataStruct mobData;
@@ -63,12 +67,19 @@ MobManager::setListOfMobs(
             mobData.isRare = row.isRare;
             mobData.rareSpawnChance = row.rareSpawnChance;
             mobData.rareSpawnCondition = row.rareSpawnCondition;
+            mobData.rareOfMobId = row.rareOfMobId;
 
             // Bestiary metadata (migration 040)
             mobData.biomeSlug = row.biomeSlug;
             mobData.mobTypeSlug = row.mobTypeSlug;
             mobData.hpMin = row.hpMin;
             mobData.hpMax = row.hpMax;
+
+            // Stage 4 — Reputation (migration 039): parsed from game-server
+            // JSON but previously dropped here, so no mob kill ever granted
+            // faction rep (character_reputation held quest rows only).
+            mobData.factionSlug = row.factionSlug;
+            mobData.repDeltaPerKill = row.repDeltaPerKill;
 
             mobs_[mobData.id] = mobData;
         }
@@ -211,6 +222,20 @@ MobManager::getMobBySlug(const std::string &slug) const
     for (const auto &[id, mob] : mobs_)
     {
         if (mob.slug == slug)
+            return mob;
+    }
+    return MobDataStruct();
+}
+
+MobDataStruct
+MobManager::getRareVariantOf(int commonMobId) const
+{
+    if (commonMobId <= 0)
+        return MobDataStruct();
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    for (const auto &[id, mob] : mobs_)
+    {
+        if (mob.rareOfMobId == commonMobId)
             return mob;
     }
     return MobDataStruct();

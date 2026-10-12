@@ -346,6 +346,7 @@ struct ActiveEffectStruct
     int attributeId = 0;             // entity_attributes.id (0 = non-stat effect)
     std::string attributeSlug = "";  // slug matched against CharacterAttributeStruct::slug
     float value = 0.0f;              // stat: additive modifier; dot/hot: per-tick amount
+    std::string modifierType = "";   // "flat" | "percent" (percent = of stored base); "" = flat legacy
     std::string sourceType = "";     // quest|skill|item|dialogue
     int64_t expiresAt = 0;           // Unix timestamp (seconds); 0 = permanent
     int tickMs = 0;                  // tick interval (ms); 0 = non-tick (stat modifier only)
@@ -549,6 +550,7 @@ struct MobDataStruct
     bool isRare = false;            ///< True if this is a rare spawn mob
     float rareSpawnChance = 0.0f;   ///< Spawn chance per check [0..1]
     std::string rareSpawnCondition; ///< 'night' | 'day' | 'zone_event' | empty = any time
+    int rareOfMobId = 0; ///< If this template is a rare: common template id it replaces (0 = not a rare)
 
     // Stage 4 — Reputation (migration 039)
     std::string factionSlug; ///< Faction this mob belongs to (e.g. 'wolves', 'bandits')
@@ -863,6 +865,11 @@ struct MobMovementData
     // until it arrives, then picks a new random point inside the zone.
     PositionStruct patrolTargetPoint;
     bool hasPatrolTarget = false;
+
+    // CC hold (stun/root): set by MobAIController from the mob effect store,
+    // honored by MobMovementManager::canPerformAction. The mob stands still
+    // but the AI state machine keeps running (attacks in range still fire).
+    bool movementHeld = false;
 
     // Return-to-zone destination.
     // When the mob enters RETURNING, a random point within the spawn zone is

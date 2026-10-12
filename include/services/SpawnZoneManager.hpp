@@ -14,6 +14,7 @@
 // Forward declaration to avoid circular dependency
 class MobInstanceManager;
 class GameZoneManager;
+class IStatsNotifier;
 
 class SpawnZoneManager
 {
@@ -27,6 +28,10 @@ class SpawnZoneManager
     // without it exclusion is silently ignored — same posture as the
     // optional MobInstanceManager above).
     void setGameZoneManager(GameZoneManager *gameZoneManager);
+
+    // Optional announcer for rare spawns (nullable: without it rares still
+    // spawn, only the rare_mob_spawned toast is skipped).
+    void setStatsNotifier(IStatsNotifier *statsNotify);
 
     void loadMobSpawnZones(std::vector<SpawnZoneStruct> selectSpawnZones);
     void loadMobsInSpawnZones(std::vector<MobDataStruct> selectMobs);
@@ -52,6 +57,7 @@ class SpawnZoneManager
     MobManager &mobManager_;
     MobInstanceManager *mobInstanceManager_; // Pointer to avoid circular dependency
     GameZoneManager *gameZoneManager_ = nullptr; // Optional exclusion filter
+    IStatsNotifier *statsNotify_ = nullptr; // Optional rare-spawn announcer
 
     // Store the mob spawn zones in memory with zoneId as key
     std::map<int, SpawnZoneStruct> mobSpawnZones_;
