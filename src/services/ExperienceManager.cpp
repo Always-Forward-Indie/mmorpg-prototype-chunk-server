@@ -2,6 +2,7 @@
 #include "services/CharacterManager.hpp"
 #include "services/ExperienceCacheManager.hpp"
 #include "services/IStatsNotifier.hpp"
+#include "services/StatsResolver.hpp"
 #include "services/TitleManager.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TimestampUtils.hpp"
@@ -34,38 +35,119 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
 
     try
     {
-        // Получаем данные персонажа
-        auto characterData = characters_.getCharacterData(characterId);
-
-        // Сохраняем старые значения
-        int oldExperience = characterData.characterExperiencePoints;
-        int oldLevel = characterData.characterLevel;
-        int oldDebt = characterData.experienceDebt;
-
-        // ── Experience Debt: redirect XP to pay debt first, remainder goes to character ─
-        if (experienceAmount > 0 && characterData.experienceDebt > 0)
+        // ── Atomic mutation under the character-map lock ────────────────────
+        // The old copy-modify-write across the whole grant lost XP on
+        // concurrent grants (AoE multi-kill) and wiped HP interleaved with
+        // damage/heal via the stale-copy overwrite in loadCharacterData.
+        // Everything below runs on the LIVE struct; packets, titles and
+        // callbacks stay outside the lock. Lock order: character map is
+        // innermost (see applyUnderLock); exp-cache reads are its own lock.
+        struct Applied
         {
-            int toDebt = std::min(experienceAmount, characterData.experienceDebt);
-            characterData.experienceDebt -= toDebt;
-            experienceAmount -= toDebt;
-            log_->info("[ExperienceDebt] character {} paid {} debt, remaining: {}",
-                characterId,
-                toDebt,
-                characterData.experienceDebt);
+            bool present = false;
+            int oldExp = 0, oldLvl = 0, oldDebt = 0;
+            int newExp = 0, newLvl = 0, debtAfter = 0;
+            bool leveled = false;
+        } applied;
+        const int amountIn = experienceAmount;
+        const bool present = characters_.applyUnderLock(characterId,
+            [&](CharacterDataStruct &ch) {
+                applied.present = true;
+                applied.oldExp = ch.characterExperiencePoints;
+                applied.oldLvl = ch.characterLevel;
+                applied.oldDebt = ch.experienceDebt;
+
+                // ── Experience Debt: redirect XP to pay debt first ──────
+                int amount = amountIn;
+                if (amount > 0 && ch.experienceDebt > 0)
+                {
+                    const int toDebt = std::min(amount, ch.experienceDebt);
+                    ch.experienceDebt -= toDebt;
+                    amount -= toDebt;
+                }
+
+                int newExp = std::max(0, ch.characterExperiencePoints + amount);
+                int newLvl = getLevelFromExperience(newExp);
+                if (newLvl > MAX_LEVEL)
+                {
+                    newLvl = MAX_LEVEL;
+                    newExp = getExperienceForLevel(MAX_LEVEL);
+                }
+                applied.newExp = newExp;
+                applied.newLvl = newLvl;
+                applied.debtAfter = ch.experienceDebt;
+                applied.leveled = (newLvl > applied.oldLvl);
+
+                ch.characterExperiencePoints = newExp;
+                ch.characterLevel = newLvl;
+                ch.expForNextLevel = getExperienceForLevelFromGameServer(newLvl + 1);
+                // SP grant mirrors game set_character_exp_level (+1 per level).
+                ch.freeSkillPoints += (newLvl - applied.oldLvl);
+
+                if (applied.leveled)
+                {
+                    // Repair base max from attributes when unset.
+                    if (ch.characterMaxHealth <= 0)
+                        for (const auto &attr : ch.attributes)
+                            if (attr.slug == "max_health")
+                            {
+                                ch.characterMaxHealth = attr.value;
+                                break;
+                            }
+                    if (ch.characterMaxMana <= 0)
+                        for (const auto &attr : ch.attributes)
+                            if (attr.slug == "max_mana")
+                            {
+                                ch.characterMaxMana = attr.value;
+                                break;
+                            }
+
+                    ch.characterMaxHealth += (newLvl - applied.oldLvl) * 10; // +10 HP/level
+                    ch.characterMaxMana += (newLvl - applied.oldLvl) * 5;    // +5 MP/level
+
+                    // Full restore capped to effective max: bumped struct max +
+                    // effect deltas from StatsResolver (flat, percent-of-base,
+                    // debuffs). Resolver totals are relative to the stored
+                    // attribute vector (pre-bump), so take only the DELTA —
+                    // the bump itself lives in the struct fields. Current never
+                    // exceeds max on the client HUD.
+                    const int64_t nowSecLvl =
+                        std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+                    const auto eff = StatsResolver::effectiveMap(
+                        ch.attributes, ch.activeEffects, nowSecLvl);
+                    const auto effDelta = [&](const char *slug) {
+                        int base = 0;
+                        for (const auto &a : ch.attributes)
+                            if (a.slug == slug)
+                            {
+                                base = a.value;
+                                break;
+                            }
+                        const auto it = eff.find(slug);
+                        const float total =
+                            (it != eff.end()) ? it->second : static_cast<float>(base);
+                        return static_cast<int>(std::round(total)) - base;
+                    };
+                    ch.characterCurrentHealth = std::max(1,
+                        ch.characterMaxHealth + effDelta("max_health"));
+                    ch.characterCurrentMana = std::max(0,
+                        ch.characterMaxMana + effDelta("max_mana"));
+                }
+            });
+        if (!present)
+        {
+            log_->error("grantExperience: character " + std::to_string(characterId) + " not in map");
+            result.success = false;
+            return result;
         }
 
-        // Вычисляем новые значения
-        int newExperience = oldExperience + experienceAmount;
-        newExperience = std::max(0, newExperience); // Не даем опыту стать отрицательным
-
-        int newLevel = getLevelFromExperience(newExperience);
-
-        // Проверяем максимальный уровень
-        if (newLevel > MAX_LEVEL)
-        {
-            newLevel = MAX_LEVEL;
-            newExperience = getExperienceForLevel(MAX_LEVEL);
-        }
+        const int oldExperience = applied.oldExp;
+        const int oldLevel = applied.oldLvl;
+        const int oldDebt = applied.oldDebt;
+        const int newExperience = applied.newExp;
+        const int newLevel = applied.newLvl;
 
         // Заполняем структуру события
         result.experienceEvent.characterId = characterId;
@@ -81,109 +163,23 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         result.experienceEvent.timestamps = TimestampUtils::createReceiveTimestamp(0, "");
 
         // Проверяем повышение уровня
-        result.levelUp = (newLevel > oldLevel);
+        result.levelUp = applied.leveled;
 
-        // Обновляем данные персонажа в CharacterManager
-        // Обновляем опыт
-        characterData.characterExperiencePoints = newExperience;
-        characterData.characterLevel = newLevel;
-        characterData.expForNextLevel = result.experienceEvent.expForNextLevel;
-        // SP grant mirrors game set_character_exp_level (+1 per level gained).
-        // On the local copy BEFORE loadCharacterData (a manager-side touch
-        // here would be wiped by the stale-copy overwrite below). Without it
-        // chunk memory goes stale after every level-up (false
-        // insufficient_sp until relog); game persist stays source of truth.
-        characterData.freeSkillPoints += (newLevel - oldLevel);
-
-        // Тестируем новый метод получения опыта из гейм-сервера
-        log_->info("Testing getExperienceForLevelFromGameServer for level " + std::to_string(newLevel + 1));
-        int expFromGameServer = getExperienceForLevelFromGameServer(newLevel + 1);
-        logger_.log("Experience for level " + std::to_string(newLevel + 1) +
-                        " from game server: " + std::to_string(expFromGameServer),
-            GREEN);
-
-        // Если произошло повышение уровня, обновляем статы
         if (result.levelUp)
-        {
-            // Сохраняем старые значения для события
-            int oldMaxHealth = characterData.characterMaxHealth;
-            int oldMaxMana = characterData.characterMaxMana;
-
-            // Убеждаемся, что у нас правильные базовые значения из атрибутов
-            if (characterData.characterMaxHealth <= 0)
-            {
-                for (const auto &attr : characterData.attributes)
-                {
-                    if (attr.slug == "max_health")
-                    {
-                        characterData.characterMaxHealth = attr.value;
-                        break;
-                    }
-                }
-            }
-
-            if (characterData.characterMaxMana <= 0)
-            {
-                for (const auto &attr : characterData.attributes)
-                {
-                    if (attr.slug == "max_mana")
-                    {
-                        characterData.characterMaxMana = attr.value;
-                        break;
-                    }
-                }
-            }
-
             handleLevelUp(characterId, oldLevel, newLevel, result);
-
-            // Обновляем здоровье и ману при повышении уровня
-            int healthIncrease = (newLevel - oldLevel) * 10; // +10 HP за уровень
-            int manaIncrease = (newLevel - oldLevel) * 5;    // +5 MP за уровень
-
-            characterData.characterMaxHealth += healthIncrease;
-            characterData.characterMaxMana += manaIncrease;
-
-            // Compute effective max: base + active non-expired stat modifiers (e.g. resurrection_sickness debuff).
-            // Full restore must not exceed effective max, otherwise current > max on the client HUD.
-            const int64_t nowSecLvl = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::system_clock::now().time_since_epoch())
-                                          .count();
-            int effectiveMaxHealthLvl = characterData.characterMaxHealth;
-            int effectiveMaxManaLvl = characterData.characterMaxMana;
-            for (const auto &eff : characterData.activeEffects)
-            {
-                if (eff.expiresAt != 0 && eff.expiresAt <= nowSecLvl)
-                    continue;
-                if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
-                    continue;
-                if (eff.attributeSlug == "max_health")
-                    effectiveMaxHealthLvl += static_cast<int>(std::round(eff.value));
-                else if (eff.attributeSlug == "max_mana")
-                    effectiveMaxManaLvl += static_cast<int>(std::round(eff.value));
-            }
-            effectiveMaxHealthLvl = std::max(1, effectiveMaxHealthLvl);
-            effectiveMaxManaLvl = std::max(0, effectiveMaxManaLvl);
-
-            // Full restore on level-up, but capped to effective max so current never exceeds max.
-            characterData.characterCurrentHealth = effectiveMaxHealthLvl;
-            characterData.characterCurrentMana = effectiveMaxManaLvl;
-        }
-
-        // Сохраняем обновленные данные персонажа
-        characters_.loadCharacterData(characterData);
 
         // Немедленно сохраняем exp/level на гейм-сервере
         sendSaveProgressToGameServer(characterId, newExperience, newLevel);
 
         // Сохраняем долг, если он изменился
-        if (characterData.experienceDebt != oldDebt && saveProgressCallback_)
+        if (applied.debtAfter != oldDebt && saveProgressCallback_)
         {
             nlohmann::json debtPacket;
             debtPacket["header"]["eventType"] = "saveExperienceDebt";
             debtPacket["header"]["clientId"] = 0;
             debtPacket["header"]["hash"] = "";
             debtPacket["body"]["characterId"] = characterId;
-            debtPacket["body"]["experienceDebt"] = characterData.experienceDebt;
+            debtPacket["body"]["experienceDebt"] = applied.debtAfter;
             saveProgressCallback_(debtPacket.dump() + "\n");
         }
 
@@ -194,6 +190,24 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         if (result.levelUp && statsNotify_ != nullptr)
         {
             statsNotify_->sendStatsUpdate(characterId);
+        }
+
+        // Level-up growth (mult*level^exp) lives in DB: ask game to recompute
+        // now so the new base values apply immediately, not at the next
+        // incidental refresh. Best-effort like the durability path.
+        if (result.levelUp && refreshAttributesCallback_)
+        {
+            try
+            {
+                refreshAttributesCallback_(characterId);
+            }
+            catch (const std::exception &e)
+            {
+                logger_.logError(std::string("Level-up refresh trigger failed: ") + e.what());
+            }
+            catch (...)
+            {
+            }
         }
 
         result.success = true;
@@ -447,6 +461,12 @@ void
 ExperienceManager::setSaveProgressCallback(std::function<void(const std::string &)> callback)
 {
     saveProgressCallback_ = callback;
+}
+
+void
+ExperienceManager::setRefreshAttributesCallback(std::function<void(int)> callback)
+{
+    refreshAttributesCallback_ = std::move(callback);
 }
 
 void

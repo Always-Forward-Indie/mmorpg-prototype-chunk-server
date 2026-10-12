@@ -9,8 +9,8 @@
 // lookup lambdas, so the rules are unit-testable without GameServices.
 #include "data/CombatStructs.hpp"
 #include "data/DataStructs.hpp"
+#include "utils/DistanceUtils.hpp"
 
-#include <cmath>
 #include <functional>
 #include <optional>
 
@@ -73,10 +73,8 @@ class CombatTargetResolver
         if (!target.has_value())
             return out;
 
-        const float dx = caster->positionX - target->positionX;
-        const float dy = caster->positionY - target->positionY;
         out.checkRange = true;
-        out.distance = std::sqrt(dx * dx + dy * dy);
+        out.distance = DistanceUtils::dist2D(*caster, *target);
         return out;
     }
 

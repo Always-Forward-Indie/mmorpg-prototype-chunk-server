@@ -1,6 +1,7 @@
 #pragma once
 
 #include "data/DataStructs.hpp"
+#include <functional>
 #include <iostream>
 #include <shared_mutex>
 #include <unordered_map>
@@ -54,6 +55,15 @@ class CharacterManager
     // Update character health (raw setter — prefer applyDamage/applyHeal for combat)
     void updateCharacterHealth(int characterID, int newHealth);
 
+    // Atomic read-modify-write primitive: runs fn(struct&) under the single
+    // character-map lock. Use for multi-field mutations (XP grants, restores)
+    // that copy-modify-write would race (AoE multi-kill, damage interleaved
+    // with level-up). RULES for fn: pure struct surgery only — never call
+    // other managers or CharacterManager methods (lock-order: character map
+    // is innermost; ExperienceCache reads are allowed, it never calls back).
+    // Returns false when the character is absent (fn not run).
+    bool applyUnderLock(int characterID, const std::function<void(CharacterDataStruct &)> &fn);
+
     // Update character mana
     void updateCharacterMana(int characterID, int newMana);
 
@@ -84,8 +94,11 @@ class CharacterManager
     // Store active effects received from game-server on login
     void setCharacterActiveEffects(int characterID, std::vector<ActiveEffectStruct> effects);
 
-    // Add a single active effect. If an effect with the same effectSlug already exists,
-    // its expiresAt is refreshed (no stacking). Handles both stat modifiers and HoT/DoT.
+    // Add a single active effect. Buffs/debuffs refresh by slug (no stacking);
+    // dot/hot stack up to kMaxDotHotStacks same-slug instances, each ticking
+    // separately; at cap the oldest is refreshed. Handles both stat modifiers
+    // and HoT/DoT.
+    static constexpr int kMaxDotHotStacks = 3;
     void addActiveEffect(int characterID, const ActiveEffectStruct &effect);
     void removeActiveEffectBySlug(int characterID, const std::string &effectSlug);
 
@@ -107,6 +120,17 @@ class CharacterManager
     // Returns tick events to broadcast, and the set of character IDs whose
     // expired effects were removed (so callers can send stats_update).
     std::pair<std::vector<EffectTickResult>, std::unordered_set<int>> processEffectTicks();
+
+    // Crowd control: true when a live stun/silence/root is present (unix sec).
+    // Used by skill initiation (stun/silence block casts) and movement
+    // (stun/root block moves). Mob side mirrors via MobInstanceManager.
+    bool hasLiveCC(int characterID, const std::string &ccType, int64_t nowSec) const;
+    // DR-gated CC application: returns effective duration sec, or -1 when
+    // immune (4th same-type CC inside immuneWindowSec; history pruned).
+    // On success records the application AND appends the effect with the
+    // scaled expiry (caller passes base duration + attribute; value unused).
+    float applyCrowdControl(int characterID, const ActiveEffectStruct &effect,
+        float baseDurationSec, int64_t nowSec, float immuneWindowSec = 15.0f);
 
     // Remove all expired active effects from a character (expiresAt != 0 && <= now).
     void removeExpiredActiveEffects(int characterID);
@@ -140,4 +164,8 @@ class CharacterManager
 
     // Mutex for charactersMap_
     mutable std::shared_mutex mutex_;
+
+    // CC diminishing-returns history: charId → ccType → application times
+    // (unix sec). Same mutex_; pruned on every application.
+    std::unordered_map<int, std::unordered_map<std::string, std::vector<int64_t>>> ccHistory_;
 };

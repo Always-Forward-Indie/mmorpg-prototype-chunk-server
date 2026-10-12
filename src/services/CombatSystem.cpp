@@ -5,6 +5,7 @@
 #include "services/MobInstanceManager.hpp"
 #include "services/SkillInitiationValidator.hpp"
 #include "services/SkillSystem.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/Logger.hpp"
 #include <algorithm>
 #include <atomic>
@@ -172,6 +173,40 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
         const SkillStruct &skill = skillOpt.value();
         // Дополнительная проверка валидности skill указателя
         log_->info("Skill found: " + std::string(skill.skillName));
+
+        // Crowd control gate (stun/silence block casts; root does not — the
+        // target may be melee-adjacent). Checked before mana/cooldown so a
+        // stunned button-mash neither spends resources nor starts cooldowns.
+        // Mobs mirror via MobInstanceManager::hasMobCC below.
+        {
+            const int64_t nowSecCC = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                                         .count();
+            auto charCaster = gameServices_->getCharacterManager().getCharacterData(casterId);
+            if (charCaster.characterId != 0)
+            {
+                auto &chars = gameServices_->getCharacterManager();
+                if (chars.hasLiveCC(casterId, "stun", nowSecCC))
+                {
+                    result.errorMessage = "Stunned";
+                    return result;
+                }
+                if (chars.hasLiveCC(casterId, "silence", nowSecCC) && skill.costMp > 0)
+                {
+                    result.errorMessage = "Silenced";
+                    return result;
+                }
+            }
+            else
+            {
+                auto &mobs = gameServices_->getMobInstanceManager();
+                if (mobs.hasMobCC(casterId, "stun", nowSecCC))
+                {
+                    result.errorMessage = "Stunned";
+                    return result;
+                }
+            }
+        }
 
         // Заполняем информацию о скиле
         result.skillName = skill.skillName;
@@ -994,12 +1029,26 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug, b
             if (hitCount >= maxHits)
                 break;
 
-            // Simplified player→mob path (mirror of SkillSystem::useSkill MOB branch)
-            int dmg = calc->calculateBaseDamage(skill, casterData.attributes);
-            bool isCrit = calc->rollCriticalHit(casterData.attributes);
-            if (isCrit)
-                dmg = static_cast<int>(std::lround(dmg * 2.0f));
-            dmg = std::max(0, dmg);
+            // Full pipeline via tempTarget (mirror of SkillSystem::useSkill
+            // MOB branch): miss, crit, block, level, defense, resistance —
+            // identical to single-target. The old simplified path
+            // (baseDamage + hardcoded x2.0 crit, no miss/block/defense) is gone.
+            CharacterDataStruct tempTarget;
+            tempTarget.characterId = mob.uid;
+            tempTarget.characterMaxHealth = mob.maxHealth;
+            tempTarget.characterCurrentHealth = mob.currentHealth;
+            tempTarget.characterPosition = mob.position;
+            tempTarget.characterLevel = mob.level;
+            for (const auto &a : mob.attributes)
+            {
+                CharacterAttributeStruct ca;
+                ca.name = a.name;
+                ca.slug = a.slug;
+                ca.value = a.value;
+                tempTarget.attributes.push_back(ca);
+            }
+            const auto hit = calc->calculateSkillDamage(skill, casterData, tempTarget);
+            const int dmg = hit.totalDamage;
 
             // Skip if mob is leashing back to spawn (RETURNING) or in post-leash
             // invulnerability window (EVADING).
@@ -1009,20 +1058,45 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug, b
                     mobMoveData.combatState == MobCombatState::EVADING)
                 {
                     gameServices_->getLogger().log("[COMBAT] AOE: Mob " + std::to_string(mob.uid) +
-                                                   " is leashing — damage blocked (EVADING)");
+                                                    " is leashing — damage blocked (EVADING)");
                     continue;
                 }
             }
 
             auto upResult = gameServices_->getMobInstanceManager().applyDamageToMob(mob.uid, dmg, casterId);
 
+            // Durability + mastery per landed hit, same as single-target.
+            if (!hit.isMissed && dmg > 0)
+            {
+                try
+                {
+                    durability_.applyWeaponHitWear(casterId);
+                    auto weapon = gameServices_->getInventoryManager().getEquippedWeapon(casterId);
+                    if (weapon.has_value())
+                    {
+                        const auto &wItem = gameServices_->getItemManager().getItemById(weapon->itemId);
+                        if (!wItem.masterySlug.empty())
+                        {
+                            const auto charData = gameServices_->getCharacterManager().getCharacterData(casterId);
+                            auto mobInst = gameServices_->getMobInstanceManager().getMobInstance(mob.uid);
+                            gameServices_->getMasteryManager().onPlayerAttack(
+                                casterId, wItem.masterySlug, charData.characterLevel, mobInst.level);
+                        }
+                    }
+                }
+                catch (const std::exception &e)
+                {
+                    log_->warn("[COMBAT] AOE weapon durability/mastery update error: {}", e.what());
+                }
+            }
+
             AoETargetResultEntry entry;
             entry.targetId = mob.uid;
             entry.targetType = CombatTargetType::MOB;
             entry.damage = dmg;
-            entry.isCritical = isCrit;
-            entry.isBlocked = false;
-            entry.isMissed = false;
+            entry.isCritical = hit.isCritical;
+            entry.isBlocked = hit.isBlocked;
+            entry.isMissed = hit.isMissed;
             entry.targetDied = upResult.mobDied;
             entry.finalTargetHealth = upResult.newHealth;
             batchResult.targets.push_back(entry);
@@ -1073,17 +1147,6 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug, b
     }
 }
 
-std::vector<int>
-CombatSystem::getAvailableTargets(int attackerId, const SkillStruct &skill)
-{
-    std::vector<int> targets;
-
-    // TODO: Реализовать логику поиска доступных целей на основе типа скила
-    // Учитывать дистанцию, препятствия, состояние целей и т.д.
-
-    return targets;
-}
-
 void
 CombatSystem::applySkillEffects(const SkillUsageResult &result, int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, SkillExecutionResult *execResult)
 {
@@ -1104,19 +1167,76 @@ CombatSystem::applySkillEffects(const SkillUsageResult &result, int casterId, co
         std::chrono::system_clock::now().time_since_epoch())
                                .count();
 
+    auto *calc = skillSystem_->getCombatCalculator();
+    if (!calc)
+        return;
+
     for (const auto &ed : skill.effects)
     {
         if (ed.effectSlug.empty() || ed.effectTypeSlug.empty())
             continue;
 
-        // Determine recipient
-        int recipientId = -1;
-        if (ed.effectTypeSlug == "dot" || ed.effectTypeSlug == "debuff")
+        // Determine recipient. Hostile effects (dot/debuff/stun/root/silence)
+        // land on the target — players AND mobs (mob store holds CC + stat
+        // debuffs; DoT damage ticks on mobs stay out of scope). Buffs/hots
+        // land on the caster (SELF) or the target player (support).
+        // Unknown → skip.
+        const bool isHostile = (ed.effectTypeSlug == "dot" || ed.effectTypeSlug == "debuff" ||
+            ed.effectTypeSlug == "stun" || ed.effectTypeSlug == "root" ||
+            ed.effectTypeSlug == "silence");
+        const bool isCC = (ed.effectTypeSlug == "stun" || ed.effectTypeSlug == "root" ||
+            ed.effectTypeSlug == "silence");
+
+        // ---- Mob target: hostile effects go to the mob effect store ----
+        if (isHostile && targetType == CombatTargetType::MOB)
         {
-            // Dots / debuffs land on the target (only players for now)
+            auto mobInst = gameServices_->getMobInstanceManager().getMobInstance(targetId);
+            if (mobInst.uid == 0)
+                continue; // not a mob (stale uid)
+            ActiveEffectStruct eff;
+            eff.effectSlug = ed.effectSlug;
+            eff.effectTypeSlug = ed.effectTypeSlug;
+            eff.attributeSlug = ed.attributeSlug;
+            eff.value = ed.value;
+            eff.modifierType = ed.modifierType;
+            eff.sourceType = "skill";
+            eff.tickMs = calc->clampDotTick(ed.tickMs, ed.durationSeconds);
+            if (isCC)
+            {
+                const float scaled =
+                    gameServices_->getMobInstanceManager().applyMobCC(targetId,
+                        ed.effectTypeSlug, static_cast<float>(ed.durationSeconds), nowSec);
+                if (scaled < 0.0f)
+                {
+                    log_->info("[applySkillEffects] mob {} immune to {} (DR)",
+                        targetId, ed.effectTypeSlug);
+                    continue;
+                }
+                eff.expiresAt = nowSec + static_cast<int64_t>(std::lround(scaled));
+            }
+            else
+            {
+                eff.expiresAt = (ed.durationSeconds > 0) ? (nowSec + ed.durationSeconds) : 0;
+            }
+            if (eff.tickMs > 0)
+            {
+                eff.nextTickAt = std::chrono::steady_clock::now() +
+                                 std::chrono::milliseconds(eff.tickMs);
+            }
+            gameServices_->getMobInstanceManager().addMobEffect(targetId, eff);
+            // Mob effects are chunk-local (never persisted to game DB), so
+            // execResult->appliedEffects stays untouched here by design.
+            log_->info("[applySkillEffects] Applied '" + ed.effectSlug +
+                       "' (" + ed.effectTypeSlug + ") on mob " + std::to_string(targetId) +
+                       " from skill '" + skill.skillSlug + "'");
+            continue;
+        }
+
+        int recipientId = -1;
+        if (isHostile)
+        {
             if (targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF)
                 recipientId = targetId;
-            // TODO: mobs don't have activeEffects yet — skip mob targets
         }
         else // buff / hot
         {
@@ -1144,9 +1264,10 @@ CombatSystem::applySkillEffects(const SkillUsageResult &result, int casterId, co
         eff.effectTypeSlug = ed.effectTypeSlug;
         eff.attributeSlug = ed.attributeSlug;
         eff.value = ed.value;
+        eff.modifierType = ed.modifierType;
         eff.sourceType = "skill";
         eff.expiresAt = (ed.durationSeconds > 0) ? (nowSec + ed.durationSeconds) : 0;
-        eff.tickMs = ed.tickMs;
+        eff.tickMs = calc->clampDotTick(ed.tickMs, ed.durationSeconds);
 
         if (ed.tickMs > 0)
         {
@@ -1154,7 +1275,25 @@ CombatSystem::applySkillEffects(const SkillUsageResult &result, int casterId, co
                              std::chrono::milliseconds(ed.tickMs);
         }
 
-        gameServices_->getCharacterManager().addActiveEffect(recipientId, eff);
+        if (isCC)
+        {
+            // Crowd control goes through DR: diminishing durations, then
+            // immunity. The applied (scaled) expiry is what persists below.
+            const float scaled =
+                gameServices_->getCharacterManager().applyCrowdControl(recipientId,
+                    eff, static_cast<float>(ed.durationSeconds), nowSec);
+            if (scaled < 0.0f)
+            {
+                log_->info("[applySkillEffects] char {} immune to {} (DR)",
+                    recipientId, ed.effectTypeSlug);
+                continue;
+            }
+            eff.expiresAt = nowSec + static_cast<int64_t>(std::lround(scaled));
+        }
+        else
+        {
+            gameServices_->getCharacterManager().addActiveEffect(recipientId, eff);
+        }
 
         // Record for persistence: CombatEventHandler will send saveActiveEffect to game server
         if (execResult)
@@ -1301,9 +1440,7 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
                                            mobMoveData.targetPlayerId != 0)
                                            ? mobMoveData.lastSentPosition
                                            : mobData.position;
-        float dx = mobPos.positionX - targetPlayer.characterPosition.positionX;
-        float dy = mobPos.positionY - targetPlayer.characterPosition.positionY;
-        float distance = std::sqrt(dx * dx + dy * dy);
+        const float distance = DistanceUtils::dist2D(mobPos, targetPlayer.characterPosition);
 
         gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " targeting player " + std::to_string(targetPlayerId) + " at distance " + std::to_string(distance));
 

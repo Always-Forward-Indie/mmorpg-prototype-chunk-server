@@ -20,6 +20,7 @@ struct SkillEffectDefinitionStruct
     float value = 0.0f;         ///< stat modifier (buff/debuff) or per-tick amount (dot/hot)
     int durationSeconds = 0;    ///< 0 = permanent (passive only); >0 = timed
     int tickMs = 0;             ///< 0 = non-tick; >0 = DoT/HoT interval in ms
+    std::string modifierType = ""; ///< "flat" | "percent" (passive_skill_modifiers); "" = flat legacy
 };
 
 // Структура для скила персонажа/моба

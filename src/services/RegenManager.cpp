@@ -4,6 +4,7 @@
 #include "services/GameConfigService.hpp"
 #include "services/IStatsNotifier.hpp"
 #include "services/ItemManager.hpp"
+#include "services/StatsResolver.hpp"
 #include "utils/Logger.hpp"
 #include <algorithm>
 #include <chrono>
@@ -75,71 +76,32 @@ RegenManager::tickRegen()
         }
 
         // ── Compute effective regen and max values ────────────────────────────
-        // Start from base character attributes, then layer active effects and
-        // equipped item bonuses, exactly as CharacterStatsNotificationService does.
-        int hpRegenBase = findAttr(ch.attributes, "hp_regen_per_s");
-        int mpRegenBase = findAttr(ch.attributes, "mp_regen_per_s");
-        int maxHpEff = findAttr(ch.attributes, "max_health");
-        int maxMpEff = findAttr(ch.attributes, "max_mana");
+        // Single source of truth: StatsResolver over stored attributes (which
+        // already contain equip/set/durability) + effects. The old code added
+        // raw equip a second time (double-count vs combat) — never re-add.
+        StatsResolverOptions convOpts;
+        convOpts.agilityToEvasion = gameConfig_.getFloat("stats.conv_agility_evasion", 0.3f);
+        convOpts.intellectToMagAttack = gameConfig_.getFloat("stats.conv_intellect_magattack", 0.5f);
+        convOpts.strengthToPhysAttack = gameConfig_.getFloat("stats.conv_strength_physattack", 0.5f);
+        const auto eff =
+            StatsResolver::effectiveMap(ch.attributes, ch.activeEffects, nowSec, convOpts);
+        const auto effInt = [&](const char *slug) -> int {
+            const auto it = eff.find(slug);
+            return it != eff.end() ? static_cast<int>(std::round(it->second)) : 0;
+        };
+        int hpRegenBase = effInt("hp_regen_per_s");
+        int mpRegenBase = effInt("mp_regen_per_s");
+        int maxHpEff = effInt("max_health");
+        int maxMpEff = effInt("max_mana");
         // Fallback to stored struct values if the attribute list is incomplete
         if (maxHpEff <= 0)
             maxHpEff = ch.characterMaxHealth;
         if (maxMpEff <= 0)
             maxMpEff = ch.characterMaxMana;
 
-        // Layer active-effect stat modifiers (skip DoT/HoT ticks)
-        for (const auto &eff : ch.activeEffects)
-        {
-            if (eff.expiresAt != 0 && eff.expiresAt <= nowSec)
-                continue;
-            if (eff.tickMs > 0)
-                continue;
-            const auto &slug = eff.attributeSlug;
-            const int val = static_cast<int>(std::round(eff.value));
-            if (slug == "hp_regen_per_s")
-                hpRegenBase += val;
-            else if (slug == "mp_regen_per_s")
-                mpRegenBase += val;
-            else if (slug == "max_health")
-                maxHpEff += val;
-            else if (slug == "max_mana")
-                maxMpEff += val;
-        }
-
-        // Layer equipped-item bonuses (apply_on == "equip"). Best-effort per
-        // tick: a broken equip lookup must not zero the whole regen tick.
-        try
-        {
-            const auto equipState = equipment_.getEquipmentState(cid);
-            for (const auto &[slotSlug, slot] : equipState.slots)
-            {
-                if (slot.inventoryItemId == 0)
-                    continue;
-                const auto item = items_.getItemById(slot.itemId);
-                for (const auto &attr : item.attributes)
-                {
-                    if (attr.apply_on != "equip")
-                        continue;
-                    const int v = attr.value;
-                    if (attr.slug == "hp_regen_per_s")
-                        hpRegenBase += v;
-                    else if (attr.slug == "mp_regen_per_s")
-                        mpRegenBase += v;
-                    else if (attr.slug == "max_health")
-                        maxHpEff += v;
-                    else if (attr.slug == "max_mana")
-                        maxMpEff += v;
-                }
-            }
-        }
-        catch (const std::exception &e)
-        {
-            log_->debug("[Regen] equip-bonus layer skipped for char={} ({}), base regen kept",
-                cid, e.what());
-        }
-        catch (...)
-        {
-        }
+        // (Effects already folded in by StatsResolver with combat-identical
+        // rules — skip dot/hot. The old extra tickMs>0 filter is dropped on
+        // purpose: display, regen and combat now share one rule set.)
 
         // Final per-tick gains.  Regen attributes are stored as per-second values;
         // tick interval is configurable (default 4 s) so multiply accordingly.

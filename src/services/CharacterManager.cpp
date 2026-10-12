@@ -1,9 +1,12 @@
 #include "services/CharacterManager.hpp"
+#include "services/CrowdControl.hpp"
+#include "services/StatsResolver.hpp"
 #include "utils/DistanceUtils.hpp"
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <ctime>
 #include <iostream>
 #include <random>
 #include <spdlog/logger.h>
@@ -52,6 +55,10 @@ CharacterManager::loadCharacterAttributes(std::vector<CharacterAttributeStruct> 
         }
 
         std::unique_lock<std::shared_mutex> lock(mutex_);
+        // Replace semantics (same as replaceCharacterAttributes): group rows
+        // per character, clear, then fill — a reload must not append
+        // duplicates, or first-win lookups keep serving the stale value.
+        std::unordered_map<int, std::vector<CharacterAttributeStruct>> grouped;
         for (const auto &row : characterAttributes)
         {
             CharacterAttributeStruct attributeData;
@@ -60,13 +67,14 @@ CharacterManager::loadCharacterAttributes(std::vector<CharacterAttributeStruct> 
             attributeData.name = row.name;
             attributeData.slug = row.slug;
             attributeData.value = row.value;
-
+            grouped[attributeData.character_id].push_back(std::move(attributeData));
+        }
+        for (auto &[characterId, attrs] : grouped)
+        {
             // CRITICAL-4 + HIGH-9 fix: O(1) map lookup instead of OOB vector index
-            auto it = charactersMap_.find(attributeData.character_id);
+            auto it = charactersMap_.find(characterId);
             if (it != charactersMap_.end())
-            {
-                it->second.attributes.push_back(attributeData);
-            }
+                it->second.attributes = std::move(attrs);
         }
     }
     catch (const std::exception &e)
@@ -196,12 +204,24 @@ CharacterManager::removeCharacter(int characterID)
     if (it != charactersMap_.end())
     {
         charactersMap_.erase(it);
+        ccHistory_.erase(characterID);
         log_->info("Character with ID " + std::to_string(characterID) + " removed.");
     }
     else
     {
         log_->error("Character with ID " + std::to_string(characterID) + " not found. Cannot remove.");
     }
+}
+
+bool
+CharacterManager::applyUnderLock(int characterID, const std::function<void(CharacterDataStruct &)> &fn)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+        return false;
+    fn(it->second);
+    return true;
 }
 
 std::vector<CharacterDataStruct>
@@ -346,7 +366,16 @@ CharacterManager::applyHealToCharacter(int characterID, int healAmount)
         auto &ch = it->second;
         if (ch.isDead)
             return {ch.characterCurrentHealth, ch.characterCurrentMana, false};
-        int newHp = std::min(ch.characterMaxHealth, ch.characterCurrentHealth + healAmount);
+        // Clamp to EFFECTIVE max (equip/effects/passives), same as mana and
+        // regen — clamping to base characterMaxHealth stranded real HP.
+        const int64_t nowSec = static_cast<int64_t>(std::time(nullptr));
+        const auto eff = StatsResolver::effectiveMap(ch.attributes,
+            ch.activeEffects, nowSec);
+        int effMax = ch.characterMaxHealth;
+        const auto f = eff.find("max_health");
+        if (f != eff.end() && static_cast<int>(std::round(f->second)) > 0)
+            effMax = static_cast<int>(std::round(f->second));
+        int newHp = std::min(effMax, ch.characterCurrentHealth + healAmount);
         ch.characterCurrentHealth = newHp;
         return {newHp, ch.characterCurrentMana, false};
     }
@@ -494,6 +523,46 @@ CharacterManager::addActiveEffect(int characterID, const ActiveEffectStruct &eff
     }
 
     auto &effects = it->second.activeEffects;
+    const bool isTicking =
+        (effect.effectTypeSlug == "dot" || effect.effectTypeSlug == "hot");
+    if (isTicking)
+    {
+        // DoT/HoT stacking (cap kMaxDotHotStacks): same slug from re-application
+        // adds a new ticking instance instead of refreshing — each stack ticks
+        // separately. At cap, refresh the oldest instance (duration/value update).
+        const int64_t nowSec =
+            static_cast<int64_t>(std::time(nullptr));
+        int liveCount = 0;
+        auto oldest = effects.end();
+        for (auto eit = effects.begin(); eit != effects.end(); ++eit)
+        {
+            if (eit->effectSlug != effect.effectSlug)
+                continue;
+            if (eit->expiresAt != 0 && eit->expiresAt <= nowSec)
+                continue;
+            ++liveCount;
+            if (oldest == effects.end() || eit->expiresAt < oldest->expiresAt)
+                oldest = eit;
+        }
+        if (liveCount < kMaxDotHotStacks)
+        {
+            effects.push_back(effect);
+            log_->info("[CharacterManager] Added effect '" + effect.effectSlug +
+                       "' for character " + std::to_string(characterID) +
+                       " (stack " + std::to_string(liveCount + 1) + ")");
+            return;
+        }
+        if (oldest != effects.end())
+        {
+            oldest->expiresAt = effect.expiresAt;
+            oldest->value = effect.value;
+            oldest->nextTickAt = effect.nextTickAt;
+            log_->info("[CharacterManager] Refreshed effect '" + effect.effectSlug +
+                       "' for character " + std::to_string(characterID) + " (at cap)");
+            return;
+        }
+        // All instances expired: fall through to plain append below.
+    }
     // Refresh if an effect with the same slug already exists (no stacking)
     auto existing = std::find_if(effects.begin(), effects.end(), [&effect](const ActiveEffectStruct &e)
         { return e.effectSlug == effect.effectSlug; });
@@ -813,4 +882,52 @@ CharacterManager::updateLastPlayTimeSaveAt(int characterID, std::chrono::steady_
     auto it = charactersMap_.find(characterID);
     if (it != charactersMap_.end())
         it->second.lastPlayTimeSaveAt = t;
+}
+
+namespace {
+// CC types share one helper: live when type matches and unexpired.
+bool effectIsLiveCC(const ActiveEffectStruct &eff, const std::string &ccType, int64_t nowSec)
+{
+    if (eff.effectTypeSlug != ccType)
+        return false;
+    return eff.expiresAt == 0 || eff.expiresAt > nowSec;
+}
+} // namespace
+
+bool
+CharacterManager::hasLiveCC(int characterID, const std::string &ccType, int64_t nowSec) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+        return false;
+    for (const auto &eff : it->second.activeEffects)
+    {
+        if (effectIsLiveCC(eff, ccType, nowSec))
+            return true;
+    }
+    return false;
+}
+
+float
+CharacterManager::applyCrowdControl(int characterID, const ActiveEffectStruct &effect,
+    float baseDurationSec, int64_t nowSec, float immuneWindowSec)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+        return -1.0f;
+    const std::string &ccType = effect.effectTypeSlug;
+    auto &history = ccHistory_[characterID][ccType];
+    const float scaled = CrowdControl::applyWithDR(history, nowSec,
+        baseDurationSec, immuneWindowSec);
+    if (scaled < 0.0f)
+    {
+        log_->info("[CC] character {} immune to {} (DR)", characterID, ccType);
+        return -1.0f;
+    }
+    ActiveEffectStruct applied = effect;
+    applied.expiresAt = nowSec + static_cast<int64_t>(std::lround(scaled));
+    it->second.activeEffects.push_back(std::move(applied));
+    return scaled;
 }
