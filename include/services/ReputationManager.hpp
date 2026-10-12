@@ -49,10 +49,16 @@ class ReputationManager
     void fillReputationContext(int characterId, PlayerContextStruct &ctx) const;
 
     /// Human-readable tier for a raw value: "enemy"|"stranger"|"neutral"|"friendly"|"ally"
+    /// Thresholds are tunable (defaults below); production feeds game_config
+    /// via setThresholds() on catalog sync. Keeps balance in data (AAA rule).
     static std::string getTier(int value);
 
     /// Ordinal index for tier name comparison (0=enemy → 4=ally, -1=unknown).
     static int getTierOrdinal(const std::string &tierName);
+
+    /// Override tier thresholds {enemy, neutral, friendly, ally}.
+    /// enemy = below-this is "enemy"; neutral/friendly/ally = at-or-above.
+    static void setThresholds(int enemy, int neutral, int friendly, int ally);
 
     // ── Mutation ───────────────────────────────────────────────────────────
     /**
@@ -96,6 +102,12 @@ class ReputationManager
 
   private:
     void persist(int characterId, const std::string &factionSlug, int value, int delta);
+
+    // Tunable tier thresholds (fed from game_config; defaults = legacy).
+    static int s_enemyThreshold;
+    static int s_neutralThreshold;
+    static int s_friendlyThreshold;
+    static int s_allyThreshold;
 
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;

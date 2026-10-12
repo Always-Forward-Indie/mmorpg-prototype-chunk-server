@@ -371,10 +371,10 @@ TitleManager::sendTitleUpdateToClient(int characterId)
         for (const auto &slug : state.earnedSlugs)
         {
             TitleDefinitionStruct def = getTitleDefinition(slug);
+            // Keys only: display text lives in the client locale
+            // (titles.{slug}.name/description). No ready-text duplicates.
             nlohmann::json entry;
             entry["slug"] = slug;
-            entry["displayName"] = def.displayName;
-            entry["description"] = def.description;
             entry["earnCondition"] = def.earnCondition;
             nlohmann::json bonusArr = nlohmann::json::array();
             for (const auto &b : def.bonuses)
@@ -389,8 +389,6 @@ TitleManager::sendTitleUpdateToClient(int characterId)
             TitleDefinitionStruct def = getTitleDefinition(state.equippedSlug);
             equippedEntry = {
                 {"slug", state.equippedSlug},
-                {"displayName", def.displayName},
-                {"description", def.description},
                 {"earnCondition", def.earnCondition}};
             nlohmann::json bonusArr = nlohmann::json::array();
             for (const auto &b : def.bonuses)

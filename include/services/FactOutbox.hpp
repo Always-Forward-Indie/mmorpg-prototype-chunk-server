@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -83,6 +84,8 @@ class FactOutbox
             "savePlayerTitle",
             "saveSkillCooldown",
             "analyticsEvent",
+            "saveGmAction",
+            "saveUserBan",
         };
         return kFacts.count(eventType) > 0;
     }
@@ -151,6 +154,7 @@ class FactOutbox
 
     /// Drop an acked fact. Returns true when something was pending
     /// (false = unknown/duplicate ack; caller may log at debug).
+    /// One-shot ack waiters are fired separately via fireAckCb (strand).
     bool ack(const std::string &key)
     {
         auto it = pending_.find(key);
@@ -160,6 +164,25 @@ class FactOutbox
         pendingCount_.store(pending_.size(), std::memory_order_relaxed);
         ++acked_;
         return true;
+    }
+
+    /// One-shot ack waiter (strand-confined like everything else here).
+    /// Used by synchronous admin ops (ban/unban) with a bounded wait.
+    using AckCb = std::function<void(const std::string &status)>;
+    void onAckOnce(std::string key, AckCb cb)
+    {
+        ackCbs_[std::move(key)] = std::move(cb);
+    }
+
+    /// Fire (and drop) the waiter for key, if any. Strand-confined.
+    void fireAckCb(const std::string &key, const std::string &status)
+    {
+        auto it = ackCbs_.find(key);
+        if (it == ackCbs_.end())
+            return;
+        auto cb = std::move(it->second);
+        ackCbs_.erase(it);
+        cb(status);
     }
 
     /// Drop facts older than maxAgeMs (DLQ: caller logs them first).
@@ -255,6 +278,7 @@ class FactOutbox
     uint64_t order_ = 0;
     std::string bootId_;
     std::unordered_map<std::string, OutboxFact> pending_;
+    std::unordered_map<std::string, AckCb> ackCbs_;
     std::atomic<size_t> pendingCount_{0};
     std::atomic<uint64_t> sent_{0};
     std::atomic<uint64_t> acked_{0};

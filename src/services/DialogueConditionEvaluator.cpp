@@ -1,4 +1,5 @@
 #include "services/DialogueConditionEvaluator.hpp"
+#include "services/ReputationManager.hpp"
 
 bool
 DialogueConditionEvaluator::evaluate(const nlohmann::json &conditionGroup,
@@ -287,18 +288,12 @@ DialogueConditionEvaluator::evaluateReputation(const nlohmann::json &rule,
         auto tierIt = rule["tier"].get<std::string>();
         int needed = tierRank.count(tierIt) ? tierRank.at(tierIt) : -1;
 
-        // Determine current tier
-        int current = 2; // neutral
-        if (value < -500)
-            current = 0;
-        else if (value < 0)
-            current = 1;
-        else if (value < 200)
-            current = 2;
-        else if (value < 500)
-            current = 3;
-        else
-            current = 4;
+        // Determine current tier through the single tunable ladder
+        // (ReputationManager thresholds, fed from game_config).
+        int current = ReputationManager::getTierOrdinal(
+            ReputationManager::getTier(value));
+        if (current < 0)
+            current = 2; // unknown → neutral
         return current >= needed;
     }
     return true;

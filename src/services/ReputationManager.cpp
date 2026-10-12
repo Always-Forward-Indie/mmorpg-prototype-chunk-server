@@ -14,6 +14,20 @@ ReputationManager::ReputationManager(Logger &logger)
         log_ = logger_.getSystem("reputation");
 }
 
+int ReputationManager::s_enemyThreshold = -500;
+int ReputationManager::s_neutralThreshold = 0;
+int ReputationManager::s_friendlyThreshold = 200;
+int ReputationManager::s_allyThreshold = 500;
+
+void
+ReputationManager::setThresholds(int enemy, int neutral, int friendly, int ally)
+{
+    s_enemyThreshold = enemy;
+    s_neutralThreshold = neutral;
+    s_friendlyThreshold = friendly;
+    s_allyThreshold = ally;
+}
+
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 
 void
@@ -71,13 +85,13 @@ ReputationManager::fillReputationContext(int characterId,
 std::string
 ReputationManager::getTier(int value)
 {
-    if (value < -500)
+    if (value < s_enemyThreshold)
         return "enemy";
-    if (value < 0)
+    if (value < s_neutralThreshold)
         return "stranger";
-    if (value < 200)
+    if (value < s_friendlyThreshold)
         return "neutral";
-    if (value < 500)
+    if (value < s_allyThreshold)
         return "friendly";
     return "ally";
 }

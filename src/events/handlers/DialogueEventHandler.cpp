@@ -3,6 +3,7 @@
 #include "services/DialogueActionExecutor.hpp"
 #include "services/DialogueConditionEvaluator.hpp"
 #include "services/GameServices.hpp"
+#include "services/ReputationManager.hpp"
 #include "utils/DistanceUtils.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TerminalColors.hpp"
@@ -293,11 +294,11 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
             return;
         }
 
-        // Reputation check: block dialogue if player is enemy (rep < -500) with NPC's faction
+        // Reputation check: block dialogue if player is enemy tier with NPC's faction
         if (!npc.factionSlug.empty())
         {
             const int rep = gameServices_.getReputationManager().getReputation(characterId, npc.factionSlug);
-            if (rep < -500)
+            if (ReputationManager::getTier(rep) == "enemy")
             {
                 log_->info("[DialogueEventHandler] NPC_INTERACT: char {} blocked by reputation (faction={}, rep={})",
                     characterId,
@@ -922,6 +923,8 @@ DialogueEventHandler::isPlayerInRange(
     const PositionStruct &npcPos,
     float radius) const
 {
-    // 2D by design (differs from the vendor 3D check — see DistanceUtils).
-    return DistanceUtils::withinRange2D(playerPos, npcPos, radius);
+    // AAA: 2D + Z tolerance (was pure 2D infinite-Z — talking through floors).
+    const float zTol =
+        gameServices_.getGameConfigService().getFloat("interaction.z_tolerance_dialogue", DistanceUtils::kDefaultZTolerance);
+    return DistanceUtils::withinRange2DWithZTolerance(playerPos, npcPos, radius, zTol);
 }

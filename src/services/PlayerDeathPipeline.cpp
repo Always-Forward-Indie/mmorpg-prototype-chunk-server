@@ -59,7 +59,7 @@ PlayerDeathPipeline::execute(int targetId)
         if (penaltyAmount > 0)
         {
             // Set experience debt instead of removing XP immediately.
-            // The debt will be paid off gradually as the player earns XP (50% per gain).
+            // Future gains pay the debt first (min(gain, debt) redirect).
             characterData.experienceDebt += penaltyAmount;
             characters_.addExperienceDebt(targetId, penaltyAmount);
             logger_.log("Player " + std::to_string(targetId) + " died — experience debt set to " +
