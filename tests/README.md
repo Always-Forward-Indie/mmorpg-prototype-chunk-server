@@ -45,13 +45,13 @@ cmake -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
   -S /usr/src/app -B /usr/src/app/build-ubsan
 cmake --build /usr/src/app/build-ubsan --target unit_tests -j8
-/usr/src/app/build-ubsan/tests/unit_tests   # must be silent (264 green, 0 reports)
+/usr/src/app/build-ubsan/tests/unit_tests   # must be silent (all green, 0 reports)
 
 # TSan unit run. Two environment quirks, both documented:
 #  1. TSan is incompatible with ASan: use a custom build type (e.g. -DCMAKE_BUILD_TYPE=TSan)
 #     so the hardcoded Debug ASan flags do not apply.
 #  2. This toolchain+Docker needs non-PIE binaries (-fno-pie -no-pie) plus
-#     setarch/run under seccomp=unconfined, otherwise TSan dies at startup
+#     setarch -R (ASLR off), otherwise TSan dies at startup
 #     with "unexpected memory mapping".
 cmake -DCMAKE_BUILD_TYPE=TSan \
   -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer -g -fno-pie" \
@@ -59,10 +59,19 @@ cmake -DCMAKE_BUILD_TYPE=TSan \
   -S /usr/src/app -B /usr/src/app/build-tsan-nopie
 cmake --build /usr/src/app/build-tsan-nopie --target unit_tests -j8
 TSAN_OPTIONS="suppressions=/usr/src/app/tests/TSanSuppressions.txt" \
-  ./build-tsan-nopie/tests/unit_tests
+  setarch -R ./build-tsan-nopie/tests/unit_tests
 ```
 
 Gate: zero non-suppressed reports. Suppressions (`tests/TSanSuppressions.txt`)
 cover only the triaged spdlog-teardown artifact. The flaky Scheduler
 same-mutex reports are deliberately NOT suppressed (see the file header);
 any new stack shape is guilty until proven otherwise.
+
+KNOWN ARTIFACT 3 (verified 2026-10-01): ChampionManager lock-order-inversion
+(`recordMobKill:97` vs `checkDespawnedChampions:478`) fires only inside
+`test_champion.cpp` multi-threaded fixtures (test threads take the manager
+mutex in opposite order to production call paths). Production paths always
+lock in one order (tick → record); no player-facing symptom ever observed.
+Pre-existing, untouched by the CatalogSyncService/route-table work (zero
+frames from EventDispatcher/CatalogSyncService/MobMovement/DistanceUtils in
+any TSan stack — verified same run).

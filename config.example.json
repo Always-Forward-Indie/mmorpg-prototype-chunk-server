@@ -1,0 +1,9 @@
+{
+  "_comment": "Example config for MMOChunkServer. Copy to config.json or use ENV overrides. Static game data comes from game-server via JOIN_CHUNK_SERVER, not from DB.",
+  "game_server_host": "127.0.0.1",
+  "game_server_port": 27016,
+  "server_host": "0.0.0.0",
+  "server_port": 27017,
+  "server_max_clients": 3000,
+  "chunk_public_host": "127.0.0.1"
+}

@@ -8,6 +8,7 @@
 #include "services/GameServices.hpp"
 #include "utils/RandomUtils.hpp"
 
+#include <ctime>
 #include <gtest/gtest.h>
 #include <string>
 
@@ -173,4 +174,85 @@ TEST_F(CombatFixture, PvpDamageBlocked)
     EXPECT_EQ(exec.errorMessage, "PvP is not available");
     // Target untouched.
     EXPECT_EQ(gs.getCharacterManager().getCharacterData(2).characterCurrentHealth, 100);
+}
+
+namespace
+{
+
+SkillStruct makeStunSkill()
+{
+    SkillStruct s = makeSkill("shield_slam");
+    s.costMp = 0;
+    s.cooldownMs = 0;
+    s.flatAdd = 10.0f;
+    s.coeff = 1.0f;
+    SkillEffectDefinitionStruct stun;
+    stun.effectSlug = "shield_slam_stun";
+    stun.effectTypeSlug = "stun";
+    stun.attributeSlug = "";
+    stun.value = 0.0f;
+    stun.durationSeconds = 2;
+    stun.tickMs = 0;
+    s.effects = {stun};
+    return s;
+}
+
+} // namespace
+
+TEST_F(CombatFixture, StunLandsOnMobAndHoldsIt)
+{
+    CharacterDataStruct c = gs.getCharacterManager().getCharacterData(1);
+    c.skills.push_back(makeStunSkill());
+    gs.getCharacterManager().removeCharacter(1);
+    gs.getCharacterManager().addCharacter(c);
+
+    auto exec = combat->executeSkillUsage(1, "shield_slam", 9001, CombatTargetType::MOB, true);
+    EXPECT_TRUE(exec.success) << exec.errorMessage;
+    const int64_t nowSec =
+        static_cast<int64_t>(std::time(nullptr));
+    EXPECT_TRUE(gs.getMobInstanceManager().hasMobCC(9001, "stun", nowSec));
+}
+
+TEST_F(CombatFixture, StunLandsOnPlayerAndBlocksCasts)
+{
+    CharacterDataStruct c = gs.getCharacterManager().getCharacterData(1);
+    c.skills.push_back(makeStunSkill());
+    gs.getCharacterManager().removeCharacter(1);
+    gs.getCharacterManager().addCharacter(c);
+
+    auto exec = combat->executeSkillUsage(1, "shield_slam", 2, CombatTargetType::PLAYER, true);
+    // PvP damage is blocked, but the stun effect is hostile-applied... PvP
+    // guard rejects hostile execution paths; use SELF to land a self-stun.
+    (void)exec;
+    auto self = combat->executeSkillUsage(1, "shield_slam", 1, CombatTargetType::SELF, true);
+    EXPECT_TRUE(self.success) << self.errorMessage;
+    const int64_t nowSec = static_cast<int64_t>(std::time(nullptr));
+    EXPECT_TRUE(gs.getCharacterManager().hasLiveCC(1, "stun", nowSec));
+    auto init = combat->initiateSkillUsage(1, "strike", 9001, CombatTargetType::MOB);
+    EXPECT_FALSE(init.success);
+    EXPECT_EQ(init.errorMessage, "Stunned");
+}
+
+TEST_F(CombatFixture, StunDiminishesThenImmunes)
+{
+    CharacterDataStruct c = gs.getCharacterManager().getCharacterData(1);
+    c.skills.push_back(makeStunSkill());
+    gs.getCharacterManager().removeCharacter(1);
+    gs.getCharacterManager().addCharacter(c);
+
+    // 1st stun lands full; 4 rapid re-stuns run the DR chain into immunity.
+    // hasLiveCC stays true throughout (fresh applications overlap).
+    for (int i = 0; i < 3; ++i)
+    {
+        auto exec = combat->executeSkillUsage(1, "shield_slam", 9001, CombatTargetType::MOB, true);
+        EXPECT_TRUE(exec.success) << exec.errorMessage;
+    }
+    const int64_t nowSec = static_cast<int64_t>(std::time(nullptr));
+    EXPECT_TRUE(gs.getMobInstanceManager().hasMobCC(9001, "stun", nowSec));
+    // 4th application is immune: effect count must not grow.
+    size_t before = gs.getMobInstanceManager().getMobEffects(9001, nowSec).size();
+    auto exec = combat->executeSkillUsage(1, "shield_slam", 9001, CombatTargetType::MOB, true);
+    EXPECT_TRUE(exec.success) << exec.errorMessage;
+    size_t after = gs.getMobInstanceManager().getMobEffects(9001, nowSec).size();
+    EXPECT_EQ(after, before);
 }

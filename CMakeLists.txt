@@ -46,6 +46,7 @@ set(SOURCE_FILES
     src/services/PlayerDeathPipeline.cpp
     src/services/ItemManager.cpp
     src/services/LootManager.cpp
+    src/services/CatalogSyncService.cpp
     src/services/InventoryManager.cpp
     src/services/HarvestManager.cpp
     src/services/InterestManager.cpp
@@ -125,6 +126,7 @@ set(HEADER_FILES
     include/services/CharacterManager.hpp
     include/services/CharacterStatsNotificationService.hpp
     include/services/StatsPacketBuilder.hpp
+    include/services/StatsResolver.hpp
     include/services/DialogueEnvelopeParser.hpp
     include/services/LearnSkillValidator.hpp
     include/services/RepairCostCalculator.hpp
@@ -153,6 +155,7 @@ set(HEADER_FILES
     include/services/SkillInitiationValidator.hpp
     include/services/ItemManager.hpp
     include/services/LootManager.hpp
+    include/services/CatalogSyncService.hpp
     include/services/InventoryManager.hpp
     include/services/HarvestManager.hpp
     include/services/ExperienceManager.hpp

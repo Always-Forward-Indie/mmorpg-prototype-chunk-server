@@ -94,8 +94,10 @@ TEST(StatsPacketBuilder, EffectiveMaxFallbackToStruct)
     EXPECT_EQ(pkt["body"]["mana"]["max"], 50);
 }
 
-TEST(StatsPacketBuilder, EquipBonusMerge)
+TEST(StatsPacketBuilder, EquipBonusNeverDoubleCounted)
 {
+    // Stored attributes already contain equip/set/durability (DB computes
+    // them). Raw equipBonuses must NOT inflate effective (old double-count).
     auto in = baseInput();
     in.equipBonuses = {{"strength", 5}, {"crit_chance", 2}};
     in.equipNames = {{"crit_chance", "Crit Chance"}};
@@ -103,12 +105,9 @@ TEST(StatsPacketBuilder, EquipBonusMerge)
     const auto *str = findAttr(pkt["body"]["attributes"], "strength");
     ASSERT_NE(str, nullptr);
     EXPECT_EQ((*str)["base"], 10);
-    EXPECT_EQ((*str)["effective"], 15);
-    const auto *crit = findAttr(pkt["body"]["attributes"], "crit_chance");
-    ASSERT_NE(crit, nullptr);
-    EXPECT_EQ((*crit)["base"], 0); // equip-only slug
-    EXPECT_EQ((*crit)["effective"], 2);
-    EXPECT_EQ((*crit)["name"], "Crit Chance");
+    EXPECT_EQ((*str)["effective"], 10);
+    // Equip-only slugs contribute names, not values.
+    EXPECT_EQ(findAttr(pkt["body"]["attributes"], "crit_chance"), nullptr);
 }
 
 TEST(StatsPacketBuilder, EffectsMergeAndDisplay)

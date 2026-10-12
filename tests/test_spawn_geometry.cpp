@@ -136,3 +136,25 @@ TEST(SpawnGeometry, SectorDegenerateSlotsFallBack)
     EXPECT_GE(d2, 30.0f * 30.0f);
     EXPECT_LE(d2, 50.0f * 50.0f);
 }
+
+TEST(SpawnGeometry, ArcStaysInRingAndWedge)
+{
+    // ±90° arc around east must stay in-ring and never point west.
+    RandomUtils::seedForTests(42u);
+    for (int i = 0; i < 200; ++i)
+    {
+        const auto [x, y] = SpawnGeometry::sampleAnnulusArc(
+            0.0f, 0.0f, 30.0f, 50.0f, 0.0f, 3.14159265358979323846f * 0.5f);
+        const float d2 = dist2(x, y, 0.0f, 0.0f);
+        EXPECT_GE(d2, 30.0f * 30.0f);
+        EXPECT_LE(d2, 50.0f * 50.0f);
+        EXPECT_GT(x, 0.0f); // cos in (-90°,+90°) > 0
+    }
+}
+
+TEST(SpawnGeometry, ArcDegenerateReturnsCentre)
+{
+    const auto [x, y] = SpawnGeometry::sampleAnnulusArc(5.0f, 6.0f, 40.0f, 40.0f, 0.0f, 1.0f);
+    EXPECT_FLOAT_EQ(x, 5.0f);
+    EXPECT_FLOAT_EQ(y, 6.0f);
+}

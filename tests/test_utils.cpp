@@ -144,6 +144,37 @@ TEST(DistanceUtils, WithinRangeMatchesSqrtCompare)
     EXPECT_FALSE(DistanceUtils::withinRange3D(a, b, 50.5f));
 }
 
+TEST(DistanceUtils, WithinRange2DWithZTolerance400)
+{
+    // Product decision 2026-10: authoritative 2D + Z=400. Hills must pass,
+    // teleports must fail. Client Z snap diverges — strict 3D would false-negative.
+    PositionStruct a, b;
+    a.positionX = 0.0f;
+    a.positionY = 0.0f;
+    a.positionZ = 0.0f;
+    b.positionX = 100.0f;
+    b.positionY = 0.0f;
+    // Same XY (100 units), varying Z.
+    b.positionZ = 0.0f;
+    EXPECT_TRUE(DistanceUtils::withinRange2DWithZTolerance(a, b, 300.0f));
+    b.positionZ = 399.0f;
+    EXPECT_TRUE(DistanceUtils::withinRange2DWithZTolerance(a, b, 300.0f));
+    b.positionZ = 400.0f;
+    EXPECT_TRUE(DistanceUtils::withinRange2DWithZTolerance(a, b, 300.0f));
+    b.positionZ = 401.0f;
+    EXPECT_FALSE(DistanceUtils::withinRange2DWithZTolerance(a, b, 300.0f));
+    b.positionZ = -401.0f;
+    EXPECT_FALSE(DistanceUtils::withinRange2DWithZTolerance(a, b, 300.0f));
+    // XY out still fails even with Z=0.
+    b.positionX = 301.0f;
+    b.positionZ = 0.0f;
+    EXPECT_FALSE(DistanceUtils::withinRange2DWithZTolerance(a, b, 300.0f));
+    // Constants pinned.
+    EXPECT_FLOAT_EQ(DistanceUtils::kDefaultZTolerance, 400.0f);
+    EXPECT_FLOAT_EQ(DistanceUtils::kRangeUnitScale, 100.0f);
+    EXPECT_FLOAT_EQ(DistanceUtils::metersToUnits(3.0f), 300.0f);
+}
+
 TEST(ResponseBuilder, HeaderBodyAndTimestamps)
 {
     ResponseBuilder b;

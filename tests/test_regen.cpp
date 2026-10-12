@@ -198,6 +198,10 @@ TEST_F(RegenFixture, ExpiredAndTickEffectsIgnored)
 
 TEST_F(RegenFixture, EquipmentRegenBonusAndEffectiveCap)
 {
+    // New contract (StatsResolver): stored attributes already contain
+    // equip/set/durability (DB computes them) — regen must NOT re-add raw
+    // equip on top (that was a double-count vs combat). The ring below only
+    // exercises the lookup path; values come from stored.
     ItemDataStruct ring;
     ring.id = 300;
     ring.slug = "regen_ring";
@@ -216,12 +220,15 @@ TEST_F(RegenFixture, EquipmentRegenBonusAndEffectiveCap)
     items.setItemsList({ring});
 
     auto c = baseChar(1);
+    // Stored as the DB would deliver: base 100 max + 50 ring, base regen + 5.
+    c.attributes.push_back(attr("hp_regen_per_s", 5));
+    c.attributes.push_back(attr("max_health", 150));
     c.characterCurrentHealth = 120; // above base max 100, below effective 150
     chars.addCharacter(c);
     giveEquipped(1, 300, 21);
 
     regen.tickRegen();
-    // hpRegenBase=5*4=20 > 5; effectiveMax = 100 + 50 = 150
+    // hpRegenBase=5*4=20 > 5; effectiveMax = 150 (stored, NOT 100+50 double)
     EXPECT_EQ(chars.getCharacterData(1).characterCurrentHealth, 140);
     EXPECT_EQ(notifier.calls, 1);
 }
