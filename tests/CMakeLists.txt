@@ -46,7 +46,9 @@ if(GTest_FOUND)
         test_champion.cpp
         test_regen.cpp
         test_cooldown.cpp
+        test_crowd_control.cpp
         test_stats_builder.cpp
+        test_stats_resolver.cpp
         test_stats_notify.cpp
         test_dialogue_actions.cpp
         test_durability.cpp
@@ -65,6 +67,7 @@ if(GTest_FOUND)
         test_item_cooldowns.cpp
         test_join_respawn.cpp
         test_spawn_geometry.cpp
+        test_rare_spawn.cpp
         test_outbox.cpp
         test_config.cpp
         stubs/WorldStubs.cpp
