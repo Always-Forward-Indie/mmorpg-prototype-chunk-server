@@ -1,6 +1,8 @@
 #include "services/MobInstanceManager.hpp"
 #include "events/Event.hpp"
 #include "events/EventQueue.hpp"
+#include "services/CrowdControl.hpp"
+#include "utils/DistanceUtils.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -77,6 +79,10 @@ MobInstanceManager::unregisterMobInstance(int mobUID)
 
         // Remove from main map
         mobInstances_.erase(it);
+
+        // Effects and CC history die with the instance.
+        mobEffects_.erase(mobUID);
+        mobCCHistory_.erase(mobUID);
 
         log_->info("[INFO] Unregistered mob instance UID: " + std::to_string(mobUID));
     }
@@ -431,9 +437,8 @@ MobInstanceManager::getMobsInRange(float centerX, float centerY, float radius) c
     {
         if (mob.isDead)
             continue;
-        float dx = mob.position.positionX - centerX;
-        float dy = mob.position.positionY - centerY;
-        if (std::sqrt(dx * dx + dy * dy) <= radius)
+        PositionStruct center{centerX, centerY, mob.position.positionZ, 0.0f};
+        if (DistanceUtils::withinRange2D(mob.position, center, radius))
             result.push_back(mob);
     }
     return result;
@@ -486,4 +491,60 @@ MobInstanceManager::updateZoneIndex(int mobUID, int oldZoneId, int newZoneId)
     {
         mobsByZone_[newZoneId].push_back(mobUID);
     }
+}
+
+void
+MobInstanceManager::addMobEffect(int mobUID, const ActiveEffectStruct &effect)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    if (mobInstances_.find(mobUID) == mobInstances_.end())
+        return;
+    mobEffects_[mobUID].push_back(effect);
+}
+
+std::vector<ActiveEffectStruct>
+MobInstanceManager::getMobEffects(int mobUID, int64_t nowSec) const
+{
+    std::vector<ActiveEffectStruct> out;
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = mobEffects_.find(mobUID);
+    if (it == mobEffects_.end())
+        return out;
+    auto &vec = it->second;
+    for (auto vit = vec.begin(); vit != vec.end();)
+    {
+        if (vit->expiresAt != 0 && vit->expiresAt <= nowSec)
+            vit = vec.erase(vit);
+        else
+        {
+            out.push_back(*vit);
+            ++vit;
+        }
+    }
+    if (vec.empty())
+        mobEffects_.erase(it);
+    return out;
+}
+
+bool
+MobInstanceManager::hasMobCC(int mobUID, const std::string &ccType, int64_t nowSec) const
+{
+    for (const auto &eff : getMobEffects(mobUID, nowSec))
+    {
+        if (eff.effectTypeSlug == ccType)
+            return true;
+    }
+    return false;
+}
+
+float
+MobInstanceManager::applyMobCC(int mobUID, const std::string &ccType, float baseDurationSec,
+    int64_t nowSec, float immuneWindowSec)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    if (mobInstances_.find(mobUID) == mobInstances_.end())
+        return -1.0f;
+    const float scaled = CrowdControl::applyWithDR(mobCCHistory_[mobUID][ccType],
+        nowSec, baseDurationSec, immuneWindowSec);
+    return scaled;
 }

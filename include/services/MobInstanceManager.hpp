@@ -208,6 +208,23 @@ class MobInstanceManager
      */
     void setEventQueue(EventQueue *eventQueue);
 
+    // ── Mob effect store ──────────────────────────────────────────────────
+    // Minimal CC/debuff store (DoT damage ticks on mobs stay out of scope —
+    // DoT damage is applied by the existing instant paths; the store holds
+    // CC (stun/root/silence) and stat debuffs so armor-shred etc. works on
+    // mobs). Effects die with the instance (purged in unregister). Expiry by
+    // unix seconds, same convention as player ActiveEffects.
+    void addMobEffect(int mobUID, const ActiveEffectStruct &effect);
+    // Live (unexpired) effects, pruned copy.
+    std::vector<ActiveEffectStruct> getMobEffects(int mobUID, int64_t nowSec) const;
+    // True when a live CC of the given type (stun|root|silence) is present.
+    bool hasMobCC(int mobUID, const std::string &ccType, int64_t nowSec) const;
+    // DR-gated CC application: returns effective duration sec, or -1 when
+    // immune (4th same-type CC inside immuneWindowSec). History pruned inline
+    // and purged with the instance on unregister.
+    float applyMobCC(int mobUID, const std::string &ccType, float baseDurationSec,
+        int64_t nowSec, float immuneWindowSec = 15.0f);
+
   private:
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
@@ -224,6 +241,14 @@ class MobInstanceManager
     // Throttle map for position log spam prevention.
     // Protected by mutex_ (already held in updateMobPosition).
     std::unordered_map<int, float> positionLogThrottleMap_;
+
+    // Mob effect store: uid → live effects (CC + stat debuffs).
+    // Mutable: reads prune expired entries (cache-like behavior).
+    mutable std::unordered_map<int, std::vector<ActiveEffectStruct>> mobEffects_;
+
+    // CC diminishing-returns history: uid → ccType → application times.
+    // Mutable for the same prune-on-read reason.
+    mutable std::unordered_map<int, std::unordered_map<std::string, std::vector<int64_t>>> mobCCHistory_;
 
     // Mutex for thread safety
     mutable std::shared_mutex mutex_;

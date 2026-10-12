@@ -1,6 +1,7 @@
 #pragma once
 
 #include "data/CombatStructs.hpp"
+#include "utils/DistanceUtils.hpp"
 #include <string>
 
 /**
@@ -43,8 +44,8 @@ struct InitiationCheckInput
     std::string skillEffect;
 };
 
-/// DB range units (meters) vs position units are 100x larger.
-inline constexpr float kInitiationRangeUnitScale = 100.0f;
+/// DB range units (meters) vs position units are 100x larger (single source: DistanceUtils).
+inline constexpr float kInitiationRangeUnitScale = DistanceUtils::kRangeUnitScale;
 
 inline InitiationReject validateSkillInitiation(const InitiationCheckInput &in)
 {

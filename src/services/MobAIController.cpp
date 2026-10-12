@@ -12,6 +12,7 @@
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 
 // ---------------------------------------------------------------------------
 // checkAndTriggerFlee — call from any combat state when mob takes damage
@@ -429,6 +430,24 @@ void
 MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movementData, float currentTime)
 {
     float timeSinceStateChange = currentTime - movementData.stateChangeTime;
+
+    // Crowd-control gate (mirror of the player gates in CombatSystem /
+    // CharacterEventHandler): stun freezes the whole tick; root holds
+    // movement (movementHeld, honored by MobMovementManager) while attacks
+    // in range keep firing through the state machine below.
+    {
+        const int64_t nowSecCC = static_cast<int64_t>(std::time(nullptr));
+        const bool stunned = mobInstances_.hasMobCC(mob.uid, "stun", nowSecCC);
+        const bool rooted =
+            !stunned && mobInstances_.hasMobCC(mob.uid, "root", nowSecCC);
+        if (movementData.movementHeld != (stunned || rooted))
+        {
+            movementData.movementHeld = stunned || rooted;
+            mobMovement_.updateMobMovementData(mob.uid, movementData);
+        }
+        if (stunned)
+            return;
+    }
 
     switch (movementData.combatState)
     {

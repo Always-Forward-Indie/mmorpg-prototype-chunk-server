@@ -2,6 +2,7 @@
 
 #include "data/DataStructs.hpp"
 #include "data/SkillStructs.hpp"
+#include "utils/DistanceUtils.hpp"
 #include <cmath>
 #include <string>
 #include <unordered_map>
@@ -27,8 +28,8 @@ inline constexpr float kThreatDecayBase = 0.95f;
 /// Fallback mob diameter when template radius is 0
 inline constexpr float kDefaultMobDiameter = 140.0f;
 
-/// DB range units (meters) vs position units are 100x larger
-inline constexpr float kRangeUnitScale = 100.0f;
+/// DB range units (meters) vs position units are 100x larger (single source: DistanceUtils).
+inline constexpr float kRangeUnitScale = DistanceUtils::kRangeUnitScale;
 
 /**
  * @brief Melee-slot occupancy count (Wave 4.1).
