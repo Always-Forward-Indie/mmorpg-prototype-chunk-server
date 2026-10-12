@@ -5,8 +5,11 @@
 #include "services/MobInstanceManager.hpp"
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
+#include "services/StatsResolver.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/Logger.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <spdlog/logger.h>
 
@@ -179,6 +182,18 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
                     ca.value = a.value;
                     tempTarget.attributes.push_back(ca);
                 }
+                // Fold live mob-store debuffs (armor shred etc.) so they bite
+                // exactly like player debuffs do. CC types carry no stat
+                // value and change nothing here.
+                {
+                    const int64_t nowSecTgt =
+                        std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+                    tempTarget.attributes = StatsResolver::mergedVector(
+                        tempTarget.attributes,
+                        mobInstances_.getMobEffects(targetId, nowSecTgt), nowSecTgt);
+                }
 
                 result.damageResult = combatCalculator_->calculateSkillDamage(skill, casterData, tempTarget);
             }
@@ -187,6 +202,18 @@ SkillSystem::useSkill(int casterId, const std::string &skillSlug, int targetId, 
         { // MOB caster
             auto mobData = mobInstances_.getMobInstance(casterId);
             auto targetData = characters_.getCharacterData(targetId);
+
+            // Fold live mob-store debuffs (weakened mobs hit softer) — the
+            // same two-pass rules as player debuffs, on template attributes.
+            {
+                const int64_t nowSecMob =
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+                mobData.attributes = StatsResolver::mergedMobVector(
+                    mobData.attributes,
+                    mobInstances_.getMobEffects(casterId, nowSecMob), nowSecMob);
+            }
 
             result.damageResult = combatCalculator_->calculateMobSkillDamage(skill, mobData, targetData);
         }
@@ -453,18 +480,17 @@ SkillSystem::isInRange(const SkillStruct &skill, int casterId, int targetId, Com
             return true; // Для AREA и NONE не проверяем дистанцию
         }
 
-        // Вычисляем дистанцию
-        float dx = casterPos.positionX - targetPos.positionX;
-        float dy = casterPos.positionY - targetPos.positionY;
-        float distance = std::sqrt(dx * dx + dy * dy);
+        // Authoritative range is 2D (Z snapped by client). Meters→units via central scale.
+        const float distance = DistanceUtils::dist2D(casterPos, targetPos);
 
-        bool inRange = distance <= skill.maxRange * 100.0f;
+        const float maxRangeUnits = DistanceUtils::metersToUnits(skill.maxRange);
+        const bool inRange = distance <= maxRangeUnits;
         if (!inRange)
         {
             log_->warn("[isInRange] Out of range: caster=" + std::to_string(casterId) +
                        " target=" + std::to_string(targetId) +
                        " distance=" + std::to_string(distance) +
-                       " maxRange=" + std::to_string(skill.maxRange * 100.0f));
+                       " maxRange=" + std::to_string(maxRangeUnits));
         }
         return inRange;
     }

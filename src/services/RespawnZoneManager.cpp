@@ -30,16 +30,16 @@ RespawnZoneManager::findNearest(const PositionStruct &deathPosition) const
     }
 
     const RespawnZoneStruct *best = nullptr;
-    float bestDist = std::numeric_limits<float>::max();
+    float bestDist2 = std::numeric_limits<float>::max();
 
     for (const auto &zone : zones_)
     {
-        float dx = zone.position.positionX - deathPosition.positionX;
-        float dy = zone.position.positionY - deathPosition.positionY;
-        float dist = std::sqrt(dx * dx + dy * dy);
-        if (dist < bestDist)
+        const float dx = zone.position.positionX - deathPosition.positionX;
+        const float dy = zone.position.positionY - deathPosition.positionY;
+        const float dist2 = dx * dx + dy * dy; // squared: argmin identical, no sqrt
+        if (dist2 < bestDist2)
         {
-            bestDist = dist;
+            bestDist2 = dist2;
             best = &zone;
         }
     }

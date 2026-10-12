@@ -65,15 +65,16 @@ struct MovementValidation
         return moveSpeedUnits * (effectiveDelta / 1000.0f) * speedBuffer;
     }
 
-    // Overweight slow factor: 1.0 at/below the limit, linear down to a 0.3
-    // floor (a full pack slows to a crawl but never roots the character).
+    // Overweight slow factor: 1.0 at/below the limit, linear down to a floor
+    // (a full pack slows to a crawl but never roots the character).
     // Pure: unit-tested here; the move handler only feeds it manager values.
-    static float overweightFactor(float carried, float limit)
+    // Floor comes from game_config carry_weight.overweight_speed_penalty.
+    static float overweightFactor(float carried, float limit, float floor = 0.3f)
     {
         if (limit <= 0.0f || carried <= limit)
             return 1.0f;
         const float f = limit / carried;
-        return (f < 0.3f) ? 0.3f : f;
+        return (f < floor) ? floor : f;
     }
 
     struct WindowVerdict

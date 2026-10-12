@@ -17,6 +17,19 @@
 class DistanceUtils
 {
   public:
+    // Product decision 2026-10: authoritative range is 2D (X/Y plane) with
+    // a Z tolerance band. Server knows nothing about client collision /
+    // terrain snap, client snaps mobs/items to ground itself — strict 3D
+    // would give false TOO_FAR on hills/floors. Default 400 units.
+    static constexpr float kDefaultZTolerance = 400.0f;
+    // DB skills store meters, world positions store units (x100).
+    static constexpr float kRangeUnitScale = 100.0f;
+    // Vendor radius bonus (was magic +2.0f x8 in VendorEventHandler).
+    static constexpr float kVendorRadiusBonus = 2.0f;
+    // Teleport snap: |dz| above this is corrected, not range-failed.
+    static constexpr float kTeleportSnapZ = 800.0f;
+
+    static float metersToUnits(float meters) { return meters * kRangeUnitScale; }
     // Planar distance (X/Y). The standard for movement, aggro, loot, harvest.
     static float dist2D(const PositionStruct &a, const PositionStruct &b)
     {
@@ -52,12 +65,33 @@ class DistanceUtils
 
     // Range check without sqrt (squared comparison — bit-identical to the
     // hand-rolled form it replaces, e.g. VendorEventHandler::isPlayerInRange).
+    // LEGACY 3D sphere — kept for compat, new code must use withinRange2DWithZTolerance.
     static bool withinRange3D(const PositionStruct &a, const PositionStruct &b, float radius)
     {
         const float dx = a.positionX - b.positionX;
         const float dy = a.positionY - b.positionY;
         const float dz = a.positionZ - b.positionZ;
         return (dx * dx + dy * dy + dz * dz) <= (radius * radius);
+    }
+
+    // AAA standard: 2D range + Z tolerance band. Use for ALL gameplay
+    // interactions (combat/skills/aggro/loot/harvest/dialogue/vendor/WIO/quest).
+    static bool withinRange2DWithZTolerance(const PositionStruct &a, const PositionStruct &b,
+        float radius, float zTolerance = kDefaultZTolerance)
+    {
+        const float dx = a.positionX - b.positionX;
+        const float dy = a.positionY - b.positionY;
+        if ((dx * dx + dy * dy) > (radius * radius))
+            return false;
+        const float dz = a.positionZ - b.positionZ;
+        return (dz >= -zTolerance && dz <= zTolerance);
+    }
+
+    static float dist2DWithZTolerance(const PositionStruct &a, const PositionStruct &b,
+        float zTolerance = kDefaultZTolerance)
+    {
+        (void)zTolerance;
+        return dist2D(a, b);
     }
 
     DistanceUtils() = delete;

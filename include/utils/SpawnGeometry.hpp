@@ -56,6 +56,23 @@ class SpawnGeometry
         return {centerX + r * std::cos(angle), centerY + r * std::sin(angle)};
     }
 
+    // Arc-limited ring sample: equal-area radius like sampleAnnulus, but the
+    // angle is uniform in [centerAngle-halfArc, centerAngle+halfArc].
+    // Patrol steering uses it to keep annulus waypoints within ±90° of the
+    // mob (a full-circle waypoint forces a straight path through the inner
+    // hole). Degenerate ring falls back to the centre.
+    static std::pair<float, float> sampleAnnulusArc(float centerX, float centerY,
+        float innerRadius, float outerRadius, float centerAngle, float halfArc)
+    {
+        if (outerRadius <= 0.0f || outerRadius <= innerRadius)
+            return {centerX, centerY};
+        const float angle = centerAngle + RandomUtils::range(-halfArc, halfArc);
+        const float r2in = innerRadius * innerRadius;
+        const float r2out = outerRadius * outerRadius;
+        const float r = std::sqrt(r2in + RandomUtils::uniform01() * (r2out - r2in));
+        return {centerX + r * std::cos(angle), centerY + r * std::sin(angle)};
+    }
+
     // Stratified variant: uniform point within the slotIdx-th of totalSlots
     // equal angular sectors (totalSlots>=1). Spreads mobs evenly around
     // narrow rings instead of clumping. Falls back to sampleAnnulus for

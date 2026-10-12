@@ -136,6 +136,15 @@ class EquipmentManager
     std::shared_ptr<spdlog::logger> log_;
     mutable std::shared_mutex mutex_;
 
+    // LOCK ORDER CONTRACT (deadlock prevention): this manager may take
+    // InventoryManager's lock while holding its own (equip/unequip update
+    // equipped flags), i.e. equipment → inventory. The reverse path does
+    // not exist (InventoryManager never calls back here), so the order is
+    // acyclic. Rule for future code: never take equipment_ mutex while
+    // holding the character-map lock, and never call CharacterManager from
+    // inside an equipment-locked section — use applyUnderLock-style
+    // short critical sections instead.
+
     std::unordered_map<int, CharacterEquipmentStruct> equipment_; // characterId → state
 
     static const std::vector<std::string> ALL_SLOTS;

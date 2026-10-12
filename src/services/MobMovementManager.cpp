@@ -13,6 +13,7 @@
 #include "utils/DistanceUtils.hpp"
 #include "utils/MovementUnits.hpp"
 #include "utils/RandomUtils.hpp"
+#include "utils/SpawnGeometry.hpp"
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
 #include <chrono>
@@ -462,18 +463,19 @@ MobMovementManager::calculateNewPosition(
     }
     else if (zone.shape == ZoneShape::CIRCLE)
     {
-        float dx = mob.position.positionX - zone.centerX;
-        float dy = mob.position.positionY - zone.centerY;
-        float d = std::sqrt(dx * dx + dy * dy);
-        atBorder = (d >= zone.outerRadius - borderThreshold);
+        const float dx = mob.position.positionX - zone.centerX;
+        const float dy = mob.position.positionY - zone.centerY;
+        const float border = zone.outerRadius - borderThreshold;
+        atBorder = (dx * dx + dy * dy >= border * border);
     }
     else // ANNULUS
     {
-        float dx = mob.position.positionX - zone.centerX;
-        float dy = mob.position.positionY - zone.centerY;
-        float d = std::sqrt(dx * dx + dy * dy);
-        atBorder = (d >= zone.outerRadius - borderThreshold ||
-                    d <= zone.innerRadius + borderThreshold);
+        const float dx = mob.position.positionX - zone.centerX;
+        const float dy = mob.position.positionY - zone.centerY;
+        const float d2 = dx * dx + dy * dy;
+        const float outer = zone.outerRadius - borderThreshold;
+        const float inner = zone.innerRadius + borderThreshold;
+        atBorder = (d2 >= outer * outer || d2 <= inner * inner);
     }
 
     // Initialize step multiplier if needed
@@ -544,49 +546,43 @@ MobMovementManager::calculateNewPosition(
         else
         {
             // Waypoint patrol (plan §5.1): pick/reuse a random target and steer toward it.
+            // Squared arrival check (no sqrt on the hot path).
             float wpDX = movementData.patrolTargetPoint.positionX - mob.position.positionX;
             float wpDY = movementData.patrolTargetPoint.positionY - mob.position.positionY;
-            float wpDist = std::sqrt(wpDX * wpDX + wpDY * wpDY);
 
-            bool needNewWaypoint = !movementData.hasPatrolTarget || wpDist < 2.0f;
+            bool needNewWaypoint = !movementData.hasPatrolTarget ||
+                (wpDX * wpDX + wpDY * wpDY < 2.0f * 2.0f);
             if (needNewWaypoint)
             {
                 bool waypointSet = false;
                 if (zone.shape == ZoneShape::CIRCLE)
                 {
-                    float safeRadius = zone.outerRadius - borderThreshold - 1.0f;
+                    const float safeRadius = zone.outerRadius - borderThreshold - 1.0f;
                     if (safeRadius > 0.0f)
                     {
-                        std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * static_cast<float>(M_PI));
-                        std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
-                        float angle = angleDist(RandomUtils::engine());
-                        float r = safeRadius * std::sqrt(unitDist(RandomUtils::engine()));
-                        movementData.patrolTargetPoint.positionX = zone.centerX + r * std::cos(angle);
-                        movementData.patrolTargetPoint.positionY = zone.centerY + r * std::sin(angle);
+                        const auto [wx, wy] = SpawnGeometry::sampleCircle(
+                            zone.centerX, zone.centerY, safeRadius);
+                        movementData.patrolTargetPoint.positionX = wx;
+                        movementData.patrolTargetPoint.positionY = wy;
                         waypointSet = true;
                     }
                 }
                 else if (zone.shape == ZoneShape::ANNULUS)
                 {
-                    float safeOuter = zone.outerRadius - borderThreshold - 1.0f;
-                    float safeInner = zone.innerRadius + borderThreshold + 1.0f;
+                    const float safeOuter = zone.outerRadius - borderThreshold - 1.0f;
+                    const float safeInner = zone.innerRadius + borderThreshold + 1.0f;
                     if (safeOuter > safeInner)
                     {
                         // Limit waypoint to ±90° arc from mob's current angular position.
                         // A waypoint on the opposite side of the ring forces a straight-line
                         // path through the inner hole → all retries fail → orbit via inertia.
-                        float mobAngle = std::atan2(mob.position.positionY - zone.centerY,
+                        const float mobAngle = std::atan2(mob.position.positionY - zone.centerY,
                             mob.position.positionX - zone.centerX);
-                        std::uniform_real_distribution<float> arcDist(
-                            -static_cast<float>(M_PI) * 0.5f,
-                            static_cast<float>(M_PI) * 0.5f);
-                        std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
-                        float angle = mobAngle + arcDist(RandomUtils::engine());
-                        float r2in = safeInner * safeInner;
-                        float r2out = safeOuter * safeOuter;
-                        float r = std::sqrt(r2in + unitDist(RandomUtils::engine()) * (r2out - r2in));
-                        movementData.patrolTargetPoint.positionX = zone.centerX + r * std::cos(angle);
-                        movementData.patrolTargetPoint.positionY = zone.centerY + r * std::sin(angle);
+                        const auto [wx, wy] = SpawnGeometry::sampleAnnulusArc(
+                            zone.centerX, zone.centerY, safeInner, safeOuter,
+                            mobAngle, static_cast<float>(M_PI) * 0.5f);
+                        movementData.patrolTargetPoint.positionX = wx;
+                        movementData.patrolTargetPoint.positionY = wy;
                         waypointSet = true;
                     }
                 }
@@ -999,12 +995,12 @@ MobMovementManager::calculateChaseMovement(
         return std::nullopt;
     }
 
-    // ---- 1. Vector to target ----
+    // ---- 1. Vector to target (squared range check — no sqrt) ----
     const float targetX = targetPlayer.characterPosition.positionX;
     const float targetY = targetPlayer.characterPosition.positionY;
-    float dx = targetX - mob.position.positionX;
-    float dy = targetY - mob.position.positionY;
-    float distance = std::sqrt(dx * dx + dy * dy);
+    const float dx = targetX - mob.position.positionX;
+    const float dy = targetY - mob.position.positionY;
+    const float dist2 = dx * dx + dy * dy;
 
     // ---- 2. Zone boundary check (leash if mob is dragged outside its zone) ----
     if (shouldStopChasing(mob.position, zone))
@@ -1026,13 +1022,13 @@ MobMovementManager::calculateChaseMovement(
     // ---- 2. Attack range — stop movement, let combat state machine handle attacks ----
     {
         std::lock_guard<std::mutex> lg(logMutex_);
-        if (distance <= mob.attackRange)
+        if (dist2 <= mob.attackRange * mob.attackRange)
         {
             if (inRangeSet_.insert(mob.uid).second)
             {
                 logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
                             " reached attack range of player " + std::to_string(targetPlayerId) +
-                            " (distance: " + std::to_string(distance) + ") - stopping movement");
+                            " (dist2: " + std::to_string(dist2) + ") - stopping movement");
             }
             return std::nullopt;
         }
@@ -1046,15 +1042,17 @@ MobMovementManager::calculateChaseMovement(
     auto md = getMobMovementDataInternal(mob.uid);
     {
         constexpr float kWaitBuffer = 20.0f;
-        if (md.waitingForMeleeSlot && distance <= mob.attackRange + kWaitBuffer)
+        const float waitR = mob.attackRange + kWaitBuffer;
+        if (md.waitingForMeleeSlot && dist2 <= waitR * waitR)
             return std::nullopt;
     }
 
-    // ---- 6. Skip micro-movements ----
-    if (distance < 1.0f)
+    // ---- 6. Skip micro-movements (squared) ----
+    if (dist2 < 1.0f)
         return std::nullopt;
 
-    // ---- 7. Desired direction (normalized vector to target) ----
+    // ---- 7. Desired direction (length needed for normalization) ----
+    const float distance = std::sqrt(dist2);
     float desiredDx = dx / distance;
     float desiredDy = dy / distance;
 
@@ -1205,10 +1203,10 @@ MobMovementManager::calculateReturnToSpawnMovement(
     const MobMovementParams &params,
     float speedMultiplier)
 {
-    // Вектор к точке спавна
+    // Вектор к точке спавна (squared arrival check; length below for stepping)
     float dx = spawnPosition.positionX - mob.position.positionX;
     float dy = spawnPosition.positionY - mob.position.positionY;
-    float dist = std::sqrt(dx * dx + dy * dy);
+    const float dist2 = dx * dx + dy * dy;
 
     // Use the configured return speed (units/sec) so the mob walks back at a
     // controlled pace instead of using the raw baseSpeedMax patrol step.
@@ -1216,9 +1214,9 @@ MobMovementManager::calculateReturnToSpawnMovement(
     float stepSize = returnSpeed * aiConfig_.returnMovementInterval;
 
     // Проверяем, находится ли моб уже очень близко к точке спавна
-    const float SPAWN_THRESHOLD = 10.0f; // Минимальное расстояние до точки спавна для считания "на месте"
+    constexpr float SPAWN_THRESHOLD = 10.0f; // Минимальное расстояние до точки спавна для считания "на месте"
 
-    if (dist <= SPAWN_THRESHOLD)
+    if (dist2 <= SPAWN_THRESHOLD * SPAWN_THRESHOLD)
     {
         // Моб достаточно близко к точке спавна, переключаем в режим патруля
         auto md = getMobMovementDataInternal(mob.uid);
@@ -1236,13 +1234,16 @@ MobMovementManager::calculateReturnToSpawnMovement(
         md.movementDirectionY = 0.0f;
         updateMobMovementData(mob.uid, md);
 
-        logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) + " reached spawn area (distance: " +
-                    std::to_string(dist) + "), switching to patrol mode");
+        logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) + " reached spawn area (dist2: " +
+                    std::to_string(dist2) + "), switching to patrol mode");
 
         // Если моб уже на точке спавна, не двигаем его - просто переключаем режим
         // Возвращаем nullopt, чтобы не было лишнего обновления позиции
         return std::nullopt;
     }
+
+    // Length needed below for step compare, teleport-scale and normalization.
+    const float dist = std::sqrt(dist2);
 
     // Если до точки спавна ближе, чем один шаг — телепортируем
     if (dist <= stepSize)
@@ -1353,6 +1354,10 @@ bool
 MobMovementManager::canPerformAction(const MobMovementData &movementData, float currentTime) const
 {
     (void)currentTime;
+    // CC hold set by MobAIController (stun/root): stand still, keep attacking
+    // via the AI state machine (which reads range, not movement).
+    if (movementData.movementHeld)
+        return false;
     // State table lives in MobMovementMath (1-1 with the inline switch).
     return MobMovementMath::canPerformAction(movementData.combatState);
 }

@@ -111,6 +111,15 @@ class ExperienceManager
      */
     void setSaveProgressCallback(std::function<void(const std::string &)> callback);
 
+    /**
+     * @brief RefreshAttributes trigger on level-up: base formula values
+     * (mult*level^exp) live in DB — ask game to recompute so growth applies
+     * now instead of at the next incidental refresh. Same packet shape as
+     * the durability path (clientId 0, game resolves the live chunk socket).
+     * @param callback Invoked with characterId on every level-up.
+     */
+    void setRefreshAttributesCallback(std::function<void(int)> callback);
+
   private:
     CharacterManager &characters_;
     ExperienceCacheManager &expCache_;
@@ -120,6 +129,7 @@ class ExperienceManager
     std::shared_ptr<spdlog::logger> log_;
     std::function<void(const nlohmann::json &)> experiencePacketCallback_;
     std::function<void(const std::string &)> saveProgressCallback_;
+    std::function<void(int)> refreshAttributesCallback_;
 
     /**
      * @brief Отправить пакет об изменении опыта

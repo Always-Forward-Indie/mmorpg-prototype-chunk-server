@@ -1,4 +1,5 @@
 #include "services/QuestStore.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/Logger.hpp"
 #include <chrono>
 #include <cmath>
@@ -554,11 +555,9 @@ QuestStore::onPositionReached(int characterId, float x, float y)
         float ty = step.params.value("y", 0.0f);
         float radius = step.params.value("radius", 200.0f);
 
-        float dx = x - tx;
-        float dy = y - ty;
-        float dist = std::sqrt(dx * dx + dy * dy);
-
-        if (dist <= radius)
+        PositionStruct cur{x, y, 0.0f, 0.0f};
+        PositionStruct tgt{tx, ty, 0.0f, 0.0f};
+        if (DistanceUtils::withinRange2D(cur, tgt, radius))
         {
             pq.progress["done"] = true;
             pq.isDirty = true;

@@ -87,11 +87,6 @@ class CombatSystem
     void setupExperienceCallbacks();
 
     /**
-     * @brief Получить доступные цели для атаки
-     */
-    std::vector<int> getAvailableTargets(int attackerId, const SkillStruct &skill);
-
-    /**
      * @brief Set callback for persisting durability changes to the game server
      */
     void setSaveDurabilityCallback(std::function<void(const std::string &)> callback);

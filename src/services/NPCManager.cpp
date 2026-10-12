@@ -1,4 +1,5 @@
 #include "services/NPCManager.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/TerminalColors.hpp"
 #include <algorithm>
 #include <cmath>
@@ -95,11 +96,8 @@ NPCManager::getNPCsInArea(float centerX, float centerY, float radius) const
     for (const auto &pair : npcsMap_)
     {
         const auto &npc = pair.second;
-        float dx = npc.position.positionX - centerX;
-        float dy = npc.position.positionY - centerY;
-        float distance = std::sqrt(dx * dx + dy * dy);
-
-        if (distance <= radius)
+        PositionStruct center{centerX, centerY, npc.position.positionZ, 0.0f};
+        if (DistanceUtils::withinRange2D(npc.position, center, radius))
         {
             npcsInArea.push_back(npc);
         }
