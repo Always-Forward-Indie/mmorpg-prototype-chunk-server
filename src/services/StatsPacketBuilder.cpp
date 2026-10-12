@@ -1,4 +1,5 @@
 #include "services/StatsPacketBuilder.hpp"
+#include "services/StatsResolver.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <chrono>
@@ -13,43 +14,35 @@ StatsPacketBuilder::build(const StatsPacketBuilderInput &in)
     const int characterId = characterData.characterId;
     std::string requestId = "stats_update_" + std::to_string(characterId);
 
-    // ── Build effective attributes: base + equipment bonuses + active effects ─
-    // Start with base character attributes
+    // ── Build effective attributes via StatsResolver (single source of truth).
+    // Stored attributes already contain equip/set/durability (DB computes
+    // them), so raw equip is NEVER re-added here (that was a double-count).
+    // in.equipBonuses survives only for display names of otherwise-unknown
+    // slugs; in.equipNames likewise.
     std::unordered_map<std::string, int> baseValues;
-    std::unordered_map<std::string, float> effectiveValues;
     std::unordered_map<std::string, std::string> attrNames;
 
     for (const auto &a : characterData.attributes)
     {
         baseValues[a.slug] = a.value;
-        effectiveValues[a.slug] = a.value;
         attrNames[a.slug] = a.name;
     }
-
-    // Add pre-resolved item attribute bonuses from equipped gear
-    for (const auto &[slug, bonus] : in.equipBonuses)
-    {
-        effectiveValues[slug] += bonus;
+    for (const auto &[slug, name] : in.equipNames)
         if (attrNames.find(slug) == attrNames.end())
-        {
-            auto nameIt = in.equipNames.find(slug);
-            attrNames[slug] = (nameIt != in.equipNames.end()) ? nameIt->second : slug;
-        }
-    }
+            attrNames[slug] = name;
 
-    // Add non-expired stat-modifier active effects (skip dot/hot – they are damage ticks)
-    for (const auto &eff : characterData.activeEffects)
+    std::unordered_map<std::string, float> effectiveValues;
     {
-        if (eff.attributeSlug.empty())
-            continue;
-        if (eff.expiresAt != 0 && eff.expiresAt <= in.nowSec)
-            continue;
-        if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
-            continue;
-        effectiveValues[eff.attributeSlug] += static_cast<float>(eff.value);
-        if (attrNames.find(eff.attributeSlug) == attrNames.end())
-            attrNames[eff.attributeSlug] = eff.attributeSlug;
+        StatsResolverOptions opts;
+        opts.agilityToEvasion = in.convAgilityEvasion;
+        opts.intellectToMagAttack = in.convIntellectMagAttack;
+        opts.strengthToPhysAttack = in.convStrengthPhysAttack;
+        effectiveValues = StatsResolver::effectiveMap(characterData.attributes,
+            characterData.activeEffects, in.nowSec, opts);
     }
+    for (const auto &[slug, _] : effectiveValues)
+        if (attrNames.find(slug) == attrNames.end())
+            attrNames[slug] = slug;
 
     // Item Soul: pre-resolved kill-count tier bonus on the weapon's primary attribute
     if (in.soulBonusFlat > 0 && !in.soulAttrSlug.empty())
@@ -57,6 +50,13 @@ StatsPacketBuilder::build(const StatsPacketBuilderInput &in)
         effectiveValues[in.soulAttrSlug] += in.soulBonusFlat;
         if (attrNames.find(in.soulAttrSlug) == attrNames.end())
             attrNames[in.soulAttrSlug] = in.soulAttrName.empty() ? in.soulAttrSlug : in.soulAttrName;
+    }
+    // Item Soul: tier crit bonus (percentage points) on crit_chance
+    if (in.soulCritBonus > 0.0f)
+    {
+        effectiveValues["crit_chance"] += static_cast<int>(std::lround(in.soulCritBonus));
+        if (attrNames.find("crit_chance") == attrNames.end())
+            attrNames["crit_chance"] = "crit_chance";
     }
 
     // Build attributes JSON array (base attrs + any extras added only by equipment/effects)

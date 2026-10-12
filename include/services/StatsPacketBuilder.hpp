@@ -28,7 +28,14 @@ struct StatsPacketBuilderInput
     std::string soulAttrSlug;
     std::string soulAttrName;
     int soulBonusFlat = 0;
+    /// Pre-resolved item-soul crit bonus, percentage points (0 = none)
+    float soulCritBonus = 0.0f;
     int64_t nowSec = 0;
+    /// Stat conversion rates (StatsResolverOptions fields, filled by the
+    /// caller from game_config stats.conv_*; defaults 0 = off).
+    float convAgilityEvasion = 0.0f;
+    float convIntellectMagAttack = 0.0f;
+    float convStrengthPhysAttack = 0.0f;
 };
 
 class StatsPacketBuilder

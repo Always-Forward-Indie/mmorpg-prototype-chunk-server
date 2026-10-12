@@ -1,4 +1,5 @@
 #include "services/CombatCalculator.hpp"
+#include "services/StatsResolver.hpp"
 #include "utils/RandomUtils.hpp"
 #include <algorithm>
 #include <cmath>
@@ -44,40 +45,19 @@ CombatCalculator::cfg(const std::string &key, float defaultValue) const
 std::vector<CharacterAttributeStruct>
 CombatCalculator::mergeEffects(const CharacterDataStruct &character) const
 {
-    auto attrs = character.attributes; // copy base attributes
-
-    if (character.activeEffects.empty())
-        return attrs;
-
+    // Single source of truth (StatsResolver::mergedVector is 1-1 with the
+    // old inline loop when conversions are off — same order, same rounding).
+    // Conversions revive agility/intellect/strength (approved design rates,
+    // game_config stats.conv_*): display, regen and combat share them.
     const int64_t nowSec = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch())
                                .count();
-
-    for (const auto &eff : character.activeEffects)
-    {
-        if (eff.attributeSlug.empty())
-            continue; // non-stat effect
-        if (eff.expiresAt != 0 && eff.expiresAt <= nowSec)
-            continue; // expired
-        // DoT/HoT are not stat modifiers — handled by tickEffects()
-        if (eff.effectTypeSlug == "dot" || eff.effectTypeSlug == "hot")
-            continue;
-
-        auto it = std::find_if(attrs.begin(), attrs.end(), [&](const CharacterAttributeStruct &a)
-            { return a.slug == eff.attributeSlug; });
-        if (it != attrs.end())
-        {
-            it->value += static_cast<int>(std::round(eff.value));
-        }
-        else
-        {
-            CharacterAttributeStruct newAttr;
-            newAttr.slug = eff.attributeSlug;
-            newAttr.value = static_cast<int>(std::round(eff.value));
-            attrs.push_back(std::move(newAttr));
-        }
-    }
-    return attrs;
+    StatsResolverOptions opts;
+    opts.agilityToEvasion = cfg("stats.conv_agility_evasion", 0.3f);
+    opts.intellectToMagAttack = cfg("stats.conv_intellect_magattack", 0.5f);
+    opts.strengthToPhysAttack = cfg("stats.conv_strength_physattack", 0.5f);
+    return StatsResolver::mergedVector(character.attributes,
+        character.activeEffects, nowSec, opts);
 }
 
 DamageCalculationStruct
@@ -323,6 +303,9 @@ CombatCalculator::rollMiss(
     int accuracy = getAttributeValue(attackerAttributes, "accuracy");
     int evasion = getAttributeValue(targetAttributes, "evasion");
 
+    const float evaCap = cfg("combat.evasion_cap", 75.0f);
+    evasion = std::min(evasion, static_cast<int>(evaCap));
+
     const float baseHit = cfg("combat.base_hit_chance", 0.95f);
     const float minHit = cfg("combat.hit_chance_min", 0.05f);
     const float maxHit = cfg("combat.hit_chance_max", 0.95f);
@@ -341,6 +324,9 @@ CombatCalculator::rollMiss(
 {
     int accuracy = getAttributeValue(attackerAttributes, "accuracy");
     int evasion = getAttributeValue(targetAttributes, "evasion");
+
+    const float evaCap = cfg("combat.evasion_cap", 75.0f);
+    evasion = std::min(evasion, static_cast<int>(evaCap));
 
     const float baseHit = cfg("combat.base_hit_chance", 0.95f);
     const float minHit = cfg("combat.hit_chance_min", 0.05f);
@@ -393,4 +379,21 @@ CombatCalculator::applyDefense(int damage, int defenseValue, const std::string &
 
     int finalDamage = static_cast<int>(std::lround(damage * (1.0f - damageReduction)));
     return std::max(0, finalDamage);
+}
+
+int
+CombatCalculator::clampDotTick(int tickMs, int durationSeconds)
+{
+    if (tickMs <= 0)
+        return 0;
+    const int minTick = static_cast<int>(cfg("combat.dot_min_tick_ms", 500.0f));
+    const int maxTicks = static_cast<int>(cfg("combat.dot_max_ticks", 20.0f));
+    int clamped = std::max(tickMs, minTick);
+    if (durationSeconds > 0 && maxTicks > 0)
+    {
+        const int durationMs = durationSeconds * 1000;
+        const int minInterval = (durationMs + maxTicks - 1) / maxTicks; // ceil
+        clamped = std::max(clamped, minInterval);
+    }
+    return clamped;
 }

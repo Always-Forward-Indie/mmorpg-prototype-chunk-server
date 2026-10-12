@@ -115,6 +115,14 @@ class CombatCalculator
         float hitModifier = 0.0f);
 
     /**
+     * @brief Нормализовать DoT/HoT тики по конфигу (AAA: баланс в данных).
+     * tickMs поднимается до combat.dot_min_tick_ms; если тиков вышло бы
+     * больше combat.dot_max_ticks — интервал растягивается (DPS падает,
+     * длительность держится). Возвращает итоговый tickMs (0 = не тикает).
+     */
+    int clampDotTick(int tickMs, int durationSeconds);
+
+    /**
      * @brief Получить значение атрибута по slug
      * @param attributes Список атрибутов
      * @param slug Slug атрибута

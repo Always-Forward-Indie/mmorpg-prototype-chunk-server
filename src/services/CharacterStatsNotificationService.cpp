@@ -154,6 +154,10 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
 
     StatsPacketBuilderInput in;
     in.character = characterData;
+    // Stat conversions share the combat/regen rates (single design truth).
+    in.convAgilityEvasion = gameConfig_.getFloat("stats.conv_agility_evasion", 0.3f);
+    in.convIntellectMagAttack = gameConfig_.getFloat("stats.conv_intellect_magattack", 0.5f);
+    in.convStrengthPhysAttack = gameConfig_.getFloat("stats.conv_strength_physattack", 0.5f);
 
     // ── Experience level thresholds ───────────────────────────────────────────
     in.levelStart = experience_.getExperienceForLevelFromGameServer(
@@ -198,6 +202,7 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
         {
             const ItemSoulTiers::Table soulTiers = ItemSoulTiers::Table::load(gameConfig_);
             const int soulBonus = ItemSoulTiers::bonusForKills(soulTiers, weaponOpt->killCount);
+            in.soulCritBonus = ItemSoulTiers::critForKills(soulTiers, weaponOpt->killCount);
             if (soulBonus > 0)
             {
                 const auto &wItem = items_.getItemById(weaponOpt->itemId);

@@ -17,6 +17,8 @@ struct ItemSoulTiers
     static constexpr int kDefaultTier1BonusFlat = 1;
     static constexpr int kDefaultTier2BonusFlat = 2;
     static constexpr int kDefaultTier3BonusFlat = 3;
+    static constexpr float kDefaultTier2CritPct = 0.05f;
+    static constexpr float kDefaultTier3CritPct = 0.08f;
     static constexpr int kDefaultDbFlushEveryKills = 5;
 
     struct Table
@@ -27,6 +29,8 @@ struct ItemSoulTiers
         int tier1BonusFlat = kDefaultTier1BonusFlat;
         int tier2BonusFlat = kDefaultTier2BonusFlat;
         int tier3BonusFlat = kDefaultTier3BonusFlat;
+        float tier2CritPct = kDefaultTier2CritPct;
+        float tier3CritPct = kDefaultTier3CritPct;
         int dbFlushEveryKills = kDefaultDbFlushEveryKills;
 
         static Table load(GameConfigService &cfg)
@@ -38,6 +42,8 @@ struct ItemSoulTiers
             t.tier1BonusFlat = cfg.getInt("item_soul.tier1_bonus_flat", kDefaultTier1BonusFlat);
             t.tier2BonusFlat = cfg.getInt("item_soul.tier2_bonus_flat", kDefaultTier2BonusFlat);
             t.tier3BonusFlat = cfg.getInt("item_soul.tier3_bonus_flat", kDefaultTier3BonusFlat);
+            t.tier2CritPct = cfg.getFloat("item_soul.tier2_crit_pct", kDefaultTier2CritPct);
+            t.tier3CritPct = cfg.getFloat("item_soul.tier3_crit_pct", kDefaultTier3CritPct);
             t.dbFlushEveryKills = cfg.getInt("item_soul.db_flush_every_kills", kDefaultDbFlushEveryKills);
             return t;
         }
@@ -53,6 +59,16 @@ struct ItemSoulTiers
         if (killCount >= t.tier1Kills)
             return t.tier1BonusFlat;
         return 0;
+    }
+
+    // Crit-chance bonus in percentage points (0 below tier 2).
+    static float critForKills(const Table &t, int killCount)
+    {
+        if (killCount >= t.tier3Kills)
+            return t.tier3CritPct * 100.0f;
+        if (killCount >= t.tier2Kills)
+            return t.tier2CritPct * 100.0f;
+        return 0.0f;
     }
 
     // True exactly on a tier boundary (stats re-push + DB flush trigger).
