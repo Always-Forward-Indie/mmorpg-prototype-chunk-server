@@ -1,4 +1,26 @@
 #pragma once
+// Service-locator composition root (header-only, no DI container — by design).
+//
+// Groups (keep new managers inside their group):
+//   Combat: CombatSystem/Calculator/TargetResolver, SkillSystem, CooldownService,
+//     MobAIController/Formulas, MobMovementManager/Math, ChampionManager
+//   World: Mob/MobInstance/NPC/SpawnZone/RespawnZone/GameZone/Chunk/WIO managers,
+//     InterestManager, LootManager, HarvestManager, ZoneEventManager
+//   Social: ClientManager, Chat/Dialogue/Vendor/Trainer/Trade/Equipment managers,
+//     Emote/AmbientSpeech/Bestiary/Title/Reputation/Mastery managers
+//   Progression: ExperienceManager/Cache, QuestManager/Store, PityManager,
+//     RegenManager, DurabilityService, StatsNotificationService, ItemSoulTiers
+//   Infra: GameConfigService, Scheduler/ThreadPool, CooldownService,
+//     FactOutbox/JoinFlushPolicy, CatalogSyncService
+//
+// Ctor-order contract (initialization order = declaration order):
+//   characterManager_ BEFORE mobMovementManager_ (takes characters by ref);
+//   statsNotificationService_ AFTER all its fetch deps (char/exp/inv/equip/
+//   item/config/zones); post-ctor setters close the remaining cycles
+//   (setMobInstanceManager/setGameZoneManager/setSpawnZoneManager/
+//   setGameServices/setInventoryManager/setGameConfigService/setPityManager).
+// New managers: add include + member + getter + ctor entry in group order,
+// extend CMakeLists SOURCE/HEADER_FILES (no globs), add a unit test.
 #include "services/AmbientSpeechManager.hpp"
 #include "services/BestiaryManager.hpp"
 #include "services/ChampionManager.hpp"

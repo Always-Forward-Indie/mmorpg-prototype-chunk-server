@@ -2,6 +2,7 @@
 #include "events/EventData.hpp"
 #include "services/DialogueConditionEvaluator.hpp"
 #include "services/GameServices.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <algorithm>
 #include <cmath>
@@ -76,12 +77,12 @@ WorldObjectEventHandler::handleInteractEvent(const Event &event)
         }
 
         // ── Range check ────────────────────────────────────────────────────────
+        // AAA: 2D + Z tolerance (was strict 3D sphere *1.25 — false TOO_FAR on hills).
         const PositionStruct &pp = req.playerPosition;
         const PositionStruct &op = obj.position;
-        const float dx = pp.positionX - op.positionX;
-        const float dy = pp.positionY - op.positionY;
-        const float dz = pp.positionZ - op.positionZ;
-        if (std::sqrt(dx * dx + dy * dy + dz * dz) > obj.interactionRadius * 1.25f)
+        const float zTolWio =
+            gameServices_.getGameConfigService().getFloat("interaction.z_tolerance_wio", DistanceUtils::kDefaultZTolerance);
+        if (!DistanceUtils::withinRange2DWithZTolerance(pp, op, obj.interactionRadius, zTolWio))
         {
             sendInteractResult(clientId, objectId, false, "TOO_FAR");
             return;

@@ -705,6 +705,21 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                 return;
             }
 
+            // Crowd control gate: stun/root hold movement (silence does not —
+            // it only blocks spells). Same error path as dead moves.
+            {
+                const int64_t nowSecCC = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch())
+                                             .count();
+                auto &chars = gameServices_.getCharacterManager();
+                if (chars.hasLiveCC(movementData.characterId, "stun", nowSecCC) ||
+                    chars.hasLiveCC(movementData.characterId, "root", nowSecCC))
+                {
+                    sendErrorResponseWithTimestamps(clientSocket, "Rooted", "moveCharacter", clientID, timestamps);
+                    return;
+                }
+            }
+
             // ── Server-authoritative movement speed validation ────────────────────
             // Math lives in MovementValidation (pure, unit-tested); here only
             // lookups, logging, correction responses and state writes.
@@ -743,14 +758,24 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                             gameServices_.getInventoryManager().getTotalWeight(movementData.characterId);
                         const float limit =
                             gameServices_.getEquipmentManager().getCarryWeightLimit(movementData.characterId);
-                        overweightFactor = MovementValidation::overweightFactor(carried, limit);
+                        const float floor = gameServices_.getGameConfigService().getFloat(
+                            "carry_weight.overweight_speed_penalty", 0.3f);
+                        overweightFactor = MovementValidation::overweightFactor(carried, limit, floor);
                     }
                     const float maxDist = MovementValidation::maxDistanceFor(
                         moveSpeedUnits * overweightFactor, deltaMs, speedBuffer);
                     // posZ is the vertical axis (altitude/terrain height); gravity and slopes are
                     // not bounded by move_speed, so the speed check uses the horizontal XY plane only.
+                    // Z teleport guard: |dz| > kTeleportSnapZ is corrected, never range-failed.
                     const float actualDist = DistanceUtils::dist2D(
                         movementData.position, charData.lastValidatedPosition);
+                    const float dzMove =
+                        movementData.position.positionZ - charData.lastValidatedPosition.positionZ;
+                    if (dzMove > DistanceUtils::kTeleportSnapZ || dzMove < -DistanceUtils::kTeleportSnapZ)
+                    {
+                        log_->warn("[MOVE_VALIDATE] char {} Z snap {:.2f} — corrected (not failed)",
+                            movementData.characterId, dzMove);
+                    }
 
                     if (actualDist > maxDist)
                     {

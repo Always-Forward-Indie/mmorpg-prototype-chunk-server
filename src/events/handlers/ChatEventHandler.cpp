@@ -3,6 +3,7 @@
 #include "services/CharacterManager.hpp"
 #include "services/ClientManager.hpp"
 #include "services/GameServices.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <nlohmann/json.hpp>
 #include <spdlog/logger.h>
@@ -88,16 +89,13 @@ ChatEventHandler::deliverLocal(const ChatMessageStruct &msg, const std::string &
     PositionStruct senderPos =
         gameServices_.getCharacterManager().getCharacterPosition(msg.senderCharId);
 
-    // Iterate all connected characters, check distance
+    // Iterate all connected characters, check distance (2D + Z tolerance, not strict 3D).
     auto characters = gameServices_.getCharacterManager().getCharactersList();
+    const float zTolChat =
+        gameServices_.getGameConfigService().getFloat("interaction.z_tolerance_chat", DistanceUtils::kDefaultZTolerance);
     for (const auto &ch : characters)
     {
-        float dx = ch.characterPosition.positionX - senderPos.positionX;
-        float dy = ch.characterPosition.positionY - senderPos.positionY;
-        float dz = ch.characterPosition.positionZ - senderPos.positionZ;
-        float distSq = dx * dx + dy * dy + dz * dz;
-
-        if (distSq <= msg.localRadius * msg.localRadius)
+        if (DistanceUtils::withinRange2DWithZTolerance(ch.characterPosition, senderPos, msg.localRadius, zTolChat))
         {
             ClientDataStruct client =
                 gameServices_.getClientManager().getClientDataByCharacterId(ch.characterId);

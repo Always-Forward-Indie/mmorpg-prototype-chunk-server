@@ -31,8 +31,11 @@ VendorEventHandler::isPlayerInRange(
     const PositionStruct &npc,
     float radius) const
 {
-    // Single implementation in DistanceUtils (squared comparison, Wave 3.1).
-    return DistanceUtils::withinRange3D(player, npc, radius);
+    // AAA standard: 2D range + Z tolerance (product decision 2026-10, default 400).
+    // Strict 3D sphere gave false TOO_FAR on hills — server has no collision.
+    const float zTol =
+        gameServices_.getGameConfigService().getFloat("interaction.z_tolerance_vendor", DistanceUtils::kDefaultZTolerance);
+    return DistanceUtils::withinRange2DWithZTolerance(player, npc, radius, zTol);
 }
 
 int
@@ -262,7 +265,7 @@ VendorEventHandler::handleOpenVendorShopEvent(const Event &event)
             sendErrorResponseWithTimestamps(socket, "npc_not_found", "vendorShop", req.clientId, req.timestamps);
             return;
         }
-        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + 2.0f))
+        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + DistanceUtils::kVendorRadiusBonus))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "vendorShop", req.clientId, req.timestamps);
             return;
@@ -307,7 +310,7 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
             sendErrorResponseWithTimestamps(socket, "vendor_not_found", "buyItem", req.clientId, req.timestamps);
             return;
         }
-        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + 2.0f))
+        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + DistanceUtils::kVendorRadiusBonus))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "buyItem", req.clientId, req.timestamps);
             return;
@@ -419,7 +422,7 @@ VendorEventHandler::handleSellItemEvent(const Event &event)
             sendErrorResponseWithTimestamps(socket, "vendor_not_found", "sellItem", req.clientId, req.timestamps);
             return;
         }
-        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + 2.0f))
+        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + DistanceUtils::kVendorRadiusBonus))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "sellItem", req.clientId, req.timestamps);
             return;
@@ -478,7 +481,7 @@ VendorEventHandler::handleBuyItemBatchEvent(const Event &event)
             sendErrorResponseWithTimestamps(socket, "vendor_not_found", "buyItemBatch", req.clientId, req.timestamps);
             return;
         }
-        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + 2.0f))
+        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + DistanceUtils::kVendorRadiusBonus))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "buyItemBatch", req.clientId, req.timestamps);
             return;
@@ -554,7 +557,7 @@ VendorEventHandler::handleSellItemBatchEvent(const Event &event)
             sendErrorResponseWithTimestamps(socket, "vendor_not_found", "sellItemBatch", req.clientId, req.timestamps);
             return;
         }
-        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + 2.0f))
+        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + DistanceUtils::kVendorRadiusBonus))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "sellItemBatch", req.clientId, req.timestamps);
             return;
@@ -694,7 +697,7 @@ VendorEventHandler::handleOpenRepairShopEvent(const Event &event)
             return;
         }
         const auto playerPos = gameServices_.getCharacterManager().getCharacterPosition(req.characterId);
-        if (!isPlayerInRange(playerPos, npc.position, npc.radius + 2.0f))
+        if (!isPlayerInRange(playerPos, npc.position, npc.radius + DistanceUtils::kVendorRadiusBonus))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "repairShop", req.clientId, req.timestamps);
             return;
@@ -734,7 +737,7 @@ VendorEventHandler::handleRepairItemEvent(const Event &event)
             return;
         }
         const auto playerPos = gameServices_.getCharacterManager().getCharacterPosition(req.characterId);
-        if (!isPlayerInRange(playerPos, npc.position, npc.radius + 2.0f))
+        if (!isPlayerInRange(playerPos, npc.position, npc.radius + DistanceUtils::kVendorRadiusBonus))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "repairItem", req.clientId, req.timestamps);
             return;
@@ -809,7 +812,7 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
             return;
         }
         const auto playerPos = gameServices_.getCharacterManager().getCharacterPosition(req.characterId);
-        if (!isPlayerInRange(playerPos, npc.position, npc.radius + 2.0f))
+        if (!isPlayerInRange(playerPos, npc.position, npc.radius + DistanceUtils::kVendorRadiusBonus))
         {
             sendErrorResponseWithTimestamps(socket, "out_of_range", "repairAll", req.clientId, req.timestamps);
             return;

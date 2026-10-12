@@ -4,6 +4,8 @@
 #include "events/Event.hpp"
 #include "events/EventQueue.hpp"
 #include <mutex>
+#include <string>
+#include <unordered_map>
 
 class EventDispatcher
 {
@@ -12,7 +14,13 @@ class EventDispatcher
 
     void dispatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
 
+    /// Route-table size pin (tolerant unknown types bypass the table).
+    size_t routeTableSize() const;
+
   private:
+    using DispatchFn = void (EventDispatcher::*)(const EventContext &, std::shared_ptr<boost::asio::ip::tcp::socket>);
+    void buildRouteTable();
+
     void handleJoinGameClient(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleJoinGameCharacter(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleMoveCharacter(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
@@ -79,6 +87,10 @@ class EventDispatcher
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;
     ChunkServer *chunkServer_;
+
+    /// Single source of truth for wire routing (was a 52-branch if/else
+    /// chain). All handlers share the (context, socket) signature.
+    std::unordered_map<std::string, DispatchFn> routeTable_;
 
     std::vector<Event> eventsBatch_;
     constexpr static int BATCH_SIZE = 10;

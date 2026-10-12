@@ -122,6 +122,18 @@ ChunkServer::ChunkServer(GameServices &gameServices,
         [this](const std::string &data)
         { gameServerWorker_.sendDataToGameServer(data); });
 
+    // Wire up level-up attribute refresh: base formula growth lives in DB.
+    gameServices_.getExperienceManager().setRefreshAttributesCallback(
+        [this](int characterId)
+        {
+            nlohmann::json pkt;
+            pkt["header"]["eventType"] = "getCharacterAttributes";
+            pkt["header"]["clientId"] = 0;
+            pkt["header"]["hash"] = "";
+            pkt["body"]["characterId"] = characterId;
+            gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+        });
+
     // Wire up inventory persistence: send item changes to game server DB immediately
     gameServices_.getInventoryManager().setSaveInventoryCallback(
         [this](const std::string &data)

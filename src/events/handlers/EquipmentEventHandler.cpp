@@ -248,8 +248,12 @@ EquipmentEventHandler::handleEquipItemEvent(const Event &event)
         sendEquipmentState(clientId, characterId, req.timestamps);
         sendWeightStatus(clientId, characterId);
 
-        // ── Send updated stats (effective attrs change with new gear) ─────────
-        gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+        // NOTE: no immediate sendStatsUpdate here on purpose. Stored attrs
+        // are still pre-refresh (the game round-trip below recomputes them);
+        // a now-packet would broadcast stale effective values. The refresh
+        // echo (SET_CHARACTER_ATTRIBUTES_REFRESH) replaces stored and pushes
+        // a fresh stats_update. EQUIP_RESULT + EQUIPMENT_STATE above stay
+        // instant (ack + visuals must not wait a round-trip).
 
         // ── Broadcast gear change to all other clients (visual update) ─────────
         broadcastEquipmentUpdate(characterId, clientId);
@@ -322,8 +326,8 @@ EquipmentEventHandler::handleUnequipItemEvent(const Event &event)
         sendEquipmentState(clientId, characterId, req.timestamps);
         sendWeightStatus(clientId, characterId);
 
-        // ── Send updated stats (effective attrs change without old gear) ──────
-        gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+        // NOTE: no immediate sendStatsUpdate here on purpose (same reason
+        // as equip: stored attrs are pre-refresh; the echo pushes fresh).
 
         // ── Broadcast gear change to all other clients (visual update) ─────────
         broadcastEquipmentUpdate(characterId, clientId);

@@ -19,7 +19,95 @@ EventDispatcher::EventDispatcher(
       gameServices_(gameServices)
 {
     log_ = gameServices_.getLogger().getSystem("events");
+    buildRouteTable();
 }
+
+void
+EventDispatcher::buildRouteTable()
+{
+    // Single source of truth for wire routing (was a 52-branch if/else
+    // chain). All handlers share the (context, socket) signature, so the
+    // table is uniform. Unknown types bypass the table (tolerant reader).
+    routeTable_ = {
+        {"joinGameClient", &EventDispatcher::handleJoinGameClient},
+        {"joinGameCharacter", &EventDispatcher::handleJoinGameCharacter},
+        {"moveCharacter", &EventDispatcher::handleMoveCharacter},
+        {"disconnectClient", &EventDispatcher::handleDisconnect},
+        {"pingClient", &EventDispatcher::handlePing},
+        {"getConnectedCharacters", &EventDispatcher::handleGetConnectedClients},
+        {"playerAttack", &EventDispatcher::handlePlayerAttack},
+        {"skillUsage", &EventDispatcher::handleSkillUsage},
+        {"itemPickup", &EventDispatcher::handlePickupDroppedItem},
+        {"getPlayerInventory", &EventDispatcher::handleGetPlayerInventory},
+        {"harvestStart", &EventDispatcher::handleHarvestStart},
+        {"harvestCancel", &EventDispatcher::handleHarvestCancel},
+        {"getNearbyCorpses", &EventDispatcher::handleGetNearbyCorpses},
+        {"corpseLootPickup", &EventDispatcher::handleCorpseLootPickup},
+        {"corpseLootInspect", &EventDispatcher::handleCorpseLootInspect},
+        {"getCharacterExperience", &EventDispatcher::handleGetCharacterExperience},
+        {"npcInteract", &EventDispatcher::handleNPCInteract},
+        {"dialogueChoice", &EventDispatcher::handleDialogueChoice},
+        {"dialogueClose", &EventDispatcher::handleDialogueClose},
+        {"openVendorShop", &EventDispatcher::handleOpenVendorShop},
+        {"openSkillShop", &EventDispatcher::handleOpenSkillShop},
+        {"requestLearnSkill", &EventDispatcher::handleRequestLearnSkill},
+        {"buyItem", &EventDispatcher::handleBuyItem},
+        {"sellItem", &EventDispatcher::handleSellItem},
+        {"buyItemBatch", &EventDispatcher::handleBuyItemBatch},
+        {"sellItemBatch", &EventDispatcher::handleSellItemBatch},
+        {"openRepairShop", &EventDispatcher::handleOpenRepairShop},
+        {"repairItem", &EventDispatcher::handleRepairItem},
+        {"repairAll", &EventDispatcher::handleRepairAll},
+        {"tradeRequest", &EventDispatcher::handleTradeRequest},
+        {"tradeAccept", &EventDispatcher::handleTradeAccept},
+        {"tradeDecline", &EventDispatcher::handleTradeDecline},
+        {"tradeOfferUpdate", &EventDispatcher::handleTradeOfferUpdate},
+        {"tradeConfirm", &EventDispatcher::handleTradeConfirm},
+        {"tradeCancel", &EventDispatcher::handleTradeCancel},
+        {"equipItem", &EventDispatcher::handleEquipItem},
+        {"unequipItem", &EventDispatcher::handleUnequipItem},
+        {"getEquipment", &EventDispatcher::handleGetEquipment},
+        {"respawnRequest", &EventDispatcher::handleRespawnRequest},
+        {"dropItem", &EventDispatcher::handleDropItemByPlayer},
+        {"useItem", &EventDispatcher::handleUseItem},
+        {"getBestiaryEntry", &EventDispatcher::handleGetBestiaryEntry},
+        {"getBestiaryOverview", &EventDispatcher::handleGetBestiaryOverview},
+        {"chatMessage", &EventDispatcher::handleChatMessage},
+        {"playerReady", &EventDispatcher::handlePlayerReady},
+        {"getTitles", &EventDispatcher::handleGetPlayerTitles},
+        {"equipTitle", &EventDispatcher::handleEquipTitle},
+        {"setSkillBarSlot", &EventDispatcher::handleSetSkillBarSlot},
+        {"useEmote", &EventDispatcher::handleUseEmote},
+        {"worldObjectInteract", &EventDispatcher::handleWorldObjectInteract},
+        {"worldObjectChannelCancel", &EventDispatcher::handleWorldObjectChannelCancel},
+        {"adminCommand", &EventDispatcher::handleAdminCommand},
+    };
+}
+
+size_t
+EventDispatcher::routeTableSize() const
+{
+    return routeTable_.size();
+}
+
+namespace {
+// Single-parse helper: hot handlers must read context.json (parsed once in
+// ClientSession::processMessage) instead of re-parsing context.fullMessage.
+// Falls back to parse only for legacy callers that built EventContext without json.
+inline nlohmann::json wireJson(const EventContext &context)
+{
+    if (context.json.is_object() && !context.json.is_null())
+        return context.json;
+    try
+    {
+        return nlohmann::json::parse(context.fullMessage);
+    }
+    catch (...)
+    {
+        return nlohmann::json::object();
+    }
+}
+} // namespace
 
 void
 EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
@@ -28,213 +116,10 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     // so concurrent io_context threads cannot race on it.
     std::lock_guard<std::mutex> dispatchLock(dispatchMutex_);
 
-    if (context.eventType == "joinGameClient")
+    const auto routeIt = routeTable_.find(context.eventType);
+    if (routeIt != routeTable_.end())
     {
-        handleJoinGameClient(context, socket);
-    }
-    else if (context.eventType == "joinGameCharacter")
-    {
-        handleJoinGameCharacter(context, socket);
-    }
-    else if (context.eventType == "moveCharacter")
-    {
-        handleMoveCharacter(context, socket);
-    }
-    else if (context.eventType == "disconnectClient")
-    {
-        handleDisconnect(context, socket);
-    }
-    else if (context.eventType == "pingClient")
-    {
-        handlePing(context, socket);
-    }
-    else if (context.eventType == "getConnectedCharacters")
-    {
-        handleGetConnectedClients(context, socket);
-    }
-    else if (context.eventType == "playerAttack")
-    {
-        handlePlayerAttack(context, socket);
-    }
-    else if (context.eventType == "skillUsage")
-    {
-        handleSkillUsage(context, socket);
-    }
-    else if (context.eventType == "itemPickup")
-    {
-        handlePickupDroppedItem(context, socket);
-    }
-    else if (context.eventType == "getPlayerInventory")
-    {
-        handleGetPlayerInventory(context, socket);
-    }
-    else if (context.eventType == "harvestStart")
-    {
-        handleHarvestStart(context, socket);
-    }
-    else if (context.eventType == "harvestCancel")
-    {
-        handleHarvestCancel(context, socket);
-    }
-    else if (context.eventType == "getNearbyCorpses")
-    {
-        handleGetNearbyCorpses(context, socket);
-    }
-    else if (context.eventType == "corpseLootPickup")
-    {
-        handleCorpseLootPickup(context, socket);
-    }
-    else if (context.eventType == "corpseLootInspect")
-    {
-        handleCorpseLootInspect(context, socket);
-    }
-    else if (context.eventType == "getCharacterExperience")
-    {
-        handleGetCharacterExperience(context, socket);
-    }
-    else if (context.eventType == "npcInteract")
-    {
-        handleNPCInteract(context, socket);
-    }
-    else if (context.eventType == "dialogueChoice")
-    {
-        handleDialogueChoice(context, socket);
-    }
-    else if (context.eventType == "dialogueClose")
-    {
-        handleDialogueClose(context, socket);
-    }
-    else if (context.eventType == "openVendorShop")
-    {
-        handleOpenVendorShop(context, socket);
-    }
-    else if (context.eventType == "openSkillShop")
-    {
-        handleOpenSkillShop(context, socket);
-    }
-    else if (context.eventType == "requestLearnSkill")
-    {
-        handleRequestLearnSkill(context, socket);
-    }
-    else if (context.eventType == "buyItem")
-    {
-        handleBuyItem(context, socket);
-    }
-    else if (context.eventType == "sellItem")
-    {
-        handleSellItem(context, socket);
-    }
-    else if (context.eventType == "buyItemBatch")
-    {
-        handleBuyItemBatch(context, socket);
-    }
-    else if (context.eventType == "sellItemBatch")
-    {
-        handleSellItemBatch(context, socket);
-    }
-    else if (context.eventType == "openRepairShop")
-    {
-        handleOpenRepairShop(context, socket);
-    }
-    else if (context.eventType == "repairItem")
-    {
-        handleRepairItem(context, socket);
-    }
-    else if (context.eventType == "repairAll")
-    {
-        handleRepairAll(context, socket);
-    }
-    else if (context.eventType == "tradeRequest")
-    {
-        handleTradeRequest(context, socket);
-    }
-    else if (context.eventType == "tradeAccept")
-    {
-        handleTradeAccept(context, socket);
-    }
-    else if (context.eventType == "tradeDecline")
-    {
-        handleTradeDecline(context, socket);
-    }
-    else if (context.eventType == "tradeOfferUpdate")
-    {
-        handleTradeOfferUpdate(context, socket);
-    }
-    else if (context.eventType == "tradeConfirm")
-    {
-        handleTradeConfirm(context, socket);
-    }
-    else if (context.eventType == "tradeCancel")
-    {
-        handleTradeCancel(context, socket);
-    }
-    else if (context.eventType == "equipItem")
-    {
-        handleEquipItem(context, socket);
-    }
-    else if (context.eventType == "unequipItem")
-    {
-        handleUnequipItem(context, socket);
-    }
-    else if (context.eventType == "getEquipment")
-    {
-        handleGetEquipment(context, socket);
-    }
-    else if (context.eventType == "respawnRequest")
-    {
-        handleRespawnRequest(context, socket);
-    }
-    else if (context.eventType == "dropItem")
-    {
-        handleDropItemByPlayer(context, socket);
-    }
-    else if (context.eventType == "useItem")
-    {
-        handleUseItem(context, socket);
-    }
-    else if (context.eventType == "getBestiaryEntry")
-    {
-        handleGetBestiaryEntry(context, socket);
-    }
-    else if (context.eventType == "getBestiaryOverview")
-    {
-        handleGetBestiaryOverview(context, socket);
-    }
-    else if (context.eventType == "chatMessage")
-    {
-        handleChatMessage(context, socket);
-    }
-    else if (context.eventType == "playerReady")
-    {
-        handlePlayerReady(context, socket);
-    }
-    else if (context.eventType == "getTitles")
-    {
-        handleGetPlayerTitles(context, socket);
-    }
-    else if (context.eventType == "equipTitle")
-    {
-        handleEquipTitle(context, socket);
-    }
-    else if (context.eventType == "setSkillBarSlot")
-    {
-        handleSetSkillBarSlot(context, socket);
-    }
-    else if (context.eventType == "useEmote")
-    {
-        handleUseEmote(context, socket);
-    }
-    else if (context.eventType == "worldObjectInteract")
-    {
-        handleWorldObjectInteract(context, socket);
-    }
-    else if (context.eventType == "worldObjectChannelCancel")
-    {
-        handleWorldObjectChannelCancel(context, socket);
-    }
-    else if (context.eventType == "adminCommand")
-    {
-        handleAdminCommand(context, socket);
+        (this->*(routeIt->second))(context, socket);
     }
     else
     {
@@ -662,7 +547,7 @@ EventDispatcher::handlePlayerAttack(const EventContext &context, std::shared_ptr
 
             // Parse the complete JSON message instead of just the body
             JSONParser jsonParser;
-            nlohmann::json fullData = nlohmann::json::parse(fullMessage);
+            nlohmann::json fullData = wireJson(context);
             log_->info("EventDispatcher handlePlayerAttack - Parsed full data: " + fullData.dump());
 
             Event playerAttackEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, fullData}, context.timestamps);
@@ -719,7 +604,7 @@ EventDispatcher::handleSkillUsage(const EventContext &context, std::shared_ptr<b
     try
     {
         JSONParser jsonParser;
-        nlohmann::json fullData = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json fullData = wireJson(context);
         Event skillUsageEvent(Event::PLAYER_ATTACK, context.clientData.clientId, EventData{std::in_place_type<nlohmann::json>, fullData}, context.timestamps);
         eventsBatch_.push_back(skillUsageEvent);
         if (eventsBatch_.size() >= BATCH_SIZE)
@@ -747,7 +632,7 @@ EventDispatcher::handlePickupDroppedItem(const EventContext &context, std::share
             log_->info("EventDispatcher handlePickupDroppedItem - Full message: " + fullMessage);
 
             // Parse JSON to extract pickup data
-            nlohmann::json j = nlohmann::json::parse(fullMessage);
+            nlohmann::json j = wireJson(context);
             nlohmann::json pickupData = j["body"];
 
             log_->info("EventDispatcher handlePickupDroppedItem - Parsed pickup data: " + pickupData.dump());
@@ -847,7 +732,7 @@ EventDispatcher::handleHarvestStart(const EventContext &context, std::shared_ptr
         try
         {
             // Parse harvest request from message
-            auto messageJson = nlohmann::json::parse(context.fullMessage);
+            nlohmann::json messageJson = wireJson(context);
 
             if (!messageJson.contains("body") || !messageJson["body"].contains("corpseUID"))
             {
@@ -936,7 +821,7 @@ EventDispatcher::handleCorpseLootPickup(const EventContext &context, std::shared
             log_->info("EventDispatcher handleCorpseLootPickup - Full message: " + fullMessage);
 
             // Parse JSON to extract pickup data
-            nlohmann::json j = nlohmann::json::parse(fullMessage);
+            nlohmann::json j = wireJson(context);
             nlohmann::json bodyData = j["body"];
 
             log_->info("EventDispatcher handleCorpseLootPickup - Parsed body data: " + bodyData.dump());
@@ -1040,7 +925,7 @@ EventDispatcher::handleCorpseLootInspect(const EventContext &context, std::share
             log_->info("EventDispatcher handleCorpseLootInspect - Full message: " + fullMessage);
 
             // Parse JSON to extract inspect data
-            nlohmann::json j = nlohmann::json::parse(fullMessage);
+            nlohmann::json j = wireJson(context);
             nlohmann::json bodyData = j["body"];
 
             log_->info("EventDispatcher handleCorpseLootInspect - Parsed body data: " + bodyData.dump());
@@ -1181,7 +1066,7 @@ EventDispatcher::handleNPCInteract(const EventContext &context, std::shared_ptr<
 
     try
     {
-        auto messageJson = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json messageJson = wireJson(context);
 
         int npcId = messageJson["body"].value("npcId", 0);
         if (npcId <= 0)
@@ -1217,7 +1102,7 @@ EventDispatcher::handleDialogueChoice(const EventContext &context, std::shared_p
 
     try
     {
-        auto messageJson = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json messageJson = wireJson(context);
 
         DialogueChoiceRequestStruct request;
         request.characterId = context.characterData.characterId;
@@ -1247,7 +1132,7 @@ EventDispatcher::handleDialogueClose(const EventContext &context, std::shared_pt
 
     try
     {
-        auto messageJson = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json messageJson = wireJson(context);
 
         DialogueCloseRequestStruct request;
         request.characterId = context.characterData.characterId;
@@ -1276,7 +1161,7 @@ EventDispatcher::handleOpenVendorShop(const EventContext &context, std::shared_p
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         OpenVendorShopRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1298,7 +1183,7 @@ EventDispatcher::handleOpenSkillShop(const EventContext &context, std::shared_pt
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         OpenSkillShopRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1320,7 +1205,7 @@ EventDispatcher::handleRequestLearnSkill(const EventContext &context, std::share
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         RequestLearnSkillRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1349,7 +1234,7 @@ EventDispatcher::handleBuyItem(const EventContext &context, std::shared_ptr<boos
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         BuyItemRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1373,7 +1258,7 @@ EventDispatcher::handleSellItem(const EventContext &context, std::shared_ptr<boo
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         SellItemRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1397,7 +1282,7 @@ EventDispatcher::handleBuyItemBatch(const EventContext &context, std::shared_ptr
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         BuyBatchRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1430,7 +1315,7 @@ EventDispatcher::handleSellItemBatch(const EventContext &context, std::shared_pt
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         SellBatchRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1463,7 +1348,7 @@ EventDispatcher::handleOpenRepairShop(const EventContext &context, std::shared_p
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         OpenRepairShopRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1485,7 +1370,7 @@ EventDispatcher::handleRepairItem(const EventContext &context, std::shared_ptr<b
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         RepairItemRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1508,7 +1393,7 @@ EventDispatcher::handleRepairAll(const EventContext &context, std::shared_ptr<bo
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         RepairAllRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1530,7 +1415,7 @@ EventDispatcher::handleTradeRequest(const EventContext &context, std::shared_ptr
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         TradeRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1552,7 +1437,7 @@ EventDispatcher::handleTradeAccept(const EventContext &context, std::shared_ptr<
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         TradeRespondStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1575,7 +1460,7 @@ EventDispatcher::handleTradeDecline(const EventContext &context, std::shared_ptr
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         TradeRespondStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1597,7 +1482,7 @@ EventDispatcher::handleTradeOfferUpdate(const EventContext &context, std::shared
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         TradeOfferUpdateStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1631,7 +1516,7 @@ EventDispatcher::handleTradeConfirm(const EventContext &context, std::shared_ptr
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         TradeConfirmCancelStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1652,7 +1537,7 @@ EventDispatcher::handleTradeCancel(const EventContext &context, std::shared_ptr<
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         TradeConfirmCancelStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1673,7 +1558,7 @@ EventDispatcher::handleEquipItem(const EventContext &context, std::shared_ptr<bo
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         EquipItemRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1694,7 +1579,7 @@ EventDispatcher::handleUnequipItem(const EventContext &context, std::shared_ptr<
         return;
     try
     {
-        auto j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         UnequipItemRequestStruct req;
         req.characterId = context.characterData.characterId;
         req.clientId = context.clientData.clientId;
@@ -1758,7 +1643,7 @@ EventDispatcher::handleDropItemByPlayer(const EventContext &context,
 
     try
     {
-        nlohmann::json j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         nlohmann::json body = j["body"];
 
         int itemId = body.value("itemId", 0);
@@ -1803,7 +1688,7 @@ EventDispatcher::handleUseItem(const EventContext &context,
 
     try
     {
-        nlohmann::json j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         nlohmann::json body = j["body"];
 
         int itemId = body.value("itemId", 0);
@@ -1863,7 +1748,7 @@ EventDispatcher::handleGetBestiaryEntry(const EventContext &context,
 
     try
     {
-        nlohmann::json j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
         std::string mobSlug = j["body"].value("mobSlug", std::string{});
 
         if (mobSlug.empty())
@@ -1899,7 +1784,7 @@ EventDispatcher::handleChatMessage(const EventContext &context,
 
     try
     {
-        nlohmann::json j = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json j = wireJson(context);
 
         std::string channelStr = j["body"].value("channel", std::string{"zone"});
         std::string text = j["body"].value("text", std::string{});
@@ -2015,7 +1900,7 @@ EventDispatcher::handleEquipTitle(const EventContext &context,
     std::string titleSlug;
     try
     {
-        const auto &jsonData = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json jsonData = wireJson(context);
         titleSlug = jsonData.value("body", nlohmann::json::object()).value("titleSlug", "");
     }
     catch (const std::exception &e)
@@ -2056,7 +1941,7 @@ EventDispatcher::handleSetSkillBarSlot(const EventContext &context,
     std::string skillSlug;
     try
     {
-        const auto &jsonData = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json jsonData = wireJson(context);
         const auto &body = jsonData.value("body", nlohmann::json::object());
         slotIndex = body.value("slotIndex", -1);
         skillSlug = body.value("skillSlug", std::string{});
@@ -2105,7 +1990,7 @@ EventDispatcher::handleUseEmote(const EventContext &context,
     std::string emoteSlug;
     try
     {
-        const auto &jsonData = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json jsonData = wireJson(context);
         emoteSlug = jsonData.value("body", nlohmann::json::object()).value("emoteSlug", "");
     }
     catch (const std::exception &e)
@@ -2149,7 +2034,7 @@ EventDispatcher::handleWorldObjectInteract(const EventContext &context, std::sha
 
     try
     {
-        const auto &json = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json json = wireJson(context);
         const int objectId = json.value("body", nlohmann::json::object()).value("objectId", 0);
         if (objectId <= 0)
         {
@@ -2186,7 +2071,7 @@ EventDispatcher::handleWorldObjectChannelCancel(const EventContext &context, std
 
     try
     {
-        const auto &json = nlohmann::json::parse(context.fullMessage);
+        nlohmann::json json = wireJson(context);
         const int objectId = json.value("body", nlohmann::json::object()).value("objectId", 0);
 
         WorldObjectChannelCancelStruct req;
@@ -2241,7 +2126,7 @@ EventDispatcher::handleAdminCommand(const EventContext &context, std::shared_ptr
     nlohmann::json body;
     try
     {
-        body = nlohmann::json::parse(context.fullMessage)
+        body = wireJson(context)
                    .value("body", nlohmann::json::object());
     }
     catch (const std::exception &e)
@@ -2571,6 +2456,56 @@ EventDispatcher::handleAdminCommand(const EventContext &context, std::shared_ptr
         req["body"] = nlohmann::json::object();
         chunkServer_->sendToGameServer(req.dump() + "\n");
         out["requested"] = true;
+    }
+
+    else if (op == "banUser" || op == "unbanUser")
+    {
+        // Manual ban with reason (user_bans table; login shows reason+expiry).
+        // Synchronous with a bounded wait: the fact goes through the idempotent
+        // outbox, the GM reply reflects the game ack (applied/duplicate/timeout).
+        const bool lift = (op == "unbanUser");
+        const int ownerId = charMgr.getCharacterById(targetId).clientId;
+        if (ownerId <= 0)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "no_owner");
+            return;
+        }
+        nlohmann::json fact;
+        fact["characterId"] = targetId;
+        fact["userId"] = ownerId;
+        fact["bannedByUserId"] = callerId;
+        fact["reason"] = body.value("reason", "");
+        fact["expiresAt"] = body.value("expiresAt", "");
+        fact["lift"] = lift;
+        if (!lift && fact["reason"].get<std::string>().empty())
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "missing_reason");
+            return;
+        }
+        const std::string ack = chunkServer_->sendFactAndWait("saveUserBan", fact, 8000);
+        out["ack"] = ack;
+        if (ack != "applied" && ack != "duplicate")
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "game_timeout");
+            return;
+        }
+    }
+
+    // GM audit: every served admin op appends one gm_action_log row
+    // (fire-and-forget fact; game acks, outbox retries on outage).
+    {
+        nlohmann::json logFact;
+        logFact["characterId"] = targetId;
+        logFact["gmUserId"] = callerId;
+        logFact["actionType"] = op;
+        logFact["targetType"] = "character";
+        logFact["targetId"] = targetId;
+        logFact["oldValue"] = "";
+        logFact["newValue"] = out.dump();
+        nlohmann::json pkt;
+        pkt["header"]["eventType"] = "saveGmAction";
+        pkt["body"] = logFact;
+        chunkServer_->sendToGameServer(pkt.dump() + "\n");
     }
 
     out["ok"] = true;

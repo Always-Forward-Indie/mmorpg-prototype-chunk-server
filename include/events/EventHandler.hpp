@@ -21,6 +21,7 @@
 #include "events/handlers/ZoneEventHandler.hpp"
 #include "network/GameServerWorker.hpp"
 #include "network/NetworkManager.hpp"
+#include "services/CatalogSyncService.hpp"
 #include "services/GameServices.hpp"
 #include <memory>
 
@@ -95,40 +96,15 @@ class EventHandler
     /**
      * @brief Handle experience level table data from game server
      * Sets up experience cache with level progression data
+     * (implemented in CatalogSyncService).
      */
-    void handleSetExpLevelTableEvent(const Event &event);
-
-    /**
-     * @brief Handle game config data from game server.
-     *        Populates GameConfigService so CombatCalculator and other
-     *        services can read gameplay constants without hardcoding.
-     */
-    void handleSetGameConfigEvent(const Event &event);
-    void handleSetPlayerActiveEffectsEvent(const Event &event);
-    void handleSetPlayerSkillCooldownsEvent(const Event &event);
-    void handleSetPlayerInventoryEvent(const Event &event);
+    // Catalog sync (game→chunk one-way SET_*): all handled by CatalogSyncService.
+    // Remaining decls here are queries/commands owned by this facade.
     void handleInventoryItemIdSyncEvent(const Event &event);
-    void handleSetCharacterAttributesRefreshEvent(const Event &event);
-    void handleSetStatusEffectTemplatesEvent(const Event &event);
-    void handleSetPlayerPityEvent(const Event &event);
-    void handleSetPlayerBestiaryEvent(const Event &event);
     void handleGetBestiaryEntryEvent(const Event &event);
     void handleGetBestiaryOverviewEvent(const Event &event);
-    void handleSetPlayerReputationsEvent(const Event &event);
-    void handleSetPlayerMasteriesEvent(const Event &event);
-    void handleSetZoneEventTemplatesEvent(const Event &event);
-    void handleSetLearnedSkillEvent(const Event &event);
-    // Mastery definition system
-    void handleSetMasteryDefinitionsEvent(const Event &event);
-    // Title system
-    void handleSetTitleDefinitionsEvent(const Event &event);
-    void handleSetPlayerTitlesEvent(const Event &event);
     void handleGetPlayerTitlesEvent(const Event &event);
     void handleEquipTitleEvent(const Event &event);
-    void handleSetSkillBarSlotEvent(const Event &event);
-    // Emote system
-    void handleSetEmoteDefinitionsEvent(const Event &event);
-    void handleSetPlayerEmotesEvent(const Event &event);
     void handleUseEmoteEvent(const Event &event);
 
     // Specialized event handlers for different event categories
@@ -149,6 +125,7 @@ class EventHandler
     std::unique_ptr<ChatEventHandler> chatEventHandler_;
     std::unique_ptr<EmoteEventHandler> emoteEventHandler_;
     std::unique_ptr<WorldObjectEventHandler> worldObjectEventHandler_;
+    std::unique_ptr<CatalogSyncService> catalogSync_;
 
     // References for logging and error handling
     NetworkManager &networkManager_;

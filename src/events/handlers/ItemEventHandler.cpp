@@ -1,5 +1,6 @@
 #include "events/handlers/ItemEventHandler.hpp"
 #include "events/Event.hpp"
+#include "utils/DistanceUtils.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <cmath>
 #include <spdlog/logger.h>
@@ -318,15 +319,9 @@ ItemEventHandler::handleGetNearbyItemsEvent(const Event &event)
             gameServices_.getLogger().log("[GET_NEARBY_ITEMS_EVENT] Getting items near position: " +
                                           std::to_string(playerPosition.positionX) + "," + std::to_string(playerPosition.positionY));
 
-            // Get all dropped items (TODO: implement getNearbyItems in LootManager)
-            auto allDroppedItems = gameServices_.getLootManager().getAllDroppedItems();
-            std::vector<DroppedItemStruct> nearbyItems;
-
-            // Convert map to vector for now (TODO: filter by distance)
-            for (const auto &item : allDroppedItems)
-            {
-                nearbyItems.push_back(item.second);
-            }
+            // Distance-filtered via LootManager (2D authoritative plane).
+            const std::vector<DroppedItemStruct> nearbyItems =
+                gameServices_.getLootManager().getDroppedItemsNearPosition(playerPosition, LOOT_RADIUS);
 
             // Build response with nearby items
             nlohmann::json nearbyItemsArray = nlohmann::json::array();
@@ -1140,12 +1135,8 @@ ItemEventHandler::broadcastToNearbyClients(const std::string &responseData,
             continue;
 
         PositionStruct charPos = gameServices_.getCharacterManager().getCharacterPosition(client.characterId);
-        float dx = charPos.positionX - center.positionX;
-        float dy = charPos.positionY - center.positionY;
-        float dz = charPos.positionZ - center.positionZ;
-        float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-
-        if (dist > radius)
+        // 2D + Z tolerance: client snaps items to ground, strict 3D would cull on hills.
+        if (!DistanceUtils::withinRange2DWithZTolerance(charPos, center, radius))
             continue;
 
         auto sock = gameServices_.getClientManager().getClientSocket(client.clientId);
@@ -1181,12 +1172,8 @@ ItemEventHandler::maybeSendGroundItemsToClient(int clientId, int characterId,
         auto it = lastLootSnapshotPosition_.find(characterId);
         if (it != lastLootSnapshotPosition_.end())
         {
-            float dx = currentPos.positionX - it->second.positionX;
-            float dy = currentPos.positionY - it->second.positionY;
-            float dz = currentPos.positionZ - it->second.positionZ;
-            float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-
-            if (dist < LOOT_SNAPSHOT_DISTANCE_THRESHOLD)
+            // Throttle is 2D movement; Z snap (terrain) must not trigger resend.
+            if (DistanceUtils::dist2D(currentPos, it->second) < LOOT_SNAPSHOT_DISTANCE_THRESHOLD)
                 return;
         }
     }
