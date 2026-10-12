@@ -76,6 +76,12 @@ class GameServerWorker
     ~GameServerWorker();
     void startIOEventLoop();
     void sendDataToGameServer(const std::string &data);
+    /// Send an idempotent fact and wait (bounded) for the game factAck.
+    /// Returns "applied", "duplicate", or "timeout". Blocks the caller —
+    /// only for rare synchronous admin ops (ban/unban), never hot paths.
+    std::string sendFactAndWait(const std::string &eventType,
+        const nlohmann::json &body,
+        int timeoutMs = 8000);
     /// Lock-free outbox snapshot for the periodic status task.
     OutboxSnapshot outboxSnapshot() const { return outbox_.snapshot(); }
     void receiveDataFromGameServer();

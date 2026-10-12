@@ -54,6 +54,14 @@ class ChunkServer
         gameServerWorker_.sendDataToGameServer(data);
     }
 
+    /// Idempotent fact + bounded ack wait (rare synchronous admin ops only).
+    std::string sendFactAndWait(const std::string &eventType,
+        const nlohmann::json &body,
+        int timeoutMs = 8000)
+    {
+        return gameServerWorker_.sendFactAndWait(eventType, body, timeoutMs);
+    }
+
   private:
     std::atomic<bool> running_{true};
 

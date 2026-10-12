@@ -1,6 +1,7 @@
 #include "network/GameServerWorker.hpp"
 #include <chrono>
 #include <cstdlib>
+#include <future>
 #include <spdlog/logger.h>
 
 // Work with data from/to the Game Server
@@ -543,10 +544,12 @@ GameServerWorker::processGameServerData(std::string_view data)
         {
             nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
             const std::string key = body.value("key", "");
+            const std::string status = body.value("status", "applied");
             if (!key.empty())
             {
-                boost::asio::post(strand_, [this, key]()
+                boost::asio::post(strand_, [this, key, status]()
                     {
+                        outbox_.fireAckCb(key, status);
                         outbox_.ack(key);
                     });
             }
@@ -662,4 +665,65 @@ GameServerWorker::closeConnection()
     {
         game_server_socket_->close();
     }
+}
+
+std::string
+GameServerWorker::sendFactAndWait(const std::string &eventType,
+    const nlohmann::json &body,
+    int timeoutMs)
+{
+    auto promise = std::make_shared<std::promise<std::string>>();
+    auto future = promise->get_future();
+    boost::asio::post(strand_,
+        [this, promise, eventType, body]()
+        {
+            try
+            {
+                nlohmann::json j;
+                j["header"]["eventType"] = eventType;
+                j["body"] = body;
+                const int characterId = body.value("characterId", 0);
+                const std::string key = outbox_.assignKey(characterId, eventType);
+                j["header"]["factKey"] = key;
+                j["body"]["factKey"] = key;
+                outbox_.onAckOnce(key,
+                    [promise](const std::string &status) {
+                        try
+                        {
+                            promise->set_value(status.empty() ? "applied" : status);
+                        }
+                        catch (...)
+                        {
+                        }
+                    });
+                const std::string wire = j.dump() + "\n";
+                outbox_.store(key, wire, steadyMs());
+                outbox_.noteSent();
+                sendQueue_.push(wire);
+                if (!writePending_)
+                    doNextWrite();
+            }
+            catch (...)
+            {
+                try
+                {
+                    promise->set_value("timeout");
+                }
+                catch (...)
+                {
+                }
+            }
+        });
+    if (future.wait_for(std::chrono::milliseconds(timeoutMs)) == std::future_status::ready)
+    {
+        try
+        {
+            return future.get();
+        }
+        catch (...)
+        {
+            return "timeout";
+        }
+    }
+    return "timeout";
 }

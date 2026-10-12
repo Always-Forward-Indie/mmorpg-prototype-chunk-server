@@ -77,7 +77,8 @@ inline bool isKnownOp(const std::string &op)
     return op == "teleport" || op == "getState" || op == "grantXP" ||
            op == "grantLevel" || op == "grantItem" || op == "setHP" ||
            op == "skipTime" || op == "spawnMob" || op == "killMob" ||
-           op == "resetWorld" || op == "reloadWorldContent";
+           op == "resetWorld" || op == "reloadWorldContent" ||
+           op == "banUser" || op == "unbanUser";
 }
 
 } // namespace admin_gate
