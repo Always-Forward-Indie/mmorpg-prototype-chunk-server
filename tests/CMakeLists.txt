@@ -38,6 +38,7 @@ if(GTest_FOUND)
         test_chunk_registry.cpp
         test_utils.cpp
         test_json_parser.cpp
+        test_json_chunking.cpp
         test_scheduler_gen.cpp
         test_mob_ai.cpp
         test_movement_validation.cpp

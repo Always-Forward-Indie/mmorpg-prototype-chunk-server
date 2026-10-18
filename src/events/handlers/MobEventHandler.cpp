@@ -1,4 +1,5 @@
 #include "events/handlers/MobEventHandler.hpp"
+#include "utils/JsonLineChunking.hpp"
 #include "events/EventData.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <algorithm>
@@ -50,41 +51,6 @@ MobEventHandler::mobToJson(const MobDataStruct &mobData)
     return mobJson;
 }
 
-namespace {
-// Wire-contract guard: one '\n'-terminated JSON line must stay under the
-// client's 8KB cap (FNetFraming::MaxMessageBytes). Full mob structs carry
-// attributes and run ~0.5-3KB each, so split spawn snapshots by *byte size*
-// (a fixed mob count still overflows on attribute-heavy mobs). The client
-// spawns idempotently per UID (MOBExists check), so chunk order is irrelevant.
-constexpr size_t kMaxSpawnPacketBytes = 6 * 1024;
-std::vector<nlohmann::json> chunkMobArray(const nlohmann::json &mobsArray)
-{
-    std::vector<nlohmann::json> chunks;
-    if (!mobsArray.is_array() || mobsArray.empty())
-    {
-        chunks.push_back(nlohmann::json::array());
-        return chunks;
-    }
-    nlohmann::json cur = nlohmann::json::array();
-    size_t curBytes = 2; // "[]"
-    for (const auto &mob : mobsArray)
-    {
-        const size_t entryBytes = mob.dump().size() + 1; // +comma separator
-        if (!cur.empty() && curBytes + entryBytes > kMaxSpawnPacketBytes)
-        {
-            chunks.push_back(std::move(cur));
-            cur = nlohmann::json::array();
-            curBytes = 2;
-        }
-        cur.push_back(mob);
-        curBytes += entryBytes;
-    }
-    if (!cur.empty() || chunks.empty())
-        chunks.push_back(std::move(cur));
-    return chunks;
-}
-} // namespace
-
 void
 MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
 {
@@ -116,7 +82,7 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
                 return;
             }
 
-            for (const auto &mobsChunk : chunkMobArray(mobsArray))
+            for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
             {
                 nlohmann::json response = ResponseBuilder()
                                               .setHeader("message", "Spawning mobs success!")
@@ -169,7 +135,7 @@ MobEventHandler::sendCellMobsSnapshot(int clientId, float cx, float cy, float ha
         if (mobsArray.empty())
             return;
 
-        for (const auto &mobsChunk : chunkMobArray(mobsArray))
+        for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
         {
             nlohmann::json response = ResponseBuilder()
                                           .setHeader("message", "Cell snapshot: mobs in area")
@@ -215,7 +181,7 @@ MobEventHandler::sendSpawnZonesToClient(int clientID, std::shared_ptr<boost::asi
             mobsArray.push_back(mobJson);
         }
 
-        for (const auto &mobsChunk : chunkMobArray(mobsArray))
+        for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
         {
             nlohmann::json response = ResponseBuilder()
                                           .setHeader("message", "Spawning mobs success!")
@@ -280,7 +246,7 @@ MobEventHandler::handleZoneMoveMobsEvent(const Event &event)
             return;
         }
 
-        for (const auto &mobsChunk : chunkMobArray(mobsArray))
+        for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
         {
             sendSuccessResponseWithTimestamps(clientSocket, "Moving mobs success!", "zoneMoveMobs", clientID, timestamps, "mobs", mobsChunk, "");
         }
@@ -658,19 +624,24 @@ MobEventHandler::handleMobMoveUpdateEvent(const Event &event)
             return;
         }
 
-        nlohmann::json response = ResponseBuilder()
-                                      .setHeader("message", "Mob movement update")
-                                      .setHeader("hash", "")
-                                      .setHeader("clientId", clientID)
-                                      .setHeader("eventType", "mobMoveUpdate")
-                                      .setHeader("serverSendMs", TimestampUtils::getCurrentTimestampMs())
-                                      .setBody("mobs", mobsArray)
-                                      .build();
+        // Chunked by bytes (wire::chunkJsonArray): keeps every line under
+        // the client 8KB framing cap even when many mobs move in one tick.
+        for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
+        {
+            nlohmann::json response = ResponseBuilder()
+                                          .setHeader("message", "Mob movement update")
+                                          .setHeader("hash", "")
+                                          .setHeader("clientId", clientID)
+                                          .setHeader("eventType", "mobMoveUpdate")
+                                          .setHeader("serverSendMs", TimestampUtils::getCurrentTimestampMs())
+                                          .setBody("mobs", mobsChunk)
+                                          .build();
 
-        std::string responseData = networkManager_.generateResponseMessage("success", response);
-        // Use bulk priority so mob position updates never block combat/stats packets
-        // that might already be queued in the per-socket critical priority lane.
-        networkManager_.sendResponseBulk(clientSocket, std::make_shared<const std::string>(std::move(responseData)));
+            std::string responseData = networkManager_.generateResponseMessage("success", response);
+            // Use bulk priority so mob position updates never block combat/stats packets
+            // that might already be queued in the per-socket critical priority lane.
+            networkManager_.sendResponseBulk(clientSocket, std::make_shared<const std::string>(std::move(responseData)));
+        }
     }
     catch (const std::bad_variant_access &ex)
     {
