@@ -266,6 +266,29 @@ NetworkManager::enqueueWrite(std::shared_ptr<boost::asio::ip::tcp::socket> socke
     std::shared_ptr<const std::string> data,
     bool critical)
 {
+    // Wire-contract guard (seam with the UE client): the client parses one
+    // '\n'-terminated JSON object per line with an 8KB cap
+    // (FNetFraming::MaxMessageBytes). Anything bigger is dropped client-side,
+    // so flag it here at warn level with the event type instead of silently
+    // producing snapshot holes. Threshold 6KB leaves headroom for the
+    // trailing delimiter, header growth and multi-byte UTF-8.
+    constexpr size_t kClientLineCapWarnBytes = 6 * 1024;
+    if (data && data->size() > kClientLineCapWarnBytes)
+    {
+        std::string eventType = "?";
+        const std::string key = "\"eventType\":\"";
+        const size_t pos = data->find(key);
+        if (pos != std::string::npos)
+        {
+            const size_t begin = pos + key.size();
+            const size_t end = data->find('"', begin);
+            if (end != std::string::npos)
+                eventType = data->substr(begin, end - begin);
+        }
+        log_->warn("Oversized packet for client wire ({} bytes, eventType={}): exceeds UE 8KB line cap — chunk the array payload",
+            data->size(), eventType);
+    }
+
     auto queue = getOrCreateWriteQueue(socket);
     if (!queue)
         return;

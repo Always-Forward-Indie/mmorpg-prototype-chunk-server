@@ -50,6 +50,41 @@ MobEventHandler::mobToJson(const MobDataStruct &mobData)
     return mobJson;
 }
 
+namespace {
+// Wire-contract guard: one '\n'-terminated JSON line must stay under the
+// client's 8KB cap (FNetFraming::MaxMessageBytes). Full mob structs carry
+// attributes and run ~0.5-3KB each, so split spawn snapshots by *byte size*
+// (a fixed mob count still overflows on attribute-heavy mobs). The client
+// spawns idempotently per UID (MOBExists check), so chunk order is irrelevant.
+constexpr size_t kMaxSpawnPacketBytes = 6 * 1024;
+std::vector<nlohmann::json> chunkMobArray(const nlohmann::json &mobsArray)
+{
+    std::vector<nlohmann::json> chunks;
+    if (!mobsArray.is_array() || mobsArray.empty())
+    {
+        chunks.push_back(nlohmann::json::array());
+        return chunks;
+    }
+    nlohmann::json cur = nlohmann::json::array();
+    size_t curBytes = 2; // "[]"
+    for (const auto &mob : mobsArray)
+    {
+        const size_t entryBytes = mob.dump().size() + 1; // +comma separator
+        if (!cur.empty() && curBytes + entryBytes > kMaxSpawnPacketBytes)
+        {
+            chunks.push_back(std::move(cur));
+            cur = nlohmann::json::array();
+            curBytes = 2;
+        }
+        cur.push_back(mob);
+        curBytes += entryBytes;
+    }
+    if (!cur.empty() || chunks.empty())
+        chunks.push_back(std::move(cur));
+    return chunks;
+}
+} // namespace
+
 void
 MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
 {
@@ -81,18 +116,21 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
                 return;
             }
 
-            nlohmann::json response = ResponseBuilder()
-                                          .setHeader("message", "Spawning mobs success!")
-                                          .setHeader("hash", "")
-                                          .setHeader("clientId", clientID)
-                                          .setHeader("eventType", "spawnMobsInZone")
-                                          .setTimestamps(timestamps)
-                                          .setBody("zoneId", spawnZoneData.zoneId)
-                                          .setBody("mobs", mobsArray)
-                                          .build();
+            for (const auto &mobsChunk : chunkMobArray(mobsArray))
+            {
+                nlohmann::json response = ResponseBuilder()
+                                              .setHeader("message", "Spawning mobs success!")
+                                              .setHeader("hash", "")
+                                              .setHeader("clientId", clientID)
+                                              .setHeader("eventType", "spawnMobsInZone")
+                                              .setTimestamps(timestamps)
+                                              .setBody("zoneId", spawnZoneData.zoneId)
+                                              .setBody("mobs", mobsChunk)
+                                              .build();
 
-            std::string responseData = networkManager_.generateResponseMessage("success", response, timestamps);
-            networkManager_.sendResponse(clientSocket, responseData);
+                std::string responseData = networkManager_.generateResponseMessage("success", response, timestamps);
+                networkManager_.sendResponse(clientSocket, responseData);
+            }
         }
         else
         {
@@ -131,17 +169,20 @@ MobEventHandler::sendCellMobsSnapshot(int clientId, float cx, float cy, float ha
         if (mobsArray.empty())
             return;
 
-        nlohmann::json response = ResponseBuilder()
-                                      .setHeader("message", "Cell snapshot: mobs in area")
-                                      .setHeader("hash", "")
-                                      .setHeader("clientId", clientId)
-                                      .setHeader("eventType", "spawnMobsInZone")
-                                      .setBody("zoneId", -1)
-                                      .setBody("mobs", mobsArray)
-                                      .build();
+        for (const auto &mobsChunk : chunkMobArray(mobsArray))
+        {
+            nlohmann::json response = ResponseBuilder()
+                                          .setHeader("message", "Cell snapshot: mobs in area")
+                                          .setHeader("hash", "")
+                                          .setHeader("clientId", clientId)
+                                          .setHeader("eventType", "spawnMobsInZone")
+                                          .setBody("zoneId", -1)
+                                          .setBody("mobs", mobsChunk)
+                                          .build();
 
-        networkManager_.sendResponse(clientSocket,
-            networkManager_.generateResponseMessage("success", response));
+            networkManager_.sendResponse(clientSocket,
+                networkManager_.generateResponseMessage("success", response));
+        }
         log_->info("Cell snapshot: " + std::to_string(mobsArray.size()) +
                    " mobs to client " + std::to_string(clientId));
     }
@@ -174,16 +215,19 @@ MobEventHandler::sendSpawnZonesToClient(int clientID, std::shared_ptr<boost::asi
             mobsArray.push_back(mobJson);
         }
 
-        nlohmann::json response = ResponseBuilder()
-                                      .setHeader("message", "Spawning mobs success!")
-                                      .setHeader("hash", "")
-                                      .setHeader("clientId", clientID)
-                                      .setHeader("eventType", "spawnMobsInZone")
-                                      .setBody("zoneId", spawnZone.zoneId)
-                                      .setBody("mobs", mobsArray)
-                                      .build();
+        for (const auto &mobsChunk : chunkMobArray(mobsArray))
+        {
+            nlohmann::json response = ResponseBuilder()
+                                          .setHeader("message", "Spawning mobs success!")
+                                          .setHeader("hash", "")
+                                          .setHeader("clientId", clientID)
+                                          .setHeader("eventType", "spawnMobsInZone")
+                                          .setBody("zoneId", spawnZone.zoneId)
+                                          .setBody("mobs", mobsChunk)
+                                          .build();
 
-        networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", response));
+            networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", response));
+        }
     }
 }
 
@@ -236,7 +280,10 @@ MobEventHandler::handleZoneMoveMobsEvent(const Event &event)
             return;
         }
 
-        sendSuccessResponseWithTimestamps(clientSocket, "Moving mobs success!", "zoneMoveMobs", clientID, timestamps, "mobs", mobsArray, "");
+        for (const auto &mobsChunk : chunkMobArray(mobsArray))
+        {
+            sendSuccessResponseWithTimestamps(clientSocket, "Moving mobs success!", "zoneMoveMobs", clientID, timestamps, "mobs", mobsChunk, "");
+        }
     }
     catch (const std::bad_variant_access &ex)
     {

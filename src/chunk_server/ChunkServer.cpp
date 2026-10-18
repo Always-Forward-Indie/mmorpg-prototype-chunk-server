@@ -1,7 +1,10 @@
 #include "chunk_server/ChunkServer.hpp"
 #include "services/CombatSystem.hpp"
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <fstream>
+#include <iterator>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 #include <unordered_set>
@@ -819,15 +822,28 @@ ChunkServer::mainEventLoopCH()
                 }
             }
 
-            // Push ONE event per connected client containing ALL zone updates.
+            // Push one event per connected client containing ALL zone updates.
             // This replaces the old per-zone-per-client approach that produced
             // N_zones × N_clients events per tick.
+            // Wire-contract guard: the client parses one '\n'-terminated JSON
+            // object per line with an 8KB cap (FNetFraming::MaxMessageBytes).
+            // A single full-batch event can exceed that (≈200 mobs × ~250B),
+            // so split into bounded chunks — the client applies every
+            // mobMoveUpdate body independently, order across chunks is irrelevant
+            // (each entry carries uid + stepTimestampMs).
+            constexpr size_t kMaxMobsPerMoveUpdate = 24; // ≈6KB worst case
             uint64_t tickBuilt = 0;
             for (auto &[clientId, updates] : clientUpdates)
             {
                 tickBuilt += updates.size();
-                Event mobUpdateEvent(Event::MOB_MOVE_UPDATE, clientId, std::move(updates));
-                eventQueueGameServer_.push(std::move(mobUpdateEvent));
+                for (size_t begin = 0; begin < updates.size(); begin += kMaxMobsPerMoveUpdate)
+                {
+                    const size_t end = std::min(updates.size(), begin + kMaxMobsPerMoveUpdate);
+                    std::vector<MobMoveUpdateStruct> chunk(std::make_move_iterator(updates.begin() + begin),
+                                                           std::make_move_iterator(updates.begin() + end));
+                    Event mobUpdateEvent(Event::MOB_MOVE_UPDATE, clientId, std::move(chunk));
+                    eventQueueGameServer_.push(std::move(mobUpdateEvent));
+                }
             }
             if (useInterest)
                 interest.recordFanout(tickBuilt, clientUpdates.size());
