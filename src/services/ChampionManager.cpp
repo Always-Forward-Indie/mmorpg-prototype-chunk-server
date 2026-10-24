@@ -210,7 +210,7 @@ ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId, int spawnZoneI
     }
 
     // Spawn outside of counterMutex_ lock
-    spawnChampion(mobTemplateId, zoneId, "[Чемпион] ", 1.5f);
+    spawnChampion(mobTemplateId, zoneId, "[Чемпион] ", 1.5f, "", 0, "threshold");
 }
 
 // ── Timed Champion ────────────────────────────────────────────────────────────
@@ -284,7 +284,8 @@ ChampionManager::tickTimedChampions()
                     "[!] ",
                     2.0f,
                     state.tmpl.slug,
-                    state.tmpl.windowMinutes);
+                    state.tmpl.windowMinutes,
+                    "timed");
                 if (uid > 0)
                 {
                     state.spawned = true;
@@ -387,7 +388,8 @@ ChampionManager::spawnChampion(int mobTemplateId,
     const std::string &namePrefix,
     float lootMult,
     const std::string &slug,
-    int windowMinutes)
+    int windowMinutes,
+    const std::string &kind)
 {
     const auto &cfg = gameConfig_;
     const float hpMult = cfg.getFloat("champion.hp_multiplier", 3.0f);
@@ -415,6 +417,7 @@ ChampionManager::spawnChampion(int mobTemplateId,
     base.rankCode = "champion";
     base.rankMult = combinedMult;
     base.isChampion = true;
+    base.championKind = kind;
     base.lootMultiplier = lootMult;
     base.spawnEpochSec = epochSecFn_();
     base.position = resolveChampionSpawnPoint(gameZoneId);

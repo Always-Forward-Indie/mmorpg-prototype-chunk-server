@@ -544,6 +544,7 @@ struct MobDataStruct
 
     // Champion / rare mob flags (Stage 3, migration 038)
     bool isChampion = false;     ///< True after spawnChampion(); triggers onChampionKilled
+    std::string championKind = ""; ///< "" = normal, "threshold" | "timed" (S2.5: replaces name-prefix detection)
     bool canEvolve = false;      ///< Loaded from mob_templates.can_evolve (Survival Champion)
     bool hasEvolved = false;     ///< Runtime: evolved once — do not evolve again
     int64_t spawnEpochSec = 0;   ///< Unix timestamp of spawn moment (for Survival threshold)
