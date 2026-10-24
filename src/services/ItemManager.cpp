@@ -135,7 +135,13 @@ ItemManager::recomputeCatalogVersion()
         }
         mix(item.masterySlug);
     }
-    catalogVersion_ = h;
+    // 31-bit only: the version crosses JSON as a number and lands in an int32
+    // on the client (TryGetNumberField overflows past INT32_MAX and the client
+    // would pin version 0 = "unknown" forever, re-downloading every join).
+    // 0 is reserved for unknown: never emit it.
+    catalogVersion_ = h & 0x7FFFFFFFu;
+    if (catalogVersion_ == 0)
+        catalogVersion_ = 1;
 }
 
 std::map<int, ItemDataStruct>
