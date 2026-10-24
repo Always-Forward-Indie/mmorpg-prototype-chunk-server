@@ -408,7 +408,6 @@ ItemEventHandler::itemToJson(const ItemDataStruct &itemData)
         {"slug", itemData.slug},
         {"isQuestItem", itemData.isQuestItem},
         {"itemType", itemData.itemType},
-        {"itemTypeName", itemData.itemTypeName},
         {"itemTypeSlug", itemData.itemTypeSlug},
         {"isContainer", itemData.isContainer},
         {"isDurable", itemData.isDurable},
@@ -416,27 +415,22 @@ ItemEventHandler::itemToJson(const ItemDataStruct &itemData)
         {"isEquippable", itemData.isEquippable},
         {"weight", itemData.weight},
         {"rarityId", itemData.rarityId},
-        {"rarityName", itemData.rarityName},
         {"raritySlug", itemData.raritySlug},
         {"stackMax", itemData.stackMax},
         {"durabilityMax", itemData.durabilityMax},
         {"vendorPriceBuy", itemData.vendorPriceBuy},
         {"vendorPriceSell", itemData.vendorPriceSell},
         {"equipSlot", itemData.equipSlot},
-        {"equipSlotName", itemData.equipSlotName},
         {"equipSlotSlug", itemData.equipSlotSlug},
         {"levelRequirement", itemData.levelRequirement},
         {"attributes", nlohmann::json::array()},
         {"isUsable", itemData.isUsable},
         {"useEffects", nlohmann::json::array()}};
 
-    // Add attributes
+    // Add attributes (slug+value only: names resolve client-side via slug)
     for (const auto &attribute : itemData.attributes)
     {
         nlohmann::json attributeJson = {
-            {"id", attribute.id},
-            {"item_id", attribute.item_id},
-            {"name", attribute.name},
             {"slug", attribute.slug},
             {"value", attribute.value}};
         itemJson["attributes"].push_back(attributeJson);
@@ -1084,9 +1078,8 @@ ItemEventHandler::handleUseItemEvent(const Event &event)
             nlohmann::json skillResult;
             skillResult["casterId"] = characterId;
             skillResult["targetId"] = characterId;
-            skillResult["casterTypeString"] = "PLAYER";
-            skillResult["targetTypeString"] = "PLAYER";
-            skillResult["skillName"] = itemInfo.slug;
+            skillResult["casterType"] = 2; // PLAYER (client ECasterType)
+            skillResult["targetType"] = 2; // PLAYER (CombatTargetType)
             skillResult["skillSlug"] = itemInfo.slug;
             skillResult["skillEffectType"] = "heal";
             skillResult["healing"] = totalHeal;

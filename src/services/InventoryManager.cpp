@@ -481,12 +481,11 @@ InventoryManager::inventoryItemToJson(const PlayerInventoryItemStruct &item) con
         // allowedClassIds: empty array means no class restriction
         itemJson["allowedClassIds"] = itemData.allowedClassIds;
 
-        // Add attributes
+        // Add attributes (slug+value only: names resolve client-side via slug)
         itemJson["attributes"] = nlohmann::json::array();
         for (const auto &attribute : itemData.attributes)
         {
             nlohmann::json attributeJson = {
-                {"id", attribute.id},
                 {"slug", attribute.slug},
                 {"value", attribute.value}};
             itemJson["attributes"].push_back(attributeJson);

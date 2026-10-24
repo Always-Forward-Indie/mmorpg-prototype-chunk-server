@@ -25,7 +25,6 @@ MobEventHandler::mobToJson(const MobDataStruct &mobData)
         {"id", mobData.id},
         {"uid", mobData.uid},
         {"zoneId", mobData.zoneId},
-        {"name", mobData.name},
         {"slug", mobData.slug},
         {"race", mobData.raceName},
         {"level", mobData.level},
@@ -40,11 +39,10 @@ MobEventHandler::mobToJson(const MobDataStruct &mobData)
         {"velocity", {{"dirX", movementData.movementDirectionX}, {"dirY", movementData.movementDirectionY}, {"speed", movementData.currentSpeedUnitsPerSec}}},
         {"attributes", nlohmann::json::array()}};
 
+    // Attributes carry slug+value only (names resolve client-side via slug).
     for (const auto &attr : mobData.attributes)
     {
-        mobJson["attributes"].push_back({{"id", attr.id},
-            {"name", attr.name},
-            {"slug", attr.slug},
+        mobJson["attributes"].push_back({{"slug", attr.slug},
             {"value", attr.value}});
     }
 

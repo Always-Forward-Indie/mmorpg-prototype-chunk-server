@@ -418,11 +418,9 @@ HarvestEventHandler::handleHarvestComplete(int playerId, int corpseId)
                 itemData["itemId"] = itemId;
                 itemData["itemSlug"] = itemInfo.slug;
                 itemData["quantity"] = quantity;
-                itemData["name"] = itemInfo.slug;
-                itemData["description"] = "";
                 itemData["rarityId"] = itemInfo.rarityId;
-                itemData["rarityName"] = itemInfo.rarityName;
-                itemData["itemType"] = itemInfo.itemTypeName;
+                itemData["itemType"] = itemInfo.itemTypeName; // S3: drop when DT_ItemTypeLocale lands
+                itemData["itemTypeSlug"] = itemInfo.itemTypeSlug;
                 itemData["weight"] = itemInfo.weight;
                 itemData["addedToInventory"] = false; // Изменили на false - лут не добавлен в инвентарь
                 itemData["isHarvestItem"] = itemInfo.isHarvest;
@@ -556,11 +554,9 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                     itemData["itemId"] = itemId;
                     itemData["itemSlug"] = itemInfo.slug;
                     itemData["quantity"] = quantity;
-                    itemData["name"] = itemInfo.slug;
-                    itemData["description"] = "";
                     itemData["rarityId"] = itemInfo.rarityId;
-                    itemData["rarityName"] = itemInfo.rarityName;
-                    itemData["itemType"] = itemInfo.itemTypeName;
+                    itemData["itemType"] = itemInfo.itemTypeName; // S3: drop when DT_ItemTypeLocale lands
+                    itemData["itemTypeSlug"] = itemInfo.itemTypeSlug;
                     itemData["weight"] = itemInfo.weight;
                     itemsArray.push_back(itemData);
                 }
@@ -575,11 +571,9 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
                     itemData["itemId"] = itemId;
                     itemData["itemSlug"] = itemInfo.slug;
                     itemData["quantity"] = quantity;
-                    itemData["name"] = itemInfo.slug;
-                    itemData["description"] = "";
                     itemData["rarityId"] = itemInfo.rarityId;
-                    itemData["rarityName"] = itemInfo.rarityName;
-                    itemData["itemType"] = itemInfo.itemTypeName;
+                    itemData["itemType"] = itemInfo.itemTypeName; // S3: drop when DT_ItemTypeLocale lands
+                    itemData["itemTypeSlug"] = itemInfo.itemTypeSlug;
                     itemData["weight"] = itemInfo.weight;
                     remainingLootArray.push_back(itemData);
                 }
@@ -807,11 +801,9 @@ HarvestEventHandler::handleCorpseLootInspect(const CorpseLootInspectRequestStruc
                 itemData["itemId"] = itemId;
                 itemData["itemSlug"] = itemInfo.slug;
                 itemData["quantity"] = quantity;
-                itemData["name"] = itemInfo.slug;
-                itemData["description"] = "";
                 itemData["rarityId"] = itemInfo.rarityId;
-                itemData["rarityName"] = itemInfo.rarityName;
-                itemData["itemType"] = itemInfo.itemTypeName;
+                itemData["itemType"] = itemInfo.itemTypeName; // S3: drop when DT_ItemTypeLocale lands
+                itemData["itemTypeSlug"] = itemInfo.itemTypeSlug;
                 itemData["weight"] = itemInfo.weight;
                 itemData["isHarvestItem"] = itemInfo.isHarvest;
                 lootArray.push_back(itemData);

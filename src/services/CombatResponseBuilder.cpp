@@ -23,14 +23,10 @@ CombatResponseBuilder::buildSkillInitiationBroadcast(const SkillInitiationResult
     body["casterId"] = result.casterId;
     body["targetId"] = result.targetId;
     body["targetType"] = static_cast<int>(result.targetType);
-    body["targetTypeString"] = getCombatTargetTypeString(result.targetType);
-    body["skillName"] = result.skillName;
     body["skillSlug"] = result.skillSlug;
     body["skillEffectType"] = result.skillEffectType;
     body["skillSchool"] = result.skillSchool;
     body["castTime"] = result.castTime;
-    body["animationName"] = result.animationName;
-    body["animationDuration"] = result.animationDuration;
     body["cooldownMs"] = result.cooldownMs;
     body["gcdMs"] = result.gcdMs;
     body["serverTimestamp"] = result.serverTimestamp;
@@ -44,12 +40,11 @@ CombatResponseBuilder::buildSkillInitiationBroadcast(const SkillInitiationResult
     // Определяем тип кастера
     int casterType = determineCharacterType(result.casterId);
     body["casterType"] = casterType;
-    body["casterTypeString"] = getCharacterTypeString(casterType);
 
     // Определяем тип события
     std::string eventType = determineEventType(result.skillEffectType);
     std::string messageType = result.success ? "success" : "error";
-    std::string message = result.success ? "Skill " + result.skillName + " initiated" : "Skill " + result.skillName + " initiation failed";
+    std::string message = result.success ? "Skill initiated" : "Skill initiation failed";
 
     return ResponseBuilder()
         .setHeader("message", message)
@@ -66,8 +61,6 @@ CombatResponseBuilder::buildSkillExecutionBroadcast(const SkillExecutionResult &
     body["casterId"] = result.casterId;
     body["targetId"] = result.targetId;
     body["targetType"] = static_cast<int>(result.targetType);
-    body["targetTypeString"] = getCombatTargetTypeString(result.targetType);
-    body["skillName"] = result.skillName;
     body["skillSlug"] = result.skillSlug;
     body["skillEffectType"] = result.skillEffectType;
     body["skillSchool"] = result.skillSchool;
@@ -105,11 +98,10 @@ CombatResponseBuilder::buildSkillExecutionBroadcast(const SkillExecutionResult &
     // Добавляем информацию о типе кастера
     int casterType = determineCharacterType(result.casterId);
     body["casterType"] = casterType;
-    body["casterTypeString"] = getCharacterTypeString(casterType);
 
     // Определяем тип события
     std::string eventType = determineEventType(result.skillEffectType);
-    std::string message = result.success ? "Skill " + result.skillName + " executed successfully" : "Skill " + result.skillName + " execution failed";
+    std::string message = result.success ? "Skill executed successfully" : "Skill execution failed";
 
     return ResponseBuilder()
         .setHeader("message", message)
@@ -124,7 +116,6 @@ CombatResponseBuilder::buildAoESkillExecutionBroadcast(const AoESkillExecutionRe
     nlohmann::json body;
     body["casterId"] = result.casterId;
     body["skillSlug"] = result.skillSlug;
-    body["skillName"] = result.skillName;
     body["skillEffectType"] = result.skillEffectType;
     body["skillSchool"] = result.skillSchool;
     body["serverTimestamp"] = result.serverTimestamp;
@@ -132,7 +123,6 @@ CombatResponseBuilder::buildAoESkillExecutionBroadcast(const AoESkillExecutionRe
 
     int casterType = determineCharacterType(result.casterId);
     body["casterType"] = casterType;
-    body["casterTypeString"] = getCharacterTypeString(casterType);
 
     nlohmann::json targetsArr = nlohmann::json::array();
     for (const auto &t : result.targets)
@@ -140,7 +130,6 @@ CombatResponseBuilder::buildAoESkillExecutionBroadcast(const AoESkillExecutionRe
         nlohmann::json entry;
         entry["targetId"] = t.targetId;
         entry["targetType"] = static_cast<int>(t.targetType);
-        entry["targetTypeString"] = getCombatTargetTypeString(t.targetType);
         entry["damage"] = t.damage;
         entry["isCritical"] = t.isCritical;
         entry["isBlocked"] = t.isBlocked;
@@ -193,50 +182,18 @@ CombatResponseBuilder::determineEventType(const std::string &skillEffectType)
 int
 CombatResponseBuilder::determineCharacterType(int characterId)
 {
-    // HIGH-8: no exceptions — managers return default structs (id==0) when not found
+    // HIGH-8: no exceptions — managers return default structs (id==0) when not found.
+    // Values match client ECasterType (Self=1, Player=2, Mob=3, Area=4, None=5, NPC=6):
+    // the client maps the int directly, no display strings on the wire.
     auto characterData = characterManager_.getCharacterData(characterId);
     if (characterData.characterId != 0)
-        return 1; // PLAYER
+        return 2; // Player
 
     auto mobData = mobInstanceManager_.getMobInstance(characterId);
     if (mobData.uid != 0)
-        return 2; // MOB
+        return 3; // Mob
 
-    return 0; // UNKNOWN
-}
-
-std::string
-CombatResponseBuilder::getCharacterTypeString(int characterType)
-{
-    switch (characterType)
-    {
-    case 1:
-        return "PLAYER";
-    case 2:
-        return "MOB";
-    default:
-        return "UNKNOWN";
-    }
-}
-
-std::string
-CombatResponseBuilder::getCombatTargetTypeString(CombatTargetType targetType)
-{
-    switch (targetType)
-    {
-    case CombatTargetType::SELF:
-        return "SELF";
-    case CombatTargetType::PLAYER:
-        return "PLAYER";
-    case CombatTargetType::MOB:
-        return "MOB";
-    case CombatTargetType::AREA:
-        return "AREA";
-    case CombatTargetType::NONE:
-        return "NONE";
-    default:
-        return "UNKNOWN";
-    }
+    return 0; // Invalid/unknown
 }
 
 nlohmann::json

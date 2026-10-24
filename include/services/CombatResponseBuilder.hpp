@@ -148,18 +148,9 @@ class CombatResponseBuilder
 
     /**
      * @brief Определить тип персонажа (игрок/моб)
+     * Значения совпадают с клиентским ECasterType (Player=2, Mob=3).
      */
     int determineCharacterType(int characterId);
-
-    /**
-     * @brief Получить строковое представление типа персонажа
-     */
-    std::string getCharacterTypeString(int characterType);
-
-    /**
-     * @brief Получить строковое представление типа цели
-     */
-    std::string getCombatTargetTypeString(CombatTargetType targetType);
 
     /**
      * @brief Определить тип события на основе эффекта скила

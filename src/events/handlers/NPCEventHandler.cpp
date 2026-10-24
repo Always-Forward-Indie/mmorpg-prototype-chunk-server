@@ -183,7 +183,6 @@ NPCEventHandler::convertNPCToSpawnJson(const NPCDataStruct &npc, int characterId
 
     nlohmann::json npcJson = {
         {"id", npc.id},
-        {"name", npc.name},
         {"slug", npc.slug},
         {"race", npc.raceName},
         {"level", npc.level},
@@ -195,12 +194,10 @@ NPCEventHandler::convertNPCToSpawnJson(const NPCDataStruct &npc, int characterId
         {"position", {{"x", npc.position.positionX}, {"y", npc.position.positionY}, {"z", npc.position.positionZ}, {"rotationZ", npc.position.rotationZ}}},
         {"attributes", nlohmann::json::array()}};
 
-    // Add attributes
+    // Attributes carry slug+value only (names resolve client-side via slug).
     for (const auto &attr : npc.attributes)
     {
-        npcJson["attributes"].push_back({{"id", attr.id},
-            {"name", attr.name},
-            {"slug", attr.slug},
+        npcJson["attributes"].push_back({{"slug", attr.slug},
             {"value", attr.value}});
     }
 
