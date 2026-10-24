@@ -364,8 +364,8 @@ ItemEventHandler::handleGetNearbyItemsEvent(const Event &event)
 nlohmann::json
 ItemEventHandler::droppedItemToJson(const DroppedItemStruct &droppedItem)
 {
-    // Get item info
-    ItemDataStruct itemInfo = gameServices_.getItemManager().getItemById(droppedItem.itemId);
+    // S2.2: id-only drops. Static template comes from the versioned itemCatalog
+    // the client cached at join; never re-sent per drop.
 
     // Calculate seconds remaining on reservation (0 if free for all)
     int64_t reservationSecondsLeft = 0;
@@ -389,8 +389,7 @@ ItemEventHandler::droppedItemToJson(const DroppedItemStruct &droppedItem)
         {"droppedByCharacterId", droppedItem.droppedByCharacterId},
         {"reservedForCharacterId", droppedItem.reservedForCharacterId},
         {"reservationSecondsLeft", reservationSecondsLeft},
-        {"position", {{"x", droppedItem.position.positionX}, {"y", droppedItem.position.positionY}, {"z", droppedItem.position.positionZ}, {"rotationZ", droppedItem.position.rotationZ}}},
-        {"item", itemToJson(itemInfo)}};
+        {"position", {{"x", droppedItem.position.positionX}, {"y", droppedItem.position.positionY}, {"z", droppedItem.position.positionZ}, {"rotationZ", droppedItem.position.rotationZ}}}};
 
     return droppedItemJson;
 }
