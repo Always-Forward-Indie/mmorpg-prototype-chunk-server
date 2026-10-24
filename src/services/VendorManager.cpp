@@ -101,11 +101,13 @@ VendorManager::buildShopJson(int npcId, float buyMarkupPct) const
                             ? slot.priceOverrideSell
                             : item.vendorPriceSell;
 
-        // S2.4 slim entry: vendor dynamics only. All statics (slug, type,
-        // rarity, flags, weight, slots, attrs, effects) resolve client-side
-        // from the versioned itemCatalog.
+        // S2.4 slim entry: vendor dynamics only. All statics (type, rarity,
+        // flags, weight, slots, attrs, effects) resolve client-side from the
+        // versioned itemCatalog. slug stays: entries must stay self-identifying
+        // (bots/tools/tests match by slug; itemIds are DB-autoincrement).
         nlohmann::json entry;
         entry["itemId"] = item.id;
+        entry["slug"] = item.slug;
         entry["priceBuy"] = priceBuy;
         entry["priceSell"] = priceSell;
         entry["stockCurrent"] = slot.stockCurrent;
