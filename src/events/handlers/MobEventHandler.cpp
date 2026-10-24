@@ -83,8 +83,6 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
             for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
             {
                 nlohmann::json response = ResponseBuilder()
-                                              .setHeader("message", "Spawning mobs success!")
-                                              .setHeader("hash", "")
                                               .setHeader("clientId", clientID)
                                               .setHeader("eventType", "spawnMobsInZone")
                                               .setTimestamps(timestamps)
@@ -136,8 +134,6 @@ MobEventHandler::sendCellMobsSnapshot(int clientId, float cx, float cy, float ha
         for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
         {
             nlohmann::json response = ResponseBuilder()
-                                          .setHeader("message", "Cell snapshot: mobs in area")
-                                          .setHeader("hash", "")
                                           .setHeader("clientId", clientId)
                                           .setHeader("eventType", "spawnMobsInZone")
                                           .setBody("zoneId", -1)
@@ -182,8 +178,6 @@ MobEventHandler::sendSpawnZonesToClient(int clientID, std::shared_ptr<boost::asi
         for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
         {
             nlohmann::json response = ResponseBuilder()
-                                          .setHeader("message", "Spawning mobs success!")
-                                          .setHeader("hash", "")
                                           .setHeader("clientId", clientID)
                                           .setHeader("eventType", "spawnMobsInZone")
                                           .setBody("zoneId", spawnZone.zoneId)
@@ -376,8 +370,6 @@ MobEventHandler::handleMobDeathEvent(const Event &event)
 
             // Build death notification response
             nlohmann::json response = ResponseBuilder()
-                                          .setHeader("message", "Mob died")
-                                          .setHeader("hash", "")
                                           .setHeader("eventType", "mobDeath")
                                           .setBody("mobUID", mobUID)
                                           .setBody("zoneId", zoneId)
@@ -427,8 +419,6 @@ MobEventHandler::handleMobTargetLostEvent(const Event &event)
 
             // Build target lost notification response
             nlohmann::json response = ResponseBuilder()
-                                          .setHeader("message", "Mob lost target")
-                                          .setHeader("hash", "")
                                           .setHeader("eventType", "mobTargetLost")
                                           .setBody("mobUID", mobUID)
                                           .setBody("mobId", mobId)
@@ -546,8 +536,6 @@ MobEventHandler::handleMobHealthUpdateEvent(const Event &event)
                                           "/" + std::to_string(maxHealth));
 
             nlohmann::json response = ResponseBuilder()
-                                          .setHeader("message", "Mob health updated")
-                                          .setHeader("hash", "")
                                           .setHeader("eventType", "mobHealthUpdate")
                                           .setBody("mobUID", mobUID)
                                           .setBody("mobId", mobId)
@@ -627,8 +615,6 @@ MobEventHandler::handleMobMoveUpdateEvent(const Event &event)
         for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
         {
             nlohmann::json response = ResponseBuilder()
-                                          .setHeader("message", "Mob movement update")
-                                          .setHeader("hash", "")
                                           .setHeader("clientId", clientID)
                                           .setHeader("eventType", "mobMoveUpdate")
                                           .setHeader("serverSendMs", TimestampUtils::getCurrentTimestampMs())

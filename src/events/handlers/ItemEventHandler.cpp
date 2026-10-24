@@ -102,8 +102,6 @@ ItemEventHandler::handleItemDropEvent(const Event &event)
             }
 
             nlohmann::json response = ResponseBuilder()
-                                          .setHeader("message", "Items dropped")
-                                          .setHeader("hash", "")
                                           .setHeader("eventType", "itemDrop")
                                           .setBody("droppedItems", droppedItemsArray)
                                           .build();
@@ -169,8 +167,6 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
 
                 // Notify clients that item was picked up
                 nlohmann::json response = ResponseBuilder()
-                                              .setHeader("message", "Item picked up")
-                                              .setHeader("hash", "")
                                               .setHeader("eventType", "itemPickup")
                                               .setBody("success", true)
                                               .setBody("characterId", pickupRequest.characterId)
@@ -280,7 +276,6 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                     if (clientSocket && clientSocket->is_open())
                     {
                         nlohmann::json removeMsg = ResponseBuilder()
-                                                       .setHeader("message", "success")
                                                        .setHeader("eventType", "itemRemove")
                                                        .setBody("uids", nlohmann::json::array({pickupRequest.droppedItemUID}))
                                                        .build();
@@ -1089,7 +1084,6 @@ ItemEventHandler::handleUseItemEvent(const Event &event)
             skillResult["success"] = true;
 
             nlohmann::json healResponse = ResponseBuilder()
-                                              .setHeader("message", "success")
                                               .setHeader("eventType", "healingResult")
                                               .setBody("skillResult", skillResult)
                                               .build();

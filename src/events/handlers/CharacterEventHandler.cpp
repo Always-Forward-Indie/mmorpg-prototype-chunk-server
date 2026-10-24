@@ -1001,8 +1001,6 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
 
             // Prepare and broadcast movement response
             nlohmann::json successResponse = ResponseBuilder()
-                                                 .setHeader("message", "Movement success for character!")
-                                                 .setHeader("hash", "")
                                                  .setHeader("clientId", clientID)
                                                  .setHeader("eventType", "moveCharacter")
                                                  .setTimestamps(timestamps)

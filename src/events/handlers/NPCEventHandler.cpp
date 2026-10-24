@@ -122,8 +122,6 @@ NPCEventHandler::sendNPCSpawnDataToClient(int clientId, const PositionStruct &pl
 
         // Build response message
         nlohmann::json response = ResponseBuilder()
-                                      .setHeader("message", "NPCs spawn data for area")
-                                      .setHeader("hash", "")
                                       .setHeader("clientId", clientId)
                                       .setHeader("eventType", "spawnNPCs")
                                       .setBody("npcsSpawn", npcsSpawnJson)
@@ -290,7 +288,6 @@ NPCEventHandler::sendAmbientPoolsToClient(int clientId, int characterId, const P
 
         nlohmann::json packet = ResponseBuilder()
                                     .setHeader("eventType", "NPC_AMBIENT_POOLS")
-                                    .setHeader("message", "success")
                                     .build();
         packet["body"]["npcs"] = std::move(pools);
 

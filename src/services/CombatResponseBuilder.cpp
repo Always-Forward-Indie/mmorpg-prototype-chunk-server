@@ -43,11 +43,8 @@ CombatResponseBuilder::buildSkillInitiationBroadcast(const SkillInitiationResult
 
     // Определяем тип события
     std::string eventType = determineEventType(result.skillEffectType);
-    std::string messageType = result.success ? "success" : "error";
-    std::string message = result.success ? "Skill initiated" : "Skill initiation failed";
 
     return ResponseBuilder()
-        .setHeader("message", message)
         .setHeader("eventType", eventType + "Initiation")
         .setBody("skillInitiation", body)
         .build();
@@ -101,10 +98,8 @@ CombatResponseBuilder::buildSkillExecutionBroadcast(const SkillExecutionResult &
 
     // Определяем тип события
     std::string eventType = determineEventType(result.skillEffectType);
-    std::string message = result.success ? "Skill executed successfully" : "Skill execution failed";
 
     return ResponseBuilder()
-        .setHeader("message", message)
         .setHeader("eventType", eventType + "Result")
         .setBody("skillResult", body)
         .build();
@@ -142,7 +137,6 @@ CombatResponseBuilder::buildAoESkillExecutionBroadcast(const AoESkillExecutionRe
 
     return ResponseBuilder()
         .setHeader("eventType", "combatAoeResult")
-        .setHeader("message", "AoE skill executed")
         .setBody("aoeResult", body)
         .build();
 }
