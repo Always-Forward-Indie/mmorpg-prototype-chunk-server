@@ -592,9 +592,10 @@ MobEventHandler::handleMobMoveUpdateEvent(const Event &event)
         nlohmann::json mobsArray = nlohmann::json::array();
         for (const auto &mob : movedMobs)
         {
+            // S4: wire positions rounded to 2 decimals (dead reckoning unaffected).
             nlohmann::json entry = {{"uid", mob.uid},
                 {"zoneId", mob.zoneId},
-                {"position", {{"x", mob.position.positionX}, {"y", mob.position.positionY}, {"z", mob.position.positionZ}, {"rotationZ", mob.position.rotationZ}}},
+                {"position", {{"x", wire::round2(mob.position.positionX)}, {"y", wire::round2(mob.position.positionY)}, {"z", wire::round2(mob.position.positionZ)}, {"rotationZ", wire::round2(mob.position.rotationZ)}}},
                 {"velocity", {{"dirX", mob.dirX}, {"dirY", mob.dirY}, {"speed", mob.speed}}},
                 {"combatState", mob.combatState},
                 {"stepTimestampMs", mob.stepTimestampMs}};

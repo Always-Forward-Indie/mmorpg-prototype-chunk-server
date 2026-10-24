@@ -19,6 +19,14 @@ namespace wire
 /// Max serialized bytes per emitted chunk (header room included).
 inline constexpr std::size_t kChunkBytes = 6 * 1024;
 
+/// Round a world coordinate for the wire (S4): 2 decimals = 0.01uu, far below
+/// visual/physics relevance, and trims ~2-4 chars per float at 10-20 Hz.
+/// Server keeps full precision internally; only the emission is rounded.
+inline double round2(double v)
+{
+    return std::round(v * 100.0) / 100.0;
+}
+
 /// Split a JSON array into chunks whose dumped size stays under maxBytes.
 /// Always returns >= 1 chunk (empty input yields one empty chunk, preserving
 /// the "empty list still sends" convention of the call sites). Order is

@@ -139,3 +139,13 @@ TEST(JsonChunking, OversizeSingleEntryStillGoesOutAlone)
     EXPECT_EQ(chunks[1].size(), 1u);
     EXPECT_EQ(chunks[1][0]["uid"], 2);
 }
+
+TEST(WireQuant, Round2TrimsWithoutDrift)
+{
+    EXPECT_DOUBLE_EQ(wire::round2(1234.56789), 1234.57);
+    EXPECT_DOUBLE_EQ(wire::round2(-2345.678), -2345.68);
+    EXPECT_DOUBLE_EQ(wire::round2(0.0), 0.0);
+    EXPECT_DOUBLE_EQ(wire::round2(90.0), 90.0);
+    // Serialized form stays short: no float dust past 2 decimals.
+    EXPECT_LT(nlohmann::json(wire::round2(4700.115)).dump().size(), 12u);
+}

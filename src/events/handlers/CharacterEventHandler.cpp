@@ -1025,10 +1025,11 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                 gameServices_.getLogger().logError("[Exploration] " + std::string(ex.what()));
             }
 
-            // Create minimal character data for response (only essential movement data)
+            // Create minimal character data for response (only essential movement data).
+            // S4: wire positions are rounded to 2 decimals (server keeps full precision).
             nlohmann::json characterJson = {
                 {"id", movementData.characterId},
-                {"position", {{"x", movementData.position.positionX}, {"y", movementData.position.positionY}, {"z", movementData.position.positionZ}, {"rotationZ", movementData.position.rotationZ}}},
+                {"position", {{"x", wire::round2(movementData.position.positionX)}, {"y", wire::round2(movementData.position.positionY)}, {"z", wire::round2(movementData.position.positionZ)}, {"rotationZ", wire::round2(movementData.position.rotationZ)}}},
                 {"isFalling", movementData.isFalling}};
 
             // Validate authentication
