@@ -258,6 +258,20 @@ EventDispatcher::handleJoinGameCharacter(const EventContext &context, std::share
     {
         // Register the socket in ClientManager for this client (in case it wasn't already registered)
         gameServices_.getClientManager().setClientSocket(context.clientData.clientId, validSocket);
+        // Additive S2.1: client reports its cached item stat catalog version.
+        // Absent/0 = unknown: join pushes the full itemCatalog.
+        try
+        {
+            nlohmann::json joinJson = wireJson(context);
+            const uint32_t catalogV = joinJson.value("body", nlohmann::json::object())
+                                          .value("itemCatalogVersion", (uint32_t)0);
+            gameServices_.getClientManager().setItemCatalogVersion(
+                context.clientData.clientId, catalogV);
+        }
+        catch (const std::exception &e)
+        {
+            log_->debug("[EventDispatcher] joinGameCharacter: itemCatalogVersion unreadable ({})", e.what());
+        }
         try
         {
             // Create event safely using in_place construction to avoid variant copying

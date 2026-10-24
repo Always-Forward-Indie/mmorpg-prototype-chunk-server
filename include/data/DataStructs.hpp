@@ -476,6 +476,9 @@ struct ClientDataStruct
     int characterId = 0;
     TimestampStruct timestamps; // Lag compensation timestamps
     bool isWorldReady = false;  // Set to true when client sends playerReady (scene loaded)
+    // Item stat catalog version the client reported in joinGameCharacter.
+    // 0 = unknown: server always pushes the full itemCatalog on join.
+    uint32_t itemCatalogVersion = 0;
 };
 
 /**

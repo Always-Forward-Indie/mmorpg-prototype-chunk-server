@@ -1,6 +1,7 @@
 #pragma once
 #include "data/DataStructs.hpp"
 #include "utils/Logger.hpp"
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <shared_mutex>
@@ -61,12 +62,25 @@ class ItemManager
      */
     std::vector<MobLootInfoStruct> getLootForMob(int mobId) const;
 
+    /**
+     * @brief Content version of the item stat catalog (FNV-1a over entries).
+     * 0 = not loaded yet. Clients cache the catalog per version and send it
+     * back in joinGameCharacter; mismatches trigger a fresh itemCatalog push.
+     */
+    uint32_t getCatalogVersion() const;
+
   private:
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
 
     // Store items in memory
     std::map<int, ItemDataStruct> items_;
+
+    // Catalog content version, recomputed on every setItemsList.
+    uint32_t catalogVersion_ = 0;
+
+    // Recompute catalogVersion_ from items_. Caller must hold itemsMutex_.
+    void recomputeCatalogVersion();
 
     // Store mob loot information (mobId -> vector of loot entries)
     std::map<int, std::vector<MobLootInfoStruct>> mobLootInfo_;

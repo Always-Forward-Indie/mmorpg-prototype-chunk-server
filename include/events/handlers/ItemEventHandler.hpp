@@ -63,6 +63,21 @@ class ItemEventHandler : public BaseEventHandler
     void handleGetNearbyItemsEvent(const Event &event);
 
     /**
+     * @brief Convert DroppedItemStruct to JSON
+     * @param droppedItem The dropped item data
+     * @return JSON representation
+     */
+    nlohmann::json droppedItemToJson(const DroppedItemStruct &droppedItem);
+
+    /**
+     * @brief Convert ItemDataStruct to JSON (public: reused by the join-time
+     * itemCatalog push in CharacterEventHandler; single source of truth).
+     * @param itemData The item data
+     * @return JSON representation
+     */
+    nlohmann::json itemToJson(const ItemDataStruct &itemData);
+
+    /**
      * @brief Handle mob loot generation event
      *
      * Generates loot when a mob dies
@@ -158,18 +173,4 @@ class ItemEventHandler : public BaseEventHandler
      * @return true if the item can be used (cooldown set), false if still on cooldown.
      */
     bool trySetItemCooldown(int characterId, int itemId, int cooldownSeconds);
-
-    /**
-     * @brief Convert DroppedItemStruct to JSON
-     * @param droppedItem The dropped item data
-     * @return JSON representation
-     */
-    nlohmann::json droppedItemToJson(const DroppedItemStruct &droppedItem);
-
-    /**
-     * @brief Convert ItemDataStruct to JSON
-     * @param itemData The item data
-     * @return JSON representation
-     */
-    nlohmann::json itemToJson(const ItemDataStruct &itemData);
 };

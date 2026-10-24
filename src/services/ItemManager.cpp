@@ -26,6 +26,8 @@ ItemManager::setItemsList(const std::vector<ItemDataStruct> &items)
             items_[item.id] = item;
         }
 
+        recomputeCatalogVersion();
+
         logger_.log("Loaded " + std::to_string(items_.size()) + " items from Game Server");
     }
     catch (const std::exception &e)
@@ -61,6 +63,79 @@ ItemManager::setMobLootInfo(const std::vector<MobLootInfoStruct> &mobLootInfo)
     {
         logger_.logError("Error loading mob loot: " + std::string(e.what()));
     }
+}
+
+uint32_t
+ItemManager::getCatalogVersion() const
+{
+    std::shared_lock<std::shared_mutex> lock(itemsMutex_);
+    return catalogVersion_;
+}
+
+void
+ItemManager::recomputeCatalogVersion()
+{
+    // FNV-1a 32-bit over gameplay-relevant fields (display *Name strings and
+    // DB row keys excluded on purpose: they never affect client behavior).
+    // items_ is a std::map: iteration order is stable across runs.
+    uint32_t h = 2166136261u;
+    auto mix = [&h](const std::string &s)
+    {
+        for (unsigned char c : s)
+        {
+            h ^= c;
+            h *= 16777619u;
+        }
+        h ^= '|';
+        h *= 16777619u;
+    };
+    for (const auto &[id, item] : items_)
+    {
+        mix(std::to_string(item.id));
+        mix(item.slug);
+        mix(std::to_string(item.isQuestItem));
+        mix(std::to_string(item.itemType));
+        mix(item.itemTypeSlug);
+        mix(std::to_string(item.isContainer));
+        mix(std::to_string(item.isDurable));
+        mix(std::to_string(item.isTradable));
+        mix(std::to_string(item.isEquippable));
+        mix(std::to_string(item.isHarvest));
+        mix(std::to_string(item.isUsable));
+        mix(std::to_string(item.weight));
+        mix(std::to_string(item.rarityId));
+        mix(item.raritySlug);
+        mix(std::to_string(item.stackMax));
+        mix(std::to_string(item.durabilityMax));
+        mix(std::to_string(item.vendorPriceBuy));
+        mix(std::to_string(item.vendorPriceSell));
+        mix(std::to_string(item.equipSlot));
+        mix(item.equipSlotSlug);
+        mix(std::to_string(item.levelRequirement));
+        mix(std::to_string(item.isTwoHanded));
+        for (int classId : item.allowedClassIds)
+            mix(std::to_string(classId));
+        mix(std::to_string(item.setId));
+        mix(item.setSlug);
+        for (const auto &attr : item.attributes)
+        {
+            mix(attr.slug);
+            mix(std::to_string(attr.value));
+            mix(attr.apply_on);
+        }
+        for (const auto &ue : item.useEffects)
+        {
+            mix(ue.effectSlug);
+            mix(ue.attributeSlug);
+            mix(std::to_string(ue.value));
+            mix(std::to_string(ue.isInstant));
+            mix(std::to_string(ue.durationSeconds));
+            mix(std::to_string(ue.tickMs));
+            mix(std::to_string(ue.cooldownSeconds));
+        }
+        mix(item.masterySlug);
+    }
+    catalogVersion_ = h;
 }
 
 std::map<int, ItemDataStruct>

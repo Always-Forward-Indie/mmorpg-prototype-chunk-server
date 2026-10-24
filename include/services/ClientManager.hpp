@@ -54,6 +54,10 @@ class ClientManager
     // Check if client has sent playerReady
     bool isClientWorldReady(int clientID) const;
 
+    // Item stat catalog version reported by the client in joinGameCharacter.
+    // 0 = unknown: join pushes the full itemCatalog.
+    void setItemCatalogVersion(int clientID, uint32_t version);
+
     // Get clients list
     std::vector<ClientDataStruct> getClientsList();
 

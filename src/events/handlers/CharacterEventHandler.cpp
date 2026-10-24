@@ -1,5 +1,6 @@
 #include "events/handlers/CharacterEventHandler.hpp"
 #include "events/EventData.hpp"
+#include "utils/JsonLineChunking.hpp"
 #include "events/handlers/EquipmentEventHandler.hpp"
 #include "events/handlers/HarvestEventHandler.hpp"
 #include "events/handlers/ItemEventHandler.hpp"
@@ -547,6 +548,44 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                 skillBarResponse["body"]["slots"] = slots;
                 std::string responseData = networkManager_.generateResponseMessage("success", skillBarResponse);
                 networkManager_.sendResponse(clientSocket, responseData);
+            }
+
+            // S2.1: push the item stat catalog when the client doesn't have
+            // the current version (0 = unknown: always push). Entries reuse
+            // the itemToJson shape; the client caches them by itemId so drops,
+            // inventory deltas and vendor lists can go id-only (S2.2+).
+            // Chunked per line: 60 templates exceed the 8KB framing cap.
+            {
+                const uint32_t serverCatalogV =
+                    gameServices_.getItemManager().getCatalogVersion();
+                const uint32_t clientCatalogV =
+                    gameServices_.getClientManager().getClientData(clientID).itemCatalogVersion;
+                if (serverCatalogV == 0 || clientCatalogV != serverCatalogV)
+                {
+                    nlohmann::json catalogArr = nlohmann::json::array();
+                    for (const auto &[id, item] : gameServices_.getItemManager().getItems())
+                    {
+                        nlohmann::json entry;
+                        entry["itemId"] = id;
+                        entry["item"] = itemEventHandler_ != nullptr
+                                            ? itemEventHandler_->itemToJson(item)
+                                            : nlohmann::json::object();
+                        catalogArr.push_back(std::move(entry));
+                    }
+                    for (const auto &catChunk : wire::chunkJsonArray(catalogArr))
+                    {
+                        nlohmann::json catResponse = ResponseBuilder()
+                                                         .setHeader("clientId", clientID)
+                                                         .setHeader("eventType", "itemCatalog")
+                                                         .setBody("version", serverCatalogV)
+                                                         .setBody("items", catChunk)
+                                                         .build();
+                        networkManager_.sendResponse(clientSocket,
+                            networkManager_.generateResponseMessage("success", catResponse));
+                    }
+                    log_->info("[CATALOG] itemCatalog v{} ({} entries) -> client {} (had v{})",
+                        serverCatalogV, catalogArr.size(), clientID, clientCatalogV);
+                }
             }
 
             // Notify client which game zone it is currently in

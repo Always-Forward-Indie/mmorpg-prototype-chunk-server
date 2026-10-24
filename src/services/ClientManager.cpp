@@ -208,6 +208,20 @@ ClientManager::isClientWorldReady(int clientID) const
     return false;
 }
 
+void
+ClientManager::setItemCatalogVersion(int clientID, uint32_t version)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    for (auto &client : clientsList_)
+    {
+        if (client.clientId == clientID)
+        {
+            client.itemCatalogVersion = version;
+            return;
+        }
+    }
+}
+
 // remove client by ID
 bool
 ClientManager::removeClientData(int clientID, uint64_t expectedGen)
