@@ -133,27 +133,10 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
         }
     }
 
-    // Send inventory update event to notify clients
-    if (eventQueue_)
+    // S2.3 delta: only the touched row travels; statics resolve client-side.
+    if (eventQueue_ && itemIt != playerInventories_[characterId].end())
     {
-        // Get updated inventory and convert to JSON (use direct access since we already have the lock)
-        nlohmann::json inventoryJson;
-        inventoryJson["characterId"] = characterId;
-        inventoryJson["items"] = nlohmann::json::array();
-
-        // Direct access to avoid recursive locking
-        auto it = playerInventories_.find(characterId);
-        if (it != playerInventories_.end())
-        {
-            for (const auto &item : it->second)
-            {
-                inventoryJson["items"].push_back(inventoryItemToJson(item));
-            }
-        }
-
-        Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
-        eventQueue_->push(std::move(inventoryUpdateEvent));
-        log_->info("[INVENTORY] Sent INVENTORY_UPDATE event for character " + std::to_string(characterId));
+        emitInventoryDelta(characterId, {*itemIt}, {});
     }
 
     // Release the write lock BEFORE calling into QuestManager.
@@ -224,19 +207,18 @@ InventoryManager::removeItemFromInventoryById(int characterId, int inventoryItem
         saveInventoryCallback_(savePacket.dump() + "\n");
     }
 
-    // Broadcast inventory update
+    // S2.3 delta: reduced row, or the erased id when qty hit 0.
+    PlayerInventoryItemStruct touchedRow;
+    const bool rowErased = (finalQty == 0);
+    if (!rowErased)
+        touchedRow = *itemIt;
     if (eventQueue_)
     {
-        nlohmann::json inventoryJson;
-        inventoryJson["characterId"] = characterId;
-        inventoryJson["items"] = nlohmann::json::array();
-        auto it2 = playerInventories_.find(characterId);
-        if (it2 != playerInventories_.end())
-            for (const auto &item : it2->second)
-                inventoryJson["items"].push_back(inventoryItemToJson(item));
-        Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
         lock.unlock();
-        eventQueue_->push(std::move(inventoryUpdateEvent));
+        if (rowErased)
+            emitInventoryDelta(characterId, {}, {inventoryItemId});
+        else
+            emitInventoryDelta(characterId, {touchedRow}, {});
     }
 
     log_->info("[INVENTORY] removeById: char=" + std::to_string(characterId) +
@@ -341,26 +323,27 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
         }
     }
 
-    // Send inventory update event to notify clients
+    // S2.3 delta: re-resolve touched stacks (erased ones go to removed).
     if (eventQueue_)
     {
-        // Get updated inventory and convert to JSON (use direct access since we already have the lock)
-        nlohmann::json inventoryJson;
-        inventoryJson["characterId"] = characterId;
-        inventoryJson["items"] = nlohmann::json::array();
-
-        // Direct access to avoid recursive locking
+        std::vector<PlayerInventoryItemStruct> changed;
+        std::vector<int64_t> removed;
         auto it = playerInventories_.find(characterId);
-        if (it != playerInventories_.end())
+        for (const auto &t : touched)
         {
-            for (const auto &item : it->second)
-            {
-                inventoryJson["items"].push_back(inventoryItemToJson(item));
-            }
+            bool found = false;
+            if (it != playerInventories_.end())
+                for (const auto &item : it->second)
+                    if (item.id == t.inventoryItemId)
+                    {
+                        changed.push_back(item);
+                        found = true;
+                        break;
+                    }
+            if (!found)
+                removed.push_back(t.inventoryItemId);
         }
-
-        Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
-        eventQueue_->push(std::move(inventoryUpdateEvent));
+        emitInventoryDelta(characterId, changed, removed);
         log_->info("[INVENTORY] Sent INVENTORY_UPDATE event for character " + std::to_string(characterId));
     }
 
@@ -519,6 +502,43 @@ InventoryManager::inventoryItemToJson(const PlayerInventoryItemStruct &item) con
     }
 
     return itemJson;
+}
+
+nlohmann::json
+InventoryManager::inventoryDeltaToJson(const PlayerInventoryItemStruct &item) const
+{
+    // S2.3 slim delta row: instance state only. Statics (slug, prices,
+    // attributes, effects) come from the client's versioned itemCatalog.
+    return {
+        {"id", item.id},
+        {"itemId", item.itemId},
+        {"quantity", item.quantity},
+        {"durabilityCurrent", item.durabilityCurrent},
+        {"isEquipped", item.isEquipped},
+        {"slotIndex", item.slotIndex},
+        {"killCount", item.killCount}};
+}
+
+void
+InventoryManager::emitInventoryDelta(int characterId,
+    const std::vector<PlayerInventoryItemStruct> &changed,
+    const std::vector<int64_t> &removedIds)
+{
+    if (!eventQueue_)
+        return;
+    nlohmann::json delta;
+    delta["characterId"] = characterId;
+    delta["changed"] = nlohmann::json::array();
+    for (const auto &item : changed)
+        delta["changed"].push_back(inventoryDeltaToJson(item));
+    delta["removed"] = nlohmann::json::array();
+    for (int64_t id : removedIds)
+        delta["removed"].push_back(id);
+    Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, delta);
+    eventQueue_->push(std::move(inventoryUpdateEvent));
+    log_->info("[INVENTORY] Sent delta update for character " + std::to_string(characterId) +
+               " (changed=" + std::to_string(changed.size()) +
+               " removed=" + std::to_string(removedIds.size()) + ")");
 }
 
 void
@@ -698,17 +718,11 @@ InventoryManager::addInstancedItemToInventory(int characterId, const PlayerInven
         inv.end());
     inv.push_back(inst);
 
-    // Broadcast updated inventory so client UI reflects the picked-up / traded item.
+    // S2.3 delta: the instanced row just added.
     if (eventQueue_)
     {
-        nlohmann::json inventoryJson;
-        inventoryJson["characterId"] = characterId;
-        inventoryJson["items"] = nlohmann::json::array();
-        for (const auto &item : inv)
-            inventoryJson["items"].push_back(inventoryItemToJson(item));
-        Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
+        emitInventoryDelta(characterId, {inst}, {});
         lock.unlock();
-        eventQueue_->push(std::move(inventoryUpdateEvent));
     }
 }
 
@@ -724,17 +738,11 @@ InventoryManager::evictFromMemory(int characterId, int inventoryItemId)
                   { return s.id == inventoryItemId; }),
         inv.end());
 
-    // Broadcast updated inventory to notify clients (no DB save)
+    // S2.3 delta: single erased row id.
     if (eventQueue_)
     {
-        nlohmann::json inventoryJson;
-        inventoryJson["characterId"] = characterId;
-        inventoryJson["items"] = nlohmann::json::array();
-        for (const auto &item : inv)
-            inventoryJson["items"].push_back(inventoryItemToJson(item));
-        Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
+        emitInventoryDelta(characterId, {}, {inventoryItemId});
         lock.unlock();
-        eventQueue_->push(std::move(inventoryUpdateEvent));
     }
 }
 
@@ -830,16 +838,18 @@ InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t new
     // Without this, the client retains the placeholder id=0 and equip/lookup
     // requests fail with ITEM_NOT_IN_INVENTORY because the server-side id no
     // longer matches what the client cached from the initial INVENTORY_UPDATE.
+    // S2.3 delta: only the newly-synced row.
     if (eventQueue_)
     {
-        nlohmann::json inventoryJson;
-        inventoryJson["characterId"] = characterId;
-        inventoryJson["items"] = nlohmann::json::array();
+        std::vector<PlayerInventoryItemStruct> changed;
         for (const auto &item : it->second)
-            inventoryJson["items"].push_back(inventoryItemToJson(item));
-        Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, inventoryJson);
+            if (item.itemId == itemId && item.id == static_cast<int>(newId))
+            {
+                changed.push_back(item);
+                break;
+            }
+        emitInventoryDelta(characterId, changed, {});
         lock.unlock();
-        eventQueue_->push(std::move(inventoryUpdateEvent));
     }
 }
 

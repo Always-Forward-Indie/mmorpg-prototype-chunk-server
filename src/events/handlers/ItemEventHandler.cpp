@@ -644,14 +644,14 @@ ItemEventHandler::handleInventoryUpdateEvent(const Event &event)
 
     auto clientData = gameServices_.getClientManager().getClientData(clientId);
 
-    // Use the same eventType the client already handles for inventory display.
-    // The client only processes "getPlayerInventory" responses to refresh its
-    // inventory panel — "inventoryUpdate" is silently ignored on the client side.
+    // S2.3: forward the delta as INVENTORY_UPDATE (the client's merge path:
+    // changed[] upserts by instance id, removed[] drops rows, gold refreshes).
+    // (The old comment about "inventoryUpdate" being ignored referred to a
+    // lowercase variant no one sends; "INVENTORY_UPDATE" is handled.)
     nlohmann::json response = ResponseBuilder()
-                                  .setHeader("message", "Inventory retrieved successfully!")
                                   .setHeader("hash", clientData.hash)
                                   .setHeader("clientId", clientId)
-                                  .setHeader("eventType", "getPlayerInventory")
+                                  .setHeader("eventType", "INVENTORY_UPDATE")
                                   .build();
     response["body"] = inventoryData;
     response["body"]["gold"] = gameServices_.getInventoryManager().getGoldAmount(characterId);

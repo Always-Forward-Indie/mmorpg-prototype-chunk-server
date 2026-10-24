@@ -89,6 +89,23 @@ class InventoryManager
     nlohmann::json inventoryItemToJson(const PlayerInventoryItemStruct &item) const;
 
     /**
+     * @brief Convert inventory row to a slim delta record (S2.3).
+     * Only instance state, no template: {id,itemId,quantity,durabilityCurrent,
+     * isEquipped,slotIndex,killCount}. The client resolves statics from its
+     * itemCatalog and merges by id.
+     */
+    nlohmann::json inventoryDeltaToJson(const PlayerInventoryItemStruct &item) const;
+
+    /**
+     * @brief Emit a delta update for the rows a mutation touched (S2.3).
+     * Replaces the old full-inventory snapshot push at every mutation site.
+     * @param removedIds inventory ids erased (qty hit 0); client drops them.
+     */
+    void emitInventoryDelta(int characterId,
+        const std::vector<PlayerInventoryItemStruct> &changed,
+        const std::vector<int64_t> &removedIds);
+
+    /**
      * @brief Set callback for immediately persisting inventory changes to game server DB
      * @param callback Function that sends serialized packet to game server
      */
