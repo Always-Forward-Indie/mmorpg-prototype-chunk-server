@@ -68,6 +68,8 @@
 | `reloadWorldContent` | `characterId` (любой загруженный: uniformity гейта) | Перезагрузка мирового контента БЕЗ рестартов: чанк просит game перепушить срезы NPC/vendors/world-objects/dialogues/quests/timed по живому линку (`requestCatalogReload`); чанк мержит как при реконнекте (вендоры/WIO/квесты — замена, timed — merge-by-slug, спавн-зоны — с preserve рантайма). Ответ `accepted` сразу; готовность — поллингом контента (пуши асинхронны). Только между тестами: рантайм-стоки вендоров и эфемерные WIO-состояния сбрасываются к контенту. Зеркало: харнес матчит ответы по паре `(op, requestId)` — op-only матчинг однажды вернул stale-успех (см. интеграционную 12-ю спеку) |
 | `banUser` | `characterId`, `reason` (обязательно), `expiresAt` (ISO, пусто = навсегда) | Бан аккаунта-владельца с причиной (`user_bans`; вход показывает причину+срок). Синхронно с bounded-ожиданием факта (ответ `ack: applied/duplicate`, иначе `game_timeout`). Пин: `test_ban.py` |
 | `unbanUser` | `characterId` | Снятие активных банов (`is_active=false`). Тот же sync-путь. Пин: `test_ban.py` |
+| `wireStats` | `characterId` (любой загруженный: uniformity гейта; статистика серверная, не пер-персонажная) | Счётчики транспортного фрейминга (ишьюсы #121/#122): `oversizeSeen`, `fragStreams`, `fragFrames`, `oversizeByEvent{eventType: n}`. Пин: `contracts/test_wire_frag.py` |
+| `resetQuest` | `characterId`, `questSlug` | Сброс квеста (ишью #120): стирает in-memory прогресс (квест снова можно принять с учётом `repeatable`) + шлёт `deletePlayerQuest` на game-server (удаление строки БД — иначе реjoin подтянет `turned_in` обратно). Ответ: `questId`, `accepted:true`; `unknown_quest` при левом слаге |
 
 ## 12.3. `brief` join (быстрый вход для teleport-flow тестов)
 

@@ -688,6 +688,6 @@ cost = ceil(100.0 × 30 / 50) = ceil(60.0) = 60 gold
 |-------------|---------|----------|
 | `economy.vendor_buy_markup_pct` | 0.0 | Наценка на покупку (%) |
 | `economy.vendor_sell_tax_pct` | 0.0 | Налог на продажу (%) |
-| `economy.trade_range` | 5.0 | Дистанция P2P торговли |
+| `economy.trade_range` | 500.0 | Дистанция P2P торговли (мировые единицы; 100 ед. = 1 м, т.е. 500 = 5 м) |
 | `reputation.vendor_discount_threshold` | 200 | Порог репутации для скидки |
 | `reputation.vendor_discount_pct` | 0.05 | Скидка (5%) |

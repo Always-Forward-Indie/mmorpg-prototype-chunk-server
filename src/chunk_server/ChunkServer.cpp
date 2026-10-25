@@ -1188,6 +1188,23 @@ ChunkServer::mainEventLoopCH()
             {
                 if (character.characterId <= 0)
                     continue;
+                // Issue #119: never persist ghost sessions. A dead socket's
+                // in-memory position is frozen; saving it every 30 s would
+                // clobber newer external writes (operator-placed spawns) and
+                // give the illusion of a live session. The single farewell
+                // save happens once in the disconnect teardown.
+                bool socketAlive = false;
+                {
+                    const auto owner =
+                        gameServices_.getClientManager().getClientDataByCharacterId(character.characterId);
+                    if (owner.clientId > 0)
+                    {
+                        auto sock = gameServices_.getClientManager().getClientSocket(owner.clientId);
+                        socketAlive = (sock && sock->is_open());
+                    }
+                }
+                if (!socketAlive)
+                    continue;
 
                 nlohmann::json entry;
                 entry["characterId"] = character.characterId;

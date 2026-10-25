@@ -54,9 +54,16 @@ class ClientManager
     // Check if client has sent playerReady
     bool isClientWorldReady(int clientID) const;
 
+    // Transport fragmentation support (wireFrag reassembly, issues #121/#122).
+    // Set from the additive playerReady body flag; absent = legacy behavior.
+    void setClientFragCapable(int clientID, bool capable);
+
     // Item stat catalog version reported by the client in joinGameCharacter.
     // 0 = unknown: join pushes the full itemCatalog.
     void setItemCatalogVersion(int clientID, uint32_t version);
+
+    // Check if client reassembles wireFrag frames
+    bool isClientFragCapable(int clientID) const;
 
     // Get clients list
     std::vector<ClientDataStruct> getClientsList();

@@ -886,7 +886,7 @@ VendorEventHandler::handleTradeRequestEvent(const Event &event)
         // Lookup order matches the old inline checks; getClientSocket(0) for
         // a missing target safely yields nullptr.
         const auto &targetChar = gameServices_.getCharacterManager().getCharacterData(req.targetCharacterId);
-        float tradeRange = gameServices_.getGameConfigService().getFloat("economy.trade_range", 5.0f);
+        float tradeRange = gameServices_.getGameConfigService().getFloat("economy.trade_range", 500.0f);
         auto targetSocket = gameServices_.getClientManager().getClientSocket(targetChar.clientId);
         const TradeRequestValidator::Input vargs{
             isPlayerAlive(req.characterId),

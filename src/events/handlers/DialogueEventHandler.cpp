@@ -112,8 +112,27 @@ DialogueEventHandler::handleSetPlayerQuestsEvent(const Event &event)
         }
 
         const auto &quests = std::get<std::vector<PlayerQuestProgressStruct>>(data);
+        // Empty list is a valid reset (issue #120): the game server filters
+        // turned_in/failed rows, and regression wipes the table outright.
+        // The old early-return kept stale in-memory turned_in forever, so
+        // the quest could never be accepted again without a chunk restart.
+        // characterId is unattainable from an empty vector — resolve it via
+        // the requesting client instead.
         if (quests.empty())
+        {
+            const int eventClientId = event.getClientID();
+            const int resolvedCharId =
+                gameServices_.getClientManager().getClientData(eventClientId).characterId;
+            if (resolvedCharId <= 0)
+            {
+                log_->error("[DialogueEventHandler] SET_PLAYER_QUESTS: empty list and unresolvable character");
+                return;
+            }
+            gameServices_.getQuestManager().loadPlayerQuests(resolvedCharId, quests);
+            gameServices_.getLogger().log("[DialogueEventHandler] Cleared quests for character " +
+                                          std::to_string(resolvedCharId) + " (empty progress list)");
             return;
+        }
 
         int characterId = quests[0].characterId;
         gameServices_.getQuestManager().loadPlayerQuests(characterId, quests);

@@ -86,6 +86,15 @@ class QuestManager
     bool failQuest(int characterId, const std::string &questSlug);
 
     /**
+     * @brief Admin reset of one quest (issue #120): erase in-memory progress
+     * so the quest can be accepted again (subject to content repeatable flag
+     * at offer time). The caller must also delete the DB row (the dispatcher
+     * sends deletePlayerQuest to the game server).
+     * @return questId (>0) when the quest slug is known, 0 otherwise.
+     */
+    int resetQuest(int characterId, const std::string &questSlug);
+
+    /**
      * @brief Manually advance quest step by slug (from action group).
      */
     void advanceQuestStepBySlug(int characterId, const std::string &questSlug);

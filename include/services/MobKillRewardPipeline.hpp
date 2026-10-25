@@ -22,6 +22,7 @@ class ClientManager;
 class BestiaryManager;
 class ChampionManager;
 class ReputationManager;
+struct MobDataStruct;
 
 /**
  * @brief Mob-kill reward flow (Increment 10.3).
@@ -99,10 +100,10 @@ class MobKillRewardPipeline
     AnalyticsFn analyticsCallback_;
     SaveKillCountFn saveKillCountCallback_;
 
-    void grantProportionalXp(int mobId, int killerId);
-    void grantFellowshipBonus(int mobId, int killerId);
+    void grantProportionalXp(const MobDataStruct &mobData, int mobId, int killerId);
+    void grantFellowshipBonus(const MobDataStruct &mobData, int mobId, int killerId);
     void trackItemSoul(int killerId);
-    void fireKillHooks(int mobId, int killerId);
+    void fireKillHooks(const MobDataStruct &mobData, int mobId, int killerId);
 
     /// level_up analytics for one participant (session-gated, never throws).
     void sendLevelUpAnalytics(int characterId, int newLevel, int oldLevel);

@@ -1,6 +1,7 @@
 #include "network/NetworkManager.hpp"
 #include "events/EventDispatcher.hpp"
 #include "handlers/MessageHandler.hpp"
+#include "utils/JsonLineChunking.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <netinet/tcp.h>
 #include <spdlog/logger.h>
@@ -273,6 +274,10 @@ NetworkManager::enqueueWrite(std::shared_ptr<boost::asio::ip::tcp::socket> socke
     // producing snapshot holes. Threshold 6KB leaves headroom for the
     // trailing delimiter, header growth and multi-byte UTF-8.
     constexpr size_t kClientLineCapWarnBytes = 6 * 1024;
+    // Transport fragmentation (issues #121/#122): peers that advertised the
+    // additive playerReady "frag" flag get oversize messages as wireFrag
+    // frames and reassemble them; legacy peers keep the old behavior.
+    std::vector<std::shared_ptr<const std::string>> payloads;
     if (data && data->size() > kClientLineCapWarnBytes)
     {
         std::string eventType = "?";
@@ -285,23 +290,75 @@ NetworkManager::enqueueWrite(std::shared_ptr<boost::asio::ip::tcp::socket> socke
             if (end != std::string::npos)
                 eventType = data->substr(begin, end - begin);
         }
-        log_->warn("Oversized packet for client wire ({} bytes, eventType={}): exceeds UE 8KB line cap — chunk the array payload",
-            data->size(), eventType);
+        ++oversizeSeen_;
+        {
+            std::lock_guard<std::mutex> lock(oversizeByEventMutex_);
+            ++oversizeByEvent_[eventType];
+        }
+
+        const int fragClientId = gameServices_.getClientManager().getClientIdBySocket(socket);
+        if (fragClientId > 0 && gameServices_.getClientManager().isClientFragCapable(fragClientId))
+        {
+            std::string logical = *data;
+            if (!logical.empty() && logical.back() == '\n')
+                logical.pop_back();
+            auto frames = wire::packWireMessage(logical, nextFragStreamId_++);
+            if (!frames.empty())
+            {
+                ++fragStreams_;
+                payloads.reserve(frames.size());
+                for (auto &f : frames)
+                {
+                    ++fragFrames_;
+                    payloads.push_back(std::make_shared<const std::string>(std::move(f)));
+                }
+                log_->info("Fragmented oversize packet for client wire ({} bytes, eventType={}, {} frames, clientId={})",
+                    data->size(), eventType, payloads.size(), fragClientId);
+            }
+            else
+            {
+                log_->error("Logical message exceeds {} bytes (eventType={}) — over sanity cap, sending whole (legacy)",
+                    wire::kMaxLogicalBytes, eventType);
+            }
+        }
+        if (payloads.empty())
+        {
+            log_->warn("Oversized packet for client wire ({} bytes, eventType={}): exceeds UE 8KB line cap — chunk the array payload",
+                data->size(), eventType);
+        }
     }
 
+    if (payloads.empty() && data)
+        payloads.push_back(data);
+
     auto queue = getOrCreateWriteQueue(socket);
-    if (!queue)
+    if (!queue || payloads.empty())
         return;
     boost::asio::post(queue->strand,
-        [this, socket = std::move(socket), queue, data = std::move(data), critical]() mutable
+        [this, socket = std::move(socket), queue, payloads = std::move(payloads), critical]() mutable
         {
-            if (critical)
-                queue->criticalQ.push_back(std::move(data));
-            else
-                queue->bulkQ.push_back(std::move(data));
+            for (auto &p : payloads)
+            {
+                if (critical)
+                    queue->criticalQ.push_back(p);
+                else
+                    queue->bulkQ.push_back(p);
+            }
             if (!queue->writing)
                 doNextWrite(std::move(socket), std::move(queue));
         });
+}
+
+NetworkManager::WireStats
+NetworkManager::wireStats() const
+{
+    WireStats s;
+    s.oversizeSeen = oversizeSeen_.load();
+    s.fragStreams = fragStreams_.load();
+    s.fragFrames = fragFrames_.load();
+    std::lock_guard<std::mutex> lock(oversizeByEventMutex_);
+    s.byEvent = oversizeByEvent_;
+    return s;
 }
 
 void

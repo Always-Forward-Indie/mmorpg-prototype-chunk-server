@@ -126,6 +126,21 @@ QuestManager::failQuest(int characterId, const std::string &questSlug)
     return store_.failQuest(characterId, questSlug);
 }
 
+int
+QuestManager::resetQuest(int characterId, const std::string &questSlug)
+{
+    const QuestStruct *quest = store_.getQuestBySlug(questSlug);
+    if (!quest)
+    {
+        log_->error("[QuestManager] resetQuest: unknown quest slug '" + questSlug + "'");
+        return 0;
+    }
+    const bool hadRow = store_.resetQuestProgress(characterId, quest->id);
+    log_->warn("[QuestManager] resetQuest: char={} quest='{}' (id={}) hadRow={} — caller must delete the DB row",
+        characterId, questSlug, quest->id, hadRow);
+    return quest->id;
+}
+
 void
 QuestManager::advanceQuestStepBySlug(int characterId, const std::string &questSlug)
 {

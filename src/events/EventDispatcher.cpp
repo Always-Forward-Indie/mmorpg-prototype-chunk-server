@@ -1009,7 +1009,7 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
 
         // Build response packet
         nlohmann::json response;
-        response["header"]["event"] = "characterExperience";
+        response["header"]["eventType"] = "characterExperience";
         response["header"]["status"] = "success";
         response["header"]["timestamp"] = context.timestamps.serverSendMs;
         response["header"]["requestId"] = context.timestamps.requestId;
@@ -1042,7 +1042,7 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
         // frame = use-after-free, and concurrent writes would interleave.)
         if (socket && socket->is_open() && chunkServer_)
         {
-            auto responseData = std::make_shared<const std::string>(response.dump());
+            auto responseData = std::make_shared<const std::string>(response.dump() + "\n");
             chunkServer_->getNetworkManager().sendResponse(socket, responseData);
         }
 
@@ -1055,7 +1055,7 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
 
         // Send error response
         nlohmann::json errorResponse;
-        errorResponse["header"]["event"] = "characterExperience";
+        errorResponse["header"]["eventType"] = "characterExperience";
         errorResponse["header"]["status"] = "error";
         errorResponse["header"]["message"] = std::string(e.what());
         errorResponse["header"]["timestamp"] = context.timestamps.serverSendMs;
@@ -1063,7 +1063,7 @@ EventDispatcher::handleGetCharacterExperience(const EventContext &context, std::
 
         if (socket && socket->is_open() && chunkServer_)
         {
-            auto errorData = std::make_shared<const std::string>(errorResponse.dump());
+            auto errorData = std::make_shared<const std::string>(errorResponse.dump() + "\n");
             chunkServer_->getNetworkManager().sendResponse(socket, errorData);
         }
     }
@@ -1869,6 +1869,16 @@ EventDispatcher::handlePlayerReady(const EventContext &context,
         charData.briefJoin = context.json["body"]["brief"].get<bool>();
     }
 
+    // Transport fragmentation support (wireFrag, issues #121/#122):
+    // additive body flag, absent = legacy behavior (oversize sent whole).
+    charData.fragCapable = false;
+    if (context.json.is_object() && context.json.contains("body") &&
+        context.json["body"].is_object() && context.json["body"].contains("frag") &&
+        context.json["body"]["frag"].is_boolean())
+    {
+        charData.fragCapable = context.json["body"]["frag"].get<bool>();
+    }
+
     eventsBatch_.push_back(Event(Event::PLAYER_READY,
         context.clientData.clientId,
         charData,
@@ -2263,6 +2273,47 @@ EventDispatcher::handleAdminCommand(const EventContext &context, std::shared_ptr
             flags.push_back(fj);
         }
         out["flags"] = flags;
+    }
+    else if (op == "wireStats")
+    {
+        // Transport framing counters (issues #121/#122 observability).
+        // Stats are server-wide; the targetId gate above just needs any
+        // live character (callers pass their own).
+        const auto ws = chunkServer_->getNetworkManager().wireStats();
+        out["oversizeSeen"] = ws.oversizeSeen;
+        out["fragStreams"] = ws.fragStreams;
+        out["fragFrames"] = ws.fragFrames;
+        nlohmann::json byEv = nlohmann::json::object();
+        for (const auto &[ev, n] : ws.byEvent)
+            byEv[ev] = n;
+        out["oversizeByEvent"] = std::move(byEv);
+    }
+    else if (op == "resetQuest")
+    {
+        // Admin quest reset (issue #120): erase in-memory progress so the
+        // quest can be accepted again, and delete the DB row via the game
+        // server (a rejoin would otherwise reload turned_in from the DB).
+        const std::string slug = body.value("questSlug", std::string{});
+        if (slug.empty())
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        const int questId = gameServices_.getQuestManager().resetQuest(targetId, slug);
+        if (questId <= 0)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "unknown_quest");
+            return;
+        }
+        nlohmann::json pkt;
+        pkt["header"]["eventType"] = "deletePlayerQuest";
+        pkt["header"]["clientId"] = 0;
+        pkt["header"]["hash"] = "";
+        pkt["body"]["characterId"] = targetId;
+        pkt["body"]["questId"] = questId;
+        chunkServer_->sendToGameServer(pkt.dump() + "\n");
+        out["questId"] = questId;
+        out["accepted"] = true;
     }
     else if (op == "grantXP")
     {

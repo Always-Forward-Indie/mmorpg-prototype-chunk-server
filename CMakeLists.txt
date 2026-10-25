@@ -241,6 +241,7 @@ set(HEADER_FILES
     include/utils/TerminalColors.hpp
     include/utils/Config.hpp
     include/utils/ProtocolLimits.hpp
+    include/utils/JsonLineChunking.hpp
     include/utils/TimeUtils.hpp
     include/utils/TimestampUtils.hpp
     include/utils/SpawnGeometry.hpp

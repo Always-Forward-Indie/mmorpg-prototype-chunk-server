@@ -60,6 +60,11 @@ class QuestStore
     void loadPlayerQuests(int characterId,
         const std::vector<PlayerQuestProgressStruct> &quests);
     void unloadPlayerQuests(int characterId);
+    /**
+     * @brief Erase one quest's progress row (admin resetQuest, issue #120).
+     * @return true when a row existed and was removed.
+     */
+    bool resetQuestProgress(int characterId, int questId);
     void fillQuestContext(int characterId, PlayerContextStruct &ctx) const;
     std::string getQuestStateBySlug(int characterId, const std::string &questSlug) const;
     /**

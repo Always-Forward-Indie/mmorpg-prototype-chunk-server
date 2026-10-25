@@ -140,6 +140,148 @@ TEST(JsonChunking, OversizeSingleEntryStillGoesOutAlone)
     EXPECT_EQ(chunks[1][0]["uid"], 2);
 }
 
+// ─── Transport fragmentation (issues #121/#122) ─────────────────────────────
+
+TEST(WireFrag, BudgetUnderWireCap)
+{
+    EXPECT_LT(wire::kFragPayloadBudget, protocol::kMaxMessageBytes);
+    EXPECT_LE(wire::kFragPayloadBudget + 1024u, protocol::kMaxMessageBytes);
+}
+
+TEST(WireFrag, SmallMessageStaysWhole)
+{
+    const std::string msg = R"({"header":{"eventType":"getPlayerInventory"},"body":{"gold":5}})";
+    auto lines = wire::packWireMessage(msg, 1);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(lines[0], msg + "\n");
+    EXPECT_LT(lines[0].size(), protocol::kMaxMessageBytes);
+}
+
+TEST(WireFrag, OversizeSplitsIntoFramesUnderCap)
+{
+    // 20KB logical message (fat inventory shape) must come out as small
+    // '\n'-terminated lines, each parseable and under the client cap.
+    const std::string msg(20 * 1024, 'y');
+    auto lines = wire::packWireMessage(msg, 42);
+    ASSERT_GT(lines.size(), 1u);
+    for (size_t i = 0; i < lines.size(); ++i)
+    {
+        EXPECT_LT(lines[i].size(), protocol::kMaxMessageBytes);
+        EXPECT_EQ(lines[i].back(), '\n');
+        auto frame = nlohmann::json::parse(lines[i]);
+        EXPECT_EQ(frame["header"]["eventType"], wire::kFragEventType);
+        EXPECT_EQ(frame["body"]["streamId"], 42u);
+        EXPECT_EQ(frame["body"]["index"], i);
+        EXPECT_EQ(frame["body"]["total"], lines.size());
+    }
+    // Byte-exact roundtrip through concatenation.
+    std::string glued;
+    for (const auto &ln : lines)
+        glued += nlohmann::json::parse(ln)["body"]["payload"].get<std::string>();
+    EXPECT_EQ(glued, msg);
+}
+
+TEST(WireFrag, Utf8SplitAcrossFramesRoundtrips)
+{
+    // Payloads are substrings of the ENCODED string; splitting mid-codepoint
+    // is safe because parsing happens after concatenation.
+    std::string msg;
+    for (int i = 0; i < 3000; ++i)
+        msg += "лис"; // 2 x 2-byte codepoints per unit
+    auto lines = wire::packWireMessage(msg, 7);
+    ASSERT_GT(lines.size(), 1u);
+    std::string glued;
+    for (const auto &ln : lines)
+        glued += nlohmann::json::parse(ln)["body"]["payload"].get<std::string>();
+    EXPECT_EQ(glued, msg);
+}
+
+TEST(WireFrag, OverSanityCapRefused)
+{
+    const std::string msg(wire::kMaxLogicalBytes + 1, 'z');
+    EXPECT_TRUE(wire::packWireMessage(msg, 9).empty());
+}
+
+TEST(WireFrag, ReassemblerInOrderAndOutOfOrder)
+{
+    const std::string msg(20 * 1024, 'q');
+    auto lines = wire::packWireMessage(msg, 100);
+    ASSERT_GT(lines.size(), 1u);
+
+    // In order.
+    wire::FragReassembler r1;
+    wire::FragReassembler::FeedResult last;
+    for (const auto &ln : lines)
+    {
+        auto f = nlohmann::json::parse(ln);
+        last = r1.feed(f["body"]["streamId"], f["body"]["index"], f["body"]["total"],
+            f["body"]["payload"].get<std::string>());
+    }
+    EXPECT_TRUE(last.complete);
+    EXPECT_EQ(last.message, msg);
+
+    // Reversed + duplicate first frame.
+    wire::FragReassembler r2;
+    for (auto it = lines.rbegin(); it != lines.rend(); ++it)
+    {
+        auto f = nlohmann::json::parse(*it);
+        last = r2.feed(f["body"]["streamId"], f["body"]["index"], f["body"]["total"],
+            f["body"]["payload"].get<std::string>());
+    }
+    EXPECT_TRUE(last.complete);
+    {
+        auto f = nlohmann::json::parse(lines[0]);
+        last = r2.feed(f["body"]["streamId"], f["body"]["index"], f["body"]["total"],
+            f["body"]["payload"].get<std::string>());
+    }
+    // A retransmitted frame after completion opens a fresh incomplete stream
+    // (no completion, cleaned by reapIdle) — duplicates never fabricate data.
+    EXPECT_FALSE(last.complete);
+    EXPECT_EQ(r2.pendingStreams(), 1u);
+    r2.reapIdle(std::chrono::seconds(0));
+    EXPECT_EQ(r2.pendingStreams(), 0u);
+}
+
+TEST(WireFrag, ReassemblerRejectsMalformed)
+{
+    wire::FragReassembler r;
+    // total 0
+    auto d = r.feed(1, 0, 0, "x");
+    EXPECT_TRUE(d.dropped);
+    // index out of range
+    d = r.feed(2, 5, 3, "x");
+    EXPECT_TRUE(d.dropped);
+    // mismatched total mid-stream resets
+    d = r.feed(3, 0, 2, "ab");
+    EXPECT_FALSE(d.complete);
+    EXPECT_EQ(r.pendingStreams(), 1u);
+    d = r.feed(3, 1, 3, "c");
+    EXPECT_TRUE(d.dropped);
+    EXPECT_EQ(r.pendingStreams(), 0u);
+    // valid two-frame stream still completes afterwards
+    d = r.feed(4, 1, 2, "CD");
+    EXPECT_FALSE(d.complete);
+    d = r.feed(4, 0, 2, "AB");
+    EXPECT_TRUE(d.complete);
+    EXPECT_EQ(d.message, "ABCD");
+}
+
+TEST(WireFrag, ReassemblerStreamCapAndReap)
+{
+    wire::FragReassembler r;
+    for (std::uint64_t s = 1; s <= wire::kMaxReassemblyStreams + 2; ++s)
+    {
+        auto d = r.feed(s, 0, 2, "a");
+        if (s <= wire::kMaxReassemblyStreams)
+            EXPECT_FALSE(d.dropped) << s;
+        else
+            EXPECT_TRUE(d.dropped) << s;
+    }
+    EXPECT_EQ(r.pendingStreams(), wire::kMaxReassemblyStreams);
+    r.reapIdle(std::chrono::seconds(0));
+    EXPECT_EQ(r.pendingStreams(), 0u);
+}
+
 TEST(WireQuant, Round2TrimsWithoutDrift)
 {
     EXPECT_DOUBLE_EQ(wire::round2(1234.56789), 1234.57);

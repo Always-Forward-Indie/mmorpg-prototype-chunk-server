@@ -1,3 +1,72 @@
+v0.2.61
+25.10.2026
+================
+
+New:
+
+**Transport fragmentation wireFrag (Phase 1, issues #121/#122).**
+- Класс-фикс вместо точечного чанкинга: `NetworkManager::enqueueWrite`
+  режет любое oversize-сообщение (> 6 КБ) на `wireFrag`-кадры
+  (`wire::packWireMessage`), получатель собирает по `streamId`
+  (`wire::FragReassembler`, out-of-order/дубли ок) и отдаёт наверх
+  исходный JSON. Игровая логика фрагментов не видит.
+- Лимиты: кадр ~6 КБ, посылка ≤ 1 МБ, ≤ 16 стримов/соединение, reap 30 с.
+  Capability — аддитивный `body.frag=true` в `playerReady`; без него —
+  легаси-поведение (oversize целиком + warn). Эталон тройной:
+  C++ `JsonLineChunking.hpp` / Python `mmo_proto.FragReassembler` / UE
+  `FNetFraming`. Юниты в `test_json_chunking.cpp`, e2e —
+  `test_wire_frag.py`. Наблюдаемость: ADMIN `wireStats`
+  (`oversizeSeen/fragStreams/fragFrames/oversizeByEvent`).
+- Дефолт `trade_range` в коде 5.0 -> 500.0 (мир. единицы, см. login 109);
+  доки `06`: `economy.trade_range` = 500.0.
+
+**Admin quest reset (`resetQuest`, issue #120).**
+- `QuestStore::resetQuestProgress` + `QuestManager::resetQuest`: чистка
+  in-memory прогресса + отправка `deletePlayerQuest` в game-сервер
+  (иначе реjoin перечитывал `turned_in` из БД).
+- `SET_PLAYER_QUESTS` с пустым списком — валидный ресет (characterId
+  резолвится через клиента); раньше early-return вечно держал stale
+  `turned_in` до рестарта чанка.
+
+Fixes:
+
+**Ghost-session saves (issue #119).**
+- Периодический сейвер (30 с) и `evictStaleSession` больше не персистят
+  позицию/HP мёртвого сокета: farewell-сейв только для живого дубликата
+  и один раз в disconnect-teardown. Убирает затирание операторских
+  правок позиций призрачным состоянием.
+
+**Mob-kill reward snapshot.**
+- `MobKillRewardPipeline`: моб читается ОДИН раз в `execute`, стейджи
+  работают со снапшотом — иначе reap между стейджами давал пустую
+  структуру и тихо пропускал quest/bestiary/champion-кредит при уже
+  выданном XP.
+
+**`characterExperience` framing.**
+- `header.event` -> `header.eventType` + trailing `\n` в обоих путях
+  (success/error): раньше пакет не парсился фреймингом.
+
+Wire slimming (backfill, committed 18-24.10, not in v0.2.60):
+
+- **Net:** unified byte-budget `wire::chunkJsonArray` + oversize send guard
+  (spawn/move чанкинг, `test_json_chunking`); warn > 6 КБ с `eventType`.
+- **S1a:** display-строки вырезаны из пакетов (slug + int-enum).
+- **S1b:** `message`+`hash` envelope убран с hot-бродкастов.
+- **S2.1:** версионированный `itemCatalog` пушится на join
+  (31-бит версия, клиент шлёт `itemCatalogVersion`).
+- **S2.2:** id-only ground drops (шаблон через `itemCatalog`).
+- **S2.3:** дельты инвентаря вместо полных снапшотов.
+- **S2.4:** slim vendor entries (slug оставлен, amend-коммит).
+- **S2.5:** машиночитаемые champion-маркеры (`rankCode`/`kind`).
+- **S4:** квантование hot-path позиций до 2 знаков.
+
+Docs:
+
+- api 00 (wireFrag-раздел, 1 МБ лимит), 04/05/06/12 + client-server
+  протокол: фрагментация, `trade_range` 500u, `wireStats`/`resetQuest`.
+
+---
+
 v0.2.60
 12.10.2026
 ================

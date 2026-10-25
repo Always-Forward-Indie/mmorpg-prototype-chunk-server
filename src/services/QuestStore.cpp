@@ -103,6 +103,16 @@ QuestStore::unloadPlayerQuests(int characterId)
     playerProgress_.erase(characterId);
 }
 
+bool
+QuestStore::resetQuestProgress(int characterId, int questId)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto pit = playerProgress_.find(characterId);
+    if (pit == playerProgress_.end())
+        return false;
+    return pit->second.erase(questId) > 0;
+}
+
 void
 QuestStore::fillQuestContext(int characterId, PlayerContextStruct &ctx) const
 {

@@ -248,7 +248,27 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
         return;
     }
 
+    // Issue #119: when the stale socket is already dead (crash/kill without
+    // clean logout), its in-memory position/HP is NOT the last word — the
+    // periodic saver (30 s) and the pending disconnect teardown already
+    // cover persistence. Saving here would clobber newer external writes
+    // (e.g. an operator-placed spawn position) with ghost state on every
+    // rejoin. A live duplicate login keeps the farewell save (its state is
+    // the freshest copy). Progress flushes below stay unconditional.
+    bool staleSocketAlive = false;
+    if (staleClientId > 0)
+    {
+        auto staleSocket = gameServices_.getClientManager().getClientSocket(staleClientId);
+        staleSocketAlive = (staleSocket && staleSocket->is_open());
+    }
+    if (!staleSocketAlive)
+    {
+        log_->info("[EVICT] Skipping farewell position/HP save for characterId: " +
+                    std::to_string(characterId) + " — stale socket already dead");
+    }
+
     // ── 1. Persist position ───────────────────────────────────────────────────
+    if (staleSocketAlive)
     try
     {
         PositionStruct lastPos = staleChar.characterPosition;
@@ -273,6 +293,7 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
     }
 
     // ── 2. Persist HP/Mana ───────────────────────────────────────────────────
+    if (staleSocketAlive)
     try
     {
         nlohmann::json hpManaPacket;
@@ -1247,6 +1268,10 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     }
 
     gameServices_.getClientManager().setClientWorldReady(clientID, true);
+    // Transport fragmentation (wireFrag, issues #121/#122): per-client
+    // capability from the additive playerReady flag. Unknown/old clients
+    // stay on legacy behavior (oversize lines sent whole).
+    gameServices_.getClientManager().setClientFragCapable(clientID, std::get<CharacterDataStruct>(data).fragCapable);
     log_->info("[PLAYER_READY] scene loaded — pushing world state to clientId=" +
                std::to_string(clientID) + " char=" + std::to_string(characterId));
 

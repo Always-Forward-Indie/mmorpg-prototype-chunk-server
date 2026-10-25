@@ -78,7 +78,8 @@ inline bool isKnownOp(const std::string &op)
            op == "grantLevel" || op == "grantItem" || op == "setHP" ||
            op == "skipTime" || op == "spawnMob" || op == "killMob" ||
            op == "resetWorld" || op == "reloadWorldContent" ||
-           op == "banUser" || op == "unbanUser";
+           op == "banUser" || op == "unbanUser" || op == "wireStats" ||
+           op == "resetQuest";
 }
 
 } // namespace admin_gate

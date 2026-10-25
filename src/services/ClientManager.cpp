@@ -209,6 +209,20 @@ ClientManager::isClientWorldReady(int clientID) const
 }
 
 void
+ClientManager::setClientFragCapable(int clientID, bool capable)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    for (auto &client : clientsList_)
+    {
+        if (client.clientId == clientID)
+        {
+            client.fragCapable = capable;
+            return;
+        }
+    }
+}
+
+void
 ClientManager::setItemCatalogVersion(int clientID, uint32_t version)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -220,6 +234,18 @@ ClientManager::setItemCatalogVersion(int clientID, uint32_t version)
             return;
         }
     }
+}
+
+bool
+ClientManager::isClientFragCapable(int clientID) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    for (const auto &client : clientsList_)
+    {
+        if (client.clientId == clientID)
+            return client.fragCapable;
+    }
+    return false;
 }
 
 // remove client by ID

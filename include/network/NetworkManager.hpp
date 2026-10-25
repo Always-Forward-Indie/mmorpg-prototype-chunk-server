@@ -7,7 +7,9 @@
 #include "utils/JSONParser.hpp"
 #include "utils/ProtocolLimits.hpp"
 #include <array>
+#include <atomic>
 #include <boost/asio.hpp>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -113,6 +115,27 @@ class NetworkManager
     std::unordered_set<std::shared_ptr<ClientSession>> activeSessions_;
     std::mutex sessionsMutex_;
 
+    // Transport fragmentation (wireFrag, issues #121/#122): per-connection
+    // stream ids for oversize messages. Counters feed the ADMIN wireStats op.
+    std::atomic<std::uint64_t> nextFragStreamId_{1};
+    std::atomic<std::uint64_t> oversizeSeen_{0};
+    std::atomic<std::uint64_t> fragStreams_{0};
+    std::atomic<std::uint64_t> fragFrames_{0};
+    mutable std::mutex oversizeByEventMutex_;
+    std::unordered_map<std::string, std::uint64_t> oversizeByEvent_;
+
+  public:
+    /// Snapshot of wire-framing counters (ADMIN wireStats).
+    struct WireStats
+    {
+        std::uint64_t oversizeSeen = 0;
+        std::uint64_t fragStreams = 0;
+        std::uint64_t fragFrames = 0;
+        std::unordered_map<std::string, std::uint64_t> byEvent;
+    };
+    WireStats wireStats() const;
+
+  private:
     // game services
     GameServices &gameServices_;
     std::shared_ptr<spdlog::logger> log_;

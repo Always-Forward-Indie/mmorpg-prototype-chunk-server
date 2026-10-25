@@ -82,19 +82,22 @@ MobKillRewardPipeline::setSaveKillCountCallback(SaveKillCountFn callback)
 void
 MobKillRewardPipeline::execute(int mobId, int killerId)
 {
-    // Mob lookup stays here so stage logs match the original order.
-    auto mobData = mobInstances_.getMobInstance(mobId);
+    // Mob lookup happens ONCE here: every stage below works off this entry
+    // snapshot. Re-fetching per stage could observe an already-reaped
+    // instance (empty struct, id 0) and silently skip quest/bestiary/
+    // champion credit even though XP was already granted.
+    const auto mobData = mobInstances_.getMobInstance(mobId);
     logger_.log("Mob " + std::to_string(mobId) + " (level " + std::to_string(mobData.level) +
                     ") was killed by " + std::to_string(killerId));
 
-    grantProportionalXp(mobId, killerId);
-    grantFellowshipBonus(mobId, killerId);
+    grantProportionalXp(mobData, mobId, killerId);
+    grantFellowshipBonus(mobData, mobId, killerId);
     trackItemSoul(killerId);
-    fireKillHooks(mobId, killerId);
+    fireKillHooks(mobData, mobId, killerId);
 }
 
 void
-MobKillRewardPipeline::grantProportionalXp(int mobId, int killerId)
+MobKillRewardPipeline::grantProportionalXp(const MobDataStruct &mobData, int mobId, int killerId)
 {
     // ── Proportional XP based on damage contribution ────────────────────
     // Splits mob XP among all players who damaged the mob, weighted by
@@ -103,7 +106,6 @@ MobKillRewardPipeline::grantProportionalXp(int mobId, int killerId)
     // Falls back to killer-only XP if threatTable is empty.
     try
     {
-        auto mobData = mobInstances_.getMobInstance(mobId);
         const int scaledBaseXp = static_cast<int>(std::lround(mobData.baseExperience * mobData.rankMult));
 
         auto mobMovData = mobMovement_.getMobMovementData(mobId);
@@ -213,14 +215,13 @@ MobKillRewardPipeline::grantProportionalXp(int mobId, int killerId)
 }
 
 void
-MobKillRewardPipeline::grantFellowshipBonus(int mobId, int killerId)
+MobKillRewardPipeline::grantFellowshipBonus(const MobDataStruct &mobData, int mobId, int killerId)
 {
     // --- Fellowship Bonus ---
     // If another player attacked this mob within the config window, both that
     // player and the killer receive a small bonus XP for fighting together.
     try
     {
-        auto mobData = mobInstances_.getMobInstance(mobId);
         const float bonusPct = gameConfig_.getFloat("fellowship.bonus_pct", 0.07f);
         const int windowSec = gameConfig_.getInt("fellowship.attack_window_sec", 15);
 
@@ -360,10 +361,8 @@ MobKillRewardPipeline::trackItemSoul(int killerId)
 }
 
 void
-MobKillRewardPipeline::fireKillHooks(int mobId, int killerId)
+MobKillRewardPipeline::fireKillHooks(const MobDataStruct &mobData, int mobId, int killerId)
 {
-    auto mobData = mobInstances_.getMobInstance(mobId);
-
     // Quest trigger: notify QuestManager that the mob was killed.
     // Best-effort (a failing quest hook must not fail the kill rewards);
     // warn-level like the neighboring hooks (bestiary/champion/reputation).
