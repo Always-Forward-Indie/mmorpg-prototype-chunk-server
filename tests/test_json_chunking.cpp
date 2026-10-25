@@ -291,3 +291,19 @@ TEST(WireQuant, Round2TrimsWithoutDrift)
     // Serialized form stays short: no float dust past 2 decimals.
     EXPECT_LT(nlohmann::json(wire::round2(4700.115)).dump().size(), 12u);
 }
+
+TEST(WireFrag, ParseFragOptIn)
+{
+    // S13-S1: single source of truth shared by handleJoinGameClient and
+    // handlePlayerReady. Honored from the FIRST message carrying it.
+    EXPECT_TRUE(wire::parseFragOptIn({{"frag", true}}));
+    EXPECT_TRUE(wire::parseFragOptIn({{"characterId", 615}, {"frag", true}}));
+    // Absent = legacy (oversize sent whole).
+    EXPECT_FALSE(wire::parseFragOptIn(nlohmann::json::object()));
+    EXPECT_FALSE(wire::parseFragOptIn({{"characterId", 615}}));
+    // Mistyped = legacy, never throws (old code swallowed parse errors).
+    EXPECT_FALSE(wire::parseFragOptIn({{"frag", "true"}}));
+    EXPECT_FALSE(wire::parseFragOptIn({{"frag", 1}}));
+    EXPECT_FALSE(wire::parseFragOptIn({{"frag", nullptr}}));
+    EXPECT_FALSE(wire::parseFragOptIn(nlohmann::json::array()));
+}

@@ -220,6 +220,15 @@ ClientManager::setClientFragCapable(int clientID, bool capable)
             return;
         }
     }
+
+    // No entry yet (flag arrives with joinGameClient, before any other
+    // setter ran) — create the minimal entry so the capability sticks
+    // instead of a silent no-op. Mirrors setClientCharacterId.
+    ClientDataStruct newClient;
+    newClient.clientId = clientID;
+    newClient.accountId = clientID; // clientId == accountId in this system
+    newClient.fragCapable = capable;
+    clientsList_.push_back(newClient);
 }
 
 void

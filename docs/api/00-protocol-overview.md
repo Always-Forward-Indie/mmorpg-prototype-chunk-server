@@ -77,7 +77,7 @@
 
 - Сборка по `streamId`, склейка `payload` по `index` (порядок не важен, дубли игнорятся); `total==count` → исходное сообщение готово.
 - Лимиты: кадр ≤ ~6 КБ; посылка ≤ 1 МБ (больше — не фрагментируется, идёт целиком по легаси-пути + warn); ≤ 16 активных стримов на соединение; недособранный стрим чистится по таймауту 30 с; несогласованный `total` сбрасывает стрим.
-- Capability: клиент заявляет поддержку аддитивным флагом `body.frag=true` в `playerReady` (без него — легаси-поведение: oversize идёт целиком и может дропаться 8КБ-капом). Старые пиры ничего не меняют.
+- Capability: клиент заявляет поддержку аддитивным флагом `body.frag=true` начиная с `joinGameClient` (дублируется в `joinGameCharacter`/`playerReady`; сервер учит с ПЕРВОГО сообщения с флагом, S13). Без него — легаси-поведение: oversize идёт целиком и может дропаться 8КБ-капом. Старые пиры ничего не меняют.
 - Эталон: C++ `wire::packWireMessage` / `wire::FragReassembler` (`JsonLineChunking.hpp`, юниты в `test_json_chunking.cpp`), Python — `FragReassembler` в `mmo_proto.py`, UE — сборщик в `FNetFraming`. Трое обязаны совпадать.
 - Метрики отправителя: ADMIN-оп `wireStats` (`oversizeSeen`, `fragStreams`, `fragFrames`, `oversizeByEvent`).
 

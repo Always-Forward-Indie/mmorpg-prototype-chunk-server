@@ -1259,6 +1259,11 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
 
     const int characterId = std::get<CharacterDataStruct>(data).characterId;
 
+    // Transport fragmentation (S13-S1): capability first, so even a
+    // duplicate-classified ready cannot silently drop a freshly stated
+    // opt-in. Absent flag = legacy (false), same contract as the parser.
+    gameServices_.getClientManager().setClientFragCapable(clientID, std::get<CharacterDataStruct>(data).fragCapable);
+
     // Guard: ignore duplicate or stale ready signals
     if (gameServices_.getClientManager().isClientWorldReady(clientID))
     {
@@ -1268,10 +1273,6 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     }
 
     gameServices_.getClientManager().setClientWorldReady(clientID, true);
-    // Transport fragmentation (wireFrag, issues #121/#122): per-client
-    // capability from the additive playerReady flag. Unknown/old clients
-    // stay on legacy behavior (oversize lines sent whole).
-    gameServices_.getClientManager().setClientFragCapable(clientID, std::get<CharacterDataStruct>(data).fragCapable);
     log_->info("[PLAYER_READY] scene loaded — pushing world state to clientId=" +
                std::to_string(clientID) + " char=" + std::to_string(characterId));
 

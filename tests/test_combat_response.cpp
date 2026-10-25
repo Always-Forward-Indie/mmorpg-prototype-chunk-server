@@ -51,17 +51,21 @@ SkillInitiationResult makeInitiation(int caster)
 
 TEST_F(ResponseFixture, CasterTypeResolution)
 {
+    // Contract (CombatResponseBuilder::determineCharacterType): values match
+    // client ECasterType (Player=2, Mob=3, Invalid=0), NO display strings on
+    // the wire. The client maps the int directly; casterTypeString is parsed
+    // only if present (debug/fallback, never sent by the builder).
     auto player = builder.buildSkillInitiationBroadcast(makeInitiation(1));
-    EXPECT_EQ(player["body"]["skillInitiation"]["casterType"], 1);
-    EXPECT_EQ(player["body"]["skillInitiation"]["casterTypeString"], "PLAYER");
+    EXPECT_EQ(player["body"]["skillInitiation"]["casterType"], 2);
+    EXPECT_FALSE(player["body"]["skillInitiation"].contains("casterTypeString"));
 
     auto mob = builder.buildSkillInitiationBroadcast(makeInitiation(9001));
-    EXPECT_EQ(mob["body"]["skillInitiation"]["casterType"], 2);
-    EXPECT_EQ(mob["body"]["skillInitiation"]["casterTypeString"], "MOB");
+    EXPECT_EQ(mob["body"]["skillInitiation"]["casterType"], 3);
+    EXPECT_FALSE(mob["body"]["skillInitiation"].contains("casterTypeString"));
 
     auto unknown = builder.buildSkillInitiationBroadcast(makeInitiation(424242));
     EXPECT_EQ(unknown["body"]["skillInitiation"]["casterType"], 0);
-    EXPECT_EQ(unknown["body"]["skillInitiation"]["casterTypeString"], "UNKNOWN");
+    EXPECT_FALSE(unknown["body"]["skillInitiation"].contains("casterTypeString"));
 }
 
 TEST_F(ResponseFixture, InitiationSuccessAndFailure)
@@ -98,7 +102,8 @@ TEST_F(ResponseFixture, ExecutionBroadcast)
     r.skillResult.damageResult.totalDamage = 25;
     auto out = builder.buildSkillExecutionBroadcast(r);
     EXPECT_EQ(out["header"]["eventType"], "combatResult");
-    EXPECT_EQ(out["body"]["skillResult"]["casterTypeString"], "MOB");
+    // No casterTypeString on the wire by design (see CasterTypeResolution).
+    EXPECT_FALSE(out["body"]["skillResult"].contains("casterTypeString"));
     EXPECT_EQ(out["body"]["skillResult"]["finalTargetHealth"], 150);
     EXPECT_EQ(out["body"]["skillResult"]["damage"], 25);
 }

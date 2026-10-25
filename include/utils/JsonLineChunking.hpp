@@ -86,6 +86,20 @@ inline std::vector<nlohmann::json> chunkJsonArray(const nlohmann::json &arr, std
 
 /// Frame marker: carried as an ordinary line so framing stays unchanged.
 inline constexpr const char *kFragEventType = "wireFrag";
+/// Body flag by which a peer opts into fragmentation. Honored from the
+/// FIRST message carrying it (joinGameClient), so no fat response is ever
+/// queued before the capability is known. Absent/mistyped = legacy.
+inline constexpr const char *kFragOptInKey = "frag";
+
+/// Guarded read of the frag opt-in flag from a message body. Single source
+/// of truth for every handler (joinGameClient, playerReady, ...): explicit
+/// type guards, a mistyped field keeps the legacy default (mirrors the
+/// brief-join parse style in EventDispatcher::handlePlayerReady).
+inline bool parseFragOptIn(const nlohmann::json &body)
+{
+    return body.is_object() && body.contains(kFragOptInKey) && body[kFragOptInKey].is_boolean() &&
+           body[kFragOptInKey].get<bool>();
+}
 /// Max payload bytes per frame (header room included, mirrors kChunkBytes).
 inline constexpr std::size_t kFragPayloadBudget = 6 * 1024;
 /// Sanity cap for one logical message (DoS guard). Larger messages are
