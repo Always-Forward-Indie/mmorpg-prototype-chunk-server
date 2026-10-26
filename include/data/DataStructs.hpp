@@ -466,6 +466,12 @@ struct CharacterDataStruct
     // mob/NPC flood (teleport flows re-add what's needed via snapshots).
     // Carried playerReady -> PLAYER_READY event only; never persisted.
     bool briefJoin = false;
+
+    // S15b: client's inventory baseline at ready time (0 = none/unknown).
+    // Carried playerReady -> PLAYER_READY event only; never persisted.
+    // Server replays retained deltas after it, or pushes a full snapshot
+    // with fullResync:true when the baseline fell out of the log window.
+    uint64_t lastInventoryVersion = 0;
 };
 
 struct ClientDataStruct

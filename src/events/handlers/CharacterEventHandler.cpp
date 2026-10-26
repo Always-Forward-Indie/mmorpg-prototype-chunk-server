@@ -1417,6 +1417,84 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
         worldObjectEventHandler_->sendWorldObjectsToClient(clientID, zoneId);
     }
 
+    // S15b: inventory catch-up for reconnects. The join flow already pushed a
+    // full snapshot (SET_PLAYER_INVENTORY); the retained tail after the
+    // client's baseline is replayed here — deltas as INVENTORY_UPDATE,
+    // snapshots as getPlayerInventory with fullResync:true. A baseline
+    // older than the retained head falls back to a live full snapshot.
+    // Fresh clients (lastVersion 0) and current clients skip silently.
+    {
+        const uint64_t lastV = std::get<CharacterDataStruct>(data).lastInventoryVersion;
+        auto &invMgr = gameServices_.getInventoryManager();
+        const uint64_t curV = invMgr.getInventoryVersion(characterId);
+        if (lastV != 0 && lastV < curV)
+        {
+            std::vector<InventoryManager::VersionedBody> replay;
+            if (invMgr.getEntriesSince(characterId, lastV, replay) && !replay.empty())
+            {
+                for (const auto &entry : replay)
+                {
+                    nlohmann::json upd;
+                    nlohmann::json body = entry.body;
+                    if (entry.isSnapshot)
+                    {
+                        upd = ResponseBuilder()
+                                  .setHeader("message", "Inventory retrieved successfully!")
+                                  .setHeader("hash", "")
+                                  .setHeader("clientId", clientID)
+                                  .setHeader("eventType", "getPlayerInventory")
+                                  .build();
+                    }
+                    else
+                    {
+                        upd = ResponseBuilder()
+                                  .setHeader("message", "Inventory retrieved successfully!")
+                                  .setHeader("hash", "")
+                                  .setHeader("clientId", clientID)
+                                  .setHeader("eventType", "INVENTORY_UPDATE")
+                                  .build();
+                        // Retained delta bodies predate the gold fill done on
+                        // the live forward path — stamp current gold so the
+                        // replay converges exactly (gold is absolute).
+                        body["gold"] = gameServices_.getInventoryManager().getGoldFromSnapshot(
+                            gameServices_.getInventoryManager().getPlayerInventory(characterId));
+                    }
+                    upd["body"] = body;
+                    networkManager_.sendResponse(clientSocket,
+                        networkManager_.generateResponseMessage("success", upd));
+                }
+                log_->info("[PLAYER_READY] replayed " + std::to_string(replay.size()) +
+                           " inventory entries to clientId=" + std::to_string(clientID));
+            }
+            else
+            {
+                // Baseline too old (or log empty) — explicit live full snapshot.
+                // Same atomic items+gold rule as the explicit path (#132);
+                // no version bump: re-send is not new content (S15a).
+                auto snap = invMgr.getPlayerInventory(characterId);
+                nlohmann::json itemsArray = nlohmann::json::array();
+                for (const auto &it : snap)
+                    itemsArray.push_back(invMgr.inventoryItemToJson(it));
+                nlohmann::json full = ResponseBuilder()
+                                          .setHeader("message", "Inventory retrieved successfully!")
+                                          .setHeader("hash", "")
+                                          .setHeader("clientId", clientID)
+                                          .setHeader("eventType", "getPlayerInventory")
+                                          .setBody("characterId", characterId)
+                                          .setBody("items", itemsArray)
+                                          .setBody("gold", invMgr.getGoldFromSnapshot(snap))
+                                          .setBody("version", invMgr.getInventoryVersion(characterId))
+                                          .setBody("fullResync", true)
+                                          .build();
+                networkManager_.sendResponse(clientSocket,
+                    networkManager_.generateResponseMessage("success", full));
+                log_->warn("[PLAYER_READY] fullResync inventory snapshot to clientId=" +
+                           std::to_string(clientID) + " (baseline " + std::to_string(lastV) +
+                           " fell out of delta log)");
+            }
+        }
+    }
+
     // Acknowledge receipt so client can hide the loading screen / enable input
     nlohmann::json ack = ResponseBuilder()
                              .setHeader("message", "success")

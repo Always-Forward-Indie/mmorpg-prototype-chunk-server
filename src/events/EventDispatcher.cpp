@@ -1887,6 +1887,14 @@ EventDispatcher::handlePlayerReady(const EventContext &context,
     {
         charData.briefJoin = context.json["body"]["brief"].get<bool>();
     }
+    // S15b: client's inventory baseline (same guards as brief above).
+    charData.lastInventoryVersion = 0;
+    if (context.json.is_object() && context.json.contains("body") &&
+        context.json["body"].is_object() && context.json["body"].contains("inventoryVersion") &&
+        context.json["body"]["inventoryVersion"].is_number_unsigned())
+    {
+        charData.lastInventoryVersion = context.json["body"]["inventoryVersion"].get<uint64_t>();
+    }
 
     eventsBatch_.push_back(Event(Event::PLAYER_READY,
         context.clientData.clientId,

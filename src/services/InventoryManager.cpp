@@ -540,6 +540,17 @@ InventoryManager::emitInventoryDelta(int characterId,
         delta["removed"].push_back(id);
     Event inventoryUpdateEvent(Event::INVENTORY_UPDATE, characterId, delta);
     eventQueue_->push(std::move(inventoryUpdateEvent));
+    // S15b: retain for reconnect replay (bounded; oldest falls off).
+    // Version read BEFORE the move — argument evaluation order would
+    // otherwise race the move-from state.
+    const uint64_t publishedVersion = delta["version"].get<uint64_t>();
+    {
+        std::lock_guard<std::mutex> lock(versionMutex_);
+        auto &log = versionLog_[characterId];
+        log.push_back(VersionedBody{publishedVersion, false, std::move(delta)});
+        while (log.size() > kDeltaLogDepth)
+            log.erase(log.begin());
+    }
     log_->info("[INVENTORY] Sent delta update for character " + std::to_string(characterId) +
                " (changed=" + std::to_string(changed.size()) +
                " removed=" + std::to_string(removedIds.size()) + ")");
@@ -940,9 +951,43 @@ InventoryManager::bumpInventoryVersion(int characterId)
 }
 
 uint64_t
-InventoryManager::trackSnapshotPublished(int characterId)
+InventoryManager::logSnapshotPublished(int characterId, const nlohmann::json &body)
 {
-    return bumpInventoryVersion(characterId);
+    std::lock_guard<std::mutex> lock(versionMutex_);
+    const uint64_t v = ++inventoryVersions_[characterId];
+    auto &log = versionLog_[characterId];
+    nlohmann::json stored = body;
+    stored["version"] = v;
+    stored["fullResync"] = true; // for the replay receiver (live push omits it)
+    log.push_back(VersionedBody{v, true, std::move(stored)});
+    while (log.size() > kDeltaLogDepth)
+        log.erase(log.begin());
+    return v;
+}
+
+bool
+InventoryManager::getEntriesSince(int characterId, uint64_t lastVersion,
+                                  std::vector<VersionedBody> &out) const
+{
+    out.clear();
+    std::lock_guard<std::mutex> lock(versionMutex_);
+    const auto lit = versionLog_.find(characterId);
+    if (lit == versionLog_.end() || lit->second.empty())
+    {
+        // Nothing retained: covered only when the client is already current.
+        const auto vit = inventoryVersions_.find(characterId);
+        const uint64_t current = vit != inventoryVersions_.end() ? vit->second : 0;
+        return lastVersion >= current;
+    }
+    const auto &log = lit->second;
+    if (lastVersion + 1 < log.front().version)
+        return false; // baseline fell out of the window -> live full snapshot
+    for (const auto &entry : log)
+    {
+        if (entry.version > lastVersion)
+            out.push_back(entry);
+    }
+    return true;
 }
 
 std::vector<PlayerInventoryItemStruct>

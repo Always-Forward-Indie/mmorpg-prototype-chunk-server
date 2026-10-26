@@ -226,22 +226,42 @@ class InventoryManager
      */
     int getGoldFromSnapshot(const std::vector<PlayerInventoryItemStruct> &items) const;
 
+    /// S15b: one retained versioned body (delta or full snapshot).
+    /// Public so reconnect replay can ship entries back over the wire.
+    struct VersionedBody
+    {
+        uint64_t version = 0;
+        bool isSnapshot = false;
+        nlohmann::json body;
+    };
+
     /**
      * @brief Current inventory generation for a character (S15a).
      * 0 = nothing published yet. Bumped exactly once per PUBLISHED
      * client-visible change (delta via emit, full snapshot via
-     * trackSnapshotPublished); clients track it to detect missed deltas
+     * logSnapshotPublished); clients track it to detect missed deltas
      * (gap = explicit full refresh, never silent).
      */
     uint64_t getInventoryVersion(int characterId) const;
 
     /**
-     * @brief Record a pushed full snapshot, return its generation (S15a).
-     * loadPlayerInventory replaces content without publishing; the caller
-     * that pushes the snapshot (CatalogSyncService) records it here so the
-     * stamped version always matches what the client received.
+     * @brief Record a pushed full snapshot, return its generation (S15a/b).
+     * Bumps, retains a snapshot-marked copy of the pushed body for reconnect
+     * replay, and returns the stamped version. Re-sends of unchanged state
+     * go through getInventoryVersion (no bump).
      */
-    uint64_t trackSnapshotPublished(int characterId);
+    uint64_t logSnapshotPublished(int characterId, const nlohmann::json &body);
+
+    /**
+     * @brief Versioned bodies after a client baseline, in order (S15b).
+     * Fills out with retained delta AND snapshot bodies newer than
+     * lastVersion (snapshots carry fullResync:true for the receiver).
+     * @return true when the retained head covers lastVersion+1, i.e. the
+     * tail replay converges to current; false = baseline fell out of the
+     * window — caller must push a live full snapshot instead.
+     */
+    bool getEntriesSince(int characterId, uint64_t lastVersion,
+                         std::vector<VersionedBody> &out) const;
 
   private:
     ItemManager &itemManager_;
@@ -257,15 +277,24 @@ class InventoryManager
     std::map<int, std::vector<PlayerInventoryItemStruct>> playerInventories_;
 
     // S15a: per-character inventory generation (separate mutex — bumped from
-    // emitInventoryDelta, which must never take inventoryMutex_, and from
-    // loadPlayerInventory, which already holds it; a shared lock would
-    // deadlock). Every client-visible content change bumps exactly once:
-    // full snapshot (load) and each delta (emit). 0 = never published.
+    // emitInventoryDelta, which must never take inventoryMutex_. A shared lock
+    // would deadlock). Every PUBLISHED content change bumps exactly once:
+    // each delta (emit) and each pushed snapshot (logSnapshotPublished).
+    // 0 = never published.
     mutable std::mutex versionMutex_;
     std::map<int, uint64_t> inventoryVersions_;
 
+    /// S15b: retained versioned bodies per character, bounded. Deltas and
+    /// full snapshots alike (kind flag on each entry) — replaying the tail
+    /// after a client baseline always converges, no separate code path for
+    /// "snapshot missed" vs "delta missed". Oldest entries fall off; a
+    /// baseline older than the retained head forces a live full snapshot.
+    /// Same versionMutex_ (never inventoryMutex_).
+    static constexpr size_t kDeltaLogDepth = 50;
+    std::map<int, std::vector<VersionedBody>> versionLog_;
+
     /// S15a: bump the generation (callers: emitInventoryDelta per delta,
-    /// loadPlayerInventory per full snapshot). Separate versionMutex_ —
+    /// logSnapshotPublished per pushed snapshot). Separate versionMutex_ —
     /// never inventoryMutex_ (see above).
     uint64_t bumpInventoryVersion(int characterId);
 

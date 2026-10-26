@@ -389,7 +389,61 @@ TEST_F(ShopFixture, InventoryVersionBumpsPerDelta)
 TEST_F(ShopFixture, InventoryVersionBumpsOnPushedSnapshot)
 {
     EXPECT_TRUE(inv.addItemToInventory(13, 999, 10));
-    EXPECT_EQ(inv.trackSnapshotPublished(13), 2u);
+    nlohmann::json body;
+    body["items"] = nlohmann::json::array();
+    EXPECT_EQ(inv.logSnapshotPublished(13, body), 2u);
     EXPECT_EQ(inv.getInventoryVersion(13), 2u);
-    EXPECT_EQ(inv.trackSnapshotPublished(13), 3u);
+    EXPECT_EQ(inv.logSnapshotPublished(13, body), 3u);
+}
+
+// S15b: reconnect replay window over the retained version log
+// (deltas and snapshots alike).
+TEST_F(ShopFixture, DeltasSinceReplaysCoveredRange)
+{
+    EXPECT_TRUE(inv.addItemToInventory(21, 999, 10)); // v1
+    EXPECT_TRUE(inv.addItemToInventory(21, 100, 2));  // v2
+    std::vector<InventoryManager::VersionedBody> out;
+    // lastVersion 0 with a fully retained log replays from the head.
+    EXPECT_TRUE(inv.getEntriesSince(21, 0, out));
+    ASSERT_EQ(out.size(), 2u);
+    // Covered range replays in order.
+    EXPECT_TRUE(inv.getEntriesSince(21, 1, out));
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].version, 2u);
+    EXPECT_FALSE(out[0].isSnapshot);
+    // Already current -> no-op, still covered.
+    EXPECT_TRUE(inv.getEntriesSince(21, 2, out));
+    EXPECT_TRUE(out.empty());
+}
+
+TEST_F(ShopFixture, DeltasSinceEvictsBeyondDepth)
+{
+    for (int i = 0; i < 60; ++i)
+        EXPECT_TRUE(inv.addItemToInventory(22, 999, 1)); // 60 deltas, 60 versions
+    const uint64_t cur = inv.getInventoryVersion(22);
+    EXPECT_EQ(cur, 60u);
+    std::vector<InventoryManager::VersionedBody> out;
+    // Retained window is v11..v60 (60-50+1); v10 and below fell out.
+    EXPECT_FALSE(inv.getEntriesSince(22, 9, out));
+    EXPECT_TRUE(inv.getEntriesSince(22, 10, out));
+    EXPECT_EQ(out.size(), 50u);
+    EXPECT_EQ(out.front().version, 11u);
+    EXPECT_EQ(out.back().version, 60u);
+}
+
+TEST_F(ShopFixture, SnapshotEntriesReplayWithFullResync)
+{
+    EXPECT_TRUE(inv.addItemToInventory(23, 999, 10)); // v1 delta
+    nlohmann::json body;
+    body["items"] = nlohmann::json::array();
+    EXPECT_EQ(inv.logSnapshotPublished(23, body), 2u); // v2 snapshot
+    EXPECT_TRUE(inv.addItemToInventory(23, 100, 1));   // v3 delta
+    std::vector<InventoryManager::VersionedBody> out;
+    EXPECT_TRUE(inv.getEntriesSince(23, 1, out));
+    ASSERT_EQ(out.size(), 2u);
+    EXPECT_TRUE(out[0].isSnapshot);
+    EXPECT_EQ(out[0].version, 2u);
+    EXPECT_TRUE(out[0].body.value("fullResync", false));
+    EXPECT_FALSE(out[1].isSnapshot);
+    EXPECT_EQ(out[1].version, 3u);
 }
