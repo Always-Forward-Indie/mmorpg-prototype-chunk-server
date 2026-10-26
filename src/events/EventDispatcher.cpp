@@ -1,4 +1,5 @@
 #include "events/EventDispatcher.hpp"
+#include "events/handlers/CharacterEventHandler.hpp"
 #include "services/AdminGate.hpp"
 #include "utils/AdminResponse.hpp"
 #include "utils/Generators.hpp"
@@ -191,6 +192,23 @@ EventDispatcher::handleJoinGameClient(const EventContext &context, std::shared_p
     // Only create and queue the event if we have a valid socket
     if (validSocket)
     {
+        // #119: same account reconnecting on a new socket while a character
+        // session is still attached — evict BEFORE overwriting the socket
+        // mapping below. Afterwards the displaced socket is unrecoverable and
+        // the rejoin misreads as a same-socket duplicate, serving the stale
+        // in-memory position. Same-socket re-joins fall through untouched.
+        {
+            auto prevSocket = gameServices_.getClientManager().getClientSocket(context.clientData.clientId);
+            int prevChar = gameServices_.getClientManager().getClientData(context.clientData.clientId).characterId;
+            if (prevSocket && prevSocket.get() != validSocket.get() && prevChar != 0 && characterEventHandler_)
+            {
+                log_->warn("[JOIN] clientId " + std::to_string(context.clientData.clientId) +
+                    " reconnect on new socket with live character " + std::to_string(prevChar) +
+                    " — evicting stale session first");
+                characterEventHandler_->evictStaleSession(prevChar, context.clientData.clientId, validSocket);
+                characterEventHandler_->removePendingJoinRequests(prevChar);
+            }
+        }
         // Register the socket in ClientManager for this client
         gameServices_.getClientManager().setClientSocket(context.clientData.clientId, validSocket);
         try
@@ -2244,10 +2262,12 @@ EventDispatcher::handleAdminCommand(const EventContext &context, std::shared_ptr
             skills.push_back({{"slug", s.skillSlug}, {"name", s.skillName}, {"level", s.skillLevel}, {"isPassive", s.isPassive}});
         out["skills"] = skills;
         nlohmann::json items = nlohmann::json::array();
-        for (const auto &it : invMgr.getPlayerInventory(targetId))
+        // #132: one snapshot copy feeds both items[] and gold (atomic).
+        const auto invSnapshot = invMgr.getPlayerInventory(targetId);
+        for (const auto &it : invSnapshot)
             items.push_back(invMgr.inventoryItemToJson(it));
         out["inventory"] = items;
-        out["gold"] = invMgr.getGoldAmount(targetId);
+        out["gold"] = invMgr.getGoldFromSnapshot(invSnapshot);
         nlohmann::json quests = nlohmann::json::array();
         // Progress truth lives in QuestStore (CharacterDataStruct::quests is
         // never populated — reading it here returned [] forever).

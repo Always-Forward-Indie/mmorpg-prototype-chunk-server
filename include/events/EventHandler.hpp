@@ -70,6 +70,13 @@ class EventHandler
     CombatEventHandler &getCombatEventHandler();
 
     /**
+     * @brief Get reference to character event handler for stale-session eviction.
+     * Used once at startup to let EventDispatcher (socket layer) trigger the
+     * same evict path as joinGameCharacter (#119).
+     */
+    CharacterEventHandler &getCharacterEventHandler();
+
+    /**
      * @brief Get reference to skill event handler for skill operations
      *
      * @return Reference to the skill event handler

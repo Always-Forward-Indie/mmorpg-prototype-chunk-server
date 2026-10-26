@@ -7,12 +7,19 @@
 #include <string>
 #include <unordered_map>
 
+class CharacterEventHandler;
+
 class EventDispatcher
 {
   public:
     EventDispatcher(EventQueue &eventQueue, EventQueue &eventQueuePing, ChunkServer *chunkServer, GameServices &gameServices);
 
     void dispatch(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+
+    /// Stale-session evict hook (#119): same-account reconnects are detected
+    /// at joinGameClient time, but the evict routine lives on
+    /// CharacterEventHandler (owned by EventHandler). Wired once in main().
+    void setCharacterEventHandler(CharacterEventHandler *handler) { characterEventHandler_ = handler; }
 
     /// Route-table size pin (tolerant unknown types bypass the table).
     size_t routeTableSize() const;
@@ -87,6 +94,7 @@ class EventDispatcher
     EventQueue &eventQueue_;
     EventQueue &eventQueuePing_;
     ChunkServer *chunkServer_;
+    CharacterEventHandler *characterEventHandler_ = nullptr;
 
     /// Single source of truth for wire routing (was a 52-branch if/else
     /// chain). All handlers share the (context, socket) signature.

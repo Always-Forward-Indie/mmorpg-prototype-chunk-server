@@ -206,7 +206,8 @@ CharacterEventHandler::characterToJson(const CharacterDataStruct &characterData)
 }
 
 void
-CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
+CharacterEventHandler::evictStaleSession(int characterId, int newClientId,
+                                         const std::shared_ptr<boost::asio::ip::tcp::socket> &newSocket)
 {
     // Check whether the character is actually loaded (stale session present)
     CharacterDataStruct staleChar = gameServices_.getCharacterManager().getCharacterData(characterId);
@@ -239,9 +240,28 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId)
     }
 
     // If the stale session belongs to the SAME client that is now reconnecting, this is a
-    // duplicate joinGameCharacter packet (common UE behaviour). Do NOT evict — the session
-    // is still valid and the socket is still the same.
-    if (evictDecision == JoinEvictDecision::DuplicateSkip)
+    // duplicate joinGameCharacter packet (common UE behaviour) — but ONLY when it arrives
+    // on the same socket. #119: a crashed client's reconnect carries the same clientId
+    // (= accountId, stable per account) on a NEW socket; the old ID-only check misread
+    // that as a duplicate and served the stale in-memory position. A reconnect falls
+    // through to FullEvict below (flush + remove), so the join waits for the DB re-read
+    // instead of spawning at the ghost position.
+    bool isDuplicate = (evictDecision == JoinEvictDecision::DuplicateSkip);
+    if (isDuplicate)
+    {
+        auto staleSocket = gameServices_.getClientManager().getClientSocket(staleClientId);
+        const bool sameLiveSocket = staleSocket && newSocket &&
+                                    staleSocket.get() == newSocket.get() && staleSocket->is_open();
+        if (!sameLiveSocket)
+        {
+            log_->warn("[EVICT] Same clientId " + std::to_string(newClientId) + " reconnecting on a " +
+                       (staleSocket ? "different/dead socket" : "unmapped socket") +
+                       " for characterId: " + std::to_string(characterId) +
+                       " — treating as stale reconnect, running full evict");
+            isDuplicate = false;
+        }
+    }
+    if (isDuplicate)
     {
         log_->info("[EVICT] Skipping eviction for characterId: " + std::to_string(characterId) +
                    " — duplicate joinGameCharacter from the same clientId: " + std::to_string(newClientId));
@@ -473,7 +493,7 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
 
             // Evict any stale session for this character before registering a new one.
             // This happens when a client crashes or reconnects without a clean disconnect.
-            evictStaleSession(passedCharacterData.characterId, clientID);
+            evictStaleSession(passedCharacterData.characterId, clientID, clientSocket);
 
             // set client character ID - now handles missing clients automatically
             gameServices_.getClientManager().setClientCharacterId(clientID, passedCharacterData.characterId);

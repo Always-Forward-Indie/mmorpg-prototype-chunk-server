@@ -554,6 +554,12 @@ EventHandler::getCombatEventHandler()
     return *combatEventHandler_;
 }
 
+CharacterEventHandler &
+EventHandler::getCharacterEventHandler()
+{
+    return *characterEventHandler_;
+}
+
 SkillEventHandler &
 EventHandler::getSkillEventHandler()
 {

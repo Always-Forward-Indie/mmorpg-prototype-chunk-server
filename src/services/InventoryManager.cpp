@@ -528,6 +528,10 @@ InventoryManager::emitInventoryDelta(int characterId,
         return;
     nlohmann::json delta;
     delta["characterId"] = characterId;
+    // S15a: every client-visible change carries the new generation. Only
+    // published changes bump (queue present) — the version describes what
+    // the client can see, so a queue-less (test) manager stays at 0.
+    delta["version"] = bumpInventoryVersion(characterId);
     delta["changed"] = nlohmann::json::array();
     for (const auto &item : changed)
         delta["changed"].push_back(inventoryDeltaToJson(item));
@@ -903,6 +907,42 @@ InventoryManager::getGoldAmount(int characterId) const
     if (!goldItem)
         return 0;
     return getItemQuantity(characterId, goldItem->id);
+}
+
+int
+InventoryManager::getGoldFromSnapshot(const std::vector<PlayerInventoryItemStruct> &items) const
+{
+    const ItemDataStruct *goldItem = itemManager_.getItemBySlug("gold_coin");
+    if (!goldItem)
+        return 0;
+    int total = 0;
+    for (const auto &item : items)
+    {
+        if (item.itemId == goldItem->id)
+            total += item.quantity;
+    }
+    return total;
+}
+
+uint64_t
+InventoryManager::getInventoryVersion(int characterId) const
+{
+    std::lock_guard<std::mutex> lock(versionMutex_);
+    auto it = inventoryVersions_.find(characterId);
+    return it != inventoryVersions_.end() ? it->second : 0;
+}
+
+uint64_t
+InventoryManager::bumpInventoryVersion(int characterId)
+{
+    std::lock_guard<std::mutex> lock(versionMutex_);
+    return ++inventoryVersions_[characterId];
+}
+
+uint64_t
+InventoryManager::trackSnapshotPublished(int characterId)
+{
+    return bumpInventoryVersion(characterId);
 }
 
 std::vector<PlayerInventoryItemStruct>

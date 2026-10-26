@@ -216,6 +216,33 @@ class InventoryManager
      */
     int getGoldAmount(int characterId) const;
 
+    /**
+     * @brief Derive gold from an already-copied inventory snapshot (#132).
+     * Same sum as getGoldAmount, but over the caller's local vector instead
+     * of re-reading the manager — items[] and gold in one response are then
+     * atomically consistent (no concurrent loadPlayerInventory can land
+     * between the two reads). Prefer this whenever a snapshot copy is
+     * already in hand.
+     */
+    int getGoldFromSnapshot(const std::vector<PlayerInventoryItemStruct> &items) const;
+
+    /**
+     * @brief Current inventory generation for a character (S15a).
+     * 0 = nothing published yet. Bumped exactly once per PUBLISHED
+     * client-visible change (delta via emit, full snapshot via
+     * trackSnapshotPublished); clients track it to detect missed deltas
+     * (gap = explicit full refresh, never silent).
+     */
+    uint64_t getInventoryVersion(int characterId) const;
+
+    /**
+     * @brief Record a pushed full snapshot, return its generation (S15a).
+     * loadPlayerInventory replaces content without publishing; the caller
+     * that pushes the snapshot (CatalogSyncService) records it here so the
+     * stamped version always matches what the client received.
+     */
+    uint64_t trackSnapshotPublished(int characterId);
+
   private:
     ItemManager &itemManager_;
     Logger &logger_;
@@ -228,6 +255,19 @@ class InventoryManager
 
     // Store inventories (characterId -> vector of inventory items)
     std::map<int, std::vector<PlayerInventoryItemStruct>> playerInventories_;
+
+    // S15a: per-character inventory generation (separate mutex — bumped from
+    // emitInventoryDelta, which must never take inventoryMutex_, and from
+    // loadPlayerInventory, which already holds it; a shared lock would
+    // deadlock). Every client-visible content change bumps exactly once:
+    // full snapshot (load) and each delta (emit). 0 = never published.
+    mutable std::mutex versionMutex_;
+    std::map<int, uint64_t> inventoryVersions_;
+
+    /// S15a: bump the generation (callers: emitInventoryDelta per delta,
+    /// loadPlayerInventory per full snapshot). Separate versionMutex_ —
+    /// never inventoryMutex_ (see above).
+    uint64_t bumpInventoryVersion(int characterId);
 
     // Monotonic pending-sync token source (0 is reserved = no pending sync).
     // Random start per process: tokens must not collide with a previous

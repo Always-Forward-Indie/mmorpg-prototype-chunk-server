@@ -119,6 +119,20 @@
 по `streamId`) удалён вместе с v1-транспортом (S14d). Пин: живой
 `contracts/test_framing_v2.py` (жирный снапшот доезжает целым, без кадров).
 
+### Поколения снапшотов (version, S15a)
+
+Каждый `getPlayerInventory`-ответ и каждая `INVENTORY_UPDATE` несут
+`body.version` — монотонное поколение персонажа (`InventoryManager::
+inventoryVersions_`, 0 = ничего не публиковалось). Бамп ровно один раз
+на опубликованное изменение: дельта — в `emitInventoryDelta`, полный
+снимок — в точке отправки (`CatalogSyncService` через
+`trackSnapshotPublished`). Дубликаты и опоздавшие пакеты клиент
+отбрасывает молча, разрыв (`version > last+1`) — явный запрос полного
+снимка, никогда полу-мердж.
+Неверсионированные тихие пути (durability-only, killCount-нотификация,
+`EQUIPMENT_STATE`) версию не двигают — задокументированный гэп S15a,
+закрывается в S15b.
+
 ### Поля PlayerInventoryItemStruct
 
 | Поле | Тип | Описание |

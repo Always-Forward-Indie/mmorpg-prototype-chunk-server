@@ -538,7 +538,8 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
                 gameServices_.getLogger().log("[INVENTORY] Built inventory response with " + std::to_string(itemsArray.size()) + " items");
 
                 // Create response using ResponseBuilder
-                int goldAmount = gameServices_.getInventoryManager().getGoldAmount(characterId);
+                // #132: gold from the SAME snapshot copy (atomic items+gold).
+                int goldAmount = gameServices_.getInventoryManager().getGoldFromSnapshot(inventory);
 
                 nlohmann::json response = ResponseBuilder()
                                               .setHeader("message", "Inventory retrieved successfully!")
@@ -548,6 +549,8 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
                                               .setBody("characterId", characterId)
                                               .setBody("items", itemsArray)
                                               .setBody("gold", goldAmount)
+                                              // S15a: generation of this snapshot.
+                                              .setBody("version", gameServices_.getInventoryManager().getInventoryVersion(characterId))
                                               .build();
 
                 std::string responseData = networkManager_.generateResponseMessage("success", response);
@@ -654,7 +657,9 @@ ItemEventHandler::handleInventoryUpdateEvent(const Event &event)
                                   .setHeader("eventType", "INVENTORY_UPDATE")
                                   .build();
     response["body"] = inventoryData;
-    response["body"]["gold"] = gameServices_.getInventoryManager().getGoldAmount(characterId);
+    // #132: gold from one snapshot copy (atomic vs the delta payload).
+    response["body"]["gold"] = gameServices_.getInventoryManager().getGoldFromSnapshot(
+        gameServices_.getInventoryManager().getPlayerInventory(characterId));
 
     networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", response));
 

@@ -40,6 +40,9 @@ class NetworkManager
     std::string generateResponseMessage(const std::string &status, const nlohmann::json &message);
     std::string generateResponseMessage(const std::string &status, const nlohmann::json &message, const TimestampStruct &timestamps);
     void setChunkServer(ChunkServer *ChunkServer);
+    /// Socket-layer dispatcher (owns the joinGameClient socket mapping).
+    /// Wired to CharacterEventHandler once in main() for #119 evict.
+    EventDispatcher *getEventDispatcher() { return eventDispatcher_.get(); }
 
     // Session management methods to prevent memory leaks
     bool addActiveSession(std::shared_ptr<ClientSession> session);

@@ -1,6 +1,7 @@
 // Unit tests for ItemManager + InventoryManager (Logger only, no DB/sockets).
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
+#include "events/EventQueue.hpp"
 
 #include <gtest/gtest.h>
 
@@ -23,6 +24,9 @@ struct ShopFixture : ::testing::Test
     Logger logger{"test"};
     ItemManager items{logger};
     InventoryManager inv{items, logger};
+    // Production wiring: deltas (and their versions) only publish with a
+    // queue attached. Without it the manager stays silent at version 0.
+    EventQueue queue{1024};
 
     void SetUp() override
     {
@@ -32,6 +36,7 @@ struct ShopFixture : ::testing::Test
         sword.isEquippable = true;
         sword.equipSlotSlug = "main_hand";
         items.setItemsList({gold, potion, sword});
+        inv.setEventQueue(&queue);
     }
 };
 
@@ -339,4 +344,52 @@ TEST_F(ShopFixture, SyncRetryGivesUpToLegacyAfterBudget)
     // Row still id==0: legacy first-id==0 echo still heals it.
     inv.updateInventoryItemId(1, 100, 55);
     EXPECT_EQ(inv.getPlayerInventory(1)[0].id, 55);
+}
+
+// #132: gold derived from a snapshot copy must equal the manager read.
+// Call sites send items[] + gold from one copy; any divergence means a
+// mixed-generation response (gold 0 with present items).
+TEST_F(ShopFixture, GoldFromSnapshotMatchesManager)
+{
+    EXPECT_TRUE(inv.addItemToInventory(7, 999, 310));
+    EXPECT_TRUE(inv.addItemToInventory(7, 100, 5));
+    const auto snapshot = inv.getPlayerInventory(7);
+    ASSERT_EQ(snapshot.size(), 2u);
+    EXPECT_EQ(inv.getGoldFromSnapshot(snapshot), 310);
+    EXPECT_EQ(inv.getGoldFromSnapshot(snapshot), inv.getGoldAmount(7));
+}
+
+TEST_F(ShopFixture, GoldFromSnapshotEmptyIsZero)
+{
+    EXPECT_TRUE(inv.getPlayerInventory(424242).empty());
+    EXPECT_EQ(inv.getGoldFromSnapshot({}), 0);
+    EXPECT_EQ(inv.getGoldFromSnapshot(inv.getPlayerInventory(424242)), 0);
+}
+
+// S15a: per-character generation — 0 until first publish, +1 per delta,
+// +1 per pushed snapshot, isolated across characters.
+TEST_F(ShopFixture, InventoryVersionStartsAtZero)
+{
+    InventoryManager bare{items, logger}; // no queue: silent, stays 0
+    EXPECT_EQ(bare.getInventoryVersion(11), 0u);
+    EXPECT_TRUE(bare.addItemToInventory(11, 999, 10));
+    EXPECT_EQ(bare.getInventoryVersion(11), 0u);
+}
+
+TEST_F(ShopFixture, InventoryVersionBumpsPerDelta)
+{
+    EXPECT_TRUE(inv.addItemToInventory(11, 999, 10));
+    EXPECT_EQ(inv.getInventoryVersion(11), 1u);
+    EXPECT_TRUE(inv.addItemToInventory(11, 100, 2));
+    EXPECT_EQ(inv.getInventoryVersion(11), 2u);
+    // Other characters are unaffected.
+    EXPECT_EQ(inv.getInventoryVersion(12), 0u);
+}
+
+TEST_F(ShopFixture, InventoryVersionBumpsOnPushedSnapshot)
+{
+    EXPECT_TRUE(inv.addItemToInventory(13, 999, 10));
+    EXPECT_EQ(inv.trackSnapshotPublished(13), 2u);
+    EXPECT_EQ(inv.getInventoryVersion(13), 2u);
+    EXPECT_EQ(inv.trackSnapshotPublished(13), 3u);
 }

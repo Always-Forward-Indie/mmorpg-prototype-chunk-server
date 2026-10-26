@@ -333,6 +333,13 @@ CatalogSyncService::handleSetPlayerInventoryEvent(const Event &event)
                                       .setHeader("eventType", "getPlayerInventory")
                                       .setBody("characterId", characterId)
                                       .setBody("items", itemsArray)
+                                      // #132: this push previously omitted gold (client
+                                      // defaulted it to 0 until the next explicit
+                                      // refresh). Derive from the same event copy.
+                                      .setBody("gold", gameServices_.getInventoryManager().getGoldFromSnapshot(items))
+                                      // S15a: record the pushed snapshot and stamp its
+                                      // generation so the snapshot is ordered.
+                                      .setBody("version", gameServices_.getInventoryManager().trackSnapshotPublished(characterId))
                                       .build();
 
         networkManager_.sendResponse(clientSocket,

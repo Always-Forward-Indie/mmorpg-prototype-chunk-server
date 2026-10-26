@@ -1,4 +1,5 @@
 #include "chunk_server/ChunkServer.hpp"
+#include "events/EventDispatcher.hpp"
 #include "network/GameServerWorker.hpp"
 #include "network/NetworkManager.hpp"
 #include "services/CharacterManager.hpp"
@@ -65,6 +66,13 @@ main()
 
         // Set the ChunkServer object in the NetworkManager
         networkManager.setChunkServer(&chunkServer);
+
+        // #119: let the socket layer (EventDispatcher::handleJoinGameClient)
+        // trigger the same stale-session evict as joinGameCharacter when a
+        // reconnect arrives on a new socket. Must run AFTER setChunkServer —
+        // that is where the dispatcher is constructed.
+        if (auto *dispatcher = networkManager.getEventDispatcher())
+            dispatcher->setCharacterEventHandler(&eventHandler.getCharacterEventHandler());
 
         // Start accepting connections
         networkManager.startAccept();

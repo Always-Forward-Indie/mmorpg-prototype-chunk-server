@@ -236,6 +236,22 @@ class CharacterEventHandler : public BaseEventHandler
      */
     void removePendingJoinRequests(int characterId);
 
+    /**
+     * @brief Evict a stale character session before a (re)join claims it.
+     *
+     * @param characterId  The character being reclaimed.
+     * @param newClientId  The clientId of the incoming (re)connect — excluded from
+     *                     the disconnect broadcast so it does not confuse itself.
+     * @param newSocket    The incoming connection's socket. Same-clientId joins
+     *                     on a DIFFERENT socket are reconnects after a dead
+     *                     peer (#119), not duplicate packets — only a
+     *                     same-socket re-send is a true duplicate.
+     * Public so joinGameClient can evict BEFORE overwriting the socket
+     * mapping (afterwards the displaced socket is unrecoverable).
+     */
+    void evictStaleSession(int characterId, int newClientId,
+                           const std::shared_ptr<boost::asio::ip::tcp::socket> &newSocket);
+
   private:
     /**
      * @brief Convert character data to JSON format
@@ -244,24 +260,6 @@ class CharacterEventHandler : public BaseEventHandler
      * @return nlohmann::json Character data in JSON format
      */
     nlohmann::json characterToJson(const CharacterDataStruct &characterData);
-
-    /**
-     * @brief Evict a stale session for a character that is already loaded.
-     *
-     * If `characterId` is already present in CharacterManager (left over from a
-     * previous connection that did not cleanly disconnect), this method:
-     *   1. Flushes position, HP/Mana, quests, flags, reputation, mastery and
-     *      ItemSoul kill-count to the game-server.
-     *   2. Removes the character and old client entry from their respective managers.
-     *   3. Broadcasts a `disconnectClient` notification to all currently connected
-     *      clients, excluding both the dead old socket and `newClientId` (the
-     *      reconnecting client that has not yet joined).
-     *
-     * @param characterId  The character being reclaimed.
-     * @param newClientId  The clientId of the incoming (re)connect — excluded from
-     *                     the disconnect broadcast so it does not confuse itself.
-     */
-    void evictStaleSession(int characterId, int newClientId);
 
     /**
      * @brief Validate character authentication
