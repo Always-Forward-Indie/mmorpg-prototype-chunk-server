@@ -180,3 +180,16 @@ TEST_F(InterestFixture, RecipientsFailOpen)
     for (int id : ids2)
         EXPECT_NE(id, 1);
 }
+
+TEST(InterestTickTiming, RecordsLastAndMax)
+{
+    Logger logger{"test"};
+    InterestManager im(logger);
+    im.recordTickMs(3.0);
+    im.recordTickMs(12.5);
+    im.recordTickMs(1.0);
+    auto s = im.stats();
+    EXPECT_DOUBLE_EQ(s.tickMsLast, 1.0);
+    EXPECT_DOUBLE_EQ(s.tickMsMax, 12.5);
+    EXPECT_EQ(s.tickCount, 3u);
+}

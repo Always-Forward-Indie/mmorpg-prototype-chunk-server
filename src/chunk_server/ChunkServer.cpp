@@ -1,6 +1,7 @@
 #include "chunk_server/ChunkServer.hpp"
 #include "services/CombatSystem.hpp"
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -610,6 +611,9 @@ ChunkServer::mainEventLoopCH()
     Task unifiedMobTickTask(
         [&]
         {
+            // S16b tick timing (load Numbers): measure the whole
+            // movement+broadcast section; recorded once at the end.
+            const auto tickStart = std::chrono::steady_clock::now();
             auto spawnZones = gameServices_.getSpawnZoneManager().getMobSpawnZones();
             if (spawnZones.empty())
                 return;
@@ -833,6 +837,11 @@ ChunkServer::mainEventLoopCH()
             }
             if (useInterest)
                 interest.recordFanout(tickBuilt, clientUpdates.size());
+            {
+                const auto tickEnd = std::chrono::steady_clock::now();
+                const double tickMs = std::chrono::duration<double, std::milli>(tickEnd - tickStart).count();
+                interest.recordTickMs(tickMs);
+            }
         },
         schedMs("scheduler.mob_tick_ms", 50), // 50ms scheduling resolution; actual mob movement is gated internally
         std::chrono::steady_clock::now(),
@@ -908,6 +917,10 @@ ChunkServer::mainEventLoopCH()
             }
             {
                 auto istats = gameServices_.getInterestManager().stats();
+                const auto oneDecimal = [](double v)
+                {
+                    return std::to_string(std::round(v * 10.0) / 10.0).substr(0, 5);
+                };
                 gameServices_.getLogger().log(
                     "Interest: clients=" + std::to_string(istats.trackedClients) +
                     " cells=" + std::to_string(istats.liveCells) +
@@ -916,7 +929,10 @@ ChunkServer::mainEventLoopCH()
                     " tickMobs=" + std::to_string(istats.tickMobs) +
                     " tickEvents=" + std::to_string(istats.tickEvents) +
                     " snaps=" + std::to_string(istats.snapshotsSent) +
-                    "/" + std::to_string(istats.snapshotsSkipped), BLUE);
+                    "/" + std::to_string(istats.snapshotsSkipped) +
+                    " tickMs last=" + oneDecimal(istats.tickMsLast) +
+                    " max=" + oneDecimal(istats.tickMsMax) +
+                    " n=" + std::to_string(istats.tickCount), BLUE);
             }
 
             // If any queue is getting too large, log a warning

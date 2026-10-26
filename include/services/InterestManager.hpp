@@ -62,6 +62,12 @@ class InterestManager
         // Enter-snapshots sent/skipped (cooldown) — storm visibility.
         uint64_t snapshotsSent{0};
         uint64_t snapshotsSkipped{0};
+        // Movement+broadcast tick duration, ms (S16b load Numbers). The
+        // scheduler fires every 50 ms; actual work is gated internally, so
+        // most ticks are near-zero and busy ticks stand out in max.
+        double tickMsLast{0.0};
+        double tickMsMax{0.0};
+        uint64_t tickCount{0};
     };
 
     // Enter-snapshot gate: at most one snapshot per client per cooldown.
@@ -70,6 +76,11 @@ class InterestManager
 
     // Called once per fan-out tick (single call, already aggregated).
     void recordFanout(uint64_t mobsBuilt, uint64_t eventsPushed);
+
+    // S16b: record one movement+broadcast tick duration (ms). Lock-free
+    // enough for a 50 ms scheduler tick (plain fields, writer is the tick
+    // thread; readers take the periodic stats snapshot).
+    void recordTickMs(double ms);
 
     explicit InterestManager(Logger &logger);
 
@@ -183,6 +194,10 @@ class InterestManager
     std::unordered_map<int, std::chrono::steady_clock::time_point> lastSnapshot_;
     uint64_t snapshotsSent_{0};
     uint64_t snapshotsSkipped_{0};
+    // S16b tick timing (written by the single scheduler tick thread).
+    double tickMsLast_{0.0};
+    double tickMsMax_{0.0};
+    uint64_t tickCount_{0};
     // clientId -> {mobUid -> watch start (steady clock)}.
     std::unordered_map<int, std::unordered_map<int, std::chrono::steady_clock::time_point>> watches_;
 };

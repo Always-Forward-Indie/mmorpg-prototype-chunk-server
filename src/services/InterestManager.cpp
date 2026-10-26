@@ -348,6 +348,15 @@ InterestManager::recordFanout(uint64_t mobsBuilt, uint64_t eventsPushed)
     tickEvents_ += eventsPushed;
 }
 
+void
+InterestManager::recordTickMs(double ms)
+{
+    tickMsLast_ = ms;
+    if (ms > tickMsMax_)
+        tickMsMax_ = ms;
+    ++tickCount_;
+}
+
 InterestManager::Stats
 InterestManager::stats() const
 {
@@ -362,5 +371,8 @@ InterestManager::stats() const
     s.tickEvents = tickEvents_;
     s.snapshotsSent = snapshotsSent_;
     s.snapshotsSkipped = snapshotsSkipped_;
+    s.tickMsLast = tickMsLast_;
+    s.tickMsMax = tickMsMax_;
+    s.tickCount = tickCount_;
     return s;
 }
