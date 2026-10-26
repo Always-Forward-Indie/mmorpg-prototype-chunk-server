@@ -109,9 +109,23 @@ NetworkManager::startIOEventLoop()
     }
 }
 
+void
+NetworkManager::stopIO()
+{
+    boost::system::error_code ec;
+    acceptor_.close(ec);
+    io_context_.stop();
+    for (auto &thread : threadPool_)
+    {
+        if (thread.joinable())
+            thread.join();
+    }
+}
+
 NetworkManager::~NetworkManager()
 {
     log_->warn("Network Manager destructor is called...");
+    stopIO();
 
     // Clean up all active sessions before shutdown
     {
@@ -120,15 +134,8 @@ NetworkManager::~NetworkManager()
         activeSessions_.clear();
     }
 
-    // Close the acceptor and stop the IO context
-    acceptor_.close();
-    io_context_.stop();
-
-    for (auto &thread : threadPool_)
-    {
-        if (thread.joinable())
-            thread.join();
-    }
+    // (io already stopped+joined via stopIO(); direct-destruction paths are
+    // covered because the destructor calls stopIO() first.)
 
     // ASan-found UAF fix (same class as game/login): SocketWriteQueue holds
     // a strand bound to io_context_'s service, but writeQueues_ is declared

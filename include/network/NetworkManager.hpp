@@ -32,6 +32,11 @@ class NetworkManager
     ~NetworkManager();
     void startAccept();
     void startIOEventLoop();
+    /// Ordered-shutdown hook (S16a, mirrors game): close the acceptor, stop
+    /// the io_context and join its threads. After this returns no handler
+    /// can push new events, so queues can be drained and sockets released
+    /// race-free. The destructor calls it too (belt and braces).
+    void stopIO();
     void sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, const std::string &responseString);
     /// CRITICAL-8: shared_ptr overload for broadcast — one allocation for N clients, zero copies
     void sendResponse(std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket, std::shared_ptr<const std::string> data);

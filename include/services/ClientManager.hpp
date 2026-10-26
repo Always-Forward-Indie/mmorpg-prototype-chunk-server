@@ -114,6 +114,12 @@ class ClientManager
     std::vector<int> getInactiveClientIds(int timeoutSec) const;
     void removePingTime(int clientID);
 
+    /// Shutdown helper (S16a): close + release every held socket BEFORE the
+    /// io_context dies (same asio teardown UAF as game-side, found via
+    /// S16a log gates). Called once from main's ordered shutdown; afterwards
+    /// the maps are empty (reconnects re-register on fresh boot).
+    void dropAllSockets();
+
   private:
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;

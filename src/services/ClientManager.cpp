@@ -548,3 +548,22 @@ ClientManager::getInactiveClientIds(int timeoutSec) const
     }
     return inactive;
 }
+
+void
+ClientManager::dropAllSockets()
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto closeQuiet = [](const std::shared_ptr<boost::asio::ip::tcp::socket> &sock)
+    {
+        if (sock && sock->is_open())
+        {
+            boost::system::error_code ec;
+            sock->close(ec);
+        }
+    };
+    for (const auto &[clientId, entry] : clientSockets_)
+        closeQuiet(entry.sock);
+    clientSockets_.clear();
+    socketToClient_.clear();
+    log_->info("[ClientManager] dropAllSockets: all client sockets closed and released");
+}

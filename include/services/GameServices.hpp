@@ -187,6 +187,14 @@ class GameServices
     {
         return clientManager_;
     }
+
+    /// Ordered-shutdown hook (S16a): release every socket held by the
+    /// managers BEFORE NetworkManager's io_context is destroyed (asio
+    /// teardown UAF otherwise). Called once from main after the loops join.
+    void dropAllSockets()
+    {
+        clientManager_.dropAllSockets();
+    }
     ChunkManager &getChunkManager()
     {
         return chunkManager_;

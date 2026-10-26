@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <mutex>
 #include <queue>
+#include <vector>
 
 class EventQueue
 {
@@ -33,6 +34,17 @@ class EventQueue
     /// HIGH-4: Signal all blocked pop/popBatch callers to return false so that
     ///         consumer threads can exit cleanly on shutdown.
     void stop();
+    /// Drop everything still queued (S16a shutdown). Queued events may own
+    /// sockets; the queue outlives NetworkManager's io_context at scope
+    /// exit, so leftovers would destroy sockets after their service
+    /// (ASan heap-use-after-free in asio internals, observed on game).
+    /// Call after all producers are joined and before returning from main.
+    void drain()
+    {
+        std::vector<Event> tmp;
+        while (popBatch(tmp, 1024))
+            tmp.clear();
+    }
     bool isStopped() const
     {
         return stopped_.load(std::memory_order_acquire);

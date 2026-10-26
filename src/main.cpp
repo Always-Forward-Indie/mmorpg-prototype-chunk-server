@@ -100,7 +100,17 @@ main()
         // HIGH-5: explicit ordered shutdown
         // 1. Stop event queues and wake all consumer threads
         chunkServer.stop(); // sets running_=false, stops queues + scheduler
-        // 2. Stop the network I/O (done in NetworkManager destructor upon scope exit)
+        // 2. Stop the network I/O first (S16a: afterwards no handler can
+        // push new events, so everything below is race-free).
+        networkManager.stopIO();
+        // 3. Drain leftover queued events (they may own sockets) and release
+        // every manager-held socket while the io_context is still alive.
+        // Otherwise live sockets die after ~io_context — ASan
+        // heap-use-after-free in asio internals, observed on game.
+        eventQueueChunkServer.drain();
+        eventQueueChunkServerPing.drain();
+        eventQueueGameServer.drain();
+        gameServices.dropAllSockets();
 
         return 0;
     }
