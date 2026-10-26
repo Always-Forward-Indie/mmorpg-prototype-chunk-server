@@ -73,6 +73,9 @@ class ClientSession : public std::enable_shared_from_this<ClientSession>
     void processMessage(const std::string &message);
     void handleClientDisconnect();
     void notifyCleanup(); // Called when session is ending
+    // Length-prefixed extraction (S14): complete frames dispatched,
+    // partial tails buffered. Fatal (>4MB length) disconnects.
+    void extractV2Messages();
 
     std::shared_ptr<boost::asio::ip::tcp::socket> socket_;
     std::array<char, protocol::kReadChunkBytes> dataBuffer_;

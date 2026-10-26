@@ -593,17 +593,15 @@ CharacterEventHandler::handleJoinCharacterEvent(const Event &event)
                                             : nlohmann::json::object();
                         catalogArr.push_back(std::move(entry));
                     }
-                    for (const auto &catChunk : wire::chunkJsonArray(catalogArr))
-                    {
-                        nlohmann::json catResponse = ResponseBuilder()
-                                                         .setHeader("clientId", clientID)
-                                                         .setHeader("eventType", "itemCatalog")
-                                                         .setBody("version", serverCatalogV)
-                                                         .setBody("items", catChunk)
-                                                         .build();
-                        networkManager_.sendResponse(clientSocket,
-                            networkManager_.generateResponseMessage("success", catResponse));
-                    }
+                    // S14d: v2 single frame (no chunking).
+                    nlohmann::json catResponse = ResponseBuilder()
+                                                     .setHeader("clientId", clientID)
+                                                     .setHeader("eventType", "itemCatalog")
+                                                     .setBody("version", serverCatalogV)
+                                                     .setBody("items", catalogArr)
+                                                     .build();
+                    networkManager_.sendResponse(clientSocket,
+                        networkManager_.generateResponseMessage("success", catResponse));
                     log_->info("[CATALOG] itemCatalog v{} ({} entries) -> client {} (had v{})",
                         serverCatalogV, catalogArr.size(), clientID, clientCatalogV);
                 }
@@ -1258,11 +1256,6 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     }
 
     const int characterId = std::get<CharacterDataStruct>(data).characterId;
-
-    // Transport fragmentation (S13-S1): capability first, so even a
-    // duplicate-classified ready cannot silently drop a freshly stated
-    // opt-in. Absent flag = legacy (false), same contract as the parser.
-    gameServices_.getClientManager().setClientFragCapable(clientID, std::get<CharacterDataStruct>(data).fragCapable);
 
     // Guard: ignore duplicate or stale ready signals
     if (gameServices_.getClientManager().isClientWorldReady(clientID))

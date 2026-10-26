@@ -267,83 +267,41 @@ NetworkManager::enqueueWrite(std::shared_ptr<boost::asio::ip::tcp::socket> socke
     std::shared_ptr<const std::string> data,
     bool critical)
 {
-    // Wire-contract guard (seam with the UE client): the client parses one
-    // '\n'-terminated JSON object per line with an 8KB cap
-    // (FNetFraming::MaxMessageBytes). Anything bigger is dropped client-side,
-    // so flag it here at warn level with the event type instead of silently
-    // producing snapshot holes. Threshold 6KB leaves headroom for the
-    // trailing delimiter, header growth and multi-byte UTF-8.
-    constexpr size_t kClientLineCapWarnBytes = 6 * 1024;
-    // Transport fragmentation (issues #121/#122): peers that advertised the
-    // additive playerReady "frag" flag get oversize messages as wireFrag
-    // frames and reassemble them; legacy peers keep the old behavior.
-    std::vector<std::shared_ptr<const std::string>> payloads;
-    if (data && data->size() > kClientLineCapWarnBytes)
+    // S14d: v2-only transport. Every message is length-prefixed; oversize
+    // (>6KB) is counted for seam visibility (never dropped, never chunked —
+    // wireFrag and the 8KB line cap are gone with v1).
+    // framingError() payloads carry a trailing '\n' for the v1 era; strip
+    // one so the v2 frame holds pure JSON.
+    constexpr size_t kFatMessageWarnBytes = 6 * 1024;
+    if (!data)
+        return;
+    std::string logical = *data;
+    if (!logical.empty() && logical.back() == '\n')
+        logical.pop_back();
+    if (logical.size() > kFatMessageWarnBytes)
     {
-        std::string eventType = "?";
-        const std::string key = "\"eventType\":\"";
-        const size_t pos = data->find(key);
-        if (pos != std::string::npos)
-        {
-            const size_t begin = pos + key.size();
-            const size_t end = data->find('"', begin);
-            if (end != std::string::npos)
-                eventType = data->substr(begin, end - begin);
-        }
         ++oversizeSeen_;
-        {
-            std::lock_guard<std::mutex> lock(oversizeByEventMutex_);
-            ++oversizeByEvent_[eventType];
-        }
-
-        const int fragClientId = gameServices_.getClientManager().getClientIdBySocket(socket);
-        if (fragClientId > 0 && gameServices_.getClientManager().isClientFragCapable(fragClientId))
-        {
-            std::string logical = *data;
-            if (!logical.empty() && logical.back() == '\n')
-                logical.pop_back();
-            auto frames = wire::packWireMessage(logical, nextFragStreamId_++);
-            if (!frames.empty())
-            {
-                ++fragStreams_;
-                payloads.reserve(frames.size());
-                for (auto &f : frames)
-                {
-                    ++fragFrames_;
-                    payloads.push_back(std::make_shared<const std::string>(std::move(f)));
-                }
-                log_->info("Fragmented oversize packet for client wire ({} bytes, eventType={}, {} frames, clientId={})",
-                    data->size(), eventType, payloads.size(), fragClientId);
-            }
-            else
-            {
-                log_->error("Logical message exceeds {} bytes (eventType={}) — over sanity cap, sending whole (legacy)",
-                    wire::kMaxLogicalBytes, eventType);
-            }
-        }
-        if (payloads.empty())
-        {
-            log_->warn("Oversized packet for client wire ({} bytes, eventType={}): exceeds UE 8KB line cap — chunk the array payload",
-                data->size(), eventType);
-        }
+        std::lock_guard<std::mutex> lock(oversizeByEventMutex_);
+        ++oversizeByEvent_[wire::probeEventType(logical)];
     }
-
-    if (payloads.empty() && data)
-        payloads.push_back(data);
-
+    std::string framed = wire::packFramedMessage(logical);
+    if (framed.empty())
+    {
+        log_->error("v2 frame over {} bytes, dropping instead of sending whole",
+            protocol::kMaxFrameBytes);
+        return;
+    }
+    auto payload = std::make_shared<const std::string>(std::move(framed));
     auto queue = getOrCreateWriteQueue(socket);
-    if (!queue || payloads.empty())
+    if (!queue)
         return;
     boost::asio::post(queue->strand,
-        [this, socket = std::move(socket), queue, payloads = std::move(payloads), critical]() mutable
+        [this, socket = std::move(socket), queue, payload = std::move(payload), critical]() mutable
         {
-            for (auto &p : payloads)
-            {
-                if (critical)
-                    queue->criticalQ.push_back(p);
-                else
-                    queue->bulkQ.push_back(p);
-            }
+            if (critical)
+                queue->criticalQ.push_back(payload);
+            else
+                queue->bulkQ.push_back(payload);
             if (!queue->writing)
                 doNextWrite(std::move(socket), std::move(queue));
         });

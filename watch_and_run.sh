@@ -5,10 +5,14 @@ echo "📂 Current Directory: $(pwd)"
 echo "📜 Listing contents of /usr/src/app:"
 ls -lh /usr/src/app
 
-# ✅ Ensure the binary exists
+# ✅ Ensure the binary exists — build it if missing (S14d: a killed link
+# used to leave the container in a restart loop, as nothing ever rebuilt it).
 if [ ! -f "/usr/src/app/build/MMOChunkServer" ]; then
-    echo "❌ ERROR: MMOChunkServer binary not found in /usr/src/app!"
-    exit 1
+    echo "⚙️ Binary missing — building before starting watch..."
+    mkdir -p /usr/src/app/build && cd /usr/src/app/build && \
+        cmake -DADMIN_RPC=ON -DCMAKE_BUILD_TYPE=Debug /usr/src/app && \
+        make -j8 || { echo "❌ ERROR: initial build failed, cannot start."; exit 1; }
+    cd /usr/src/app
 fi
 
 # ✅ Ensure the binary is executable

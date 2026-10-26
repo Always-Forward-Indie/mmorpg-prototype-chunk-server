@@ -83,19 +83,19 @@ MobEventHandler::handleSpawnMobsInZoneEvent(const Event &event)
                 return;
             }
 
-            for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
-            {
-                nlohmann::json response = ResponseBuilder()
-                                              .setHeader("clientId", clientID)
-                                              .setHeader("eventType", "spawnMobsInZone")
-                                              .setTimestamps(timestamps)
-                                              .setBody("zoneId", spawnZoneData.zoneId)
-                                              .setBody("mobs", mobsChunk)
-                                              .build();
+            // S14d: v2 sends the whole array in one length-prefixed frame
+            // (no 8KB line cap anymore); empty arrays still send once so the
+            // client can distinguish "no mobs" from "no message".
+            nlohmann::json response = ResponseBuilder()
+                                          .setHeader("clientId", clientID)
+                                          .setHeader("eventType", "spawnMobsInZone")
+                                          .setTimestamps(timestamps)
+                                          .setBody("zoneId", spawnZoneData.zoneId)
+                                          .setBody("mobs", mobsArray)
+                                          .build();
 
-                std::string responseData = networkManager_.generateResponseMessage("success", response, timestamps);
-                networkManager_.sendResponse(clientSocket, responseData);
-            }
+            std::string responseData = networkManager_.generateResponseMessage("success", response, timestamps);
+            networkManager_.sendResponse(clientSocket, responseData);
         }
         else
         {
@@ -134,18 +134,16 @@ MobEventHandler::sendCellMobsSnapshot(int clientId, float cx, float cy, float ha
         if (mobsArray.empty())
             return;
 
-        for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
-        {
-            nlohmann::json response = ResponseBuilder()
-                                          .setHeader("clientId", clientId)
-                                          .setHeader("eventType", "spawnMobsInZone")
-                                          .setBody("zoneId", -1)
-                                          .setBody("mobs", mobsChunk)
-                                          .build();
+        // S14d: v2 single frame (see above).
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("clientId", clientId)
+                                      .setHeader("eventType", "spawnMobsInZone")
+                                      .setBody("zoneId", -1)
+                                      .setBody("mobs", mobsArray)
+                                      .build();
 
-            networkManager_.sendResponse(clientSocket,
-                networkManager_.generateResponseMessage("success", response));
-        }
+        networkManager_.sendResponse(clientSocket,
+            networkManager_.generateResponseMessage("success", response));
         log_->info("Cell snapshot: " + std::to_string(mobsArray.size()) +
                    " mobs to client " + std::to_string(clientId));
     }
@@ -178,17 +176,16 @@ MobEventHandler::sendSpawnZonesToClient(int clientID, std::shared_ptr<boost::asi
             mobsArray.push_back(mobJson);
         }
 
-        for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
-        {
-            nlohmann::json response = ResponseBuilder()
-                                          .setHeader("clientId", clientID)
-                                          .setHeader("eventType", "spawnMobsInZone")
-                                          .setBody("zoneId", spawnZone.zoneId)
-                                          .setBody("mobs", mobsChunk)
-                                          .build();
+        // S14d: v2 single frame (empty zones are skipped above, so the
+        // array is never empty here).
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("clientId", clientID)
+                                      .setHeader("eventType", "spawnMobsInZone")
+                                      .setBody("zoneId", spawnZone.zoneId)
+                                      .setBody("mobs", mobsArray)
+                                      .build();
 
-            networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", response));
-        }
+        networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", response));
     }
 }
 
@@ -241,10 +238,8 @@ MobEventHandler::handleZoneMoveMobsEvent(const Event &event)
             return;
         }
 
-        for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
-        {
-            sendSuccessResponseWithTimestamps(clientSocket, "Moving mobs success!", "zoneMoveMobs", clientID, timestamps, "mobs", mobsChunk, "");
-        }
+        // S14d: v2 single frame (no chunking).
+        sendSuccessResponseWithTimestamps(clientSocket, "Moving mobs success!", "zoneMoveMobs", clientID, timestamps, "mobs", mobsArray, "");
     }
     catch (const std::bad_variant_access &ex)
     {
@@ -614,22 +609,19 @@ MobEventHandler::handleMobMoveUpdateEvent(const Event &event)
             return;
         }
 
-        // Chunked by bytes (wire::chunkJsonArray): keeps every line under
-        // the client 8KB framing cap even when many mobs move in one tick.
-        for (const auto &mobsChunk : wire::chunkJsonArray(mobsArray))
-        {
-            nlohmann::json response = ResponseBuilder()
-                                          .setHeader("clientId", clientID)
-                                          .setHeader("eventType", "mobMoveUpdate")
-                                          .setHeader("serverSendMs", TimestampUtils::getCurrentTimestampMs())
-                                          .setBody("mobs", mobsChunk)
-                                          .build();
+        // S14d: v2 sends the whole tick in one length-prefixed frame
+        // (no 8KB line cap anymore) — also cheaper than N chunks per tick.
+        nlohmann::json response = ResponseBuilder()
+                                      .setHeader("clientId", clientID)
+                                      .setHeader("eventType", "mobMoveUpdate")
+                                      .setHeader("serverSendMs", TimestampUtils::getCurrentTimestampMs())
+                                      .setBody("mobs", mobsArray)
+                                      .build();
 
-            std::string responseData = networkManager_.generateResponseMessage("success", response);
-            // Use bulk priority so mob position updates never block combat/stats packets
-            // that might already be queued in the per-socket critical priority lane.
-            networkManager_.sendResponseBulk(clientSocket, std::make_shared<const std::string>(std::move(responseData)));
-        }
+        std::string responseData = networkManager_.generateResponseMessage("success", response);
+        // Use bulk priority so mob position updates never block combat/stats packets
+        // that might already be queued in the per-socket critical priority lane.
+        networkManager_.sendResponseBulk(clientSocket, std::make_shared<const std::string>(std::move(responseData)));
     }
     catch (const std::bad_variant_access &ex)
     {

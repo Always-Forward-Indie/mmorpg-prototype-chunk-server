@@ -193,15 +193,6 @@ EventDispatcher::handleJoinGameClient(const EventContext &context, std::shared_p
     {
         // Register the socket in ClientManager for this client
         gameServices_.getClientManager().setClientSocket(context.clientData.clientId, validSocket);
-        // Transport capability (S13-S1): learn frag support from the FIRST
-        // message carrying the additive body flag, so no fat response is
-        // ever queued before the capability is known. Entry is created on
-        // demand; absent/mistyped flag = legacy behavior.
-        if (context.json.is_object() && context.json.contains("body"))
-        {
-            gameServices_.getClientManager().setClientFragCapable(
-                context.clientData.clientId, wire::parseFragOptIn(context.json["body"]));
-        }
         try
         {
             // Create event safely using in_place construction to avoid variant copying
@@ -1877,15 +1868,6 @@ EventDispatcher::handlePlayerReady(const EventContext &context,
         context.json["body"]["brief"].is_boolean())
     {
         charData.briefJoin = context.json["body"]["brief"].get<bool>();
-    }
-
-    // Transport fragmentation support (wireFrag, S13-S1): additive body
-    // flag, absent = legacy behavior (oversize sent whole). Single helper
-    // shared with handleJoinGameClient (flag learned from the first).
-    charData.fragCapable = false;
-    if (context.json.is_object() && context.json.contains("body"))
-    {
-        charData.fragCapable = wire::parseFragOptIn(context.json["body"]);
     }
 
     eventsBatch_.push_back(Event(Event::PLAYER_READY,

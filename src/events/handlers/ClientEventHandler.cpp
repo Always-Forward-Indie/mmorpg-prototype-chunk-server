@@ -3,6 +3,7 @@
 #include "events/EventData.hpp"
 #include <chrono>
 #include <spdlog/logger.h>
+#include "utils/ProtocolLimits.hpp"
 
 ClientEventHandler::ClientEventHandler(
     NetworkManager &networkManager,
@@ -89,11 +90,14 @@ ClientEventHandler::handleJoinClientEvent(const Event &event)
             gameServices_.getClientManager().recordPingTime(clientID);
 
             // Prepare success response and broadcast to all clients (including sender) with timestamps
+            // S14d: v2-only — every peer speaks length-prefixed frames.
+            const int agreedFraming = protocol::kFramingV2;
             nlohmann::json broadcastResponse = ResponseBuilder()
                                                    .setHeader("message", "Authentication success for user!")
                                                    .setHeader("hash", passedClientData.hash)
                                                    .setHeader("clientId", passedClientData.clientId)
                                                    .setHeader("eventType", "joinGameClient")
+                                                   .setBody("framing", agreedFraming)
                                                    .setTimestamps(timestamps)
                                                    .build();
 

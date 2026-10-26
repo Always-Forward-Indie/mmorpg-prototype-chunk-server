@@ -8,18 +8,6 @@
 
 namespace {
 
-// Best-effort eventType so the client can correlate a framing error.
-std::string probeEventType(const std::string &message) {
-    try {
-        auto probe = nlohmann::json::parse(message.substr(0, 512), nullptr, false);
-        if (!probe.is_discarded() && probe.is_object() && probe.contains("header") &&
-            probe["header"].is_object() && probe["header"].contains("eventType") &&
-            probe["header"]["eventType"].is_string())
-            return probe["header"]["eventType"].get<std::string>();
-    } catch (...) {}
-    return "unknown";
-}
-
 std::string framingError(const std::string &eventType, const char *code) {
     nlohmann::json err;
     err["header"]["eventType"] = eventType;
@@ -69,8 +57,9 @@ ClientSession::doRead()
         {
             if (!ec)
             {
-                // Framing DoS guard (see utils/ProtocolLimits.hpp).
-                if (accumulatedData_.size() + bytes_transferred > protocol::kMaxAccumulatedBytes)
+                // S14d: v2-only. The length IS the boundary; partial frames
+                // wait for more TCP chunks (a split 4-byte prefix included).
+                if (accumulatedData_.size() + bytes_transferred > protocol::kMaxAccumulatedBytesV2)
                 {
                     log_->error("Buffer overflow detected, disconnecting client");
                     handleClientDisconnect();
@@ -79,60 +68,10 @@ ClientSession::doRead()
 
                 // Append new data to our session-specific buffer.
                 accumulatedData_.append(dataBuffer_.data(), bytes_transferred);
-                std::string delimiter = "\n";
-                size_t pos;
-                size_t processed_messages = 0;
-                constexpr size_t MAX_MESSAGES_PER_READ = 10; // Limit messages per read cycle
 
-                // Process all complete messages found.
-                while ((pos = accumulatedData_.find(delimiter)) != std::string::npos && processed_messages < MAX_MESSAGES_PER_READ)
-                {
-                    std::string message = accumulatedData_.substr(0, pos);
-
-                    // 8KB/message matches proto/mmo_proto.py + login-server.
-                    // Oversize gets an explicit wire ERR_OVERSIZE (previously
-                    // log-only drop => client hung until timeout).
-                    if (message.size() > protocol::kMaxMessageBytes)
-                    {
-                        gameServices_.getLogger().logError(
-                            std::string(protocol::kErrOversize) + ": message too large, skipping: " +
-                                std::to_string(message.size()) + " bytes",
-                            RED);
-                        if (sendCallback_)
-                        {
-                            try {
-                                sendCallback_(socket_,
-                                    framingError(probeEventType(message), protocol::kErrOversize));
-                            } catch (...) {}
-                        }
-                        accumulatedData_.erase(0, pos + delimiter.size());
-                        processed_messages++;
-                        continue;
-                    }
-
-                    log_->debug("Received data from Client: " + message);
-                    processMessage(message);
-                    accumulatedData_.erase(0, pos + delimiter.size());
-                    processed_messages++;
-                }
-
-                // If accumulated buffer is getting large without complete messages, clear it
-                if (accumulatedData_.size() > protocol::kMaxAccumulatedBytes / 2 && accumulatedData_.find(delimiter) == std::string::npos)
-                {
-                    log_->error("Clearing large incomplete buffer to prevent memory leak");
-                    accumulatedData_.clear();
-                }
-
-                // Periodically shrink the buffer to prevent memory fragmentation
-                if (accumulatedData_.capacity() > protocol::kMaxAccumulatedBytes && accumulatedData_.size() < protocol::kMaxAccumulatedBytes / 4)
-                {
-                    std::string temp = accumulatedData_;
-                    accumulatedData_.clear();
-                    accumulatedData_.shrink_to_fit();
-                    accumulatedData_ = std::move(temp);
-                }
-
+                extractV2Messages();
                 doRead();
+
             }
             else if (ec == boost::asio::error::eof)
             {
@@ -145,6 +84,53 @@ ClientSession::doRead()
                 handleClientDisconnect();
             }
         });
+}
+
+// S14d: v2-only transport. Length-prefixed extraction; L > 4MB is a
+// DoS attempt: explicit ERR_OVERSIZE + disconnect. Malformed JSON inside
+// a well-formed frame follows the dispatcher contract (ERR_MALFORMED via
+// processMessage, no disconnect).
+void
+ClientSession::extractV2Messages()
+{
+    size_t processed_messages = 0;
+    constexpr size_t MAX_MESSAGES_PER_READ = 10;
+    while (accumulatedData_.size() >= 4 && processed_messages < MAX_MESSAGES_PER_READ)
+    {
+        const auto *b = reinterpret_cast<const uint8_t *>(accumulatedData_.data());
+        const std::uint32_t n = static_cast<std::uint32_t>(b[0]) |
+                                (static_cast<std::uint32_t>(b[1]) << 8) |
+                                (static_cast<std::uint32_t>(b[2]) << 16) |
+                                (static_cast<std::uint32_t>(b[3]) << 24);
+        if (n > protocol::kMaxFrameBytes)
+        {
+            gameServices_.getLogger().logError(
+                std::string(protocol::kErrOversize) + ": v2 frame too large, disconnecting: " +
+                    std::to_string(n) + " bytes",
+                RED);
+            if (sendCallback_)
+            {
+                try {
+                    sendCallback_(socket_, framingError("unknown", protocol::kErrOversize));
+                } catch (...) {}
+            }
+            handleClientDisconnect();
+            return;
+        }
+        if (accumulatedData_.size() < 4 + n)
+        {
+            break; // partial frame: wait for more TCP chunks
+        }
+        processMessage(accumulatedData_.substr(4, n));
+        accumulatedData_.erase(0, 4 + n);
+        processed_messages++;
+    }
+
+    if (accumulatedData_.size() > protocol::kMaxAccumulatedBytesV2)
+    {
+        log_->error("Clearing large incomplete v2 buffer to prevent memory leak");
+        accumulatedData_.clear();
+    }
 }
 
 void

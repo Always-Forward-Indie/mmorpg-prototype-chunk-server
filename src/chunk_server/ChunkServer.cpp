@@ -822,9 +822,8 @@ ChunkServer::mainEventLoopCH()
 
             // Push one event per connected client containing ALL zone updates.
             // This replaces the old per-zone-per-client approach that produced
-            // N_zones x N_clients events per tick. Byte-level chunking into
-            // client-safe lines happens downstream in
-            // MobEventHandler::handleMobMoveUpdateEvent (wire::chunkJsonArray).
+            // N_zones x N_clients events per tick. v2 frames carry the whole
+            // batch (no 8KB line cap anymore).
             uint64_t tickBuilt = 0;
             for (auto &[clientId, updates] : clientUpdates)
             {

@@ -115,9 +115,9 @@ class NetworkManager
     std::unordered_set<std::shared_ptr<ClientSession>> activeSessions_;
     std::mutex sessionsMutex_;
 
-    // Transport fragmentation (wireFrag, issues #121/#122): per-connection
-    // stream ids for oversize messages. Counters feed the ADMIN wireStats op.
-    std::atomic<std::uint64_t> nextFragStreamId_{1};
+    // v2 framing counters (ADMIN wireStats op). fragStreams/fragFrames are
+    // legacy: always zero since S14d removed wireFrag (kept for admin API
+    // compatibility — a nonzero value would mean v1 code came back).
     std::atomic<std::uint64_t> oversizeSeen_{0};
     std::atomic<std::uint64_t> fragStreams_{0};
     std::atomic<std::uint64_t> fragFrames_{0};

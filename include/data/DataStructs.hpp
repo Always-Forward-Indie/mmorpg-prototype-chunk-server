@@ -466,12 +466,6 @@ struct CharacterDataStruct
     // mob/NPC flood (teleport flows re-add what's needed via snapshots).
     // Carried playerReady -> PLAYER_READY event only; never persisted.
     bool briefJoin = false;
-
-    // Transport fragmentation support (wireFrag reassembly, issues #121/#122).
-    // Additive playerReady body flag ("frag"); absent = legacy behavior
-    // (oversize lines sent whole, may be dropped by the 8KB client cap).
-    // Carried playerReady -> PLAYER_READY event only; never persisted.
-    bool fragCapable = false;
 };
 
 struct ClientDataStruct
@@ -482,9 +476,6 @@ struct ClientDataStruct
     int characterId = 0;
     TimestampStruct timestamps; // Lag compensation timestamps
     bool isWorldReady = false;  // Set to true when client sends playerReady (scene loaded)
-    // Transport fragmentation support (wireFrag reassembly). Set from the
-    // additive playerReady body flag; defaults to legacy behavior.
-    bool fragCapable = false;
     // Item stat catalog version the client reported in joinGameCharacter.
     // 0 = unknown: server always pushes the full itemCatalog on join.
     uint32_t itemCatalogVersion = 0;

@@ -209,29 +209,6 @@ ClientManager::isClientWorldReady(int clientID) const
 }
 
 void
-ClientManager::setClientFragCapable(int clientID, bool capable)
-{
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    for (auto &client : clientsList_)
-    {
-        if (client.clientId == clientID)
-        {
-            client.fragCapable = capable;
-            return;
-        }
-    }
-
-    // No entry yet (flag arrives with joinGameClient, before any other
-    // setter ran) — create the minimal entry so the capability sticks
-    // instead of a silent no-op. Mirrors setClientCharacterId.
-    ClientDataStruct newClient;
-    newClient.clientId = clientID;
-    newClient.accountId = clientID; // clientId == accountId in this system
-    newClient.fragCapable = capable;
-    clientsList_.push_back(newClient);
-}
-
-void
 ClientManager::setItemCatalogVersion(int clientID, uint32_t version)
 {
     std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -245,17 +222,6 @@ ClientManager::setItemCatalogVersion(int clientID, uint32_t version)
     }
 }
 
-bool
-ClientManager::isClientFragCapable(int clientID) const
-{
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    for (const auto &client : clientsList_)
-    {
-        if (client.clientId == clientID)
-            return client.fragCapable;
-    }
-    return false;
-}
 
 // remove client by ID
 bool
@@ -290,6 +256,7 @@ ClientManager::removeClientData(int clientID, uint64_t expectedGen)
     {
         if (entry->second.sock)
             socketToClient_.erase(entry->second.sock.get());
+        if (entry->second.sock)
         clientSockets_.erase(entry);
     }
     return true;
@@ -370,6 +337,7 @@ ClientManager::cleanupInvalidClients()
             {
                 if (socketIt->second.sock)
                     socketToClient_.erase(socketIt->second.sock.get());
+                if (socketIt->second.sock)
                 clientSockets_.erase(socketIt);
             }
             it = clientsList_.erase(it);
@@ -422,6 +390,7 @@ ClientManager::forceCleanupMemory()
             {
                 if (socketIt->second.sock)
                     socketToClient_.erase(socketIt->second.sock.get());
+                if (socketIt->second.sock)
                 clientSockets_.erase(socketIt);
             }
             it = clientsList_.erase(it);
