@@ -230,8 +230,8 @@ GameServerWorker::sendDataToGameServer(const std::string &data)
                         characterId = bodyIt->value("characterId", 0);
                     const std::string key = outbox_.assignKey(characterId, type);
                     // Key in header always (wire forensics); duplicated into
-                    // object bodies (array bodies stay keyless = legacy path:
-                    // periodic snapshots self-heal).
+                    // object bodies (array bodies stay keyless: periodic
+                    // snapshots self-heal, no per-fact tracking).
                     j["header"]["factKey"] = key;
                     if (bodyIsObject)
                         (*bodyIt)["factKey"] = key;
@@ -242,7 +242,7 @@ GameServerWorker::sendDataToGameServer(const std::string &data)
             }
             catch (const std::exception &)
             {
-                // Unparseable payload: legacy direct send, no tracking.
+                // Unparseable payload: direct send, no tracking.
             }
             sendQueue_.push(wire);
             if (!writePending_)

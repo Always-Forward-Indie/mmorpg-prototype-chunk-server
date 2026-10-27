@@ -645,8 +645,8 @@ ChunkServer::mainEventLoopCH()
             // Interest v2 (phase 2): fan out mob updates to subscribers of the
             // mob's cell. Fail-open set (per tick): untracked clients (never
             // moved/joined yet) and clients still loading (!isWorldReady) get
-            // everything — identical to legacy broadcast for them. Disabled
-            // interest (config) also falls back to legacy broadcast.
+            // everything — identical to broadcast for them. Disabled
+            // interest (config) also falls back to broadcast.
             auto &interest = gameServices_.getInterestManager();
             const bool useInterest = interest.isEnabled();
             InterestManager::Snapshot interestSnap;
@@ -682,7 +682,7 @@ ChunkServer::mainEventLoopCH()
             for (const auto &zone : spawnZones)
             {
                 // Use actual alive count from MobInstanceManager instead of spawnedMobsCount
-                // legacy counter, which can underflow and permanently freeze a zone's mobs.
+                // (kept only for observability; it can underflow and must never gate spawns).
                 int aliveCount = gameServices_.getMobInstanceManager().getAliveMobCountInZone(zone.second.zoneId);
                 if (!zone.second.spawnEnabled || aliveCount == 0)
                     continue;
@@ -1026,7 +1026,7 @@ ChunkServer::mainEventLoopCH()
 
                     // Only remove once the corpse has been visible for the full duration.
                     // deathTimestamp == {} means the mob was marked dead without recording
-                    // a timestamp (legacy path) → remove immediately to avoid infinite retention.
+                    // a timestamp (defensive) → remove immediately to avoid infinite retention.
                     if (mob.deathTimestamp != std::chrono::steady_clock::time_point{} &&
                         std::chrono::duration_cast<std::chrono::milliseconds>(now - mob.deathTimestamp).count() < CORPSE_DURATION_MS)
                     {
@@ -1279,7 +1279,7 @@ ChunkServer::mainEventLoopCH()
 
     // Periodic task: absolute reputation snapshot every 60 seconds.
     // Delta facts are exact but losable (chunk crash wipes the in-memory
-    // outbox); the snapshot bounds staleness to a minute via the legacy
+    // outbox); the snapshot bounds staleness to a minute via the
     // absolute upsert path (no delta field). Cheap: only online chars.
     Task repSnapshotTask(
         [this]
@@ -1678,7 +1678,7 @@ ChunkServer::mainEventLoopCH()
                         continue;
 
                     if (character.joinTimestamp == std::chrono::steady_clock::time_point{})
-                        continue; // legacy entries without timestamp, skip
+                        continue; // unstamped entries are never swept as ghosts, skip
 
                     int64_t age = std::chrono::duration_cast<std::chrono::seconds>(
                         now - character.joinTimestamp).count();

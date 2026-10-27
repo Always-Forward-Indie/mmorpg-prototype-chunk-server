@@ -794,7 +794,7 @@ InventoryManager::updateInventoryItemId(int characterId, int itemId, int64_t new
     bool updated = false;
     // Whichever token got cleared by this echo owns stashed equip saves:
     // fill them with the real id now (drained by the caller afterwards).
-    // Covers the mixed-version case too (legacy echo clearing a token).
+    // Covers the zero-token echo case too.
     uint64_t clearedToken = 0;
     if (syncToken != 0)
     {
@@ -1007,7 +1007,7 @@ InventoryManager::dueSyncResend(int64_t nowMs)
             ++item.syncAttempts;
             if (item.syncAttempts > kSyncMaxAttempts)
             {
-                // Give up: legacy matching takes over. One warn — a row
+                // Give up: token-less matching takes over. One warn — a row
                 // unsynced for ~5 min means the save path is broken.
                 log_->warn("[INVENTORY] Sync retry budget exhausted for char=" +
                            std::to_string(item.characterId) + " itemId=" +

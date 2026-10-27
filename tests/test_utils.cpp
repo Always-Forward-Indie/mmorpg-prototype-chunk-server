@@ -126,8 +126,8 @@ TEST(DistanceUtils, Dist3DKnownValues)
 
 TEST(DistanceUtils, WithinRangeMatchesSqrtCompare)
 {
-    // Wave 3.1: the vendor (3D) and dialogue (2D) range checks now share
-    // these. Pin against naive sqrt comparison away from the ulp boundary.
+    // Wave 3.1: the vendor (2D) and dialogue range checks share
+    // withinRange2D. Pin against naive sqrt comparison away from the ulp boundary.
     PositionStruct a, b;
     a.positionX = 0.0f;
     a.positionY = 0.0f;
@@ -137,11 +137,10 @@ TEST(DistanceUtils, WithinRangeMatchesSqrtCompare)
     b.positionZ = 0.0f;
     EXPECT_TRUE(DistanceUtils::withinRange2D(a, b, 50.5f));
     EXPECT_FALSE(DistanceUtils::withinRange2D(a, b, 49.5f));
-    EXPECT_TRUE(DistanceUtils::withinRange3D(a, b, 50.5f));
-    EXPECT_FALSE(DistanceUtils::withinRange3D(a, b, 49.5f));
-    b.positionZ = 100.0f; // Z splits the two: 2D still in, 3D out
+    b.positionZ = 100.0f; // Z ignored by 2D: still in; tolerance form rejects with tight band
     EXPECT_TRUE(DistanceUtils::withinRange2D(a, b, 50.5f));
-    EXPECT_FALSE(DistanceUtils::withinRange3D(a, b, 50.5f));
+    EXPECT_TRUE(DistanceUtils::withinRange2DWithZTolerance(a, b, 50.5f));
+    EXPECT_FALSE(DistanceUtils::withinRange2DWithZTolerance(a, b, 50.5f, 50.0f));
 }
 
 TEST(DistanceUtils, WithinRange2DWithZTolerance400)

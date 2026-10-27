@@ -53,7 +53,7 @@ HarvestManager::sendToInterested(const std::string &messageData, float x, float 
     const bool routed = hasPos && interest_ != nullptr && interest_->isEnabled();
     if (!routed)
     {
-        // No position, interest unset/disabled: legacy broadcast-all.
+        // No position, interest unset/disabled: broadcast-all (fail-open).
         for (const auto &client : clientsList)
         {
             auto sock = clientManager_->getClientSocket(client.clientId);

@@ -132,7 +132,7 @@ class InterestManager
 
     // Recipient list for a positional broadcast from (x, y): subscribers of
     // the source cell + fail-open clients (untracked or !isWorldReady).
-    // Empty when disabled (caller falls back to legacy broadcast-all).
+    // Empty when disabled (caller falls back to broadcast-all).
     // excludeClientId < 0 disables exclusion.
     std::vector<int> recipientsFor(float x, float y,
         const std::vector<std::pair<int, bool>> &clients,

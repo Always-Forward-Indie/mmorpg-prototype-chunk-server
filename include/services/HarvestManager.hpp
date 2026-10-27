@@ -228,7 +228,7 @@ class HarvestManager
     class InterestManager *interest_ = nullptr;
 
     // Positional send: subscribers of (x, y) + participant + fail-open.
-    // hasPos == false (or interest unset/disabled) => legacy broadcast-all.
+    // hasPos == false (or interest unset/disabled) => broadcast-all.
     void sendToInterested(const std::string &messageData, float x, float y,
         bool hasPos, int participantClientId);
 

@@ -175,7 +175,7 @@ class BaseEventHandler
     /**
      * @brief Routed broadcast: inspects packet body for casterId/characterId,
      * resolves position + participants, then broadcastPositional().
-     * Unknown shape or unresolvable position => legacy broadcast-all
+     * Unknown shape or unresolvable position => broadcast-all
      * (fail-open, never drops).
      */
     void broadcastRouted(const std::string &status, const nlohmann::json &packet);
@@ -185,7 +185,7 @@ class BaseEventHandler
     /**
      * @brief Positional send of an already-encoded payload (wire bytes
      * unchanged): subscribers of (x, y) + participants + fail-open.
-     * For legacy raw-string broadcasts (e.g. characterMoved teleports).
+     * For raw-string broadcasts (e.g. characterMoved teleports).
      */
     void sendPositionalRaw(const std::string &rawData, float x, float y,
         const std::vector<int> &participantClientIds, int excludeClientId = -1);

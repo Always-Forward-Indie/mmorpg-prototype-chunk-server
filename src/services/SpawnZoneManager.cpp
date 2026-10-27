@@ -506,7 +506,7 @@ SpawnZoneManager::mobDied(int zoneId, int mobUID)
                         "/" + std::to_string(zone->second.totalSpawnCount()));
 
             // Note: New mobs will be spawned by the periodic respawn task
-            // based on the actual alive mob count, not this legacy counter
+            // based on the actual alive mob count, not this observability counter
         }
     } // Release SpawnZoneManager mutex before calling MobInstanceManager
 

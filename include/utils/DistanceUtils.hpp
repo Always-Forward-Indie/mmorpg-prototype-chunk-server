@@ -65,14 +65,6 @@ class DistanceUtils
 
     // Range check without sqrt (squared comparison — bit-identical to the
     // hand-rolled form it replaces, e.g. VendorEventHandler::isPlayerInRange).
-    // LEGACY 3D sphere — kept for compat, new code must use withinRange2DWithZTolerance.
-    static bool withinRange3D(const PositionStruct &a, const PositionStruct &b, float radius)
-    {
-        const float dx = a.positionX - b.positionX;
-        const float dy = a.positionY - b.positionY;
-        const float dz = a.positionZ - b.positionZ;
-        return (dx * dx + dy * dy + dz * dz) <= (radius * radius);
-    }
 
     // AAA standard: 2D range + Z tolerance band. Use for ALL gameplay
     // interactions (combat/skills/aggro/loot/harvest/dialogue/vendor/WIO/quest).
