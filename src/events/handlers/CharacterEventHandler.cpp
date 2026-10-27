@@ -2160,6 +2160,37 @@ CharacterEventHandler::handleAdminTeleportEvent(const Event &event)
             sendPositionalRaw(raw, old.positionX, old.positionY, {}, event.getClientID());
     }
 
+    // 6. Unicast teleport directive to the moved client itself.
+    // Positional broadcasts (step 5) update OTHER clients' views; the
+    // locally-controlled actor ignores server coordinates by design, so
+    // without this the client keeps its old position and overwrites the
+    // server on its next move. "playerTeleported" is applied as a hard
+    // snap by the UE client (same as respawnResult).
+    if (targetSocket)
+    {
+        try
+        {
+            nlohmann::json tp = ResponseBuilder()
+                                    .setHeader("eventType", "playerTeleported")
+                                    .setBody("characterId", targetId)
+                                    .setBody("x", dest.positionX)
+                                    .setBody("y", dest.positionY)
+                                    .setBody("z", dest.positionZ)
+                                    .setBody("rotZ", dest.rotationZ)
+                                    .build();
+            networkManager_.sendResponse(targetSocket,
+                networkManager_.generateResponseMessage("success", tp));
+        }
+        catch (const std::exception &e)
+        {
+            log_->debug("[AdminTeleport] playerTeleported unicast failed for char {} ({})", targetId, e.what());
+        }
+        catch (...)
+        {
+            log_->debug("[AdminTeleport] playerTeleported unicast failed for char {} (unknown)", targetId);
+        }
+    }
+
     log_->warn("ADMIN char={} op=teleport by client={}", targetId, event.getClientID());
 #else
     (void)event;
