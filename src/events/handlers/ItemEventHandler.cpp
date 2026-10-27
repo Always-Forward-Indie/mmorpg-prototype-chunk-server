@@ -103,7 +103,7 @@ ItemEventHandler::handleItemDropEvent(const Event &event)
 
             nlohmann::json response = ResponseBuilder()
                                           .setHeader("eventType", "itemDrop")
-                                          .setBody("droppedItems", droppedItemsArray)
+                                          .setBody("items", droppedItemsArray)
                                           .build();
 
             std::string responseData = networkManager_.generateResponseMessage("success", response);
