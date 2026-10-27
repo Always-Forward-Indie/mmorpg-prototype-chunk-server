@@ -169,7 +169,7 @@ class InventoryManager
     *        Called when the game server responds with the assigned player_inventory.id.
     *        When syncToken != 0 the entry carrying that exact token is fixed
     *        (disambiguates several id==0 rows with the same itemId); 0 keeps
-    *        the legacy first-id==0 fallback for token-less echoes.
+    *        the token-less first-id==0 fallback for token-less echoes.
     */
     void updateInventoryItemId(int characterId, int itemId, int64_t newId, uint64_t syncToken = 0);
 
@@ -180,7 +180,7 @@ class InventoryManager
     *        double-counting). nowMs is chunk steady-ms (fake clocks in tests).
     */
     static constexpr int64_t kSyncRetryMs = 5000;
-    // Give-up: ~5 min of unacked retries, then clear the token (legacy
+    // Give-up: ~5 min of unacked retries, then clear the token (token-less
     // first-id==0 matching takes over). A permanently unsynced row is a
     // real bug — it deserves one warn, not infinite 5s noise.
     static constexpr int kSyncMaxAttempts = 60;

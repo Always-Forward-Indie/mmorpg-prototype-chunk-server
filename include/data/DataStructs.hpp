@@ -277,7 +277,7 @@ struct PlayerInventoryItemStruct
     // Next retry deadline (chunk steady-ms) for rows still awaiting their id.
     int64_t syncNextMs = 0;
     // Sync resend attempts (see dueSyncResend cap): gives up back to the
-    // legacy first-id==0 matching instead of retrying forever.
+    // token-less first-id==0 matching instead of retrying forever.
     int syncAttempts = 0;
 };
 

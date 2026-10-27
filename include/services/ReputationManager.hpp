@@ -103,7 +103,7 @@ class ReputationManager
   private:
     void persist(int characterId, const std::string &factionSlug, int value, int delta);
 
-    // Tunable tier thresholds (fed from game_config; defaults = legacy).
+    // Tunable tier thresholds (fed from game_config; defaults preserve the original tiers).
     static int s_enemyThreshold;
     static int s_neutralThreshold;
     static int s_friendlyThreshold;

@@ -124,7 +124,7 @@ class NetworkManager
     std::mutex sessionsMutex_;
 
     // v2 framing counters (ADMIN wireStats op). fragStreams/fragFrames are
-    // legacy: always zero since S14d removed wireFrag (kept for admin API
+    // removed-wireFrag remnants: always zero since S14d (kept for admin API
     // compatibility — a nonzero value would mean v1 code came back).
     std::atomic<std::uint64_t> oversizeSeen_{0};
     std::atomic<std::uint64_t> fragStreams_{0};

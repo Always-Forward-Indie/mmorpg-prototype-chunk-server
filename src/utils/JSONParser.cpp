@@ -2041,7 +2041,7 @@ JSONParser::parseRespawnZonesList(const char *data, size_t length)
                 zone.zoneId = z["zoneId"].get<int>();
             if (z.contains("isDefault") && z["isDefault"].is_boolean())
                 zone.isDefault = z["isDefault"].get<bool>();
-            // Area bounds (backward compatible — default 0)
+            // Area bounds (missing fields default to 0)
             if (z.contains("minX") && z["minX"].is_number())
                 zone.minX = z["minX"].get<float>();
             if (z.contains("maxX") && z["maxX"].is_number())

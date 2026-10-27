@@ -63,7 +63,7 @@ class FactOutbox
     /// 6-line claim/ack pattern). Link-level traffic
     /// (chunkServerConnection, markCharactersOnline, heartbeats) and
     /// typed-vector handlers without key access (positions/HP/progress,
-    /// quest/flag/playtime/markOnline delegates) stay on the legacy path.
+    /// quest/flag/playtime/markOnline delegates) stay on the keyless direct path.
     static bool isFactType(const std::string &eventType)
     {
         static const std::unordered_set<std::string> kFacts = {

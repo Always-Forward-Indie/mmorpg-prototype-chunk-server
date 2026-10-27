@@ -75,7 +75,7 @@ class ChampionManager
      * threshold AND no champion of that type is already active in the zone, a
      * Threshold Champion is spawned and the counter is reset — subject to two
      * Wave-6 gates: the post-threshold chance roll
-     * (champion.spawn_chance_pct, default 100 = legacy) and the per-zone
+     * (champion.spawn_chance_pct, default 100 = always-spawn) and the per-zone
      * simultaneous cap (champion.max_active_per_zone, default 3). A refused
      * spawn still resets the counter (natural retry next threshold).
      *
@@ -205,7 +205,7 @@ class ChampionManager
     // Live value comes from game_config (survival_champion.evolve_hours).
     static constexpr int kDefaultEvolveHours = 12;
     // Post-threshold spawn chance (Wave 6): live value from game_config
-    // (champion.spawn_chance_pct). 100 = legacy always-spawn.
+    // (champion.spawn_chance_pct). 100 = always-spawn.
     static constexpr float kDefaultSpawnChancePct = 100.0f;
     // Simultaneous-champion flood cap per zone (Wave 6): live value from
     // game_config (champion.max_active_per_zone).
