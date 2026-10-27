@@ -273,6 +273,9 @@ MobMovementManager::runMobTick(
         // position. The mob walks to this point (not the exact spawn pixel,
         // which may be on the opposite side of a large zone) and then resumes
         // PATROLLING. This avoids long hikes across the zone after a chase ends.
+        // pickReturnDestination returns origin as "no destination" sentinel
+        // (sampling missed the zone) — then returnTarget below falls back
+        // to the exact spawn position.
         if (!movementData.hasReturnDestination)
         {
             PositionStruct dest = pickReturnDestination(mob.position, zone);
@@ -1296,11 +1299,12 @@ MobMovementManager::pickReturnDestination(const PositionStruct &mobPos, const Sp
         return *dest;
     }
 
-    // No valid point found — fall back to the original spawn position.
-    // This should be rare (only if the mob is in a very tight corner of a
-    // small zone and most random directions go outside).
-    log_->warn("Could not pick return destination in zone " + std::to_string(zone.zoneId) +
-               " — using original spawn fallback");
+    // No valid point found — return the "no destination" sentinel (origin).
+    // The caller treats origin as absent and walks the mob to its spawn
+    // position instead. Common when a mob chased far outside a small zone
+    // (random points near the mob rarely land back inside); routine, debug.
+    log_->debug("No return destination sampled in zone " + std::to_string(zone.zoneId) +
+               " — caller falls back to spawn");
     return PositionStruct{};
 }
 
