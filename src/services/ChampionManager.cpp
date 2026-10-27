@@ -178,7 +178,7 @@ ChampionManager::recordMobKill(int gameZoneId, int mobTemplateId, int spawnZoneI
     }
 
     // Post-threshold spawn chance (game_config champion.spawn_chance_pct,
-    // default 100 = legacy always-spawn). Lets content tune rarity without
+    // default 100 = always-spawn). Lets content tune rarity without
     // touching thresholds; tests pin both extremes.
     {
         const float chancePct = gameConfig_.getFloat("champion.spawn_chance_pct", kDefaultSpawnChancePct);

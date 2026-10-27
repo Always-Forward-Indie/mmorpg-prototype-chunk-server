@@ -400,7 +400,7 @@ BaseEventHandler::broadcastPositional(const std::string &status, const nlohmann:
 
 // Resolve (x, y, participants) from a broadcast packet body. Returns false
 // when the shape is unknown or the position unresolvable => caller fails
-// open to legacy broadcast-all. ECasterType::MOB == 3 (shared convention).
+// open to broadcast-all. ECasterType::MOB == 3 (shared convention).
 // The catch below is the fail-open itself: an unparsable packet routes to
 // broadcast-all, which is always safe — hence silent by design.
 bool

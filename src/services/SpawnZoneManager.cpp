@@ -531,30 +531,6 @@ SpawnZoneManager::mobDied(int zoneId, int mobUID)
     }
 }
 
-// Delegate to MobInstanceManager for backward compatibility
-MobDataStruct
-SpawnZoneManager::getMobByUID(int mobUID)
-{
-    if (mobInstanceManager_)
-    {
-        return mobInstanceManager_->getMobInstance(mobUID);
-    }
-
-    // Fallback to local search if MobInstanceManager not available
-    std::shared_lock<std::shared_mutex> lock(mutex_);
-    for (const auto &zone : mobSpawnZones_)
-    {
-        for (const auto &mob : zone.second.spawnedMobsList)
-        {
-            if (mob.uid == mobUID)
-            {
-                return mob;
-            }
-        }
-    }
-    return MobDataStruct();
-}
-
 // Internal method for zone cleanup only (assumes mutex is already locked)
 void
 SpawnZoneManager::removeMobByUIDInternal(int mobUID)

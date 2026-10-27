@@ -617,7 +617,8 @@ EventHandler::handleInventoryItemIdSyncEvent(const Event &event)
         int characterId = j.value("characterId", 0);
         int itemId = j.value("itemId", 0);
         int64_t newId = j.value("inventoryItemId", (int64_t)0);
-        // Pending-sync token echo (0 = token-less legacy packet -> fallback).
+        // Pending-sync token echo (0 = no token sent; UE never sends one,
+        // the server-side token match then falls back to row lookup).
         uint64_t syncToken = j.value("syncToken", (uint64_t)0);
 
         if (characterId <= 0 || itemId <= 0 || newId <= 0)

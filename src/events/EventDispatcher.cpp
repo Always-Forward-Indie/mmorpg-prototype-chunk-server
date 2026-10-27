@@ -95,19 +95,14 @@ EventDispatcher::routeTableSize() const
 namespace {
 // Single-parse helper: hot handlers must read context.json (parsed once in
 // ClientSession::processMessage) instead of re-parsing context.fullMessage.
-// Falls back to parse only for legacy callers that built EventContext without json.
+// No re-parse fallback: both EventContext construction sites always pass the
+// already-parsed json, so a non-object here is malformed input — return
+// empty and let handlers ignore it.
 inline nlohmann::json wireJson(const EventContext &context)
 {
     if (context.json.is_object() && !context.json.is_null())
         return context.json;
-    try
-    {
-        return nlohmann::json::parse(context.fullMessage);
-    }
-    catch (...)
-    {
-        return nlohmann::json::object();
-    }
+    return nlohmann::json::object();
 }
 } // namespace
 
@@ -125,9 +120,9 @@ EventDispatcher::dispatch(const EventContext &context, std::shared_ptr<boost::as
     }
     else
     {
-        // Tolerant reader: unknown types (e.g. from newer clients or the
-        // legacy getSpawnZones call) are logged and ignored — the session
-        // stays alive. Warn, not error: this is client drift, not a fault.
+        // Tolerant reader: unknown types (e.g. from newer clients) are
+        // logged and ignored — the session stays alive. Warn, not error:
+        // this is client drift, not a fault.
         log_->warn("Unknown event type (ignored): " + context.eventType);
     }
 

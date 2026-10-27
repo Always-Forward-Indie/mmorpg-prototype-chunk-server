@@ -44,8 +44,6 @@ class SpawnZoneManager
     void mobDied(int zoneId, int mobUID);
 
     // Deprecated: Use MobInstanceManager instead
-    // These methods are kept for backward compatibility and internal zone management
-    MobDataStruct getMobByUID(int mobUID); // Delegates to MobInstanceManager
     void removeMobByUID(int mobUID);       // Public method for zone cleanup
 
   private:

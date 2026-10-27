@@ -1090,7 +1090,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
 
             // Interest v2 (phase 3): player movement goes to subscribers of
             // the mover's cell (+ fail-open). Disabled interest falls back to
-            // legacy broadcast-all (recipientsFor returns empty).
+            // broadcast-all (recipientsFor returns empty).
             {
                 auto clients = gameServices_.getClientManager().getClientsListReadOnly();
                 std::vector<std::pair<int, bool>> viewers;
@@ -1099,14 +1099,14 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                     viewers.emplace_back(c.clientId, c.isWorldReady);
                 auto recipients = gameServices_.getInterestManager().recipientsFor(
                     movementData.position.positionX, movementData.position.positionY,
-                    viewers, -1 /* include mover, legacy parity */);
+                    viewers, -1 /* include mover, same as broadcast */);
                 if (recipients.empty() && gameServices_.getInterestManager().isEnabled())
                 {
                     // Nobody subscribed and nobody fail-open: nobody to send to.
                 }
                 else if (recipients.empty())
                 {
-                    // Interest disabled: legacy broadcast-all.
+                    // Interest disabled: broadcast-all (fail-open by design).
                     broadcastToAllClientsWithTimestamps("success", successResponse, timestamps);
                 }
                 else
