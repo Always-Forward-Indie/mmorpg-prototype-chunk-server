@@ -233,29 +233,16 @@ QuestManager::resolveRewardsForClient(const std::vector<QuestRewardStruct> &rewa
     return resolvers_.resolveRewardsForClient(rewards, revealHidden, classId);
 }
 
-// =============================================================================
-// turnInQuest: snapshot in store, side effects here (no store lock held)
-// =============================================================================
-
-std::vector<nlohmann::json>
-QuestManager::turnInQuest(int characterId, const std::string &questSlug, int clientId)
+QuestManager::TurnInClaim
+QuestManager::turnInQuestAtomic(int characterId, const std::string &questSlug, int clientId)
 {
-    std::vector<nlohmann::json> notifications;
-
-    // Snapshot everything we need from shared state while holding the lock,
-    // then release it BEFORE calling any external service.
-    // This prevents a deadlock cycle:
-    //   turnInQuest (holds mutex_) → addItemToInventory → onItemObtained → mutex_ (already held)
+    TurnInClaim out;
     PlayerQuestProgressStruct pqSnapshot;
     QuestStruct questSnapshot;
-
     if (!store_.beginTurnIn(characterId, questSlug, pqSnapshot, questSnapshot))
-        return notifications;
+        return out;
 
-    // Fetch character class for class-specific reward filtering
     const int playerClassId = services_->getCharacterManager().getCharacterData(characterId).classId;
-
-    // Helper: returns true if this reward applies to this character's class
     auto rewardAppliesToClass = [&](const QuestRewardStruct &r) -> bool
     {
         if (r.allowedClassIds.empty())
@@ -266,46 +253,40 @@ QuestManager::turnInQuest(int characterId, const std::string &questSlug, int cli
         return false;
     };
 
-    // Build notifications
-    nlohmann::json turnInNotif;
-    turnInNotif["type"] = "quest_turned_in";
-    turnInNotif["questId"] = questSnapshot.id;
-    turnInNotif["clientQuestKey"] = questSnapshot.clientQuestKey;
-    // All rewards fully revealed at turn-in (no hidden secrets remain)
-    // Only include rewards that apply to this character's class
+    // Notifications (same shape for turned_in).
     {
+        nlohmann::json turnInNotif;
+        turnInNotif["type"] = "quest_turned_in";
+        turnInNotif["questId"] = questSnapshot.id;
+        turnInNotif["clientQuestKey"] = questSnapshot.clientQuestKey;
         nlohmann::json filteredRewards = nlohmann::json::array();
         for (const auto &reward : questSnapshot.rewards)
         {
             if (!rewardAppliesToClass(reward))
                 continue;
-            auto resolved = resolveRewardsForClient({reward}, /*revealHidden=*/true);
+            auto resolved = resolveRewardsForClient({reward}, true);
             if (!resolved.empty())
                 filteredRewards.push_back(resolved[0]);
         }
         turnInNotif["rewardsReceived"] = std::move(filteredRewards);
+        out.notifications.push_back(std::move(turnInNotif));
     }
-    notifications.push_back(std::move(turnInNotif));
-
-    // Title auto-grant: check quest conditions
     if (services_)
     {
         nlohmann::json titleEvent;
         titleEvent["questSlug"] = questSnapshot.slug;
         services_->getTitleManager().checkAndGrantTitles(characterId, "quest", titleEvent);
     }
-
     for (const auto &reward : questSnapshot.rewards)
     {
         if (!rewardAppliesToClass(reward))
             continue;
-
         if (reward.rewardType == "exp")
         {
             nlohmann::json n;
             n["type"] = "exp_received";
             n["amount"] = reward.amount;
-            notifications.push_back(std::move(n));
+            out.notifications.push_back(std::move(n));
         }
         else if (reward.rewardType == "item")
         {
@@ -315,83 +296,107 @@ QuestManager::turnInQuest(int characterId, const std::string &questSlug, int cli
             n["itemId"] = reward.itemId;
             n["item_slug"] = itemData.slug;
             n["quantity"] = reward.quantity;
-            notifications.push_back(std::move(n));
+            out.notifications.push_back(std::move(n));
         }
         else if (reward.rewardType == "gold")
         {
             nlohmann::json n;
             n["type"] = "gold_received";
             n["amount"] = reward.amount;
-            notifications.push_back(std::move(n));
+            out.notifications.push_back(std::move(n));
         }
     }
 
-    // Send QUEST_UPDATE (no store lock held — sendQuestUpdate takes none)
     sendQuestUpdate(characterId, pqSnapshot, questSnapshot);
 
-    log_->info("[QuestManager] Quest '" + questSlug + "' turned in by character " +
-               std::to_string(characterId));
-
-    // Auto reputation change for quest completion
+    // Reputation stays legacy immediate (small, non-farmable in isolation;
+    // covered by immediate flush). Items/exp/consume go atomic below.
     if (!questSnapshot.reputationFactionSlug.empty() && questSnapshot.reputationOnComplete != 0)
     {
         services_->getReputationManager().changeReputation(
             characterId, questSnapshot.reputationFactionSlug, questSnapshot.reputationOnComplete);
-        log_->info("[QuestManager] turnInQuest: rep change char=" + std::to_string(characterId) +
-                   " faction=" + questSnapshot.reputationFactionSlug +
-                   " delta=" + std::to_string(questSnapshot.reputationOnComplete));
     }
 
-    // Remove collected quest items from inventory before granting rewards.
-    // Iterate over every "collect" step and consume the required items.
+    nlohmann::json consume = nlohmann::json::array();
     for (const auto &step : questSnapshot.steps)
     {
-        if (step.stepType == "collect")
+        if (step.stepType != "collect")
+            continue;
+        const int requiredItemId = step.params.value("item_id", -1);
+        const int required = step.params.value("count", 1);
+        if (requiredItemId <= 0 || required <= 0)
+            continue;
+        if (services_->getInventoryManager().removeItemFromInventoryNoPersist(
+                characterId, requiredItemId, required))
         {
-            int requiredItemId = step.params.value("item_id", -1);
-            int required = step.params.value("count", 1);
-            if (requiredItemId > 0 && required > 0)
-            {
-                services_->getInventoryManager().removeItemFromInventory(
-                    characterId, requiredItemId, required);
-            }
+            nlohmann::json c;
+            c["itemId"] = requiredItemId;
+            c["count"] = required;
+            consume.push_back(std::move(c));
         }
     }
 
-    // Grant rewards — the store lock is NOT held here, so calls back into the
-    // store (e.g. onItemObtained) will not deadlock.
+    nlohmann::json rewards = nlohmann::json::array();
     for (const auto &reward : questSnapshot.rewards)
     {
         if (!rewardAppliesToClass(reward))
             continue;
-
         if (reward.rewardType == "exp" && reward.amount > 0)
         {
-            services_->getExperienceManager().grantExperience(
+            services_->getExperienceManager().grantExperienceNoPersist(
                 characterId, static_cast<int>(reward.amount), "quest_reward", questSnapshot.id);
+            nlohmann::json rw;
+            rw["rewardType"] = "exp";
+            rw["amount"] = reward.amount;
+            rewards.push_back(std::move(rw));
         }
         else if (reward.rewardType == "item" && reward.itemId > 0)
         {
-            services_->getInventoryManager().addItemToInventory(
-                characterId, reward.itemId, reward.quantity);
+            uint64_t tok = 0;
+            int rowId = 0;
+            services_->getInventoryManager().addItemToInventoryNoPersist(
+                characterId, reward.itemId, reward.quantity, tok, rowId);
+            nlohmann::json rw;
+            rw["rewardType"] = "item";
+            rw["itemId"] = reward.itemId;
+            rw["quantity"] = reward.quantity;
+            rw["syncToken"] = tok;
+            rewards.push_back(std::move(rw));
         }
         else if (reward.rewardType == "gold" && reward.amount > 0)
         {
-            const ItemDataStruct *goldItem =
-                services_->getItemManager().getItemBySlug("gold_coin");
-            if (goldItem)
+            const ItemDataStruct *goldItem = services_->getItemManager().getItemBySlug("gold_coin");
+            if (!goldItem)
             {
-                services_->getInventoryManager().addItemToInventory(
-                    characterId, goldItem->id, static_cast<int>(reward.amount));
+                log_->error("[QuestManager] turnInQuestAtomic: gold_coin missing, skipped");
+                continue;
             }
-            else
-            {
-                log_->error("[QuestManager] turnInQuest: 'gold_coin' item not found — gold reward skipped");
-            }
+            uint64_t tok = 0;
+            int rowId = 0;
+            services_->getInventoryManager().addItemToInventoryNoPersist(
+                characterId, goldItem->id, static_cast<int>(reward.amount), tok, rowId);
+            nlohmann::json rw;
+            rw["rewardType"] = "gold";
+            rw["amount"] = reward.amount;
+            rw["syncToken"] = tok;
+            rewards.push_back(std::move(rw));
         }
     }
 
-    return notifications;
+    nlohmann::json pkt;
+    pkt["header"]["eventType"] = "claimQuestTurnIn";
+    pkt["header"]["clientId"] = clientId;
+    pkt["header"]["hash"] = "";
+    pkt["body"]["characterId"] = characterId;
+    pkt["body"]["questId"] = questSnapshot.id;
+    pkt["body"]["questSlug"] = questSnapshot.slug;
+    pkt["body"]["consume"] = std::move(consume);
+    pkt["body"]["rewards"] = std::move(rewards);
+    out.claimPacket = pkt.dump() + "\n";
+
+    log_->info("[QuestManager] turnInQuestAtomic: char=" + std::to_string(characterId) +
+               " quest='" + questSnapshot.slug + "' claim queued");
+    return out;
 }
 
 // =============================================================================
@@ -420,6 +425,12 @@ QuestManager::setFlagBool(int characterId, const std::string &key, bool value)
     fu.boolValue = value;
     queueFlagUpdate(fu);
 
+    setFlagBoolInMemory(characterId, key, value);
+}
+
+void
+QuestManager::setFlagBoolInMemory(int characterId, const std::string &key, bool value)
+{
     // Update in-memory cache so same-session reads see the new value immediately
     auto charData = services_->getCharacterManager().getCharacterData(characterId);
     bool found = false;

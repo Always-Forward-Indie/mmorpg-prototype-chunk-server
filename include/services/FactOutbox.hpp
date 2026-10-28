@@ -86,6 +86,11 @@ class FactOutbox
             "analyticsEvent",
             "saveGmAction",
             "saveUserBan",
+            // AAA one-time claims: atomic flag/quest + inventory in one txn.
+            // Fact retry + business-key dedup (flag true / turned_in) close the
+            // 5s split-brain window for dialogue gifts and quest turn-ins.
+            "claimDialogueGift",
+            "claimQuestTurnIn",
         };
         return kFacts.count(eventType) > 0;
     }

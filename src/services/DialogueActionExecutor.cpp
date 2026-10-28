@@ -58,8 +58,144 @@ DialogueActionExecutor::execute(const nlohmann::json &actionGroup,
 {
     ActionResult result;
 
-    for (const auto &parsed : parseDialogueActionGroup(actionGroup))
-        executeDispatch(parsed.action, parsed.type, characterId, clientId, ctx, result);
+    auto parsed = parseDialogueActionGroup(actionGroup);
+
+    // AAA one-time gift fast path: an edge that both grants items/gold and
+    // sets a bool flag (the ruins_dying_stranger pattern) must persist as a
+    // SINGLE atomic claimDialogueGift txn on the game server. The legacy path
+    // (immediate saveInventoryChange + 5s-delayed updatePlayerFlag) farms on
+    // crash/disconnect inside the window. We update in-memory without
+    // individual saves and emit one fact packet; game dedupes by flag.
+    // give_exp is excluded (different table, handled by immediate flush).
+    bool hasGiveItem = false;
+    bool hasGiveGold = false;
+    bool hasGiveExp = false;
+    std::string claimFlag;
+    for (const auto &p : parsed)
+    {
+        if (p.type == "give_item")
+            hasGiveItem = true;
+        else if (p.type == "give_gold")
+            hasGiveGold = true;
+        else if (p.type == "give_exp")
+            hasGiveExp = true;
+        else if (p.type == "set_flag" && p.action.value("bool_value", false) &&
+                 p.action.contains("key"))
+        {
+            if (claimFlag.empty())
+                claimFlag = p.action["key"].get<std::string>();
+        }
+    }
+    const bool useClaim = !claimFlag.empty() && (hasGiveItem || hasGiveGold) && !hasGiveExp;
+    if (useClaim)
+    {
+        nlohmann::json items = nlohmann::json::array();
+        for (const auto &p : parsed)
+        {
+            if (p.type == "give_item")
+            {
+                const int itemId = p.action.value("item_id", 0);
+                const int qty = p.action.value("quantity", 1);
+                if (itemId <= 0 || qty <= 0)
+                    continue;
+                uint64_t tok = 0;
+                int rowId = 0;
+                if (!services_.getInventoryManager().addItemToInventoryNoPersist(
+                        characterId, itemId, qty, tok, rowId))
+                    continue;
+                ItemDataStruct item = services_.getItemManager().getItemById(itemId);
+                nlohmann::json n;
+                n["type"] = "item_received";
+                n["itemId"] = itemId;
+                n["item_slug"] = item.slug;
+                n["quantity"] = qty;
+                result.clientNotifications.push_back(std::move(n));
+                sendDialogueAnalytics("item_acquired", characterId,
+                    {{"source", "dialogue"}, {"itemSlug", item.slug}, {"quantity", qty}});
+                nlohmann::json ci;
+                ci["itemId"] = itemId;
+                // AAA: game txn uses absolute SET. For a stacked row (tok==0)
+                // the claim must carry the post-grant absolute row total;
+                // for a new instanced row (tok!=0) it carries the per-row qty
+                // (== gift qty). Sending delta for a stacked row would truncate
+                // it; sending total for a new row would overcount it.
+                ci["quantity"] = (tok != 0)
+                    ? qty
+                    : services_.getInventoryManager().getItemQuantity(characterId, itemId);
+                ci["syncToken"] = tok;
+                items.push_back(std::move(ci));
+            }
+            else if (p.type == "give_gold")
+            {
+                const int64_t amount = p.action.value("amount", 0);
+                if (amount <= 0)
+                    continue;
+                const ItemDataStruct *goldItem =
+                    services_.getItemManager().getItemBySlug("gold_coin");
+                if (!goldItem)
+                {
+                    log_->error("[DialogueAction] give_gold: item 'gold_coin' not found");
+                    continue;
+                }
+                uint64_t tok = 0;
+                int rowId = 0;
+                if (!services_.getInventoryManager().addItemToInventoryNoPersist(
+                        characterId, goldItem->id, static_cast<int>(amount), tok, rowId))
+                    continue;
+                nlohmann::json n;
+                n["type"] = "gold_received";
+                n["amount"] = amount;
+                result.clientNotifications.push_back(std::move(n));
+                sendDialogueAnalytics("gold_change", characterId,
+                    {{"source", "dialogue_give_gold"}, {"delta", static_cast<int>(amount)}});
+                nlohmann::json ci;
+                ci["itemId"] = goldItem->id;
+                ci["quantity"] = services_.getInventoryManager().getItemQuantity(characterId, goldItem->id);
+                ci["syncToken"] = tok;
+                items.push_back(std::move(ci));
+            }
+        }
+        // In-memory flag first (same-session guard), durable write via claim.
+        ctx.flagsBool[claimFlag] = true;
+        services_.getQuestManager().setFlagBoolInMemory(characterId, claimFlag, true);
+
+        // Any additional set_flag actions in the same group go the legacy
+        // queued path (harmless, same value would just upsert again).
+        for (const auto &p : parsed)
+        {
+            if (p.type == "set_flag")
+            {
+                const std::string k = p.action.value("key", "");
+                if (!k.empty() && k != claimFlag)
+                    executeSetFlag(p.action, characterId, ctx, result);
+            }
+        }
+
+        if (!items.empty())
+        {
+            nlohmann::json pkt;
+            pkt["header"]["eventType"] = "claimDialogueGift";
+            pkt["header"]["clientId"] = clientId;
+            pkt["header"]["hash"] = "";
+            pkt["body"]["characterId"] = characterId;
+            pkt["body"]["flagKey"] = claimFlag;
+            pkt["body"]["items"] = std::move(items);
+            result.pendingGameServerPackets.push_back(pkt.dump() + "\n");
+            log_->info("[DialogueAction] claimDialogueGift: char=" + std::to_string(characterId) +
+                       " flag=" + claimFlag);
+        }
+
+        // Non-gift actions in the same group still run (quests, rep, shops...).
+        for (const auto &p : parsed)
+        {
+            if (p.type != "give_item" && p.type != "give_gold" && p.type != "set_flag")
+                executeDispatch(p.action, p.type, characterId, clientId, ctx, result);
+        }
+        return result;
+    }
+
+    for (const auto &p : parsed)
+        executeDispatch(p.action, p.type, characterId, clientId, ctx, result);
 
     return result;
 }
@@ -191,12 +327,18 @@ DialogueActionExecutor::executeTurnInQuest(const nlohmann::json &action,
     const std::string slug = action["slug"].get<std::string>();
     auto &questManager = services_.getQuestManager();
 
-    auto notifications = questManager.turnInQuest(characterId, slug, clientId);
-    for (auto &n : notifications)
+    // AAA atomic path: single claimQuestTurnIn txn on game (state + consume +
+    // rewards). Legacy turnInQuest split in-memory state, immediate reward
+    // saves and delayed quest flush — same farm window as the gift (see R4).
+    auto claimed = questManager.turnInQuestAtomic(characterId, slug, clientId);
+    for (auto &n : claimed.notifications)
         result.clientNotifications.push_back(std::move(n));
+    if (!claimed.claimPacket.empty())
+        result.pendingGameServerPackets.push_back(std::move(claimed.claimPacket));
 
     // Analytics: quest_complete (best-effort, never throws)
-    sendDialogueAnalytics("quest_complete", characterId, {{"questSlug", slug}});
+    if (!claimed.notifications.empty())
+        sendDialogueAnalytics("quest_complete", characterId, {{"questSlug", slug}});
 }
 
 void

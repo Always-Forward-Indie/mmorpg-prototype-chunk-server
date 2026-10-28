@@ -369,6 +369,23 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                         }
                     }
 
+                    // AAA: flush quest/flag state BEFORE removing the character.
+                    // removeCharacter() wipes in-memory flags; pending updates live
+                    // in QuestStore, but ordering flush-first guarantees the
+                    // farewell save is queued while the character is still known
+                    // and keeps disconnect/evict/join paths uniform.
+                    try
+                    {
+                        gameServices_.getQuestManager().flushAllProgress(passedClientData.characterId);
+                        gameServices_.getQuestManager().flushPendingFlags();
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        gameServices_.getLogger().logError(
+                            "[DISCONNECT] Quest flush error for characterId: " +
+                            std::to_string(passedClientData.characterId) + " - " + ex.what());
+                    }
+
                     gameServices_.getCharacterManager().removeCharacter(passedClientData.characterId);
 
                     // Close any active trade session and notify the other party.
@@ -396,15 +413,13 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
 
                 try
                 {
-                    gameServices_.getQuestManager().flushAllProgress(passedClientData.characterId);
-                    gameServices_.getQuestManager().flushPendingFlags();
                     gameServices_.getQuestManager().unloadPlayerQuests(passedClientData.characterId);
                     gameServices_.getDialogueSessionManager().cleanupExpiredSessions();
                 }
                 catch (const std::exception &ex)
                 {
                     gameServices_.getLogger().logError(
-                        "[DISCONNECT] Quest flush error for characterId: " +
+                        "[DISCONNECT] Quest unload error for characterId: " +
                         std::to_string(passedClientData.characterId) + " - " + ex.what());
                 }
 

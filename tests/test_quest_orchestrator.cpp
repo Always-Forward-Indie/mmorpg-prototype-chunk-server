@@ -156,8 +156,9 @@ TEST_F(OrchestratorFixture, TurnInCompletedQuestNotifies)
     pq.questSlug = "kill_foxes";
     pq.state = "completed";
     gs.getQuestManager().loadPlayerQuests(1, {pq});
-    auto notes = gs.getQuestManager().turnInQuest(1, "kill_foxes", 77);
-    EXPECT_FALSE(notes.empty());
+    auto claimed = gs.getQuestManager().turnInQuestAtomic(1, "kill_foxes", 77);
+    EXPECT_FALSE(claimed.notifications.empty());
+    EXPECT_FALSE(claimed.claimPacket.empty());
     EXPECT_EQ(gs.getQuestManager().getQuestStateBySlug(1, "kill_foxes"), "turned_in");
 }
 

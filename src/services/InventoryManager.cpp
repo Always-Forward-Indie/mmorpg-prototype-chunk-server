@@ -55,6 +55,63 @@ InventoryManager::setSaveInventoryCallback(std::function<void(const std::string 
 bool
 InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
 {
+    uint64_t tok = 0;
+    int rowId = 0;
+    if (!addItemToInventoryNoPersist(characterId, itemId, quantity, tok, rowId))
+        return false;
+
+    // Persist item change to game server DB immediately (non-claim path only;
+    // claim path uses addItemToInventoryNoPersist directly + single claim pkt).
+    if (saveInventoryCallback_)
+    {
+        std::shared_lock<std::shared_mutex> lock(inventoryMutex_);
+        auto mapIt = playerInventories_.find(characterId);
+        if (mapIt != playerInventories_.end())
+        {
+            auto itemIt = mapIt->second.end();
+            if (tok != 0)
+            {
+                for (auto it = mapIt->second.begin(); it != mapIt->second.end(); ++it)
+                    if (it->syncToken == tok)
+                    {
+                        itemIt = it;
+                        break;
+                    }
+            }
+            else
+            {
+                itemIt = findInventoryItem(characterId, itemId);
+                if (itemIt == mapIt->second.end())
+                    itemIt = mapIt->second.end();
+            }
+            if (itemIt != mapIt->second.end())
+            {
+                nlohmann::json savePacket;
+                savePacket["header"]["eventType"] = "saveInventoryChange";
+                savePacket["header"]["clientId"] = 0;
+                savePacket["header"]["hash"] = "";
+                savePacket["body"]["characterId"] = characterId;
+                savePacket["body"]["itemId"] = itemId;
+                savePacket["body"]["quantity"] = itemIt->quantity;
+                savePacket["body"]["inventoryItemId"] = itemIt->id;
+                savePacket["body"]["syncToken"] = itemIt->syncToken;
+                // Copy payload while holding the shared lock, send outside it.
+                std::string wire = savePacket.dump() + "\n";
+                lock.unlock();
+                saveInventoryCallback_(wire);
+                return true;
+            }
+        }
+    }
+    return true;
+}
+
+bool
+InventoryManager::addItemToInventoryNoPersist(int characterId, int itemId, int quantity,
+    uint64_t &outSyncToken, int &outRowId)
+{
+    outSyncToken = 0;
+    outRowId = 0;
     if (quantity <= 0)
     {
         logger_.logError("Attempted to add invalid quantity (" + std::to_string(quantity) + ") of item " + std::to_string(itemId));
@@ -69,84 +126,48 @@ InventoryManager::addItemToInventory(int characterId, int itemId, int quantity)
         return false;
     }
 
-    std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
-
-    // Find existing item in inventory by template itemId.
-    auto itemIt = findInventoryItem(characterId, itemId);
-
-    // Never stack items with stackMax=1 (e.g. weapons, armour).
-    // These are equippable/unique-per-instance and each must be a separate
-    // row with its own durability and killCount. Stacking them would merge
-    // independent instances and break equip/unequip logic.
-    const bool canStack = (itemInfo.stackMax > 1);
-
-    if (canStack && itemIt != playerInventories_[characterId].end())
+    PlayerInventoryItemStruct touched;
     {
-        // Item already exists and is stackable, increase quantity
-        itemIt->quantity += quantity;
-        logger_.log("[INVENTORY] Added " + std::to_string(quantity) + "x " + itemInfo.slug +
-                    " to character " + std::to_string(characterId) +
-                    " (new total: " + std::to_string(itemIt->quantity) + ")");
-    }
-    else
-    {
-        // New item (or non-stackable duplicate), add separate entry
-        PlayerInventoryItemStruct newItem;
-        newItem.characterId = characterId;
-        newItem.itemId = itemId;
-        newItem.quantity = quantity;
-        // ID will be set when syncing with database later. Stamp a
-        // pending-sync token now so the game-side inventoryItemIdSync echo
-        // can match this exact instance even when several id==0 rows share
-        // the same itemId (syncToken 0 is reserved = no pending sync).
-        newItem.syncToken = mintSyncToken(nextSyncToken_, syncTokenSeeded_);
-        newItem.syncNextMs = 0; // due immediately if a retry sweep runs first
+        std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
 
-        playerInventories_[characterId].push_back(newItem);
-        // Re-find itemIt — push_back may invalidate iterators, so locate the
-        // freshly inserted element. For non-stackable items (stackMax=1) there
-        // can be multiple entries with the same template itemId; back() always
-        // returns the instance we just added.
-        auto &inv = playerInventories_[characterId];
-        itemIt = (inv.size() >= 1) ? inv.end() - 1 : inv.end();
-        logger_.log("[INVENTORY] Added " + std::to_string(quantity) + "x " + itemInfo.slug +
-                    " to character " + std::to_string(characterId) + " (new item)");
-    }
+        // Find existing item in inventory by template itemId.
+        auto itemIt = findInventoryItem(characterId, itemId);
 
-    // Persist item change to game server DB immediately
-    if (saveInventoryCallback_)
-    {
-        if (itemIt != playerInventories_[characterId].end())
+        // Never stack items with stackMax=1 (e.g. weapons, armour).
+        const bool canStack = (itemInfo.stackMax > 1);
+
+        if (canStack && itemIt != playerInventories_[characterId].end())
         {
-            nlohmann::json savePacket;
-            savePacket["header"]["eventType"] = "saveInventoryChange";
-            savePacket["header"]["clientId"] = 0;
-            savePacket["header"]["hash"] = "";
-            savePacket["body"]["characterId"] = characterId;
-            savePacket["body"]["itemId"] = itemId;
-            savePacket["body"]["quantity"] = itemIt->quantity;
-            savePacket["body"]["inventoryItemId"] = itemIt->id; // 0 = new row (INSERT), >0 = UPDATE
-            // Pending-sync token: game echoes it in inventoryItemIdSync so
-            // the reply matches this exact instance (0 = synced, no echo).
-            savePacket["body"]["syncToken"] = itemIt->syncToken;
-            saveInventoryCallback_(savePacket.dump() + "\n");
+            itemIt->quantity += quantity;
+            logger_.log("[INVENTORY] Added " + std::to_string(quantity) + "x " + itemInfo.slug +
+                        " to character " + std::to_string(characterId) +
+                        " (new total: " + std::to_string(itemIt->quantity) + ")");
         }
+        else
+        {
+            PlayerInventoryItemStruct newItem;
+            newItem.characterId = characterId;
+            newItem.itemId = itemId;
+            newItem.quantity = quantity;
+            newItem.syncToken = mintSyncToken(nextSyncToken_, syncTokenSeeded_);
+            newItem.syncNextMs = 0;
+            playerInventories_[characterId].push_back(newItem);
+            auto &inv = playerInventories_[characterId];
+            itemIt = (inv.size() >= 1) ? inv.end() - 1 : inv.end();
+            logger_.log("[INVENTORY] Added " + std::to_string(quantity) + "x " + itemInfo.slug +
+                        " to character " + std::to_string(characterId) + " (new item)");
+        }
+
+        outSyncToken = itemIt->syncToken;
+        outRowId = itemIt->id;
+        touched = *itemIt;
     }
 
     // S2.3 delta: only the touched row travels; statics resolve client-side.
-    if (eventQueue_ && itemIt != playerInventories_[characterId].end())
-    {
-        emitInventoryDelta(characterId, {*itemIt}, {});
-    }
+    if (eventQueue_)
+        emitInventoryDelta(characterId, {touched}, {});
 
-    // Release the write lock BEFORE calling into QuestManager.
-    // advanceStep() (called transitively via onItemObtained → checkStepCompletion)
-    // calls getPlayerInventory() which takes a shared lock on the same mutex.
-    // Holding the exclusive lock here would cause a same-thread deadlock.
-    lock.unlock();
-
-    // Quest trigger: item obtained. Best-effort by design (see the unlock
-    // above): a failing quest hook must never fail the pickup itself.
+    // Quest trigger: item obtained. Best-effort: never fail the pickup itself.
     if (questManager_)
     {
         try
@@ -347,6 +368,43 @@ InventoryManager::removeItemFromInventory(int characterId, int itemId, int quant
         log_->info("[INVENTORY] Sent INVENTORY_UPDATE event for character " + std::to_string(characterId));
     }
 
+    return true;
+}
+
+bool
+InventoryManager::removeItemFromInventoryNoPersist(int characterId, int itemId, int quantity)
+{
+    if (quantity <= 0)
+        return false;
+    {
+        std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
+        auto mapIt = playerInventories_.find(characterId);
+        if (mapIt == playerInventories_.end())
+            return false;
+        auto &inventory = mapIt->second;
+        int totalQty = 0;
+        for (const auto &item : inventory)
+            if (item.itemId == itemId)
+                totalQty += item.quantity;
+        if (totalQty < quantity)
+            return false;
+        int remainingToRemove = quantity;
+        for (auto it = inventory.begin(); it != inventory.end() && remainingToRemove > 0; )
+        {
+            if (it->itemId != itemId)
+            {
+                ++it;
+                continue;
+            }
+            int deduct = std::min(it->quantity, remainingToRemove);
+            it->quantity -= deduct;
+            remainingToRemove -= deduct;
+            if (it->quantity == 0)
+                it = inventory.erase(it);
+            else
+                ++it;
+        }
+    }
     return true;
 }
 

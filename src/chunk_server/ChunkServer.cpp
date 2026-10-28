@@ -940,6 +940,15 @@ ChunkServer::mainEventLoopCH()
             {
                 log_->error("Event queues are getting large - potential memory leak!");
             }
+            // Outbox durability lamp: expired facts went to DLQ (durable write
+            // at risk), pending growth means chunk->game link or game DB down.
+            {
+                const auto osnap = gameServerWorker_.outboxSnapshot();
+                if (osnap.expired > 0)
+                    log_->error("Outbox game: " + std::to_string(osnap.expired) + " facts expired to DLQ - check game link/DB!");
+                if (osnap.pending > 1000)
+                    log_->warn("Outbox game: pending=" + std::to_string(osnap.pending) + " - game link slow or down?");
+            }
         },
         schedMs("scheduler.cleanup_ms", 10000), // Run every 10 seconds (more frequent cleanup)
         std::chrono::steady_clock::now(),

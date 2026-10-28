@@ -38,7 +38,15 @@ class ExperienceManager
      * @param sourceId ID источника опыта (например, ID убитого моба)
      * @return Результат начисления опыта
      */
-    ExperienceGrantResult grantExperience(int characterId, int experienceAmount, const std::string &reason, int sourceId = 0);
+    ExperienceGrantResult grantExperience(int characterId, int experienceAmount, const std::string &reason, int sourceId = 0, bool persist = true);
+
+    /**
+     * @brief In-memory only grant (atomic claim path). Same level-up/client
+     * packets as grantExperience, but never sends saveCharacterProgress /
+     * saveExperienceDebt to the game server. The claimQuestTurnIn txn is the
+     * durable write.
+     */
+    ExperienceGrantResult grantExperienceNoPersist(int characterId, int experienceAmount, const std::string &reason, int sourceId = 0);
 
     /**
      * @brief Снять опыт у персонажа (например, при смерти)

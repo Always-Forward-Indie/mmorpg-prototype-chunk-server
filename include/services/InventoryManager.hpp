@@ -34,6 +34,18 @@ class InventoryManager
     bool addItemToInventory(int characterId, int itemId, int quantity = 1);
 
     /**
+     * @brief Add item in-memory WITHOUT persisting (atomic claim path).
+     * Same in-memory semantics as addItemToInventory (stacking, token mint,
+     * delta emit, quest hook) but never calls saveInventoryCallback.
+     * The caller persists via a single claimDialogueGift/claimQuestTurnIn
+     * packet carrying the returned syncToken/rowId so the game txn converges.
+     * @param outSyncToken minted token for new rows (0 for stacked onto existing id!=0)
+     * @param outRowId in-memory DB id (0 = not yet synced, as usual)
+     */
+    bool addItemToInventoryNoPersist(int characterId, int itemId, int quantity,
+        uint64_t &outSyncToken, int &outRowId);
+
+    /**
      * @brief Remove item from player's inventory
      * @param characterId Character ID
      * @param itemId Item ID to remove
@@ -41,6 +53,11 @@ class InventoryManager
      * @return true if successfully removed, false otherwise
      */
     bool removeItemFromInventory(int characterId, int itemId, int quantity = 1);
+    /**
+     * @brief In-memory only remove (atomic claim path). No DB save emitted.
+     * Caller persists via a single claimQuestTurnIn packet.
+     */
+    bool removeItemFromInventoryNoPersist(int characterId, int itemId, int quantity = 1);
     /** Remove a specific inventory row by its player_inventory.id (inventoryItemId). Avoids ambiguity when two rows share the same itemId. */
     bool removeItemFromInventoryById(int characterId, int inventoryItemId, int quantity);
 

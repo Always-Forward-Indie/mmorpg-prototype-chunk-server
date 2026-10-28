@@ -160,37 +160,20 @@ DialogueEventHandler::handleSetPlayerFlagsEvent(const Event &event)
 
         const auto &flags = std::get<std::vector<PlayerFlagStruct>>(data);
 
-        // Flags are attached to CharacterDataStruct in CharacterManager
-        // The clientId stored in the event allows us to find the character
-        int clientId = event.getClientID();
-        if (clientId <= 0)
-            return;
-
-        auto clientSocket = gameServices_.getClientManager().getClientSocket(clientId);
-        if (!clientSocket)
-            return;
-
-        // Find characterId by clientId - iterate characters
-        auto characters = gameServices_.getCharacterManager().getCharactersList();
-        int characterId = 0;
-        for (const auto &c : characters)
-        {
-            if (c.clientId == clientId)
-            {
-                characterId = c.characterId;
-                break;
-            }
-        }
-
+        // Game puts characterId into header.clientId (see
+        // DialogueQuestEventHandler::handleGetPlayerFlagsEvent: setHeader
+        // clientId=characterId). It is NOT the chunk clientId, so socket and
+        // character lookups by this id fail whenever they differ — flags were
+        // silently dropped and areFlagsLoaded stayed false forever (dialogue
+        // fell back to main = replay farm). Resolve via characterId instead.
+        const int characterId = event.getClientID();
         if (characterId <= 0)
-        {
-            log_->error("[DialogueEventHandler] SET_PLAYER_FLAGS: no character for clientId " + std::to_string(clientId));
             return;
-        }
 
         // Store flags in CharacterDataStruct so buildPlayerContext can use them.
         // Only replace if non-empty — an empty response means the player has no DB
         // flags yet; we must not wipe any flags already set in-memory this session.
+        // (No socket needed: this is game->chunk state, not a client reply.)
         if (!flags.empty())
         {
             gameServices_.getCharacterManager().setCharacterFlags(characterId, flags);
@@ -344,6 +327,29 @@ DialogueEventHandler::handleNPCInteractEvent(const Event &event)
         // and the updated state is visible in condition evaluation for this interaction.
         gameServices_.getQuestManager().onNPCTalked(characterId, request.npcId);
 
+        // AAA fail-closed: flags load async via getPlayerFlags on join.
+        // An empty ctx would match the catch-all main dialogue and re-offer
+        // one-time gifts. Refuse instead of falling back (retryable).
+        if (!gameServices_.getQuestManager().areFlagsLoaded(characterId))
+        {
+            log_->info("[DialogueEventHandler] NPC_INTERACT: flags not loaded for char " +
+                       std::to_string(characterId) + " — retryable");
+            if (clientSocket)
+            {
+                auto clientData = gameServices_.getClientManager().getClientData(clientId);
+                nlohmann::json resp = ResponseBuilder()
+                                          .setHeader("message", "Player flags not loaded yet")
+                                          .setHeader("hash", clientData.hash)
+                                          .setHeader("clientId", clientId)
+                                          .setHeader("eventType", "dialogueError")
+                                          .setBody("errorCode", "FLAGS_NOT_READY")
+                                          .setBody("retryable", true)
+                                          .build();
+                networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("error", resp));
+            }
+            return;
+        }
+
         // Build player context (after onNPCTalked so quest step/state is up to date)
         PlayerContextStruct ctx = buildPlayerContext(charData);
 
@@ -481,6 +487,28 @@ DialogueEventHandler::handleDialogueChoiceEvent(const Event &event)
 
         // Get character data for context
         CharacterDataStruct charData = gameServices_.getCharacterManager().getCharacterData(characterId);
+
+        // AAA fail-closed: same race as npcInteract — no flags yet means the
+        // one-time guard would read false and re-grant. Refuse retryably.
+        if (!gameServices_.getQuestManager().areFlagsLoaded(characterId))
+        {
+            log_->info("[DialogueEventHandler] DIALOGUE_CHOICE: flags not loaded for char " +
+                       std::to_string(characterId) + " — retryable");
+            if (clientSocket)
+            {
+                auto clientData = gameServices_.getClientManager().getClientData(clientId);
+                nlohmann::json resp = ResponseBuilder()
+                                          .setHeader("eventType", "dialogueError")
+                                          .setHeader("hash", clientData.hash)
+                                          .setHeader("clientId", clientId)
+                                          .setBody("errorCode", "FLAGS_NOT_READY")
+                                          .setBody("retryable", true)
+                                          .build();
+                networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("error", resp));
+            }
+            return;
+        }
+
         PlayerContextStruct ctx = buildPlayerContext(charData);
 
         // Evaluate edge condition
@@ -527,6 +555,18 @@ DialogueEventHandler::handleDialogueChoiceEvent(const Event &event)
             // Forward any pending game-server packets (e.g. saveLearnedSkill)
             for (const auto &pkt : result.pendingGameServerPackets)
                 gameServerWorker_.sendDataToGameServer(pkt);
+
+            // AAA: persist quest/flag deltas immediately (see plan R1).
+            try
+            {
+                gameServices_.getQuestManager().flushAllProgress(characterId);
+                gameServices_.getQuestManager().flushPendingFlags();
+            }
+            catch (const std::exception &ex)
+            {
+                log_->error("[DialogueEventHandler] immediate flush failed for char=" +
+                            std::to_string(characterId) + " (" + ex.what() + ")");
+            }
 
             // Broadcast any world-object state changes triggered by dialogue actions
             for (const auto &b : result.pendingObjectStateBroadcasts)
@@ -708,6 +748,18 @@ DialogueEventHandler::traverseToInteractiveNode(
             // Forward any pending game-server packets (e.g. saveLearnedSkill)
             for (const auto &pkt : result.pendingGameServerPackets)
                 gameServerWorker_.sendDataToGameServer(pkt);
+
+            // AAA: persist quest/flag deltas immediately (see plan R1).
+            try
+            {
+                gameServices_.getQuestManager().flushAllProgress(characterId);
+                gameServices_.getQuestManager().flushPendingFlags();
+            }
+            catch (const std::exception &ex)
+            {
+                log_->error("[DialogueEventHandler] immediate flush failed for char=" +
+                            std::to_string(characterId) + " (" + ex.what() + ")");
+            }
 
             // Broadcast any world-object state changes triggered by dialogue actions
             for (const auto &b : result.pendingObjectStateBroadcasts)

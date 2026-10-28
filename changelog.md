@@ -1,3 +1,46 @@
+v0.2.63
+29.10.2026
+================
+
+New:
+
+**Legacy removal (mandatory cleanup).**
+- Удалён legacy `QuestManager::turnInQuest` — остался только
+  `turnInQuestAtomic` (один `claimQuestTurnIn` факт). Тест
+  `test_quest_orchestrator` переведён на atomic.
+- Game `InventoryEventHandler` token-путь: `adopt_legacy_inventory_row`
+  только для стакаемых (`stack_max > 1`), инстансы всегда INSERT
+  (паритет с claim-путями, больше нет схлопывания 2 строк в 1).
+- Outbox-лампочки: `error` при `expired > 0` (DLQ), `warn` при
+  `pending > 1000` в статус-таске чистки.
+- `contracts/test_ruins_onetime.py` добавлен как эталон одноразового дара.
+
+v0.2.62
+28.10.2026
+================
+
+New:
+
+**Atomic one-time dialogue gifts + quest turn-ins (replay farm fix).**
+- Ребро `give_* + set_flag(true)` (паттерн ruins_dying_stranger) персистится
+  одним `claimDialogueGift` fact-транзактом: game `SELECT flag FOR UPDATE`
+  (уже true → `already_claimed`, без writes) + INSERT инвентаря по syncToken
+  + `upsert flag`, один commit. Ретраи сходятся (absolute SET / token dedup).
+- `turn_in_quest` идёт тем же путём: `claimQuestTurnIn` (state FOR UPDATE,
+  require `completed`; consume-проверка, grant items/gold/exp, `turned_in`).
+  In-memory обновляется через `NoPersist`-варианты без раздельных save.
+- Fail-closed gating: `npcInteract`/`dialogueChoice` до `areFlagsLoaded`
+  отвечают `dialogueError FLAGS_NOT_READY (retryable)` вместо fallback на
+  catch-all main. `SET_PLAYER_FLAGS` резолвится по characterId из header
+  (раньше сокет-lookup по characterId как clientId молча дропал флаги —
+  именно поэтому gating сразу сработал как детектор).
+- `adopt_legacy_inventory_row` только для стакаемых (`stack_max > 1`);
+  инстансы `stackMax=1` всегда INSERT (иначе gift схлопывался со стартовым
+  рядом, память 2 строки vs DB 1).
+- Немедленный `flushAllProgress + flushPendingFlags` после каждого
+  `dialogueChoice` (не ждать 5s шедулер); disconnect флашит ДО
+  `removeCharacter`. Контракт `contracts/test_ruins_onetime.py`.
+
 v0.2.61
 25.10.2026
 ================

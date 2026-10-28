@@ -380,3 +380,61 @@ TEST_F(ExecutorFixture, SetObjectStateQueuesBroadcastAndFlags)
     auto r3 = exec->execute(actionGroup({{{"type", "set_object_state"}}}), 1, 77, ctx3);
     EXPECT_TRUE(r3.pendingObjectStateBroadcasts.empty());
 }
+
+TEST_F(ExecutorFixture, OneTimeGiftUsesAtomicClaim)
+{
+    // ruins_dying_stranger pattern: give_item + set_flag(true) in one group
+    // must persist as a SINGLE claimDialogueGift fact, not as separate
+    // saveInventoryChange + queued updatePlayerFlag (split-brain farm).
+    PlayerContextStruct ctx;
+    auto r = exec->execute(
+        actionGroup({{{"type", "give_item"}, {"item_id", 100}, {"quantity", 2}},
+            {{"type", "set_flag"}, {"key", "ruins_dying_stranger.received_gift"}, {"bool_value", true}}}),
+        1, 77, ctx);
+    EXPECT_TRUE(ctx.flagsBool["ruins_dying_stranger.received_gift"]);
+    EXPECT_EQ(gs.getInventoryManager().getItemQuantity(1, 100), 2);
+    ASSERT_EQ(r.pendingGameServerPackets.size(), 1u);
+    const auto pkt = nlohmann::json::parse(r.pendingGameServerPackets[0]);
+    EXPECT_EQ(pkt["header"]["eventType"].get<std::string>(), "claimDialogueGift");
+    EXPECT_EQ(pkt["body"]["flagKey"].get<std::string>(), "ruins_dying_stranger.received_gift");
+    ASSERT_TRUE(pkt["body"]["items"].is_array());
+    EXPECT_EQ(pkt["body"]["items"].size(), 1u);
+    EXPECT_EQ(pkt["body"]["items"][0]["itemId"].get<int>(), 100);
+    // Claim packet carries the syncToken so game + chunk converge on retry.
+    EXPECT_TRUE(pkt["body"]["items"][0].contains("syncToken"));
+    EXPECT_NE(pkt["body"]["items"][0]["syncToken"].get<uint64_t>(), 0u);
+    // Client still sees the gift immediately.
+    ASSERT_EQ(r.clientNotifications.size(), 1u);
+    EXPECT_EQ(r.clientNotifications[0]["type"].get<std::string>(), "item_received");
+}
+
+TEST_F(ExecutorFixture, PureGiveItemStaysLegacy)
+{
+    // No set_flag in group: legacy immediate save path (no claim).
+    PlayerContextStruct ctx;
+    auto r = exec->execute(
+        actionGroup({{{"type", "give_item"}, {"item_id", 100}, {"quantity", 1}}}), 1, 77, ctx);
+    EXPECT_TRUE(r.pendingGameServerPackets.empty());
+    EXPECT_EQ(gs.getInventoryManager().getItemQuantity(1, 100), 1);
+}
+
+TEST_F(ExecutorFixture, AtomicTurnInQueuesSingleClaim)
+{
+    // Completed quest via dialogue must go atomic: one claimQuestTurnIn packet,
+    // in-memory turned_in, no separate legacy packets asserted here beyond claim.
+    PlayerQuestProgressStruct pq;
+    pq.characterId = 1;
+    pq.questId = 1;
+    pq.questSlug = "kill_foxes";
+    pq.state = "completed";
+    gs.getQuestManager().loadPlayerQuests(1, {pq});
+
+    PlayerContextStruct ctx;
+    auto r = exec->execute(actionGroup({{{"type", "turn_in_quest"}, {"slug", "kill_foxes"}}}), 1, 77, ctx);
+    EXPECT_FALSE(r.clientNotifications.empty());
+    EXPECT_EQ(gs.getQuestManager().getQuestStateBySlug(1, "kill_foxes"), "turned_in");
+    ASSERT_EQ(r.pendingGameServerPackets.size(), 1u);
+    const auto pkt = nlohmann::json::parse(r.pendingGameServerPackets[0]);
+    EXPECT_EQ(pkt["header"]["eventType"].get<std::string>(), "claimQuestTurnIn");
+    EXPECT_EQ(pkt["body"]["questId"].get<int>(), 1);
+}

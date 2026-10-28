@@ -73,10 +73,19 @@ class QuestManager
     bool offerQuest(int characterId, const std::string &questSlug);
 
     /**
-     * @brief Attempt to turn in a completed quest. Grants rewards.
-     * @return JSON notifications for client (quest_turned_in, exp_received, item_received…)
+     * @brief Atomic turn-in: in-memory state + rewards without individual saves.
+     * Durable write is a single claimQuestTurnIn txn on the game server; the
+     * game drops duplicates by state (already_claimed / not_completable).
+     * @return Notifications for client + claim packet for the game server.
      */
-    std::vector<nlohmann::json> turnInQuest(int characterId, const std::string &questSlug, int clientId);
+    struct TurnInClaim
+    {
+        std::vector<nlohmann::json> notifications;
+        // Single atomic claimQuestTurnIn packet (empty when nothing to persist,
+        // e.g. beginTurnIn rejected). Sent via pendingGameServerPackets (fact).
+        std::string claimPacket;
+    };
+    TurnInClaim turnInQuestAtomic(int characterId, const std::string &questSlug, int clientId);
 
     /**
      * @brief Fail/abandon a quest. Sets state to "failed" and persists.
@@ -120,6 +129,13 @@ class QuestManager
      *        persistence to the game-server.
      */
     void setFlagBool(int characterId, const std::string &key, bool value);
+
+    /**
+     * @brief In-memory only flag write (atomic claim path).
+     * The claimDialogueGift packet carries the durable write; queueing a
+     * second updatePlayerFlag would split the txn again.
+     */
+    void setFlagBoolInMemory(int characterId, const std::string &key, bool value);
 
     /**
      * @brief Set an integer player flag: updates in-memory cache and queues

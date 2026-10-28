@@ -28,7 +28,7 @@ ExperienceManager::ExperienceManager(CharacterManager &characters,
 }
 
 ExperienceGrantResult
-ExperienceManager::grantExperience(int characterId, int experienceAmount, const std::string &reason, int sourceId)
+ExperienceManager::grantExperience(int characterId, int experienceAmount, const std::string &reason, int sourceId, bool persist)
 {
     ExperienceGrantResult result;
     result.success = false;
@@ -168,11 +168,12 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
         if (result.levelUp)
             handleLevelUp(characterId, oldLevel, newLevel, result);
 
-        // Немедленно сохраняем exp/level на гейм-сервере
-        sendSaveProgressToGameServer(characterId, newExperience, newLevel);
+        // Немедленно сохраняем exp/level на гейм-сервере (пропуск в atomic claim path)
+        if (persist)
+            sendSaveProgressToGameServer(characterId, newExperience, newLevel);
 
         // Сохраняем долг, если он изменился
-        if (applied.debtAfter != oldDebt && saveProgressCallback_)
+        if (persist && applied.debtAfter != oldDebt && saveProgressCallback_)
         {
             nlohmann::json debtPacket;
             debtPacket["header"]["eventType"] = "saveExperienceDebt";
@@ -232,6 +233,12 @@ ExperienceManager::grantExperience(int characterId, int experienceAmount, const 
     }
 
     return result;
+}
+
+ExperienceGrantResult
+ExperienceManager::grantExperienceNoPersist(int characterId, int experienceAmount, const std::string &reason, int sourceId)
+{
+    return grantExperience(characterId, experienceAmount, reason, sourceId, false);
 }
 
 ExperienceGrantResult

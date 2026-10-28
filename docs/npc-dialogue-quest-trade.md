@@ -1138,3 +1138,20 @@ NPC типа `vendor` полностью заблокирован при реп�
 | Скидка по репутации у торговцев | ✅ | Полностью |
 | Блокировка NPC при репутации `enemy` | ✅ | Полностью |
 | Обновление ambient pools при смене квеста/флага | ⏳ | Запланировано: пул пересчитывается при переподключении |
+
+### Одноразовые дары и сдача квестов — атомарность (AAA)
+
+Паттерн `give_* + set_flag(true)` в одном `action_group` (эталон —
+`ruins_dying_stranger`, рёбра accept) и `turn_in_quest` персистятся **одной
+транзакцией** на game-server, а не раздельными пакетами:
+
+* чанк: `DialogueActionExecutor` собирает `claimDialogueGift {flagKey, items[]}`
+  / `claimQuestTurnIn {questId, consume[], rewards[]}` (fact, retry через outbox);
+  in-memory обновляется без индивидуальных save-пакетов (`NoPersist`);
+* game: `SELECT ... FOR UPDATE` guard (`flag=true` → `already_claimed`,
+  `state != completed` → `not_completable`) + consume/grant + `upsert` в одном
+  `commit`. Дубликаты дропаются, повторов наград нет при любом релоге/краше.
+* до загрузки флагов диалог fail-closed: `dialogueError FLAGS_NOT_READY
+  (retryable)`, fallback на catch-all `main` запрещён.
+* `adopt_legacy_inventory_row` применяется только для стакаемых
+  (`stack_max > 1`); инстансы `stackMax=1` всегда `INSERT` новой строкой.
