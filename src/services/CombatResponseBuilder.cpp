@@ -27,6 +27,11 @@ CombatResponseBuilder::buildSkillInitiationBroadcast(const SkillInitiationResult
     body["skillEffectType"] = result.skillEffectType;
     body["skillSchool"] = result.skillSchool;
     body["castTime"] = result.castTime;
+    // Behavior data (not display strings): the client needs the montage slot
+    // and the full animation length to play the cast. Restored after S1a cut
+    // them along with display strings, which broke all cast-time visuals.
+    body["animationName"] = result.animationName;
+    body["animationDuration"] = result.animationDuration;
     body["cooldownMs"] = result.cooldownMs;
     body["gcdMs"] = result.gcdMs;
     body["serverTimestamp"] = result.serverTimestamp;
