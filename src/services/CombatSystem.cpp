@@ -867,11 +867,20 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             }
         }
 
-        // Отправляем обновление статов для кастера (потратил ману)
+        // Отправляем обновление статов для кастера (потратил ману).
+        // Dead casters resolve nothing new (mana was spent at initiation and
+        // already synced): pushing per in-flight attack after death is the
+        // corpse spam the victim's HUD flickers on. The killing blow for the
+        // TARGET still pushes below; revive resyncs the caster via vitals.
         try
         {
             auto &statsService = gameServices_->getStatsNotificationService();
-            statsService.sendStatsUpdate(casterId);
+            const auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
+            const bool bCasterIsDeadPlayer = casterData.characterId != 0 && casterData.isDead;
+            if (!bCasterIsDeadPlayer)
+            {
+                statsService.sendStatsUpdate(casterId);
+            }
 
             // Если цель - игрок и получил урон/лечение, тоже отправляем обновление.
             // Corpse spam: in-flight attacks that land after death changed
@@ -1141,8 +1150,15 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug, b
         if (responseBuilder_ && broadcastCallback_)
             broadcastCallback_(responseBuilder_->buildAoESkillExecutionBroadcast(batchResult));
 
-        // Caster stats update (mana consumed)
-        gameServices_->getStatsNotificationService().sendStatsUpdate(casterId);
+        // Caster stats update (mana consumed). Same corpse rule as the
+        // direct path: a dead caster resolves nothing new.
+        {
+            const auto casterData = gameServices_->getCharacterManager().getCharacterData(casterId);
+            if (casterData.characterId == 0 || !casterData.isDead)
+            {
+                gameServices_->getStatsNotificationService().sendStatsUpdate(casterId);
+            }
+        }
 
         gameServices_->getLogger().log(
             "[AoE] '" + skillSlug + "' by char " + std::to_string(casterId) +
