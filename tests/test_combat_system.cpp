@@ -10,6 +10,7 @@
 
 #include <ctime>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include <string>
 
 namespace
@@ -125,6 +126,43 @@ TEST_F(CombatFixture, DeadMobTargetRejected)
     auto init = combat->initiateSkillUsage(1, "strike", 9001, CombatTargetType::MOB);
     EXPECT_FALSE(init.success);
     EXPECT_EQ(init.errorMessage, "Target is dead");
+}
+
+TEST_F(CombatFixture, NoCasterStatsPushAfterCasterDeath)
+{
+    // In-flight attack resolving after the caster died: damage still
+    // applies (the swing happened while alive), but the redundant caster
+    // stats_update (HP already 0, mana unchanged since initiation) must be
+    // suppressed — one such push per hit flickers the corpse HUD.
+    int pushes = 0;
+    gs.getStatsNotificationService().setStatsUpdateCallback(
+        [&pushes](const nlohmann::json &) { ++pushes; });
+
+    auto init = combat->initiateSkillUsage(1, "strike", 9001, CombatTargetType::MOB);
+    ASSERT_TRUE(init.success) << init.errorMessage;
+
+    gs.getCharacterManager().applyDamageToCharacter(1, 100000);
+    ASSERT_TRUE(gs.getCharacterManager().getCharacterData(1).isDead);
+
+    pushes = 0;
+    auto exec = combat->executeSkillUsage(1, "strike", 9001, CombatTargetType::MOB, true);
+    EXPECT_TRUE(exec.success) << exec.errorMessage;
+    EXPECT_EQ(pushes, 0);
+}
+
+TEST_F(CombatFixture, CasterStatsPushWhileAlive)
+{
+    // Control: the same resolution while alive pushes exactly one caster
+    // update (mana spent); the target is a mob, so no target push exists.
+    int pushes = 0;
+    gs.getStatsNotificationService().setStatsUpdateCallback(
+        [&pushes](const nlohmann::json &) { ++pushes; });
+
+    auto init = combat->initiateSkillUsage(1, "strike", 9001, CombatTargetType::MOB);
+    ASSERT_TRUE(init.success) << init.errorMessage;
+    auto exec = combat->executeSkillUsage(1, "strike", 9001, CombatTargetType::MOB, true);
+    EXPECT_TRUE(exec.success) << exec.errorMessage;
+    EXPECT_EQ(pushes, 1);
 }
 
 TEST_F(CombatFixture, InitiateRejectsOutOfRangeTarget)
