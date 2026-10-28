@@ -873,12 +873,22 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
             auto &statsService = gameServices_->getStatsNotificationService();
             statsService.sendStatsUpdate(casterId);
 
-            // Если цель - игрок и получил урон/лечение, тоже отправляем обновление
+            // Если цель - игрок и получил урон/лечение, тоже отправляем обновление.
+            // Corpse spam: in-flight attacks that land after death changed
+            // nothing (HP already 0, death snapshot already sent) — pushing
+            // a stats_update per hit makes the victim's HUD flicker 0/0.
+            // The killing blow (alive -> dead transition) still pushes.
             if ((targetType == CombatTargetType::PLAYER || targetType == CombatTargetType::SELF) &&
                 targetId != casterId &&
                 (skillResult.damageResult.totalDamage > 0 || skillResult.healAmount > 0))
             {
-                statsService.sendStatsUpdate(targetId);
+                const bool bTargetWasAlreadyDead =
+                    gameServices_->getCharacterManager().getCharacterData(targetId).isDead &&
+                    !result.targetDied;
+                if (!bTargetWasAlreadyDead)
+                {
+                    statsService.sendStatsUpdate(targetId);
+                }
             }
         }
         catch (const std::exception &e)

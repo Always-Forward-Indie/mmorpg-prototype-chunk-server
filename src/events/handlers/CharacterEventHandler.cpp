@@ -2038,6 +2038,8 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
                                                   .setTimestamps(req.timestamps)
                                                   .setBody("characterId", characterId)
                                                   .setBody("position", nlohmann::json{{"x", respawnPos.positionX}, {"y", respawnPos.positionY}, {"z", respawnPos.positionZ}, {"rotationZ", respawnPos.rotationZ}})
+                                                  .setBody("health", nlohmann::json{{"current", newHp}, {"max", effectiveMaxHealth}})
+                                                  .setBody("mana", nlohmann::json{{"current", newMana}, {"max", effectiveMaxMana}})
                                                   .build();
             std::string msg = networkManager_.generateResponseMessage("success", teleportResponse);
             networkManager_.sendResponse(clientSocket, msg);
