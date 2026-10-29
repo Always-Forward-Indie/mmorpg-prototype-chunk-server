@@ -98,7 +98,7 @@ TEST_F(DurFixture, WeaponHitWearAndSave)
 {
     equip(1, 200, 11);
     dur.applyWeaponHitWear(1);
-    // durabilityCurrent 0 -> fallback max 100 -> 99
+    // AAA: fresh rows init to max 100 at creation -> 99 after one hit.
     EXPECT_EQ(slotDur(1, 11), 99);
     ASSERT_EQ(saved.size(), 1u);
     auto pkt = nlohmann::json::parse(saved[0]);
@@ -155,7 +155,7 @@ TEST_F(DurFixture, ArmorHitWearSkipsWeapon)
     equip(1, 200, 11); // main_hand: excluded from armor wear
     equip(1, 201, 12); // chest: wears
     dur.applyArmorHitWear(1);
-    EXPECT_EQ(slotDur(1, 11), 0); // untouched
+    EXPECT_EQ(slotDur(1, 11), 100); // untouched, fresh rows init to max
     EXPECT_EQ(slotDur(1, 12), 99);
     ASSERT_EQ(saved.size(), 1u);
     EXPECT_EQ(nlohmann::json::parse(saved[0])["body"]["inventoryItemId"], 12);
@@ -180,6 +180,48 @@ TEST_F(DurFixture, NonDurableSkipped)
     dur.applyWeaponHitWear(1);
     dur.applyDeathPenalty(1);
     dur.applyArmorHitWear(1);
+    EXPECT_TRUE(saved.empty());
+}
+
+TEST_F(DurFixture, CreationInitFull)
+{
+    // AAA: fresh durable rows start at max, never at 0 (0 = broken).
+    EXPECT_TRUE(inv.addItemToInventory(1, 200, 1));
+    EXPECT_TRUE(inv.addItemToInventory(1, 202, 5)); // non-durable: stays 0
+    auto rows = inv.getPlayerInventory(1);
+    int swordDur = -1, breadDur = -1;
+    for (const auto &r : rows)
+    {
+        if (r.itemId == 200)
+            swordDur = r.durabilityCurrent;
+        if (r.itemId == 202)
+            breadDur = r.durabilityCurrent;
+    }
+    EXPECT_EQ(swordDur, 100);
+    EXPECT_EQ(breadDur, 0);
+}
+
+TEST_F(DurFixture, BrokenStaysBrokenNoSpam)
+{
+    // AAA: 0 is broken. Further wear is a no-op: no save, no publish.
+    equip(1, 200, 11);
+    inv.updateDurability(1, 11, 0);
+    dur.applyWeaponHitWear(1);
+    EXPECT_EQ(slotDur(1, 11), 0);
+    EXPECT_TRUE(saved.empty());
+    EXPECT_TRUE(notified.empty());
+    EXPECT_TRUE(refreshed.empty());
+    dur.applyDeathPenalty(1);
+    EXPECT_EQ(slotDur(1, 11), 0);
+    EXPECT_TRUE(saved.empty());
+}
+
+TEST_F(DurFixture, ArmorWearOnBrokenNoOp)
+{
+    equip(1, 201, 12);
+    inv.updateDurability(1, 12, 0);
+    dur.applyArmorHitWear(1);
+    EXPECT_EQ(slotDur(1, 12), 0);
     EXPECT_TRUE(saved.empty());
 }
 

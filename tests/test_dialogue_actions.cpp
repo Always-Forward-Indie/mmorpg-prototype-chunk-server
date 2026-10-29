@@ -136,15 +136,15 @@ TEST(LearnSkillValidator, GuardChainOrder)
 TEST(RepairCostCalculator, FiltersAndPrices)
 {
     std::vector<RepairCostInput> items = {
-        {11, 200, "iron_sword", 70, true, 100, 100},  // missing 30 -> 30
-        {12, 201, "plate", 0, true, 100, 99},         // cur 0 -> fallback max -> missing 0 -> skip
-        {13, 202, "shield", 100, true, 100, 50},      // full -> skip
-        {14, 203, "bread", 0, false, 0, 5},           // not durable -> skip
-        {15, 204, "relic", 99, true, 100, 99},        // missing 1 -> ceil(0.99) = 1
-        {16, 205, "odd", 50, true, 0, 10},            // max <= 0 -> skip
+        {11, 200, "iron_sword", 70, true, 100, 100}, // missing 30 -> 30 (+float32 artifact -> 31)
+        {12, 201, "plate", 0, true, 100, 99},        // AAA: 0 is broken -> missing 100 -> full price 99
+        {13, 202, "shield", 100, true, 100, 50},     // full -> skip
+        {14, 203, "bread", 0, false, 0, 5},          // not durable -> skip
+        {15, 204, "relic", 99, true, 100, 99},       // missing 1 -> ceil(0.99) = 1
+        {16, 205, "odd", 50, true, 0, 10},           // max <= 0 -> skip
     };
     auto out = computeRepairEntries(items);
-    ASSERT_EQ(out.size(), 2u);
+    ASSERT_EQ(out.size(), 3u);
     EXPECT_EQ(out[0].inventoryItemId, 11);
     EXPECT_EQ(out[0].itemName, "iron_sword");
     EXPECT_EQ(out[0].durabilityCurrent, 70);
@@ -152,8 +152,11 @@ TEST(RepairCostCalculator, FiltersAndPrices)
     // NOTE: 1-1 float artifact — 100 * (30/100 in float32) = 30.000002 → ceil = 31.
     // Pinned as-is (client prices already live with it); do not "fix" without a product decision.
     EXPECT_EQ(out[0].repairCost, 31);
-    EXPECT_EQ(out[1].inventoryItemId, 15);
-    EXPECT_EQ(out[1].repairCost, 1);
+    EXPECT_EQ(out[1].inventoryItemId, 12);
+    EXPECT_EQ(out[1].durabilityCurrent, 0);
+    EXPECT_EQ(out[1].repairCost, 99); // broken plate costs full price
+    EXPECT_EQ(out[2].inventoryItemId, 15);
+    EXPECT_EQ(out[2].repairCost, 1);
 }
 
 TEST(RepairCostCalculator, UnitCostMatchesBatchFormula)

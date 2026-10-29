@@ -149,6 +149,11 @@ InventoryManager::addItemToInventoryNoPersist(int characterId, int itemId, int q
             newItem.characterId = characterId;
             newItem.itemId = itemId;
             newItem.quantity = quantity;
+            // AAA: 0 means broken for durable items, never "unknown". Fresh
+            // durable rows start at full so no reader has to guess.
+            newItem.durabilityCurrent = (itemInfo.isDurable && itemInfo.durabilityMax > 0)
+                ? itemInfo.durabilityMax
+                : 0;
             newItem.syncToken = mintSyncToken(nextSyncToken_, syncTokenSeeded_);
             newItem.syncNextMs = 0;
             playerInventories_[characterId].push_back(newItem);
@@ -524,7 +529,9 @@ InventoryManager::inventoryItemToJson(const PlayerInventoryItemStruct &item) con
         itemJson["raritySlug"] = itemData.raritySlug;
         itemJson["stackMax"] = itemData.stackMax;
         itemJson["durabilityMax"] = itemData.durabilityMax;
-        itemJson["durabilityCurrent"] = (item.durabilityCurrent > 0) ? item.durabilityCurrent : itemData.durabilityMax;
+        // AAA: raw instance truth. 0 is broken for durable items (fresh rows
+        // are init to max at creation; NULL->max is handled in the DB snapshot).
+        itemJson["durabilityCurrent"] = item.durabilityCurrent;
         itemJson["isEquipped"] = item.isEquipped;
         itemJson["vendorPriceBuy"] = itemData.vendorPriceBuy;
         itemJson["vendorPriceSell"] = itemData.vendorPriceSell;

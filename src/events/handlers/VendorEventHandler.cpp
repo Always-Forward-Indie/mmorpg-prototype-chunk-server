@@ -612,7 +612,8 @@ VendorEventHandler::repairOne(
     if (!item.isDurable || item.durabilityMax <= 0)
         return {false, 0, "not_durable"};
 
-    int current = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : item.durabilityMax;
+    // AAA: raw truth, 0 is broken (fresh rows init to max at creation).
+    int current = invSlot.durabilityCurrent;
     if (current >= item.durabilityMax)
         return {false, 0, "already_full"};
 
@@ -654,7 +655,8 @@ VendorEventHandler::buildRepairableItemsJson(int characterId, int &outTotalCost)
         const ItemDataStruct item = itemMgr.getItemById(invSlot.itemId);
         if (!item.isDurable || item.durabilityMax <= 0)
             continue;
-        int current = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : item.durabilityMax;
+        // AAA: raw truth, 0 is broken and must appear in the shop list.
+        int current = invSlot.durabilityCurrent;
         if (current >= item.durabilityMax)
             continue;
         int cost = computeRepairCost(item, current);
@@ -844,7 +846,8 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
             const ItemDataStruct item = gameServices_.getItemManager().getItemById(invSlot.itemId);
             if (!item.isDurable || item.durabilityMax <= 0)
                 continue;
-            int current = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : item.durabilityMax;
+            // AAA: raw truth, 0 is broken.
+            int current = invSlot.durabilityCurrent;
             if (current >= item.durabilityMax)
                 continue;
 

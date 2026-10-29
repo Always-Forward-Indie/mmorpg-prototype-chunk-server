@@ -266,7 +266,9 @@ struct PlayerInventoryItemStruct
     int itemId = 0;
     int quantity = 1;
     int slotIndex = -1;        // bag position (-1 = unassigned)
-    int durabilityCurrent = 0; // 0 = not applicable / full
+    int durabilityCurrent = 0; // AAA: raw instance truth. 0 = broken for durable
+                              // items (fresh durable rows init to max at creation),
+                              // N/A for non-durable items.
     bool isEquipped = false;   // true when in character_equipment table
     int killCount = 0;         // Item Soul: accumulated kills with this weapon instance
     // Chunk-local id-sync tracking (never serialized to client/DB):

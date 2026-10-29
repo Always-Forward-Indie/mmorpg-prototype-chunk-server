@@ -59,7 +59,8 @@ inline std::vector<RepairCostEntry> computeRepairEntries(const std::vector<Repai
         if (!it.isDurable || it.durabilityMax <= 0)
             continue;
 
-        int durCurrent = (it.durabilityCurrent > 0) ? it.durabilityCurrent : it.durabilityMax;
+        // AAA: raw truth, 0 is broken (fresh rows init to max at creation).
+        int durCurrent = it.durabilityCurrent;
         int missing = it.durabilityMax - durCurrent;
         if (missing <= 0)
             continue;

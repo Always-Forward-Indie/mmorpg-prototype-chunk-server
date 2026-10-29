@@ -53,7 +53,11 @@ DurabilityService::applyWeaponHitWear(int characterId)
         return;
     int loss = static_cast<int>(
         std::lround(gameConfig_.getFloat("durability.weapon_loss_per_hit", 1.0f)));
-    int cur = (weapon->durabilityCurrent > 0) ? weapon->durabilityCurrent : wItem.durabilityMax;
+    // AAA: raw truth, 0 is broken (fresh rows init to max at creation).
+    // Broken stays broken: no save spam, no duplicate publish.
+    int cur = weapon->durabilityCurrent;
+    if (cur <= 0)
+        return;
     int newDur = std::max(0, cur - loss);
     inventory_.updateDurability(characterId, weapon->id, newDur);
     saveDurabilityChange(characterId, weapon->id, newDur);
@@ -73,7 +77,10 @@ DurabilityService::applyArmorHitWear(int characterId)
         if (!iData.isDurable || iData.equipSlotSlug == "main_hand" || iData.equipSlotSlug == "two_hand" ||
             iData.durabilityMax <= 0)
             continue;
-        int cur = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : iData.durabilityMax;
+        // AAA: raw truth, 0 is broken. Skip dead rows: no save/publish spam.
+        int cur = invSlot.durabilityCurrent;
+        if (cur <= 0)
+            continue;
         int newDur = std::max(0, cur - armorLoss);
         inventory_.updateDurability(characterId, invSlot.id, newDur);
         saveDurabilityChange(characterId, invSlot.id, newDur);
@@ -93,7 +100,10 @@ DurabilityService::applyDeathPenalty(int characterId)
         if (!iData.isDurable || iData.durabilityMax <= 0)
             continue;
         int penalty = static_cast<int>(std::ceil(iData.durabilityMax * penaltyPct));
-        int cur = (invSlot.durabilityCurrent > 0) ? invSlot.durabilityCurrent : iData.durabilityMax;
+        // AAA: raw truth, 0 is broken. Dead rows take no further penalty.
+        int cur = invSlot.durabilityCurrent;
+        if (cur <= 0)
+            continue;
         int newDur = std::max(0, cur - penalty);
         inventory_.updateDurability(characterId, invSlot.id, newDur);
         saveDurabilityChange(characterId, invSlot.id, newDur);
