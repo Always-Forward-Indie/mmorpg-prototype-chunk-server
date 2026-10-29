@@ -416,7 +416,22 @@ InventoryManager::getPlayerInventory(int characterId) const
     auto it = playerInventories_.find(characterId);
     if (it != playerInventories_.end())
     {
-        return it->second;
+        // Canonical wire order (single source with the DB snapshot path,
+        // which is ORDER BY id): synced rows ascending by instance id,
+        // unsynced pendings (id==0) last in arrival order. Without this,
+        // consecutive full snapshots reshuffle the client grid and stale
+        // tooltips no longer match the slots underneath.
+        std::vector<PlayerInventoryItemStruct> out = it->second;
+        std::stable_sort(out.begin(), out.end(),
+            [](const PlayerInventoryItemStruct &a, const PlayerInventoryItemStruct &b)
+            {
+                const bool aPending = (a.id == 0);
+                const bool bPending = (b.id == 0);
+                if (aPending != bPending)
+                    return bPending; // synced rows first, pendings last
+                return a.id < b.id;
+            });
+        return out;
     }
 
     return std::vector<PlayerInventoryItemStruct>();
