@@ -429,11 +429,25 @@ EventDispatcher::handleDisconnect(const EventContext &context, std::shared_ptr<b
     // object. The handler must trust this flag instead of probing liveness:
     // a probe reads "live" precisely when the client waits for farewell-ack
     // with its socket open, and would drop its own goodbye.
+    //
+    // Self-healing registration first: the mapping can rot (silent link
+    // reconnect without re-join leaves a dead/null entry while the live
+    // session talks on a new socket). A packet arriving on an OPEN socket
+    // proves a live session — refresh the mapping so the verdict below and
+    // the farewell ack target the real socket. Dead-socket packets never
+    // touch the mapping (stale duplicates stay stale).
     try
     {
         if (validSocket && validSocket->is_open())
         {
             auto registered = gameServices_.getClientManager().getClientSocket(context.clientData.clientId);
+            if (!registered || registered.get() != validSocket.get() || !registered->is_open())
+            {
+                gameServices_.getClientManager().setClientSocket(context.clientData.clientId, validSocket);
+                gameServices_.getLogger().log("Refreshed socket registration for clientId: " + std::to_string(context.clientData.clientId) +
+                    " (had " + std::string(registered ? (registered->is_open() ? "live-other" : "dead") : "none") + ")", GREEN);
+                registered = validSocket;
+            }
             if (registered && registered == validSocket)
             {
                 clientData.isGracefulDisconnect = true;
