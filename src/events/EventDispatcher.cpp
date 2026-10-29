@@ -423,6 +423,32 @@ EventDispatcher::handleDisconnect(const EventContext &context, std::shared_ptr<b
         }
     }
 
+    // Graceful-disconnect verdict, computed HERE (the only place holding both
+    // ends): the packet's socket vs the registered session socket. Shared_ptr
+    // identity is exact — copies share ownership, a reconnect mints a new
+    // object. The handler must trust this flag instead of probing liveness:
+    // a probe reads "live" precisely when the client waits for farewell-ack
+    // with its socket open, and would drop its own goodbye.
+    try
+    {
+        if (validSocket && validSocket->is_open())
+        {
+            auto registered = gameServices_.getClientManager().getClientSocket(context.clientData.clientId);
+            if (registered && registered == validSocket)
+            {
+                clientData.isGracefulDisconnect = true;
+            }
+        }
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("Error verifying disconnect socket identity: " + std::string(e.what()), RED);
+    }
+    catch (...)
+    {
+        gameServices_.getLogger().logError("Unknown error verifying disconnect socket identity", RED);
+    }
+
     // Always create disconnect event, even with invalid socket, as cleanup is needed
     try
     {

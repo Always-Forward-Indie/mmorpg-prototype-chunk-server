@@ -407,6 +407,36 @@ CharacterEventHandler::evictStaleSession(int characterId, int newClientId,
         log_->error("[EVICT] Failed to send savePlayTime for characterId: " + std::to_string(characterId) + " - " + ex.what());
     }
 
+    // ── 4c. Farewell position save from the evicted in-memory state ──────────
+    // Without this, a reconnect without clean logout (crash, timeout path)
+    // joins at the last 30s-periodic save — up to half a minute behind.
+    // In-memory validated position is authoritative; same shape as the
+    // disconnect farewell save.
+    try
+    {
+        nlohmann::json savePacket;
+        savePacket["header"]["eventType"] = "savePositions";
+        savePacket["header"]["clientId"] = 0;
+        savePacket["header"]["hash"] = "";
+        savePacket["body"]["characters"] = nlohmann::json::array();
+        nlohmann::json entry;
+        entry["characterId"] = characterId;
+        entry["posX"] = staleChar.characterPosition.positionX;
+        entry["posY"] = staleChar.characterPosition.positionY;
+        entry["posZ"] = staleChar.characterPosition.positionZ;
+        entry["rotZ"] = staleChar.characterPosition.rotationZ;
+        savePacket["body"]["characters"].push_back(entry);
+        gameServerWorker_.sendDataToGameServer(savePacket.dump() + "\n");
+        log_->info("[EVICT] Saved position for characterId: " + std::to_string(characterId) +
+                   " at (" + std::to_string(staleChar.characterPosition.positionX) + "," +
+                   std::to_string(staleChar.characterPosition.positionY) + "," +
+                   std::to_string(staleChar.characterPosition.positionZ) + ")");
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[EVICT] Failed to send savePositions for characterId: " + std::to_string(characterId) + " - " + ex.what());
+    }
+
     // ── 5. Close any active trade session and notify the other party ──────────
     {
         auto *session = gameServices_.getTradeSessionManager().getSessionByCharacter(characterId);

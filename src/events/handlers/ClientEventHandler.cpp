@@ -207,9 +207,20 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 }
             }
 
-            // Stale-event guard: disconnect events are processed async and may
-            // arrive AFTER the same clientId reconnected. Never wipe a live
-            // session — only remove when the registered socket is gone/closed.
+            // Stale-event guard, socket-identity version: disconnect events are
+            // processed async and may arrive AFTER the same clientId reconnected.
+            // A dispatcher-verified graceful goodbye (packet socket == registered
+            // session socket) is ALWAYS authoritative — even with the socket open,
+            // because the client deliberately waits for farewell-ack on it.
+            // Probing liveness here would drop its own goodbye. Only
+            // non-graceful events (timeout/close) consult liveness: a live
+            // registered socket then means the event is stale.
+            if (passedClientData.isGracefulDisconnect)
+            {
+                log_->info("Client " + std::to_string(passedClientData.clientId) +
+                           " graceful disconnect (socket identity verified) — running farewell saves.");
+            }
+            else
             {
                 auto liveSocket = gameServices_.getClientManager().getClientSocket(passedClientData.clientId);
                 bool live = false;

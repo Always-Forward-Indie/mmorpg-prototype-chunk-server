@@ -1554,6 +1554,22 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
                         log_->warn("[COMBAT] Armor durability update error: " + std::string(e.what()));
                     }
 
+                    // Victim stats push (mirrors executeSkillUsage): makes stats_update
+                    // the complete channel for player vitals, so clients never
+                    // depend on combatResult for HP. Skip when the victim was
+                    // already dead (in-flight hits landing on a corpse).
+                    if (!targetPlayer.isDead)
+                    {
+                        try
+                        {
+                            gameServices_->getStatsNotificationService().sendStatsUpdate(targetPlayer.characterId);
+                        }
+                        catch (const std::exception &e)
+                        {
+                            gameServices_->getLogger().logError("Error sending victim stats update after mob attack: " + std::string(e.what()));
+                        }
+                    }
+
                     if (result.targetDied)
                     {
                         handleTargetDeath(targetPlayer.characterId, CombatTargetType::PLAYER);

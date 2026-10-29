@@ -482,6 +482,13 @@ struct ClientDataStruct
     int characterId = 0;
     TimestampStruct timestamps; // Lag compensation timestamps
     bool isWorldReady = false;  // Set to true when client sends playerReady (scene loaded)
+    // True when this struct travels inside a packet-driven disconnect event
+    // whose socket matches the registered session socket (dispatcher-verified
+    // in handleDisconnect). Lets the handler tell "live session says goodbye"
+    // apart from stale/timeout events without probing socket liveness — a
+    // liveness probe misfires exactly when the client waits for farewell-ack
+    // with its socket open. Default false: timeout/close paths stay guarded.
+    bool isGracefulDisconnect = false;
     // Item stat catalog version the client reported in joinGameCharacter.
     // 0 = unknown: server always pushes the full itemCatalog on join.
     uint32_t itemCatalogVersion = 0;
