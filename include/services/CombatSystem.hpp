@@ -103,6 +103,12 @@ class CombatSystem
     void setSaveItemKillCountCallback(std::function<void(const std::string &)> callback);
 
     /**
+     * @brief Set callback for an immediate position checkpoint of a character
+     * (kill/zone-entry fast path to the game server; periodic saver is the net).
+     */
+    void setSavePositionCallback(std::function<void(int characterId)> callback);
+
+    /**
      * @brief Restore a persisted skill cooldown for a player (called on character join).
      *        Passes through to the internal SkillSystem::restoreCooldown().
      */
@@ -136,6 +142,14 @@ class CombatSystem
 
     // Callback for persisting Item Soul kill_count to game server
     std::function<void(const std::string &)> saveItemKillCountCallback_;
+
+    // Immediate position checkpoint (kill fast path); wired by CombatEventHandler.
+    std::function<void(int characterId)> savePositionCallback_;
+
+    // Authoritative per-hit mob vitals push (single-channel rule: combatResult
+    // is cosmetic for mobs, mobHealthUpdate owns their HP — mirrors the player
+    // victim stats_update push). Corpse-skip: dead mobs resolve via mobDeath.
+    void pushMobHealthUpdate(int mobUid);
 
     /**
      * @brief Применить эффекты скила.

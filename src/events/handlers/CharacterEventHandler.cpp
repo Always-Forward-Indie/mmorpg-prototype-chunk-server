@@ -1056,6 +1056,26 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                             {"isSafeZone", zoneOpt->isSafeZone}};
                         gameServices_.getStatsNotificationService().sendWorldNotification(
                             movementData.characterId, "zone_entered", zoneData, "high", "zone_banner");
+                        // Event checkpoint: crossing a zone boundary is a natural
+                        // crash-rollback cut point (position now means something
+                        // new). Never fails the move.
+                        try
+                        {
+                            nlohmann::json zoneSave;
+                            zoneSave["header"]["eventType"] = "savePositions";
+                            zoneSave["header"]["clientId"] = 0;
+                            zoneSave["header"]["hash"] = "";
+                            zoneSave["body"]["characters"] = nlohmann::json::array();
+                            nlohmann::json zoneEntry;
+                            zoneEntry["characterId"] = movementData.characterId;
+                            zoneEntry["posX"] = movementData.position.positionX;
+                            zoneEntry["posY"] = movementData.position.positionY;
+                            zoneEntry["posZ"] = movementData.position.positionZ;
+                            zoneEntry["rotZ"] = movementData.position.rotationZ;
+                            zoneSave["body"]["characters"].push_back(zoneEntry);
+                            gameServerWorker_.sendDataToGameServer(zoneSave.dump() + "\n");
+                        }
+                        catch (...) {}
                     }
 
                     // One-time exploration XP reward.

@@ -682,6 +682,12 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
                         result.targetDied = updateResult.mobDied;
                         result.healthPopulated = true;
 
+                        // Authoritative per-hit vitals (single-channel rule).
+                        if (updateResult.success && !updateResult.mobDied)
+                        {
+                            pushMobHealthUpdate(targetId);
+                        }
+
                         // Durability + Mastery: single weapon fetch for both (HIGH-8 style)
                         try
                         {
@@ -775,6 +781,10 @@ CombatSystem::executeSkillUsage(int casterId, const std::string &skillSlug, int 
                     result.finalTargetHealth = updateResult.newHealth;
                     result.finalTargetMana = updateResult.currentMana;
                     result.healthPopulated = true;
+                    if (updateResult.success)
+                    {
+                        pushMobHealthUpdate(targetId);
+                    }
                 }
             }
             catch (const std::exception &e)
@@ -1084,6 +1094,12 @@ CombatSystem::executeAoESkillUsage(int casterId, const std::string &skillSlug, b
 
             auto upResult = gameServices_->getMobInstanceManager().applyDamageToMob(mob.uid, dmg, casterId);
 
+            // Authoritative per-hit vitals (single-channel rule).
+            if (upResult.success && !upResult.mobDied)
+            {
+                pushMobHealthUpdate(mob.uid);
+            }
+
             // Durability + mastery per landed hit, same as single-target.
             if (!hit.isMissed && dmg > 0)
             {
@@ -1358,6 +1374,17 @@ CombatSystem::handleMobDeath(int mobId, int killerId)
     try
     {
         rewardPipeline_.execute(mobId, killerId);
+
+        // Event checkpoint: the killer's position right after a kill is a
+        // natural crash-rollback cut point. Best-effort, never fails death.
+        try
+        {
+            if (savePositionCallback_ && killerId > 0)
+                savePositionCallback_(killerId);
+        }
+        catch (...)
+        {
+        }
 
         // Вызываем общую логику смерти цели (для совместимости)
         handleTargetDeath(mobId, CombatTargetType::MOB);
@@ -1642,6 +1669,41 @@ void
 CombatSystem::setSaveItemKillCountCallback(std::function<void(const std::string &)> callback)
 {
     saveItemKillCountCallback_ = std::move(callback);
+}
+
+void
+CombatSystem::setSavePositionCallback(std::function<void(int characterId)> callback)
+{
+    savePositionCallback_ = std::move(callback);
+}
+
+void
+CombatSystem::pushMobHealthUpdate(int mobUid)
+{
+    // Single-channel rule for mobs: combatResult carries cosmetic
+    // damage/effects only; mobHealthUpdate owns their vitals (mirrors the
+    // player victim stats_update push). Dead mobs resolve via mobDeath +
+    // loot — pushing HP for a corpse would only flicker a doomed bar.
+    // Never throws: broadcast path is best-effort.
+    try
+    {
+        if (!broadcastCallback_)
+            return;
+        const auto mob = gameServices_->getMobInstanceManager().getMobInstance(mobUid);
+        if (mob.uid <= 0 || mob.isDead || mob.currentHealth <= 0)
+            return;
+        nlohmann::json packet;
+        packet["header"]["eventType"] = "mobHealthUpdate";
+        packet["header"]["status"] = "success";
+        packet["body"]["mobUID"] = mob.uid;
+        packet["body"]["mobId"] = mob.id;
+        packet["body"]["currentHealth"] = mob.currentHealth;
+        packet["body"]["maxHealth"] = mob.maxHealth;
+        broadcastCallback_(packet);
+    }
+    catch (...)
+    {
+    }
 }
 
 void

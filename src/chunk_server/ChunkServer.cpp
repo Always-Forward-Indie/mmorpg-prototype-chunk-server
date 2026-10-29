@@ -1198,7 +1198,9 @@ ChunkServer::mainEventLoopCH()
 
     scheduler_.scheduleTask(aggressiveCleanupTask);
 
-    // Periodic task: save all online player positions to the database every 30 seconds
+    // Periodic task: save all online player positions to the database every 10 seconds
+    // (was 30s — crash rollback worst-case cut 3x; event checkpoints on
+    // kill/zone-entry/teleport/respawn/evict cover the rest).
     Task savePositionsTask(
         [this]
         {
@@ -1255,8 +1257,8 @@ ChunkServer::mainEventLoopCH()
                     " position(s) to game server",
                 GREEN);
         },
-        schedMs("scheduler.save_positions_ms", 30000),                                             // Every 30 seconds
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(30 * 1000), // First run after 30s
+        schedMs("scheduler.save_positions_ms", 10000),                                             // Every 10 seconds
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(10 * 1000), // First run after 10s
         10                                                                       // unique task ID
     );
 

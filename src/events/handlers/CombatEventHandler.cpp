@@ -26,6 +26,35 @@ CombatEventHandler::CombatEventHandler(
     combatSystem_->setBroadcastCallback([this](const nlohmann::json &packet)
         { this->sendBroadcast(packet); });
 
+    // Kill checkpoint: immediate position save for the killer (best-effort;
+    // periodic saver stays the net). Same wire shape as teleport/respawn saves.
+    combatSystem_->setSavePositionCallback([this](int characterId)
+        {
+            try
+            {
+                if (characterId <= 0)
+                    return;
+                const PositionStruct pos =
+                    gameServices_.getCharacterManager().getCharacterPosition(characterId);
+                nlohmann::json savePos;
+                savePos["header"]["eventType"] = "savePositions";
+                savePos["header"]["clientId"] = 0;
+                savePos["header"]["hash"] = "";
+                savePos["body"]["characters"] = nlohmann::json::array();
+                nlohmann::json entry;
+                entry["characterId"] = characterId;
+                entry["posX"] = pos.positionX;
+                entry["posY"] = pos.positionY;
+                entry["posZ"] = pos.positionZ;
+                entry["rotZ"] = pos.rotationZ;
+                savePos["body"]["characters"].push_back(std::move(entry));
+                gameServerWorker_.sendDataToGameServer(savePos.dump() + "\n");
+            }
+            catch (...)
+            {
+            }
+        });
+
     log_->info("CombatEventHandler initialized with new refactored architecture");
 }
 
