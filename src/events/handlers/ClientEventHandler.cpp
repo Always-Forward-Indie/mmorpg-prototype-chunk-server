@@ -241,6 +241,12 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
             gameServices_.getClientManager().removePingTime(passedClientData.clientId);
             gameServices_.getInterestManager().removeClient(passedClientData.clientId);
 
+            // Capture the disconnecting socket BEFORE removal: the farewell
+            // ack below goes back on it (client waits for it pre-teardown).
+            // Closed/dead sockets simply skip the send — teardown proceeds.
+            std::shared_ptr<boost::asio::ip::tcp::socket> disconnectSocket;
+            try { disconnectSocket = gameServices_.getClientManager().getClientSocket(passedClientData.clientId); } catch (...) {}
+
             // Only save and clean up character data if the character is actually loaded in CharacterManager
             if (passedClientData.characterId > 0)
             {
@@ -299,7 +305,8 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                         entry["rotZ"] = lastPos.rotationZ;
                         savePacket["body"]["characters"].push_back(entry);
                         gameServerWorker_.sendDataToGameServer(savePacket.dump() + "\n");
-                        log_->info("[DISCONNECT] Saved position for characterId: " + std::to_string(passedClientData.characterId));
+                        log_->info("[DISCONNECT] Saved position for characterId: " + std::to_string(passedClientData.characterId) +
+                                   " at (" + std::to_string(lastPos.positionX) + "," + std::to_string(lastPos.positionY) + "," + std::to_string(lastPos.positionZ) + ")");
                     }
                     catch (const std::exception &ex)
                     {
@@ -331,6 +338,34 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                             std::to_string(passedClientData.characterId) + " - " + ex.what());
                     }
                 }
+            }
+
+            // Logout handshake: farewell saves (playtime/position/HP) above
+            // are dispatched to the game server. Tell the disconnecting client
+            // so it can tear down knowing the next join reads fresh data.
+            // No ordering guarantee beyond TCP here, but the client only needs
+            // chunk-side completion: its own re-login takes seconds, the game
+            // queue drains in milliseconds.
+            try
+            {
+                if (disconnectSocket)
+                {
+                    nlohmann::json ack = ResponseBuilder()
+                                             .setHeader("message", "Disconnect processed")
+                                             .setHeader("hash", "")
+                                             .setHeader("clientId", passedClientData.clientId)
+                                             .setHeader("eventType", "disconnectAck")
+                                             .setBody("characterId", passedClientData.characterId)
+                                             .build();
+                    networkManager_.sendResponse(disconnectSocket,
+                        networkManager_.generateResponseMessage("success", ack));
+                    log_->info("[DISCONNECT] Sent disconnectAck to clientId: " + std::to_string(passedClientData.clientId));
+                }
+            }
+            catch (const std::exception &ex)
+            {
+                gameServices_.getLogger().logError(
+                    "[DISCONNECT] Failed to send disconnectAck: " + std::string(ex.what()));
             }
 
             // Remove character data and flush state (only if character was loaded)
