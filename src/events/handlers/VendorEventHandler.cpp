@@ -840,6 +840,10 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
         auto inventory = gameServices_.getInventoryManager().getPlayerInventory(req.characterId);
         int totalGoldSpent = 0;
         nlohmann::json repairedItems = nlohmann::json::array();
+        // AAA: a success with zero repairs is a lie (the old code celebrated
+        // "All repaired (-0 g)" when the player simply couldn't pay). Remember
+        // the first failure: with nothing repaired it becomes the error reply.
+        std::string firstFailure;
 
         for (auto &invSlot : inventory)
         {
@@ -853,7 +857,11 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
 
             auto result = repairOne(req.characterId, goldItem->id, req.npcId, invSlot);
             if (!result.success)
+            {
+                if (firstFailure.empty())
+                    firstFailure = result.reason;
                 break; // probably out of gold — stop repairing
+            }
             totalGoldSpent += result.goldCost;
             nlohmann::json entry;
             entry["inventoryItemId"] = invSlot.id;
@@ -868,6 +876,14 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
                 networkManager_.sendResponse(socket,
                     networkManager_.generateResponseMessage("success", upd));
             }
+        }
+
+        // Nothing repaired and we know why (e.g. insufficient_gold on the very
+        // first item): report the failure instead of a hollow success.
+        if (repairedItems.empty() && !firstFailure.empty())
+        {
+            sendErrorResponseWithTimestamps(socket, firstFailure, "repairAll", req.clientId, req.timestamps);
+            return;
         }
 
         ResponseBuilder builder;
