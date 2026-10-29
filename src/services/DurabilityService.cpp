@@ -23,6 +23,12 @@ DurabilityService::setSaveCallback(SaveFn callback)
 }
 
 void
+DurabilityService::setUpdateCallback(UpdateFn callback)
+{
+    updateCallback_ = std::move(callback);
+}
+
+void
 DurabilityService::setRefreshAttributesCallback(RefreshFn callback)
 {
     refreshAttributesCallback_ = std::move(callback);
@@ -51,6 +57,7 @@ DurabilityService::applyWeaponHitWear(int characterId)
     int newDur = std::max(0, cur - loss);
     inventory_.updateDurability(characterId, weapon->id, newDur);
     saveDurabilityChange(characterId, weapon->id, newDur);
+    publishDurabilityUpdate(characterId, weapon->id, newDur, wItem.durabilityMax);
     checkAndTriggerDurabilityWarning(characterId, cur, newDur, wItem.durabilityMax);
 }
 
@@ -70,6 +77,7 @@ DurabilityService::applyArmorHitWear(int characterId)
         int newDur = std::max(0, cur - armorLoss);
         inventory_.updateDurability(characterId, invSlot.id, newDur);
         saveDurabilityChange(characterId, invSlot.id, newDur);
+        publishDurabilityUpdate(characterId, invSlot.id, newDur, iData.durabilityMax);
         checkAndTriggerDurabilityWarning(characterId, cur, newDur, iData.durabilityMax);
     }
 }
@@ -89,6 +97,7 @@ DurabilityService::applyDeathPenalty(int characterId)
         int newDur = std::max(0, cur - penalty);
         inventory_.updateDurability(characterId, invSlot.id, newDur);
         saveDurabilityChange(characterId, invSlot.id, newDur);
+        publishDurabilityUpdate(characterId, invSlot.id, newDur, iData.durabilityMax);
         checkAndTriggerDurabilityWarning(characterId, cur, newDur, iData.durabilityMax);
     }
 }
@@ -106,6 +115,16 @@ DurabilityService::saveDurabilityChange(int characterId, int inventoryItemId, in
     packet["body"]["inventoryItemId"] = inventoryItemId;
     packet["body"]["durabilityCurrent"] = durabilityCurrent;
     saveCallback_(packet.dump() + "\n");
+}
+
+void
+DurabilityService::publishDurabilityUpdate(int characterId, int inventoryItemId, int newDur, int maxDur)
+{
+    if (!updateCallback_ || maxDur <= 0)
+        return;
+    const float threshold = gameConfig_.getFloat("durability.warning_threshold_pct", 0.30f);
+    const bool warning = (static_cast<float>(newDur) / maxDur) < threshold;
+    updateCallback_(characterId, inventoryItemId, newDur, maxDur, warning);
 }
 
 void

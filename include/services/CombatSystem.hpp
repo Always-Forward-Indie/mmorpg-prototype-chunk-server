@@ -109,6 +109,12 @@ class CombatSystem
     void setSavePositionCallback(std::function<void(int characterId)> callback);
 
     /**
+     * @brief Set callback for live durability facts (wear/death paths).
+     * Wired to unicast durabilityUpdate to the owning client.
+     */
+    void setDurabilityUpdateCallback(DurabilityService::UpdateFn callback);
+
+    /**
      * @brief Restore a persisted skill cooldown for a player (called on character join).
      *        Passes through to the internal SkillSystem::restoreCooldown().
      */
@@ -145,6 +151,9 @@ class CombatSystem
 
     // Immediate position checkpoint (kill fast path); wired by CombatEventHandler.
     std::function<void(int characterId)> savePositionCallback_;
+
+    // Live durability facts (wear/death); wired to unicast durabilityUpdate.
+    DurabilityService::UpdateFn durabilityUpdateCallback_;
 
     // Authoritative per-hit mob vitals push (single-channel rule: combatResult
     // is cosmetic for mobs, mobHealthUpdate owns their HP — mirrors the player

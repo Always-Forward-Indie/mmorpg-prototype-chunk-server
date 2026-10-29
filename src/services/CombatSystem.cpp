@@ -1678,6 +1678,13 @@ CombatSystem::setSavePositionCallback(std::function<void(int characterId)> callb
 }
 
 void
+CombatSystem::setDurabilityUpdateCallback(DurabilityService::UpdateFn callback)
+{
+    durabilityUpdateCallback_ = std::move(callback);
+    durability_.setUpdateCallback(durabilityUpdateCallback_);
+}
+
+void
 CombatSystem::pushMobHealthUpdate(int mobUid)
 {
     // Single-channel rule for mobs: combatResult carries cosmetic

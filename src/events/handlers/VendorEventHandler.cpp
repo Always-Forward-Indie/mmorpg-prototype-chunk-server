@@ -10,6 +10,7 @@
 #include "services/VendorDiscountPolicy.hpp"
 #include "services/VendorManager.hpp"
 #include "utils/DistanceUtils.hpp"
+#include "utils/DurabilityPackets.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include <algorithm>
 #include <cmath>
@@ -778,6 +779,15 @@ VendorEventHandler::handleRepairItemEvent(const Event &event)
         std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "repairItemResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("inventoryItemId", req.inventoryItemId).setBody("durabilityCurrent", item.durabilityMax).setBody("goldSpent", result.goldCost).build());
         networkManager_.sendResponse(socket, msg);
 
+        // Live durability fact (single channel): repaired to full, so no warning.
+        {
+            nlohmann::json upd = DurabilityUpdatePacket::build(
+                req.characterId, req.inventoryItemId, item.durabilityMax, item.durabilityMax, false);
+            upd["header"]["clientId"] = req.clientId;
+            networkManager_.sendResponse(socket,
+                networkManager_.generateResponseMessage("success", upd));
+        }
+
         // Send refreshed repair shop list so the client window updates
         int updatedTotalCost = 0;
         nlohmann::json updatedItems = buildRepairableItemsJson(req.characterId, updatedTotalCost);
@@ -846,6 +856,15 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
             entry["inventoryItemId"] = invSlot.id;
             entry["durabilityCurrent"] = item.durabilityMax;
             repairedItems.push_back(entry);
+
+            // Live durability fact (single channel): repaired to full.
+            {
+                nlohmann::json upd = DurabilityUpdatePacket::build(
+                    req.characterId, invSlot.id, item.durabilityMax, item.durabilityMax, false);
+                upd["header"]["clientId"] = req.clientId;
+                networkManager_.sendResponse(socket,
+                    networkManager_.generateResponseMessage("success", upd));
+            }
         }
 
         ResponseBuilder builder;

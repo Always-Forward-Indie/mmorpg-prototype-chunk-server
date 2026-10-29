@@ -1,5 +1,6 @@
 #include "chunk_server/ChunkServer.hpp"
 #include "services/CombatSystem.hpp"
+#include "utils/DurabilityPackets.hpp"
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -177,6 +178,32 @@ ChunkServer::ChunkServer(GameServices &gameServices,
                 pkt["header"]["hash"] = "";
                 pkt["body"]["characterId"] = characterId;
                 gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+            });
+
+        // Wire up live durability facts: unicast durabilityUpdate to the owning
+        // client so equipment/inventory views track wear and death penalty.
+        cs->setDurabilityUpdateCallback(
+            [this](int characterId, int inventoryItemId, int newDur, int maxDur, bool warning)
+            {
+                try
+                {
+                    auto clientData = gameServices_.getClientManager().getClientDataByCharacterId(characterId);
+                    if (clientData.clientId <= 0)
+                        return;
+                    auto sock = gameServices_.getClientManager().getClientSocket(clientData.clientId);
+                    if (!sock || !sock->is_open())
+                        return;
+                    nlohmann::json packet = DurabilityUpdatePacket::build(
+                        characterId, inventoryItemId, newDur, maxDur, warning);
+                    packet["header"]["clientId"] = clientData.clientId;
+                    networkManager_.sendResponse(sock,
+                        networkManager_.generateResponseMessage("success", packet));
+                }
+                catch (const std::exception &ex)
+                {
+                    gameServices_.getLogger().logError(
+                        std::string("[durabilityUpdate] unicast failed: ") + ex.what());
+                }
             });
     }
 
