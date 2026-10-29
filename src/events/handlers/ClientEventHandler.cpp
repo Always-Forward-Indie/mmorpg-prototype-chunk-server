@@ -247,16 +247,16 @@ ClientEventHandler::handleDisconnectClientEvent(const Event &event)
                 return;
             }
 
-            // Remove the client data
-            gameServices_.getClientManager().removeClientData(passedClientData.clientId);
-            gameServices_.getClientManager().removePingTime(passedClientData.clientId);
-            gameServices_.getInterestManager().removeClient(passedClientData.clientId);
-
             // Capture the disconnecting socket BEFORE removal: the farewell
             // ack below goes back on it (client waits for it pre-teardown).
             // Closed/dead sockets simply skip the send — teardown proceeds.
             std::shared_ptr<boost::asio::ip::tcp::socket> disconnectSocket;
             try { disconnectSocket = gameServices_.getClientManager().getClientSocket(passedClientData.clientId); } catch (...) {}
+
+            // Remove the client data
+            gameServices_.getClientManager().removeClientData(passedClientData.clientId);
+            gameServices_.getClientManager().removePingTime(passedClientData.clientId);
+            gameServices_.getInterestManager().removeClient(passedClientData.clientId);
 
             // Only save and clean up character data if the character is actually loaded in CharacterManager
             if (passedClientData.characterId > 0)
