@@ -80,6 +80,18 @@ VendorManager::resolveBuyPrice(int priceOverrideBuy, int baseBuyPrice, float buy
     return static_cast<int>(std::ceil(baseBuyPrice * (1.0f + buyMarkupPct)));
 }
 
+int
+VendorManager::resolveSellLine(int unitSell, int quantity, float sellTaxPct)
+{
+    if (unitSell <= 0 || quantity <= 0)
+        return 0;
+    const float tax = std::clamp(sellTaxPct, 0.0f, 1.0f);
+    const int gold = static_cast<int>(std::floor(unitSell * quantity * (1.0f - tax)));
+    // Valued loot must never sell for nothing: a single 1g bone at 5% tax
+    // floors to 0 without this guarantee.
+    return gold > 0 ? gold : 1;
+}
+
 nlohmann::json
 VendorManager::buildShopJson(int npcId, float buyMarkupPct) const
 {
@@ -245,7 +257,7 @@ VendorManager::sellItem(
         return {false, "item_not_tradable", 0};
 
     int unitSell = item.vendorPriceSell;
-    int goldReceived = static_cast<int>(std::floor(unitSell * quantity * (1.0f - sellTaxPct)));
+    int goldReceived = resolveSellLine(unitSell, quantity, sellTaxPct);
 
     if (!inventoryMgr.removeItemFromInventory(characterId, invSlot->itemId, quantity))
         return {false, "item_remove_failed", 0};
@@ -434,7 +446,7 @@ VendorManager::sellBatch(
         if (!item.isTradable)
             return {false, "item_not_tradable", 0, {}};
 
-        int lineGold = static_cast<int>(std::floor(item.vendorPriceSell * entry.quantity * (1.0f - sellTaxPct)));
+        int lineGold = resolveSellLine(item.vendorPriceSell, entry.quantity, sellTaxPct);
         totalGold += lineGold;
         resultItems.push_back({entry.inventoryItemId, entry.quantity, lineGold});
     }

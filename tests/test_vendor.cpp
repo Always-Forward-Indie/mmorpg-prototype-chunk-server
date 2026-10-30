@@ -182,6 +182,53 @@ TEST_F(VendorFixture, SellSuccessCreditsGold)
     EXPECT_EQ(inv.getGoldAmount(1), 12);
 }
 
+TEST_F(VendorFixture, SellCheapItemNeverPaysZero)
+{
+    // animal_bones regression: vendorPriceSell=1 at 5% sell tax previously
+    // paid floor(1 * 1 * 0.95) = 0 gold — selling loot for nothing.
+    ItemDataStruct gold = makeItem(kGold, "gold_coin", 1, 1);
+    gold.stackMax = 1000000;
+    ItemDataStruct bone = makeItem(300, "animal_bones", 5, 1);
+    items.setItemsList({gold, makeItem(kPotion, "health_potion", 10, 4), bone});
+    EXPECT_TRUE(inv.addItemToInventory(1, 300, 1));
+    int boneRow = syncRowId(1, 300, 101);
+    ASSERT_NE(boneRow, 0);
+    auto r = vendor.sellItem(1, kVendor, boneRow, 1, kGold, inv, 0.05f);
+    EXPECT_TRUE(r.success);
+    EXPECT_EQ(r.goldReceived, 1);
+    EXPECT_EQ(inv.getGoldAmount(1), 1);
+}
+
+TEST_F(VendorFixture, SellLineTaxStillAppliesAboveFloor)
+{
+    // 3x potion (sell 4) at 5% tax: floor(12 * 0.95) = 11, not 12.
+    EXPECT_TRUE(inv.addItemToInventory(1, kPotion, 4));
+    int potionRow = syncRowId(1, kPotion, 77);
+    ASSERT_NE(potionRow, 0);
+    auto r = vendor.sellItem(1, kVendor, potionRow, 3, kGold, inv, 0.05f);
+    EXPECT_TRUE(r.success);
+    EXPECT_EQ(r.goldReceived, 11);
+}
+
+TEST_F(VendorFixture, SellBatchCheapLinesFloorAtOneGoldEach)
+{
+    ItemDataStruct gold = makeItem(kGold, "gold_coin", 1, 1);
+    gold.stackMax = 1000000;
+    ItemDataStruct bone = makeItem(300, "animal_bones", 5, 1);
+    ItemDataStruct blood = makeItem(301, "animal_blood", 4, 1);
+    items.setItemsList({gold, bone, blood});
+    EXPECT_TRUE(inv.addItemToInventory(1, 300, 1));
+    EXPECT_TRUE(inv.addItemToInventory(1, 301, 1));
+    int boneRow = syncRowId(1, 300, 102);
+    int bloodRow = syncRowId(1, 301, 103);
+    ASSERT_NE(boneRow, 0);
+    ASSERT_NE(bloodRow, 0);
+    std::vector<SellBatchItemEntry> entries = {{boneRow, 1}, {bloodRow, 1}};
+    auto r = vendor.sellBatch(1, kVendor, entries, kGold, inv, 0.05f);
+    EXPECT_TRUE(r.success);
+    EXPECT_EQ(r.totalGoldReceived, 2);
+}
+
 TEST_F(VendorFixture, SellEquippedItemFails)
 {
     EXPECT_TRUE(inv.addItemToInventory(1, kSword, 1));

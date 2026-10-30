@@ -177,6 +177,13 @@ class VendorManager
     // rounded up. Three call sites previously hand-synced this expression.
     static int resolveBuyPrice(int priceOverrideBuy, int baseBuyPrice, float buyMarkupPct);
 
+    // Single source of truth for the vendor sell-line formula: floor of the
+    // tax-adjusted line value, floored again at 1 gold for any valued item.
+    // Without the floor-guarantee a 1g item (e.g. animal_bones) at 5% sell
+    // tax pays floor(0.95) = 0 gold — selling loot for nothing. Both sell
+    // call sites (sellItem, sellBatch) must use this; never hand-sync.
+    static int resolveSellLine(int unitSell, int quantity, float sellTaxPct);
+
     ItemManager &itemManager_;
     Logger &logger_;
     std::shared_ptr<spdlog::logger> log_;
