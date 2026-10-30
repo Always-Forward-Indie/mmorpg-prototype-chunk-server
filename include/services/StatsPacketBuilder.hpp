@@ -20,6 +20,12 @@ struct StatsPacketBuilderInput
     int levelStart = 0;
     float currentWeight = 0.0f;
     float weightLimit = 0.0f;
+    /// Overweight slow factor (1.0 = within limit; see
+    /// MovementValidation::overweightFactor — same formula as the move
+    /// validator, so the client slows exactly as much as the server allows).
+    /// Applied to effective move_speed + surfaced as a display-only
+    /// "overweight" entry in activeEffects (never added to real effects).
+    float overweightFactor = 1.0f;
     /// Pre-resolved equipped-item bonuses (apply_on == "equip" only): slug → total
     std::unordered_map<std::string, int> equipBonuses;
     /// Display names for slugs that have no base character attribute

@@ -7,6 +7,7 @@
 #include "services/InventoryManager.hpp"
 #include "services/ItemManager.hpp"
 #include "services/ItemSoulTiers.hpp"
+#include "services/MovementValidation.hpp"
 #include "services/StatsPacketBuilder.hpp"
 #include "utils/Logger.hpp"
 #include <chrono>
@@ -166,6 +167,11 @@ CharacterStatsNotificationService::buildStatsUpdatePacket(int characterId)
     // ── Weight ────────────────────────────────────────────────────────────────
     in.currentWeight = inventory_.getTotalWeight(characterId);
     in.weightLimit = equipment_.getCarryWeightLimit(characterId);
+    // Same slow factor the move validator enforces, so the client walks
+    // exactly as fast as the server lets it (chunk decides, client applies).
+    in.overweightFactor = MovementValidation::overweightFactor(
+        in.currentWeight, in.weightLimit,
+        gameConfig_.getFloat("carry_weight.overweight_speed_penalty", 0.3f));
 
     // ── Resolve equipped-item bonuses (apply_on == "equip") ──────────────────
     const auto equipState = equipment_.getEquipmentState(characterId);

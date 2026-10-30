@@ -192,3 +192,40 @@ TEST(StatsPacketBuilder, SoulNameFallbackToSlug)
     EXPECT_EQ((*mp)["effective"], 2);
     EXPECT_EQ((*mp)["name"], "mystic_power");
 }
+
+TEST(StatsPacketBuilder, OverweightSlowsMoveSpeedAndListsEffect)
+{
+    auto in = baseInput();
+    in.character.attributes.push_back(attr("move_speed", "Move Speed", 7));
+    in.overweightFactor = 0.5f;
+    auto pkt = StatsPacketBuilder::build(in);
+    const auto *spd = findAttr(pkt["body"]["attributes"], "move_speed");
+    ASSERT_NE(spd, nullptr);
+    EXPECT_FLOAT_EQ((*spd)["effective"].get<float>(), 3.5f);
+    // Display-only overweight row (client buff bar); real effects untouched.
+    bool bFound = false;
+    for (const auto &e : pkt["body"]["activeEffects"])
+    {
+        if (e["slug"] == "overweight")
+        {
+            bFound = true;
+            EXPECT_EQ(e["attributeSlug"], "move_speed");
+            EXPECT_FLOAT_EQ(e["value"].get<float>(), -3.5f);
+            EXPECT_EQ(e["expiresAt"], 0);
+        }
+    }
+    EXPECT_TRUE(bFound);
+}
+
+TEST(StatsPacketBuilder, NoOverweightNoChange)
+{
+    auto in = baseInput();
+    in.character.attributes.push_back(attr("move_speed", "Move Speed", 7));
+    // Default factor 1.0: speed untouched, no synthetic effect row.
+    auto pkt = StatsPacketBuilder::build(in);
+    const auto *spd = findAttr(pkt["body"]["attributes"], "move_speed");
+    ASSERT_NE(spd, nullptr);
+    EXPECT_FLOAT_EQ((*spd)["effective"].get<float>(), 7.0f);
+    for (const auto &e : pkt["body"]["activeEffects"])
+        EXPECT_NE(e["slug"], "overweight");
+}

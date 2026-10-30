@@ -1,5 +1,6 @@
 #include "services/StatsPacketBuilder.hpp"
 #include "services/StatsResolver.hpp"
+#include "services/MovementValidation.hpp"
 #include "utils/ResponseBuilder.hpp"
 #include "utils/TimestampUtils.hpp"
 #include <chrono>
@@ -59,6 +60,24 @@ StatsPacketBuilder::build(const StatsPacketBuilderInput &in)
             attrNames["crit_chance"] = "crit_chance";
     }
 
+    // ── Overweight slow (must precede the JSON loops below): fold the
+    // validation-grade factor into the move_speed the client applies.
+    // No-op at/below the limit (factor 1.0): existing packets byte-identical.
+    float OverweightBaseSpeed = 0.0f;
+    if (in.overweightFactor < 1.0f)
+    {
+        auto moveIt = effectiveValues.find("move_speed");
+        if (moveIt == effectiveValues.end())
+        {
+            effectiveValues["move_speed"] = MovementValidation::kDefaultMoveSpeed;
+            if (attrNames.find("move_speed") == attrNames.end())
+                attrNames["move_speed"] = "move_speed";
+            moveIt = effectiveValues.find("move_speed");
+        }
+        OverweightBaseSpeed = moveIt->second;
+        moveIt->second = OverweightBaseSpeed * in.overweightFactor;
+    }
+
     // Build attributes JSON array (base attrs + any extras added only by equipment/effects)
     nlohmann::json attributesJson = nlohmann::json::array();
     for (const auto &[slug, baseVal] : baseValues)
@@ -89,6 +108,18 @@ StatsPacketBuilder::build(const StatsPacketBuilderInput &in)
             {"attributeSlug", eff.attributeSlug},
             {"value", eff.value},
             {"expiresAt", eff.expiresAt}});
+    }
+
+    // ── Overweight display row (expiresAt 0 = permanent until the next
+    // stats packet drops it). Display-only: never added to real effects.
+    if (in.overweightFactor < 1.0f)
+    {
+        const float factored = effectiveValues.at("move_speed");
+        activeEffectsJson.push_back({{"slug", "overweight"},
+            {"effectTypeSlug", "debuff"},
+            {"attributeSlug", "move_speed"},
+            {"value", factored - OverweightBaseSpeed},
+            {"expiresAt", 0}});
     }
 
     // ── Build packet ──────────────────────────────────────────────────────────
