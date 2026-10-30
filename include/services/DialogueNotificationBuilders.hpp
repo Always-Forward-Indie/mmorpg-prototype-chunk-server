@@ -77,7 +77,8 @@ inline nlohmann::json goldReceived(int64_t amount)
 inline nlohmann::json openVendorShop(const std::string &mode,
     int npcId,
     const std::string &npcSlug,
-    const nlohmann::json &items)
+    const nlohmann::json &items,
+    float sellTaxPct = 0.0f)
 {
     nlohmann::json notification;
     notification["type"] = "openVendorShop";
@@ -85,6 +86,7 @@ inline nlohmann::json openVendorShop(const std::string &mode,
     notification["npcId"] = npcId;
     notification["npcSlug"] = npcSlug;
     notification["items"] = items;
+    notification["sellTaxPct"] = sellTaxPct;
     return notification;
 }
 

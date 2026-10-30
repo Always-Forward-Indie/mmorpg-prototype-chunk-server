@@ -234,6 +234,10 @@ TEST_F(ExecutorFixture, OpenVendorShopNeedsSessionAndData)
     EXPECT_EQ(r.clientNotifications[0]["type"].get<std::string>(), "openVendorShop");
     EXPECT_EQ(r.clientNotifications[0]["npcId"].get<int>(), 11);
     EXPECT_EQ(r.clientNotifications[0]["npcSlug"].get<std::string>(), "milaya");
+    // Client preview parity: the dialogue shop echoes the effective sell tax
+    // like the direct vendorShop path (0.0 here — no tax configured).
+    ASSERT_TRUE(r.clientNotifications[0].contains("sellTaxPct"));
+    EXPECT_FLOAT_EQ(r.clientNotifications[0]["sellTaxPct"].get<float>(), 0.0f);
 }
 
 TEST_F(ExecutorFixture, OpenRepairShopListsDamagedDurables)

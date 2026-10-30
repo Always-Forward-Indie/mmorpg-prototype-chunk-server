@@ -7,6 +7,7 @@
 #include "services/QuestManager.hpp"
 #include "services/RepairCostCalculator.hpp"
 #include "services/TrainerManager.hpp"
+#include "services/VendorDiscountPolicy.hpp"
 #include "services/VendorManager.hpp"
 #include <spdlog/logger.h>
 
@@ -483,8 +484,27 @@ DialogueActionExecutor::executeOpenVendorShop(const nlohmann::json &action,
     }
     int npcId = session->npcId;
 
+    // Same pricing policy as the direct openVendorShop path (VendorEventHandler):
+    // reputation-discounted markup AND effective sell tax, so one NPC never
+    // shows two different price lists depending on how the shop was opened.
+    const auto &npcForPricing = services_.getNPCManager().getNPCById(npcId);
+    float discountPct = 0.0f;
+    if (!npcForPricing.factionSlug.empty() && characterId > 0)
+    {
+        const int threshold =
+            services_.getGameConfigService().getInt("reputation.vendor_discount_threshold", 200);
+        const int rep =
+            services_.getReputationManager().getReputation(characterId, npcForPricing.factionSlug);
+        const float pct =
+            services_.getGameConfigService().getFloat("reputation.vendor_discount_pct", 0.05f);
+        discountPct = VendorDiscountPolicy::resolvePct(rep, threshold, pct);
+    }
     float markupPct = static_cast<float>(
         services_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct));
+    markupPct = VendorDiscountPolicy::applyToMarkup(markupPct, discountPct);
+    float sellTaxPct = static_cast<float>(
+        services_.getGameConfigService().getFloat("economy.vendor_sell_tax_pct", 0.0f));
+    sellTaxPct = VendorDiscountPolicy::applyToTax(sellTaxPct, discountPct);
 
     nlohmann::json shopData = services_.getVendorManager().buildShopJson(npcId, markupPct);
     if (shopData.is_null())
@@ -496,7 +516,7 @@ DialogueActionExecutor::executeOpenVendorShop(const nlohmann::json &action,
     const auto &npc = services_.getNPCManager().getNPCById(npcId);
 
     result.clientNotifications.push_back(DialogueNotificationBuilders::openVendorShop(
-        action.value("mode", "shop"), npcId, npc.slug, std::move(shopData)));
+        action.value("mode", "shop"), npcId, npc.slug, std::move(shopData), sellTaxPct));
 }
 
 void
