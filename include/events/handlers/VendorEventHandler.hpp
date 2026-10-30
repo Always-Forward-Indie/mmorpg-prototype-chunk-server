@@ -3,6 +3,7 @@
 #include "data/DataStructs.hpp"
 #include "events/Event.hpp"
 #include "events/handlers/BaseEventHandler.hpp"
+#include "services/VendorDiscountPolicy.hpp"
 
 /**
  * @brief Handler for all vendor, blacksmith (repair), and P2P trade events.
@@ -64,16 +65,21 @@ class VendorEventHandler : public BaseEventHandler
     int computeRepairCost(const ItemDataStruct &item, int durabilityCurrent) const;
 
     /**
-     * @brief Return the buy-price discount fraction for a character based on their
-     *        reputation with the NPC's faction.
+     * @brief Effective shop pricing for a character at an NPC's shop.
      *
-     * Returns 0.0 if the NPC has no faction, the character data is unavailable,
-     * or the reputation is below the configured threshold.
+     * Single resolution point for the pricing policy (reputation-discounted
+     * buy markup AND sell tax). All five vendor paths (open/buy/sell/
+     * buyBatch/sellBatch) go through here; the dialogue open_vendor_shop
+     * path uses VendorDiscountPolicy::resolveEffective directly with the
+     * same game_config keys, so one NPC never shows two price lists.
      * Configured via game_config keys:
+     *   - "economy.vendor_buy_markup_pct" (default VendorManager::kDefaultBuyMarkupPct)
+     *   - "economy.vendor_sell_tax_pct" (default 0.0)
      *   - "reputation.vendor_discount_threshold" (default 200)
      *   - "reputation.vendor_discount_pct"       (default 0.05, i.e. 5%)
      */
-    float getReputationDiscountPct(int characterId, const std::string &factionSlug) const;
+    VendorDiscountPolicy::EffectivePricing getEffectivePricing(
+        int characterId, const std::string &factionSlug) const;
 
     /**
      * @brief Execute repair for one inventory slot.

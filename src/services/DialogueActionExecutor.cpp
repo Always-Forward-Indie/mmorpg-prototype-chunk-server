@@ -484,29 +484,26 @@ DialogueActionExecutor::executeOpenVendorShop(const nlohmann::json &action,
     }
     int npcId = session->npcId;
 
-    // Same pricing policy as the direct openVendorShop path (VendorEventHandler):
-    // reputation-discounted markup AND effective sell tax, so one NPC never
-    // shows two different price lists depending on how the shop was opened.
+    // Single pricing owner with the direct openVendorShop path
+    // (VendorEventHandler::getEffectivePricing): one NPC never shows two
+    // price lists depending on how the shop was opened.
     const auto &npcForPricing = services_.getNPCManager().getNPCById(npcId);
-    float discountPct = 0.0f;
+    int repForPricing = 0;
     if (!npcForPricing.factionSlug.empty() && characterId > 0)
-    {
-        const int threshold =
-            services_.getGameConfigService().getInt("reputation.vendor_discount_threshold", 200);
-        const int rep =
-            services_.getReputationManager().getReputation(characterId, npcForPricing.factionSlug);
-        const float pct =
-            services_.getGameConfigService().getFloat("reputation.vendor_discount_pct", 0.05f);
-        discountPct = VendorDiscountPolicy::resolvePct(rep, threshold, pct);
-    }
-    float markupPct = static_cast<float>(
+        repForPricing = services_.getReputationManager().getReputation(characterId, npcForPricing.factionSlug);
+    const float baseMarkupPct = static_cast<float>(
         services_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct));
-    markupPct = VendorDiscountPolicy::applyToMarkup(markupPct, discountPct);
-    float sellTaxPct = static_cast<float>(
+    const float baseSellTaxPct = static_cast<float>(
         services_.getGameConfigService().getFloat("economy.vendor_sell_tax_pct", 0.0f));
-    sellTaxPct = VendorDiscountPolicy::applyToTax(sellTaxPct, discountPct);
+    const int discountThreshold =
+        services_.getGameConfigService().getInt("reputation.vendor_discount_threshold", 200);
+    const float discountPct =
+        services_.getGameConfigService().getFloat("reputation.vendor_discount_pct", 0.05f);
+    const auto effectivePricing = VendorDiscountPolicy::resolveEffective(
+        baseMarkupPct, baseSellTaxPct, repForPricing, discountThreshold, discountPct);
+    const float sellTaxPct = effectivePricing.sellTaxPct;
 
-    nlohmann::json shopData = services_.getVendorManager().buildShopJson(npcId, markupPct);
+    nlohmann::json shopData = services_.getVendorManager().buildShopJson(npcId, effectivePricing.markupPct);
     if (shopData.is_null())
     {
         log_->warn("[DialogueAction] open_vendor_shop: no shop data for npc " + std::to_string(npcId));

@@ -33,5 +33,26 @@ class VendorDiscountPolicy
         return std::max(0.0f, tax - discountPct);
     }
 
+    /// Effective shop pricing for one NPC/character: discounted buy markup
+    /// AND effective sell tax in a single call. Single owner of the pricing
+    /// policy — the direct openVendorShop path (VendorEventHandler) and the
+    /// dialogue open_vendor_shop path (DialogueActionExecutor) must both go
+    /// through here so one NPC never shows two price lists.
+    struct EffectivePricing
+    {
+        float markupPct = 0.0f;
+        float sellTaxPct = 0.0f;
+    };
+
+    static EffectivePricing resolveEffective(
+        float baseMarkupPct, float baseSellTaxPct, int reputation, int threshold, float configuredPct)
+    {
+        const float discount = resolvePct(reputation, threshold, configuredPct);
+        EffectivePricing out;
+        out.markupPct = applyToMarkup(baseMarkupPct, discount);
+        out.sellTaxPct = applyToTax(baseSellTaxPct, discount);
+        return out;
+    }
+
     VendorDiscountPolicy() = delete;
 };

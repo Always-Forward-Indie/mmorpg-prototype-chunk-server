@@ -49,17 +49,21 @@ VendorEventHandler::computeRepairCost(const ItemDataStruct &item, int durability
     return repairUnitCost(item.vendorPriceBuy, item.durabilityMax, durabilityCurrent);
 }
 
-float
-VendorEventHandler::getReputationDiscountPct(int characterId, const std::string &factionSlug) const
+VendorDiscountPolicy::EffectivePricing
+VendorEventHandler::getEffectivePricing(int characterId, const std::string &factionSlug) const
 {
-    if (factionSlug.empty() || characterId <= 0)
-        return 0.0f;
+    const float baseMarkup =
+        gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
+    const float baseTax =
+        gameServices_.getGameConfigService().getFloat("economy.vendor_sell_tax_pct", 0.0f);
+    int rep = 0;
+    if (!factionSlug.empty() && characterId > 0)
+        rep = gameServices_.getReputationManager().getReputation(characterId, factionSlug);
     const int threshold = gameServices_.getGameConfigService().getInt("reputation.vendor_discount_threshold", 200);
-    const int rep = gameServices_.getReputationManager().getReputation(characterId, factionSlug);
     const float pct =
         gameServices_.getGameConfigService().getFloat("reputation.vendor_discount_pct", 0.05f);
-    // Threshold math lives in VendorDiscountPolicy (1-1 with the inline gate).
-    return VendorDiscountPolicy::resolvePct(rep, threshold, pct);
+    // Single policy owner: threshold gate + both applications in one call.
+    return VendorDiscountPolicy::resolveEffective(baseMarkup, baseTax, rep, threshold, pct);
 }
 
 void
@@ -272,11 +276,8 @@ VendorEventHandler::handleOpenVendorShopEvent(const Event &event)
             return;
         }
 
-        float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
-        markup = VendorDiscountPolicy::applyToMarkup(markup, getReputationDiscountPct(req.characterId, npc.factionSlug));
-        float sellTax = gameServices_.getGameConfigService().getFloat("economy.vendor_sell_tax_pct", 0.0f);
-        sellTax = VendorDiscountPolicy::applyToTax(sellTax, getReputationDiscountPct(req.characterId, npc.factionSlug));
-        nlohmann::json shopJson = gameServices_.getVendorManager().buildShopJson(req.npcId, markup);
+        const auto pricing = getEffectivePricing(req.characterId, npc.factionSlug);
+        nlohmann::json shopJson = gameServices_.getVendorManager().buildShopJson(req.npcId, pricing.markupPct);
         if (shopJson.is_null())
         {
             sendErrorResponseWithTimestamps(socket, "vendor_no_inventory", "vendorShop", req.clientId, req.timestamps);
@@ -284,7 +285,7 @@ VendorEventHandler::handleOpenVendorShopEvent(const Event &event)
         }
 
         ResponseBuilder builder;
-        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "vendorShop").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).setBody("items", shopJson).setBody("sellTaxPct", sellTax).build());
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "vendorShop").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("goldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).setBody("items", shopJson).setBody("sellTaxPct", pricing.sellTaxPct).build(), req.timestamps);
         networkManager_.sendResponse(socket, msg);
     }
     catch (const std::exception &ex)
@@ -327,8 +328,7 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
             return;
         }
 
-        float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
-        markup = VendorDiscountPolicy::applyToMarkup(markup, getReputationDiscountPct(req.characterId, npc.factionSlug));
+        const float markup = getEffectivePricing(req.characterId, npc.factionSlug).markupPct;
         auto result = gameServices_.getVendorManager().buyItem(
             req.characterId, req.npcId, req.itemId, req.quantity, goldItem->id, gameServices_.getInventoryManager(), markup);
 
@@ -341,7 +341,7 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
         saveCurrencyTransaction(req.characterId, req.npcId, req.itemId, req.quantity, result.totalPrice, "buy");
 
         ResponseBuilder builder;
-        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buyItemResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("itemId", req.itemId).setBody("quantity", req.quantity).setBody("totalPrice", result.totalPrice).build());
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buyItemResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("itemId", req.itemId).setBody("quantity", req.quantity).setBody("totalPrice", result.totalPrice).setBody("newGoldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).build(), req.timestamps);
         networkManager_.sendResponse(socket, msg);
 
         // Notify client about received item
@@ -438,8 +438,7 @@ VendorEventHandler::handleSellItemEvent(const Event &event)
             return;
         }
 
-        float tax = gameServices_.getGameConfigService().getFloat("economy.vendor_sell_tax_pct", 0.0f);
-        tax = VendorDiscountPolicy::applyToTax(tax, getReputationDiscountPct(req.characterId, npc.factionSlug));
+        const float tax = getEffectivePricing(req.characterId, npc.factionSlug).sellTaxPct;
         auto result = gameServices_.getVendorManager().sellItem(
             req.characterId, req.npcId, req.inventoryItemId, req.quantity, goldItem->id, gameServices_.getInventoryManager(), tax);
 
@@ -455,7 +454,7 @@ VendorEventHandler::handleSellItemEvent(const Event &event)
         saveCurrencyTransaction(req.characterId, req.npcId, 0, req.quantity, result.goldReceived, "sell");
 
         ResponseBuilder builder;
-        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "sellItemResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("goldReceived", result.goldReceived).build());
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "sellItemResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("goldReceived", result.goldReceived).setBody("newGoldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).build(), req.timestamps);
         networkManager_.sendResponse(socket, msg);
     }
     catch (const std::exception &ex)
@@ -498,8 +497,7 @@ VendorEventHandler::handleBuyItemBatchEvent(const Event &event)
             return;
         }
 
-        float markup = gameServices_.getGameConfigService().getFloat("economy.vendor_buy_markup_pct", VendorManager::kDefaultBuyMarkupPct);
-        markup = VendorDiscountPolicy::applyToMarkup(markup, getReputationDiscountPct(req.characterId, npc.factionSlug));
+        const float markup = getEffectivePricing(req.characterId, npc.factionSlug).markupPct;
         auto result = gameServices_.getVendorManager().buyBatch(
             req.characterId, req.npcId, req.items, goldItem->id, gameServices_.getInventoryManager(), markup);
 
@@ -517,7 +515,7 @@ VendorEventHandler::handleBuyItemBatchEvent(const Event &event)
             itemsJson.push_back({{"itemId", r.itemId}, {"quantity", r.quantity}, {"totalPrice", r.totalPrice}});
 
         ResponseBuilder builder;
-        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buyItemBatchResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("totalGoldSpent", result.totalGoldSpent).setBody("items", itemsJson).build());
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buyItemBatchResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("totalGoldSpent", result.totalGoldSpent).setBody("newGoldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).setBody("items", itemsJson).build(), req.timestamps);
         networkManager_.sendResponse(socket, msg);
 
         // Notify client about each received item
@@ -573,8 +571,7 @@ VendorEventHandler::handleSellItemBatchEvent(const Event &event)
             return;
         }
 
-        float tax = gameServices_.getGameConfigService().getFloat("economy.vendor_sell_tax_pct", 0.0f);
-        tax = VendorDiscountPolicy::applyToTax(tax, getReputationDiscountPct(req.characterId, npc.factionSlug));
+        const float tax = getEffectivePricing(req.characterId, npc.factionSlug).sellTaxPct;
         auto result = gameServices_.getVendorManager().sellBatch(
             req.characterId, req.npcId, req.items, goldItem->id, gameServices_.getInventoryManager(), tax);
 
@@ -592,7 +589,7 @@ VendorEventHandler::handleSellItemBatchEvent(const Event &event)
             itemsJson.push_back({{"inventoryItemId", r.inventoryItemId}, {"quantity", r.quantity}, {"goldReceived", r.goldReceived}});
 
         ResponseBuilder builder;
-        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "sellItemBatchResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("totalGoldReceived", result.totalGoldReceived).setBody("items", itemsJson).build());
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "sellItemBatchResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("npcId", req.npcId).setBody("npcSlug", npc.slug).setBody("totalGoldReceived", result.totalGoldReceived).setBody("newGoldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).setBody("items", itemsJson).build(), req.timestamps);
         networkManager_.sendResponse(socket, msg);
     }
     catch (const std::exception &ex)

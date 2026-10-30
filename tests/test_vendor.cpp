@@ -413,6 +413,29 @@ TEST(TradeRequestValidator, EachGateFiresItsCode)
     EXPECT_EQ(TradeRequestValidator::validate(in), "target_offline");
 }
 
+TEST(VendorDiscountPolicy, EffectivePricingBundlesBothSides)
+{
+    // Below threshold: bases pass through untouched.
+    {
+        const auto p = VendorDiscountPolicy::resolveEffective(0.10f, 0.05f, 199, 200, 0.05f);
+        EXPECT_FLOAT_EQ(p.markupPct, 0.10f);
+        EXPECT_FLOAT_EQ(p.sellTaxPct, 0.05f);
+    }
+    // At threshold: the same pct hits both sides (single policy owner —
+    // direct and dialogue shop paths cannot diverge).
+    {
+        const auto p = VendorDiscountPolicy::resolveEffective(0.10f, 0.05f, 200, 200, 0.05f);
+        EXPECT_FLOAT_EQ(p.markupPct, 0.05f);
+        EXPECT_FLOAT_EQ(p.sellTaxPct, 0.0f);
+    }
+    // Tax floor holds inside the bundle too.
+    {
+        const auto p = VendorDiscountPolicy::resolveEffective(0.10f, 0.02f, 9999, 200, 0.05f);
+        EXPECT_FLOAT_EQ(p.markupPct, 0.05f);
+        EXPECT_FLOAT_EQ(p.sellTaxPct, 0.0f);
+    }
+}
+
 TEST(VendorDiscountPolicy, ThresholdGateAndApplication)
 {
     // Below threshold: no discount; at/above: configured pct.
