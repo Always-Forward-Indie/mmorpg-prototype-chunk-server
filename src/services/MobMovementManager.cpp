@@ -241,7 +241,13 @@ MobMovementManager::runMobTick(
         const float fleeSpeedMult = movementData.isFleeing ? 0.5f : 1.0f;
         movementResult = calculateReturnToSpawnMovement(
             mob, zone, mobPositions, movementData.fleeTargetPosition, params, fleeSpeedMult);
-        if (!movementResult.has_value())
+        // AAA: explicit hold-at-target handoff. calculateReturnToSpawnMovement now
+        // returns speed=0 holds instead of nullopt (continuous velocity stream),
+        // so arrival is detected by hold + proximity, not by missing result.
+        const bool bFleeHoldAtTarget =
+            (movementResult.has_value() && movementResult->validMovement &&
+             movementResult->speed <= 0.001f);
+        if (!movementResult.has_value() || bFleeHoldAtTarget)
         {
             movementData.isBackpedaling = false;
             if (movementData.isFleeing)
@@ -833,6 +839,12 @@ MobMovementManager::shouldSendMobUpdate(int mobUID, const PositionStruct &curren
 {
     // Phase-1: shared (read) lock – fast path for the common case where the mob
     // has not moved far enough. Avoids exclusive contention on every tick.
+    // AAA: combat states (CHASING/RETURNING/FLEEING) bypass the distance gate —
+    // the velocity stream must stay continuous at 10 Hz (holds with speed=0
+    // included). Rate limiting in ChunkServer (100 ms combat) already bounds
+    // bandwidth; the distance filter starved arrival-deceleration micro-steps
+    // (<10 units) and produced client stop-start flicker. PATROLLING keeps
+    // the 10-unit gate (discrete 2–6 s steps, client interpolates).
     {
         std::shared_lock<std::shared_mutex> rlock(mutex_);
         auto it = mobMovementData_.find(mobUID);
@@ -841,9 +853,15 @@ MobMovementManager::shouldSendMobUpdate(int mobUID, const PositionStruct &curren
             // Skip the distance check if a forced update is pending.
             if (!it->second.forceNextUpdate)
             {
-                float distance = DistanceUtils::dist2D(currentPosition, it->second.lastSentPosition);
-                if (distance < aiConfig_.minimumMoveDistance)
-                    return false; // No write needed — bail out without exclusive lock
+                const bool bCombatStream = (it->second.combatState == MobCombatState::CHASING ||
+                                            it->second.combatState == MobCombatState::RETURNING ||
+                                            it->second.combatState == MobCombatState::FLEEING);
+                if (!bCombatStream)
+                {
+                    float distance = DistanceUtils::dist2D(currentPosition, it->second.lastSentPosition);
+                    if (distance < aiConfig_.minimumMoveDistance)
+                        return false; // No write needed — bail out without exclusive lock
+                }
             }
         }
     }
@@ -862,7 +880,10 @@ MobMovementManager::shouldSendMobUpdate(int mobUID, const PositionStruct &curren
     }
 
     float distance = DistanceUtils::dist2D(currentPosition, it->second.lastSentPosition);
-    if (!it->second.forceNextUpdate && distance < aiConfig_.minimumMoveDistance)
+    const bool bCombatStreamPhase2 = (it->second.combatState == MobCombatState::CHASING ||
+                                      it->second.combatState == MobCombatState::RETURNING ||
+                                      it->second.combatState == MobCombatState::FLEEING);
+    if (!it->second.forceNextUpdate && !bCombatStreamPhase2 && distance < aiConfig_.minimumMoveDistance)
         return false; // Another thread may have already updated lastSentPosition
 
     it->second.forceNextUpdate = false;
@@ -1022,7 +1043,11 @@ MobMovementManager::calculateChaseMovement(
         return std::nullopt;
     }
 
-    // ---- 2. Attack range — stop movement, let combat state machine handle attacks ----
+    // ---- 2. Attack range — hold position, let combat state machine handle attacks ----
+    // AAA: return an explicit speed=0 hold packet instead of nullopt (silence).
+    // Silence starves the client's dead reckoning (extrapolation freeze → micro-stop).
+    // A hold keeps the 10 Hz velocity stream continuous; the state machine
+    // transitions CHASING → PREPARING_ATTACK on the next tick with forceNextUpdate.
     {
         std::lock_guard<std::mutex> lg(logMutex_);
         if (dist2 <= mob.attackRange * mob.attackRange)
@@ -1031,9 +1056,28 @@ MobMovementManager::calculateChaseMovement(
             {
                 logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
                             " reached attack range of player " + std::to_string(targetPlayerId) +
-                            " (dist2: " + std::to_string(dist2) + ") - stopping movement");
+                            " (dist2: " + std::to_string(dist2) + ") - holding position");
             }
-            return std::nullopt;
+            MobMovementResult hold;
+            hold.newPosition = mob.position;
+            hold.validMovement = true;
+            hold.speed = 0.0f;
+            hold.deflectionSign = 0.0f;
+            const float holdLen = std::sqrt(dist2);
+            if (holdLen > 0.001f)
+            {
+                hold.newDirectionX = dx / holdLen;
+                hold.newDirectionY = dy / holdLen;
+                hold.newPosition.rotationZ =
+                    std::atan2(dy, dx) * (180.0f / static_cast<float>(M_PI));
+            }
+            else
+            {
+                auto holdMd = getMobMovementDataInternal(mob.uid);
+                hold.newDirectionX = holdMd.movementDirectionX;
+                hold.newDirectionY = holdMd.movementDirectionY;
+            }
+            return hold;
         }
         else
         {
@@ -1041,18 +1085,48 @@ MobMovementManager::calculateChaseMovement(
         }
     }
 
-    // ---- 5. Melee-slot waiting: park outside melee ring to prevent crowd jitter ----
+    // ---- 5. Melee-slot waiting: hold outside melee ring to prevent crowd jitter ----
+    // AAA: hold packet (speed=0) instead of silence — see §2 above.
     auto md = getMobMovementDataInternal(mob.uid);
     {
         constexpr float kWaitBuffer = 20.0f;
         const float waitR = mob.attackRange + kWaitBuffer;
         if (md.waitingForMeleeSlot && dist2 <= waitR * waitR)
-            return std::nullopt;
+        {
+            MobMovementResult hold;
+            hold.newPosition = mob.position;
+            hold.validMovement = true;
+            hold.speed = 0.0f;
+            hold.deflectionSign = 0.0f;
+            const float holdLen = std::sqrt(dist2);
+            if (holdLen > 0.001f)
+            {
+                hold.newDirectionX = dx / holdLen;
+                hold.newDirectionY = dy / holdLen;
+                hold.newPosition.rotationZ =
+                    std::atan2(dy, dx) * (180.0f / static_cast<float>(M_PI));
+            }
+            else
+            {
+                hold.newDirectionX = md.movementDirectionX;
+                hold.newDirectionY = md.movementDirectionY;
+            }
+            return hold;
+        }
     }
 
-    // ---- 6. Skip micro-movements (squared) ----
+    // ---- 6. Micro-movements: hold instead of silence (keeps velocity stream continuous) ----
     if (dist2 < 1.0f)
-        return std::nullopt;
+    {
+        MobMovementResult hold;
+        hold.newPosition = mob.position;
+        hold.validMovement = true;
+        hold.speed = 0.0f;
+        hold.deflectionSign = 0.0f;
+        hold.newDirectionX = md.movementDirectionX;
+        hold.newDirectionY = md.movementDirectionY;
+        return hold;
+    }
 
     // ---- 7. Desired direction (length needed for normalization) ----
     const float distance = std::sqrt(dist2);
@@ -1155,6 +1229,9 @@ MobMovementManager::calculateChaseMovement(
 
     // Arrival deceleration: smoothly reduce speed approaching attack range.
     // Prevents the jarring hard-stop at attackRange.
+    // AAA: floor the approach speed so steps never shrink below the broadcast
+    // threshold (which starved the client and caused stop-start flicker).
+    // Minimum approach step: 12 units (≈ minimumMoveDistance 10 + margin).
     float distToAttackRange = distance - mob.attackRange;
     if (aiConfig_.arrivalSlowdownDistance > 0.0f &&
         distToAttackRange > 0.0f &&
@@ -1163,16 +1240,45 @@ MobMovementManager::calculateChaseMovement(
         float t = distToAttackRange / aiConfig_.arrivalSlowdownDistance; // 0 at range, 1 at full speed
         float minSpeed = mobChaseSpeed * aiConfig_.arrivalMinSpeedFraction;
         mobChaseSpeed = minSpeed + (mobChaseSpeed - minSpeed) * t;
+        const float minApproachStep = 12.0f;
+        const float minApproachSpeed = minApproachStep / aiConfig_.chaseMovementInterval;
+        if (mobChaseSpeed < minApproachSpeed)
+            mobChaseSpeed = minApproachSpeed;
     }
 
     // Step size — distance the mob moves this tick.
-    const float kAttackEntryBuffer = 2.0f;
+    // AAA: arrive exactly at attackRange (no 2-unit early-stop buffer that caused
+    // alternating move/stop ticks at the boundary). At/below range → explicit hold.
     float stepSize = mobChaseSpeed * aiConfig_.chaseMovementInterval;
     stepSize = std::min(stepSize, params.maxStepSizeAbsolute);
-    float overshoot = distance - std::max(0.0f, mob.attackRange - kAttackEntryBuffer);
+    float overshoot = distance - mob.attackRange;
+    if (overshoot <= 0.0f)
+    {
+        MobMovementResult hold;
+        hold.newPosition = mob.position;
+        hold.validMovement = true;
+        hold.speed = 0.0f;
+        hold.deflectionSign = 0.0f;
+        hold.newDirectionX = finalDx;
+        hold.newDirectionY = finalDy;
+        hold.newPosition.rotationZ =
+            std::atan2(finalDy, finalDx) * (180.0f / static_cast<float>(M_PI));
+        return hold;
+    }
     stepSize = std::min(stepSize, overshoot);
     if (stepSize <= 0.0f)
-        return std::nullopt;
+    {
+        MobMovementResult hold;
+        hold.newPosition = mob.position;
+        hold.validMovement = true;
+        hold.speed = 0.0f;
+        hold.deflectionSign = 0.0f;
+        hold.newDirectionX = finalDx;
+        hold.newDirectionY = finalDy;
+        hold.newPosition.rotationZ =
+            std::atan2(finalDy, finalDx) * (180.0f / static_cast<float>(M_PI));
+        return hold;
+    }
 
     // ---- 11. Compute new position ----
     // No hard collision check during active pursuit: separation steering (step 8)
@@ -1213,7 +1319,17 @@ MobMovementManager::calculateReturnToSpawnMovement(
 
     // Use the configured return speed (units/sec) so the mob walks back at a
     // controlled pace instead of using the raw baseSpeedMax patrol step.
-    const float returnSpeed = aiConfig_.returnSpeedUnitsPerSec * speedMultiplier;
+    // AAA: arrival deceleration in the last 60 units so short returns
+    // (kill → return a few meters) ease out instead of hard-stopping.
+    float returnSpeed = aiConfig_.returnSpeedUnitsPerSec * speedMultiplier;
+    const float distPre = std::sqrt(dist2);
+    constexpr float kReturnSlowdownDist = 60.0f;
+    if (distPre < kReturnSlowdownDist && distPre > 0.0f)
+    {
+        const float t = distPre / kReturnSlowdownDist; // 0 at target, 1 at full speed
+        constexpr float kMinReturnSpeed = 60.0f;       // units/sec — never crawl below
+        returnSpeed = kMinReturnSpeed + (returnSpeed - kMinReturnSpeed) * t;
+    }
     float stepSize = returnSpeed * aiConfig_.returnMovementInterval;
 
     // Проверяем, находится ли моб уже очень близко к точке спавна
@@ -1221,8 +1337,36 @@ MobMovementManager::calculateReturnToSpawnMovement(
 
     if (dist2 <= SPAWN_THRESHOLD * SPAWN_THRESHOLD)
     {
-        // Моб достаточно близко к точке спавна, переключаем в режим патруля
         auto md = getMobMovementDataInternal(mob.uid);
+        // AAA: flee/backpedal arrival must not touch return/patrol flags here —
+        // the caller (runMobTick flee branch) owns the FLEEING → RETURNING
+        // handoff on explicit hold-at-target. Clearing targetPlayerId here
+        // would desync the caller's handoff (lostTargetId) and strand isFleeing.
+        if (md.isFleeing || md.isBackpedaling)
+        {
+            MobMovementResult fleeHold;
+            fleeHold.newPosition = mob.position;
+            fleeHold.validMovement = true;
+            fleeHold.speed = 0.0f;
+            fleeHold.deflectionSign = 0.0f;
+            const float fleeHoldLen = std::sqrt(dist2);
+            if (fleeHoldLen > 0.001f)
+            {
+                fleeHold.newDirectionX = dx / fleeHoldLen;
+                fleeHold.newDirectionY = dy / fleeHoldLen;
+                fleeHold.newPosition.rotationZ = atan2(dy, dx) * 180.0f / M_PI;
+            }
+            else
+            {
+                fleeHold.newDirectionX = 0.0f;
+                fleeHold.newDirectionY = 0.0f;
+            }
+            return fleeHold;
+        }
+        // Моб достаточно близко к точке спавна: фиксируем прибытие явным
+        // hold-пакетом (speed=0), а переход RETURNING → EVADING → PATROLLING
+        // выполняет MobAIController на следующем тике (single owner).
+        // AAA: nullopt здесь голодал клиент (экстраполяция → snap назад).
         md.isReturningToSpawn = false;
         md.targetPlayerId = 0;
         md.hasReturnDestination = false;
@@ -1233,57 +1377,56 @@ MobMovementManager::calculateReturnToSpawnMovement(
         md.nextMoveTime = currentTime + moveTime(RandomUtils::engine());
 
         md.stepMultiplier = 0.0f; // Будет переинициализирован при следующем движении
-        md.movementDirectionX = 0.0f;
-        md.movementDirectionY = 0.0f;
         updateMobMovementData(mob.uid, md);
 
         logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) + " reached spawn area (dist2: " +
-                    std::to_string(dist2) + "), switching to patrol mode");
+                    std::to_string(dist2) + "), holding for EVADING handoff");
 
-        // Если моб уже на точке спавна, не двигаем его - просто переключаем режим
-        // Возвращаем nullopt, чтобы не было лишнего обновления позиции
-        return std::nullopt;
+        MobMovementResult hold;
+        hold.newPosition = mob.position;
+        hold.validMovement = true;
+        hold.speed = 0.0f;
+        hold.deflectionSign = 0.0f;
+        const float holdLen = std::sqrt(dist2);
+        if (holdLen > 0.001f)
+        {
+            hold.newDirectionX = dx / holdLen;
+            hold.newDirectionY = dy / holdLen;
+            hold.newPosition.rotationZ = atan2(dy, dx) * 180.0f / M_PI;
+        }
+        else
+        {
+            hold.newDirectionX = 0.0f;
+            hold.newDirectionY = 0.0f;
+        }
+        return hold;
     }
 
-    // Length needed below for step compare, teleport-scale and normalization.
+    // Length needed below for clamped arrival (no teleport — see below).
     const float dist = std::sqrt(dist2);
 
-    // Если до точки спавна ближе, чем один шаг — телепортируем
-    if (dist <= stepSize)
-    {
-        MobMovementResult result;
-        result.newPosition = mob.position;
-        result.newPosition.positionX = spawnPosition.positionX;
-        result.newPosition.positionY = spawnPosition.positionY;
-        result.newPosition.rotationZ = atan2(dy, dx) * 180.0f / M_PI;
-        result.newDirectionX = dx / dist;
-        result.newDirectionY = dy / dist;
-        result.validMovement = true;
-        result.speed = (aiConfig_.returnMovementInterval > 0.0f)
-                           ? stepSize / aiConfig_.returnMovementInterval
-                           : stepSize;
-
-        logger_.log("[INFO] Mob UID: " + std::to_string(mob.uid) + " teleporting to spawn (distance: " +
-                    std::to_string(dist) + ")");
-        return result;
-    }
-
+    // AAA: точное прибытие — клампим шаг к дистанции вместо телепорта.
+    // Скорость последнего пакета масштабируется под фактический шаг, чтобы
+    // клиентская децелерация шла непрерывно и не было snap/отката.
     // Нормализуем направление
     dx /= dist;
     dy /= dist;
 
+    const float clampedStep = std::min(stepSize, dist);
+    const bool bFinalStep = (clampedStep >= dist - 0.001f);
+
     // Двигаем моба на один шаг
     MobMovementResult result;
     result.newPosition = mob.position;
-    result.newPosition.positionX = mob.position.positionX + dx * stepSize;
-    result.newPosition.positionY = mob.position.positionY + dy * stepSize;
+    result.newPosition.positionX = mob.position.positionX + dx * clampedStep;
+    result.newPosition.positionY = mob.position.positionY + dy * clampedStep;
     result.newPosition.rotationZ = atan2(dy, dx) * 180.0f / M_PI;
     result.newDirectionX = dx;
     result.newDirectionY = dy;
     result.validMovement = true;
-    result.speed = (aiConfig_.returnMovementInterval > 0.0f)
+    result.speed = (aiConfig_.returnMovementInterval > 0.0f && !bFinalStep)
                        ? stepSize / aiConfig_.returnMovementInterval
-                       : stepSize;
+                       : clampedStep / std::max(aiConfig_.returnMovementInterval, 0.001f);
     return result;
 }
 

@@ -950,6 +950,12 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
             movementData.stateChangeTime = currentTime;
             movementData.evadeEndTime = currentTime + EVADE_DURATION;
             movementData.lastRegenTime = 0.0f;
+            // AAA: zero velocity — EVADING never moves (canPerformAction=false),
+            // so the last RETURNING step's speed would otherwise ride along in
+            // the broadcast and make the client dead-reckon (slide) for 2 s.
+            movementData.currentSpeedUnitsPerSec = 0.0f;
+            movementData.movementDirectionX = 0.0f;
+            movementData.movementDirectionY = 0.0f;
             mobMovement_.updateMobMovementData(mob.uid, movementData);
             mobMovement_.forceMobStateUpdate(mob.uid);
             logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
