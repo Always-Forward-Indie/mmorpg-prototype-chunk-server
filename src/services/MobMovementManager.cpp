@@ -313,8 +313,12 @@ MobMovementManager::runMobTick(
         // AAA telemetry-honesty tripwire: the broadcast speed must equal the
         // actual step velocity — the client dead-reckons on it, and any
         // overstatement renders as overshoot past the player + snap-back.
+        // Holds (speed≈0) are exempt by design: arrival-holds place the mob
+        // exactly on the stop point and report stopped, the client converges
+        // via settle — checking them would false-positive on every arrival.
         // Throttled dev alarm (5 s): it must never fire; if it does, a
         // movement path mis-reports and needs an immediate look.
+        if (movementResult->speed > 0.001f)
         {
             const float actualDist = DistanceUtils::dist2D(movementResult->newPosition, mob.position);
             const bool bReturnPath = (movementData.isReturningToSpawn ||
@@ -1469,6 +1473,32 @@ MobMovementManager::calculateReturnToSpawnMovement(
             hold.newDirectionX = 0.0f;
             hold.newDirectionY = 0.0f;
         }
+        return hold;
+    }
+
+    // AAA arrival-stop (mirror of the chase arrival-hold): when the target is
+    // within one full-speed tick, place the mob EXACTLY on it and report
+    // speed=0. The client glides these last meters via settle and can never
+    // dead-reckon past the stop point on a stale positive speed — no overshoot,
+    // no rollback. (The ≤10u SPAWN_THRESHOLD branch above already holds; this
+    // covers the final approach tick.) Flags are untouched here — the ≤10u
+    // branch fires next tick and owns the EVADING handoff (single owner).
+    // Flee/backpedal share this path: a speed-0 hold is exactly what the
+    // caller's hold-at-target handoff keys on, so this also can never strand it.
+    const float kReturnArrivalHoldDist =
+        aiConfig_.returnSpeedUnitsPerSec * speedMultiplier * aiConfig_.returnMovementInterval;
+    if (distPre <= kReturnArrivalHoldDist)
+    {
+        MobMovementResult hold;
+        hold.newPosition = mob.position;
+        hold.newPosition.positionX = spawnPosition.positionX;
+        hold.newPosition.positionY = spawnPosition.positionY;
+        hold.newPosition.rotationZ = atan2(dy, dx) * 180.0f / M_PI;
+        hold.newDirectionX = dx / distPre;
+        hold.newDirectionY = dy / distPre;
+        hold.validMovement = true;
+        hold.speed = 0.0f;
+        hold.deflectionSign = 0.0f;
         return hold;
     }
 
