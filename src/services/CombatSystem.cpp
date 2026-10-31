@@ -1485,6 +1485,20 @@ CombatSystem::processAIAttack(int mobId, int targetPlayerId, const std::string &
             return; // Цель не найдена
         }
 
+        // AAA: never hit a corpse. The player-skill path rejects dead targets
+        // ("Target is dead"); the mob path must too. Otherwise an in-flight
+        // swing landing after the killing blow re-triggers handleTargetDeath
+        // and stacks XP debt / durability penalty on an already-dead player.
+        // The AI state machine leashes the mob on its next tick via
+        // isTargetAlive — this guard only suppresses the stray swing itself
+        // (no damage, no death event, no corpse-hit broadcast).
+        if (targetPlayer.isDead)
+        {
+            gameServices_->getLogger().log("Mob " + std::to_string(mobId) + " skipping attack on dead player " +
+                                           std::to_string(targetPlayerId));
+            return;
+        }
+
         // Проверяем дистанцию до цели
         // Берём актуальную позицию моба из MobMovementManager, а не из устаревшего
         // снимка MobInstanceManager (который не обновляется пока моб стоит).
