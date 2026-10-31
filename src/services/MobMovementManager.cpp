@@ -16,6 +16,7 @@
 #include "utils/SpawnGeometry.hpp"
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -309,6 +310,36 @@ MobMovementManager::runMobTick(
 
     if (movementResult && movementResult->validMovement)
     {
+        // AAA telemetry-honesty tripwire: the broadcast speed must equal the
+        // actual step velocity — the client dead-reckons on it, and any
+        // overstatement renders as overshoot past the player + snap-back.
+        // Throttled dev alarm (5 s): it must never fire; if it does, a
+        // movement path mis-reports and needs an immediate look.
+        {
+            const float actualDist = DistanceUtils::dist2D(movementResult->newPosition, mob.position);
+            const bool bReturnPath = (movementData.isReturningToSpawn ||
+                                      movementData.isFleeing || movementData.isBackpedaling);
+            const float stepInterval = movementData.targetPlayerId > 0 && !bReturnPath
+                                           ? aiConfig_.chaseMovementInterval
+                                           : (bReturnPath ? aiConfig_.returnMovementInterval
+                                                          : 1.0f); // patrol transition seconds
+            const float expectedDist = movementResult->speed * stepInterval;
+            const float tolerance = std::max(2.0f, expectedDist * 0.25f);
+            if (std::fabs(expectedDist - actualDist) > tolerance)
+            {
+                static std::atomic<int64_t> s_lastTelemetryWarnMs{0};
+                const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                if (nowMs - s_lastTelemetryWarnMs.exchange(nowMs) > 5000)
+                {
+                    log_->warn("Telemetry drift mob UID " + std::to_string(mob.uid) +
+                               ": reported speed " + std::to_string(movementResult->speed) +
+                               " vs actual step " + std::to_string(actualDist) +
+                               " (interval " + std::to_string(stepInterval) + ")");
+                }
+            }
+        }
+
         movementData.movementDirectionX = movementResult->newDirectionX;
         movementData.movementDirectionY = movementResult->newDirectionY;
         movementData.lastMoveTime = currentTime;
@@ -768,6 +799,11 @@ MobMovementManager::calculateNewPosition(
         {
             newX = nudgeX;
             newY = nudgeY;
+            // AAA telemetry honesty: recompute step length from the actual
+            // nudge displacement so result.speed matches reality.
+            const float ndx = newX - mob.position.positionX;
+            const float ndy = newY - mob.position.positionY;
+            stepSize = std::sqrt(ndx * ndx + ndy * ndy);
         }
         else
         {
@@ -780,6 +816,15 @@ MobMovementManager::calculateNewPosition(
     result.newPosition = mob.position;
     result.newPosition.positionX = newX;
     result.newPosition.positionY = newY;
+
+    // AAA telemetry honesty: the border clamps / nudge above may have eaten
+    // part of the step — recompute from the actual displacement so the
+    // reported speed matches reality (client animates/advances on it).
+    {
+        const float rdx = newX - mob.position.positionX;
+        const float rdy = newY - mob.position.positionY;
+        stepSize = std::sqrt(rdx * rdx + rdy * rdy);
+    }
 
     // Calculate rotation
     std::uniform_real_distribution<float> rotationJitter(params.rotationJitterMin, params.rotationJitterMax);
@@ -1228,10 +1273,10 @@ MobMovementManager::calculateChaseMovement(
     }
 
     // Arrival deceleration: smoothly reduce speed approaching attack range.
-    // Prevents the jarring hard-stop at attackRange.
-    // AAA: floor the approach speed so steps never shrink below the broadcast
-    // threshold (which starved the client and caused stop-start flicker).
-    // Minimum approach step: 12 units (≈ minimumMoveDistance 10 + margin).
+    // Prevents the jarring hard-stop at attackRange. Pure ease-out curve —
+    // no speed floor: the reported speed must always equal the actual step
+    // (telemetry honesty invariant), and combat broadcasts have no distance
+    // gate, so micro-steps transmit fine.
     float distToAttackRange = distance - mob.attackRange;
     if (aiConfig_.arrivalSlowdownDistance > 0.0f &&
         distToAttackRange > 0.0f &&
@@ -1240,10 +1285,6 @@ MobMovementManager::calculateChaseMovement(
         float t = distToAttackRange / aiConfig_.arrivalSlowdownDistance; // 0 at range, 1 at full speed
         float minSpeed = mobChaseSpeed * aiConfig_.arrivalMinSpeedFraction;
         mobChaseSpeed = minSpeed + (mobChaseSpeed - minSpeed) * t;
-        const float minApproachStep = 12.0f;
-        const float minApproachSpeed = minApproachStep / aiConfig_.chaseMovementInterval;
-        if (mobChaseSpeed < minApproachSpeed)
-            mobChaseSpeed = minApproachSpeed;
     }
 
     // Step size — distance the mob moves this tick.
@@ -1290,6 +1331,10 @@ MobMovementManager::calculateChaseMovement(
     float newY = mob.position.positionY + finalDy * stepSize;
 
     // ---- 12. Return result ----
+    // AAA telemetry honesty: the broadcast speed MUST equal the actual step
+    // velocity (stepSize already clamped by overshoot above). The client
+    // dead-reckons on this value — any overstatement renders as overshoot
+    // past the player followed by a correction snap.
     MobMovementResult result;
     result.newPosition = mob.position;
     result.newPosition.positionX = newX;
@@ -1298,7 +1343,9 @@ MobMovementManager::calculateChaseMovement(
     result.newDirectionX = finalDx;
     result.newDirectionY = finalDy;
     result.validMovement = true;
-    result.speed = mobChaseSpeed;
+    result.speed = (aiConfig_.chaseMovementInterval > 0.0f)
+                       ? stepSize / aiConfig_.chaseMovementInterval
+                       : stepSize;
     result.deflectionSign = 0.0f; // No longer used — steering handles collision avoidance
     return result;
 }
@@ -1306,7 +1353,7 @@ MobMovementManager::calculateChaseMovement(
 std::optional<MobMovementResult>
 MobMovementManager::calculateReturnToSpawnMovement(
     const MobDataStruct &mob,
-    const SpawnZoneStruct &zone,
+    const SpawnZoneStruct & /*zone*/,
     const std::vector<std::pair<int, PositionStruct>> & /*otherMobs*/,
     const PositionStruct &spawnPosition,
     const MobMovementParams &params,
