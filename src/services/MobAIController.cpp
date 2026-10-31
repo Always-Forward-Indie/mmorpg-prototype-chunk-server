@@ -9,10 +9,12 @@
 #include "services/MobManager.hpp"
 #include "services/MobMovementManager.hpp"
 #include "utils/DistanceUtils.hpp"
+#include "utils/RandomUtils.hpp"
 #include "utils/TimeUtils.hpp"
 #include <algorithm>
 #include <cmath>
 #include <ctime>
+#include <random>
 
 // ---------------------------------------------------------------------------
 // checkAndTriggerFlee — call from any combat state when mob takes damage
@@ -974,6 +976,17 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
             movementData.isReturningToSpawn = false;
             movementData.targetPlayerId = 0;
             movementData.hasPatrolTarget = false; // pick fresh waypoint from spawn (plan §5.1)
+            // AAA: post-leash breathing beat. The arrival tick armed nextMoveTime
+            // with a 2–6 s patrol roll that may already have expired during the
+            // 2 s EVADING freeze — without this reset the mob would transition
+            // AND step in the same tick, and the client (Prev=EVADING) would play
+            // a long blend-slide toward the jumped position. Parking the next
+            // step 1–2 s out guarantees a movement-free transition packet
+            // (Gap≈0, no blend), then normal patrol steps take over.
+            {
+                std::uniform_real_distribution<float> breathe(1.0f, 2.0f);
+                movementData.nextMoveTime = currentTime + breathe(RandomUtils::engine());
+            }
             mobMovement_.updateMobMovementData(mob.uid, movementData);
             // AAA: every combat-state transition force-updates (this one was
             // missing). Without it the client learns PATROLLING only with the
