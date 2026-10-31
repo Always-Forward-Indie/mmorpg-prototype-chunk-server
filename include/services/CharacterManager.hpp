@@ -1,8 +1,10 @@
 #pragma once
 
 #include "data/DataStructs.hpp"
+#include <deque>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -146,6 +148,11 @@ class CharacterManager
     // Get character by ID (returns empty struct if not found)
     CharacterDataStruct getCharacterById(int characterID);
 
+    // Rewound position lookup for lag-compensated range validation.
+    // Returns the newest sample at-or-before tsMs; clamps to the oldest
+    // sample when tsMs predates the trail; nullopt when no trail exists.
+    std::optional<PositionStruct> getCharacterPositionAt(int characterID, int64_t tsMs) const;
+
     // NOTE: planar distance now lives in utils/DistanceUtils (dist2D) — the
     // per-class copy was removed (Wave 2.1).
 
@@ -169,6 +176,14 @@ class CharacterManager
 
     // Mutex for charactersMap_
     mutable std::shared_mutex mutex_;
+
+    // Lag-compensation trail: charId -> ring of (wall-ms, position),
+    // newest last, capped at kPosHistoryDepth. Recorded on every accepted
+    // move (setCharacterPosition); cleared on teleport commit (pre-teleport
+    // samples would rewind the validator into the old location).
+    // Same mutex_.
+    static constexpr size_t kPosHistoryDepth = 20;
+    std::unordered_map<int, std::deque<std::pair<int64_t, PositionStruct>>> posHistory_;
 
     // CC diminishing-returns history: charId → ccType → application times
     // (unix sec). Same mutex_; pruned on every application.

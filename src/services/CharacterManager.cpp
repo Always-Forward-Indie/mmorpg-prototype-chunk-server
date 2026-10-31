@@ -280,13 +280,38 @@ CharacterManager::getCharacterPosition(int characterID)
     return PositionStruct();
 }
 
+std::optional<PositionStruct>
+CharacterManager::getCharacterPositionAt(int characterID, int64_t tsMs) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto it = posHistory_.find(characterID);
+    if (it == posHistory_.end() || it->second.empty())
+        return std::nullopt;
+    // Newest sample at-or-before tsMs; clamp to oldest when tsMs predates
+    // the trail (better than failing open on a short trail at boot).
+    const auto &trail = it->second;
+    for (auto rit = trail.rbegin(); rit != trail.rend(); ++rit)
+    {
+        if (rit->first <= tsMs)
+            return rit->second;
+    }
+    return trail.front().second;
+}
+
 void
 CharacterManager::setCharacterPosition(int characterID, PositionStruct position)
 {
+    const int64_t nowMs = TimestampUtils::getCurrentTimestampMs();
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto it = charactersMap_.find(characterID);
     if (it != charactersMap_.end())
         it->second.characterPosition = position;
+    // Lag-comp trail (newest last, capped). Records every accepted move so
+    // the range validator can rewind the caster to the command moment.
+    auto &trail = posHistory_[characterID];
+    trail.emplace_back(nowMs, position);
+    while (trail.size() > kPosHistoryDepth)
+        trail.pop_front();
 }
 
 void
@@ -307,6 +332,11 @@ CharacterManager::commitTeleportPosition(int characterID, PositionStruct positio
     it->second.movementWindowHead = 0;
     it->second.movementWindowCount = 0;
     it->second.teleportCommitMs = nowMs;
+    // Teleport invalidates the lag-comp trail: pre-teleport samples would
+    // rewind the validator into the old location. Seed with the dest point.
+    auto &trail = posHistory_[characterID];
+    trail.clear();
+    trail.emplace_back(nowMs, position);
 }
 
 void

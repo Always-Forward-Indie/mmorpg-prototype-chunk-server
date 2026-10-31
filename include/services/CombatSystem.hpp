@@ -33,8 +33,15 @@ class CombatSystem
 
     /**
      * @brief Инициировать использование скила
+     *
+     * @param clientSendMs command moment (server-timebase wall ms, 0 = unknown).
+     * @param serverRecvMs receive moment (wall ms, 0 = unknown).
+     * When both are known the range check rewinds to the command moment
+     * (capped 300 ms — CombatTargetResolver::rewindTimestamp): a hit the
+     * player legitimately saw connect is not rejected on stale live data.
+     * Damage still applies to live state; only validation rewinds.
      */
-    SkillInitiationResult initiateSkillUsage(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType);
+    SkillInitiationResult initiateSkillUsage(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, int64_t clientSendMs = 0, int64_t serverRecvMs = 0);
 
     /**
      * @brief Выполнить использование скила

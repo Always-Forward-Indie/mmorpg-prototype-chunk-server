@@ -109,7 +109,9 @@ class CombatEventHandler : public BaseEventHandler
         int targetId,
         CombatTargetType targetType,
         const std::string &actionTag,
-        std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket);
+        std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+        int64_t clientSendMs = 0,
+        int64_t serverRecvMs = 0);
 
     /**
      * @brief Send skill responses to all clients (broadcast)

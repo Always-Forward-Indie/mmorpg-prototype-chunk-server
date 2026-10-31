@@ -15,6 +15,7 @@
 #include "utils/RandomUtils.hpp"
 #include "utils/SpawnGeometry.hpp"
 #include "utils/TimeUtils.hpp"
+#include "utils/TimestampUtils.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -367,6 +368,18 @@ MobMovementManager::runMobTick(
 
         mobInstanceManager_->updateMobPosition(mob.uid, movementResult->newPosition);
 
+        // Lag-comp trail (newest last, capped ~2 s). Every committed move —
+        // including speed=0 holds — advances the trail so the range validator
+        // can rewind the mob to the client's command moment.
+        {
+            const int64_t wallMs = TimestampUtils::getCurrentTimestampMs();
+            std::unique_lock<std::shared_mutex> tlock(mutex_);
+            auto &trail = posHistory_[mob.uid];
+            trail.emplace_back(wallMs, movementResult->newPosition);
+            while (trail.size() > kPosHistoryDepth)
+                trail.pop_front();
+        }
+
         // Reset stuck counter on successful movement
         auto successData = getMobMovementDataInternal(mob.uid);
         successData.stuckCount = 0;
@@ -434,6 +447,15 @@ MobMovementManager::runMobTick(
                     if (ZoneBounds::contains(zone, randPos))
                     {
                         mobInstanceManager_->updateMobPosition(mob.uid, randPos);
+                        // Teleport invalidates the lag-comp trail: pre-teleport
+                        // samples would rewind the validator across the jump.
+                        {
+                            const int64_t wallMs = TimestampUtils::getCurrentTimestampMs();
+                            std::unique_lock<std::shared_mutex> tlock(mutex_);
+                            auto &trail = posHistory_[mob.uid];
+                            trail.clear();
+                            trail.emplace_back(wallMs, randPos);
+                        }
                         // Self-heal, not an alert: info (was shouty tag at info).
                         logger_.info("Stuck-guard teleported mob UID " + std::to_string(mob.uid) +
                                     " after " + std::to_string(stuckData.stuckCount) +
@@ -940,6 +962,24 @@ MobMovementManager::getMobMovementData(int mobUID) const
         return it->second;
     }
     return MobMovementData{}; // Return default values
+}
+
+std::optional<PositionStruct>
+MobMovementManager::getMobPositionAt(int mobUID, int64_t tsMs) const
+{
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto it = posHistory_.find(mobUID);
+    if (it == posHistory_.end() || it->second.empty())
+        return std::nullopt;
+    // Newest sample at-or-before tsMs; clamp to oldest when tsMs predates
+    // the trail (better than failing open on a short trail at boot).
+    const auto &trail = it->second;
+    for (auto rit = trail.rbegin(); rit != trail.rend(); ++rit)
+    {
+        if (rit->first <= tsMs)
+            return rit->second;
+    }
+    return trail.front().second;
 }
 
 bool

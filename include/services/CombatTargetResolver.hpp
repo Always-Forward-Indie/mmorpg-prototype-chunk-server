@@ -78,5 +78,26 @@ class CombatTargetResolver
         return out;
     }
 
+    /// Lag-compensation rewind cap (favor-the-shooter, Valve/Overwatch-style).
+    ///
+    /// The validator compares live positions, but the client aimed at the
+    /// world as of its command moment (clientSendMs, server-timebase via
+    /// TimeSync). Rewind both sides to that moment so a hit the player
+    /// legitimately saw connect cannot be rejected on stale data.
+    /// The rewind is capped (default 300 ms) so far-past shots on a laggy
+    /// link cannot hit through time. Returns 0 when rewind is unavailable
+    /// (missing client stamp, or the stamp is at/after the receive moment).
+    static int64_t rewindTimestamp(int64_t serverRecvMs, int64_t clientSendMs, int64_t capMs = 300)
+    {
+        if (clientSendMs <= 0 || serverRecvMs <= 0)
+            return 0;
+        if (clientSendMs >= serverRecvMs)
+            return 0;
+        const int64_t age = serverRecvMs - clientSendMs;
+        if (age > capMs)
+            return serverRecvMs - capMs;
+        return clientSendMs;
+    }
+
     CombatTargetResolver() = delete;
 };

@@ -126,7 +126,7 @@ CombatSystem::setupExperienceCallbacks()
 }
 
 SkillInitiationResult
-CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType)
+CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int targetId, CombatTargetType targetType, int64_t clientSendMs, int64_t serverRecvMs)
 {
     SkillInitiationResult result;
     result.casterId = casterId;
@@ -309,12 +309,67 @@ CombatSystem::initiateSkillUsage(int casterId, const std::string &skillSlug, int
                 result.errorMessage = "Not enough mana";
                 return result;
             case InitiationReject::OutOfRange:
+            {
+                // Lag compensation (favor-the-shooter): the client aimed at the
+                // world as of its command moment. Rewind both sides there
+                // (capped 300 ms) and re-validate; a hit legitimately seen
+                // in range connects. Damage still applies to live state.
+                const int64_t rewindTs =
+                    CombatTargetResolver::rewindTimestamp(serverRecvMs, clientSendMs);
+                if (rewindTs > 0)
+                {
+                    // Rewound lookups: trail at the command moment, live fallback
+                    // when the trail misses (boot-short trail, unknown entity).
+                    CombatTargetResolver::PosLookup casterBoth =
+                        [&](int id) -> std::optional<PositionStruct>
+                    {
+                        if (auto h = gameServices_->getCharacterManager().getCharacterPositionAt(id, rewindTs))
+                            return h;
+                        if (auto h = gameServices_->getMobMovementManager().getMobPositionAt(id, rewindTs))
+                            return h;
+                        auto d = gameServices_->getCharacterManager().getCharacterData(id);
+                        if (d.characterId != 0)
+                            return d.characterPosition;
+                        auto m = gameServices_->getMobInstanceManager().getMobInstance(id);
+                        if (m.uid != 0)
+                            return m.position;
+                        return std::nullopt;
+                    };
+                    CombatTargetResolver::PosLookup noSent = [](int) -> std::optional<PositionStruct>
+                    {
+                        return std::nullopt;
+                    };
+                    CombatTargetResolver::PosLookup mobPosAt = [&](int uid) -> std::optional<PositionStruct>
+                    {
+                        if (auto h = gameServices_->getMobMovementManager().getMobPositionAt(uid, rewindTs))
+                            return h;
+                        auto m = gameServices_->getMobInstanceManager().getMobInstance(uid);
+                        if (m.uid != 0)
+                            return m.position;
+                        return std::nullopt;
+                    };
+                    // Same rules, old positions (caster tries both trails).
+                    const auto rewound = CombatTargetResolver::resolveRange(
+                        casterId, targetId, targetType, casterBoth, noSent, mobPosAt);
+                    if (rewound.checkRange && rewound.distance <= skill.maxRange * 100.0f)
+                    {
+                        log_->info("[lag-comp] accepted rewound hit caster " + std::to_string(casterId) +
+                                   " target " + std::to_string(targetId) +
+                                   " live=" + std::to_string(check.distance) +
+                                   " rewound=" + std::to_string(rewound.distance) +
+                                   " ageMs=" + std::to_string(serverRecvMs - rewindTs));
+                        check.checkRange = false; // accept: skip the live-range gate
+                        check.distance = rewound.distance;
+                        break; // fall through to the success path below the switch
+                    }
+                }
                 log_->warn("[initiateSkillUsage] Target " + std::to_string(targetId) +
                            " out of range for caster " + std::to_string(casterId) +
                            " distance=" + std::to_string(check.distance) +
                            " maxRange=" + std::to_string(skill.maxRange * 100.0f));
                 result.errorMessage = "Target is out of range";
                 return result;
+            }
             case InitiationReject::TargetDead:
                 if (targetType == CombatTargetType::MOB)
                 {

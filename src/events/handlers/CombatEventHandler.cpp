@@ -176,7 +176,8 @@ CombatEventHandler::handlePlayerAttack(const Event &event)
                                           " (type: " + std::to_string(static_cast<int>(targetType)) + ")",
             GREEN);
 
-        dispatchSkillAction(clientData.characterId, skillSlug, targetId, targetType, "playerAttack", clientSocket);
+        dispatchSkillAction(clientData.characterId, skillSlug, targetId, targetType, "playerAttack", clientSocket,
+            event.getTimestamps().clientSendMsEcho, event.getTimestamps().serverRecvMs);
     }
     catch (const std::exception &ex)
     {
@@ -253,7 +254,8 @@ CombatEventHandler::handleSkillUsage(const Event &event)
                                           " (type: " + std::to_string(static_cast<int>(targetType)) + ")",
             GREEN);
 
-        dispatchSkillAction(clientData.characterId, skillSlug, targetId, targetType, "skillUsage", clientSocket);
+        dispatchSkillAction(clientData.characterId, skillSlug, targetId, targetType, "skillUsage", clientSocket,
+            event.getTimestamps().clientSendMsEcho, event.getTimestamps().serverRecvMs);
     }
     catch (const std::exception &ex)
     {
@@ -555,10 +557,12 @@ CombatEventHandler::dispatchSkillAction(int characterId,
     int targetId,
     CombatTargetType targetType,
     const std::string &actionTag,
-    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket)
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket,
+    int64_t clientSendMs,
+    int64_t serverRecvMs)
 {
     // LOW-4: shared initiate + execute logic factored out from handlePlayerAttack / handleSkillUsage
-    auto initiationResult = combatSystem_->initiateSkillUsage(characterId, skillSlug, targetId, targetType);
+    auto initiationResult = combatSystem_->initiateSkillUsage(characterId, skillSlug, targetId, targetType, clientSendMs, serverRecvMs);
 
     if (!initiationResult.success)
     {

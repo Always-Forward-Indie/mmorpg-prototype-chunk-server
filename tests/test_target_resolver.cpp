@@ -147,3 +147,29 @@ TEST(TargetResolver, MissingMobEverywhereSkips)
         1, 9001, CombatTargetType::MOB, fixed(pos(0, 0)), empty(), empty());
     EXPECT_FALSE(r.checkRange);
 }
+
+TEST(TargetResolver, RewindUsesCommandMomentInsideCap)
+{
+    // 120 ms old command: rewind exactly to the command moment.
+    EXPECT_EQ(CombatTargetResolver::rewindTimestamp(10000, 9880), 9880);
+}
+
+TEST(TargetResolver, RewindCapsAt300ms)
+{
+    // 1 s old command on a laggy link: clamp to 300 ms back, never further.
+    EXPECT_EQ(CombatTargetResolver::rewindTimestamp(10000, 9000), 9700);
+    EXPECT_EQ(CombatTargetResolver::rewindTimestamp(10000, 9000, 300), 9700);
+}
+
+TEST(TargetResolver, RewindCustomCap)
+{
+    EXPECT_EQ(CombatTargetResolver::rewindTimestamp(10000, 9000, 100), 9900);
+}
+
+TEST(TargetResolver, RewindMissingOrFutureStampDisables)
+{
+    EXPECT_EQ(CombatTargetResolver::rewindTimestamp(10000, 0), 0);
+    EXPECT_EQ(CombatTargetResolver::rewindTimestamp(0, 9880), 0);
+    EXPECT_EQ(CombatTargetResolver::rewindTimestamp(10000, 10000), 0);
+    EXPECT_EQ(CombatTargetResolver::rewindTimestamp(10000, 11000), 0);
+}

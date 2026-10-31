@@ -3,6 +3,7 @@
 #include "data/DataStructs.hpp"
 #include "services/MobAIController.hpp"
 #include "utils/Logger.hpp"
+#include <deque>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -114,6 +115,14 @@ class MobMovementManager
      */
     bool canSearchNewTargets(const PositionStruct &mobPos, const SpawnZoneStruct &zone);
 
+    // Lag-compensation trail: uid -> ring of (wall-ms, position), newest
+    // last, capped at kPosHistoryDepth (~2 s at 10 Hz chase). Recorded on
+    // every committed move (runMobTick success + stuck-teleport); cleared
+    // entries age out via the cap. Read via getMobPositionAt for rewound
+    // range validation in CombatSystem.
+    static constexpr size_t kPosHistoryDepth = 20;
+    std::optional<PositionStruct> getMobPositionAt(int mobUID, int64_t tsMs) const;
+
     // NOTE: planar distance now lives in utils/DistanceUtils (dist2D) — the
     // per-class copy was removed (Wave 2.1).
 
@@ -133,6 +142,9 @@ class MobMovementManager
 
     // Movement data per mob
     std::map<int, MobMovementData> mobMovementData_;
+
+    // Lag-comp trail storage (uid -> ring, newest last). Same mutex_.
+    std::unordered_map<int, std::deque<std::pair<int64_t, PositionStruct>>> posHistory_;
 
     // AI configuration: construction-time defaults, effectively read-only
     // afterwards (setAIConfig/getAIConfig were dead — zero callers — and were
