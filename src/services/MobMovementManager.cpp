@@ -809,6 +809,22 @@ MobMovementManager::calculateNewPosition(
             const float ndy = newY - mob.position.positionY;
             stepSize = std::sqrt(ndx * ndx + ndy * ndy);
         }
+        else if (ZoneBounds::contains(zone,
+                     std::clamp(mob.position.positionX + (newDirectionX * params.minMoveDistance * 0.25f), minX, maxX),
+                     std::clamp(mob.position.positionY + (newDirectionY * params.minMoveDistance * 0.25f), minY, maxY)))
+        {
+            // AAA last resort: micro-shuffle along the current heading with
+            // relaxed separation (zone containment still enforced — radial
+            // check for circle/annulus zones, bounds for rects). In a cramped
+            // zone rigid separation deadlocks patrol into stuck-teleports;
+            // a slow shuffle with slight overlap risk beats a full stop and
+            // keeps the stuck-counter from escalating to a teleport pop.
+            newX = std::clamp(mob.position.positionX + (newDirectionX * params.minMoveDistance * 0.25f), minX, maxX);
+            newY = std::clamp(mob.position.positionY + (newDirectionY * params.minMoveDistance * 0.25f), minY, maxY);
+            const float mdx = newX - mob.position.positionX;
+            const float mdy = newY - mob.position.positionY;
+            stepSize = std::sqrt(mdx * mdx + mdy * mdy);
+        }
         else
         {
             return std::nullopt; // No valid movement
