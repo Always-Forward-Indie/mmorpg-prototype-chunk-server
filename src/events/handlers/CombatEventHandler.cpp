@@ -299,6 +299,28 @@ CombatEventHandler::updateOngoingActions()
                     std::string msg = networkManager_.generateResponseMessage("success", teleportResp);
                     if (clientSocket && clientSocket->is_open())
                         networkManager_.sendResponse(clientSocket, msg);
+                    else
+                        log_->error("[CombatEventHandler] deferred teleport unicast failed for char={} (no socket)", characterId);
+                }
+
+                // Single teleport commit: memory + validation + grace mark
+                // (plus interest resubscribe below; snapshots stay admin-only).
+                gameServices_.getCharacterManager().commitTeleportPosition(characterId, dest);
+
+                // Interest resubscribe so cross-cell blinks leave no ghosts.
+                // Snapshots stay on the admin path (short-range skills rarely
+                // cross cells; the dest+source broadcast below covers them).
+                try
+                {
+                    gameServices_.getInterestManager().onPlayerMoved(casterClientId, characterId, dest.positionX, dest.positionY);
+                }
+                catch (const std::exception &e)
+                {
+                    log_->error("[CombatEventHandler] interest resubscribe failed for char={} ({})", characterId, e.what());
+                }
+                catch (...)
+                {
+                    log_->error("[CombatEventHandler] interest resubscribe failed for char={} (unknown)", characterId);
                 }
 
                 // 2. Persist position
@@ -621,6 +643,27 @@ CombatEventHandler::dispatchSkillAction(int characterId,
                 "success", teleportResp);
             if (clientSocket)
                 networkManager_.sendResponse(clientSocket, msg);
+            else
+                log_->error("[CombatEventHandler] teleport skill unicast failed for char={} (no socket)", characterId);
+        }
+
+        // Single teleport commit: memory + validation + grace mark
+        // (plus interest resubscribe below; snapshots stay admin-only).
+        gameServices_.getCharacterManager().commitTeleportPosition(characterId, dest);
+
+        // Interest resubscribe so cross-cell blinks leave no ghosts (see
+        // deferred path: snapshots stay on the admin path).
+        try
+        {
+            gameServices_.getInterestManager().onPlayerMoved(casterClientId, characterId, dest.positionX, dest.positionY);
+        }
+        catch (const std::exception &e)
+        {
+            log_->error("[CombatEventHandler] interest resubscribe failed for char={} ({})", characterId, e.what());
+        }
+        catch (...)
+        {
+            log_->error("[CombatEventHandler] interest resubscribe failed for char={} (unknown)", characterId);
         }
 
         // 2. Persist the new position to the game server

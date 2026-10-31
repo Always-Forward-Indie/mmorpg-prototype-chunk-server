@@ -70,6 +70,8 @@ class EventDispatcher
     void handleGetEquipment(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     // Respawn
     void handleRespawnRequest(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    // Teleport confirm (client -> chunk, informational, never gates).
+    void handleTeleportAck(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     // Item drop by player and use
     void handleDropItemByPlayer(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleUseItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);

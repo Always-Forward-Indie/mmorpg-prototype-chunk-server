@@ -885,6 +885,25 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                             movementData.characterId, dzMove);
                     }
 
+                    // Teleport grace (see commitTeleportPosition): a move FAR
+                    // from the committed destination inside the grace window
+                    // was sent before the snap (stale in-flight history, ~1
+                    // RTT behind). Accepting it would wipe teleport memory;
+                    // correcting it would yank the client back. Drop it
+                    // silently — post-snap moves (near dest) flow through to
+                    // the normal accept below and clear the mark.
+                    if (actualDist > maxDist && charData.teleportCommitMs > 0)
+                    {
+                        const float graceMs = gameServices_.getGameConfigService().getFloat("teleport.stale_grace_ms", 1200.0f);
+                        const int64_t commitAgeMs = srvNowMs - charData.teleportCommitMs;
+                        if (commitAgeMs >= 0 && commitAgeMs < graceMs)
+                        {
+                            log_->info("[MOVE_VALIDATE] char {} stale pre-teleport move {:.0f}u (commit {}ms ago) — dropped, no correction",
+                                movementData.characterId, actualDist, commitAgeMs);
+                            return;
+                        }
+                    }
+
                     if (actualDist > maxDist)
                     {
                         // Sliding window fallback — tolerates VPN jitter where
@@ -950,6 +969,7 @@ CharacterEventHandler::handleMoveCharacterEvent(const Event &event)
                 // Accept: persist validation state with wall-clock time before applying position
                 gameServices_.getCharacterManager().setLastValidatedMovement(
                     movementData.characterId, movementData.position, srvNowMs);
+                gameServices_.getCharacterManager().clearTeleportCommit(movementData.characterId);
             }
 
             // Update character position on server
@@ -2025,8 +2045,8 @@ CharacterEventHandler::handlePlayerRespawnEvent(const Event &event)
         charMgr.clearDeathState(characterId);
 
         // ── Teleport to respawn zone ──────────────────────────────────────────
-        charMgr.setCharacterPosition(characterId, respawnPos);
-        charMgr.setLastValidatedMovement(characterId, respawnPos, 0); // reset: player teleported
+        // Single commit (see admin teleport): memory + validation + grace mark.
+        charMgr.commitTeleportPosition(characterId, respawnPos);
 
         charMgr.setCharacterActiveEffects(characterId, currentEffects);
 
@@ -2132,15 +2152,22 @@ CharacterEventHandler::handleAdminTeleportEvent(const Event &event)
     auto &charMgr = gameServices_.getCharacterManager();
     if (charMgr.getCharacterById(targetId).characterId != targetId)
         return;
+    // 1. Authoritative position + validation reset (respawn pattern).
+    const PositionStruct old = charMgr.getCharacterPosition(targetId);
     PositionStruct dest;
     dest.positionX = j.value("x", 0.0f);
     dest.positionY = j.value("y", 0.0f);
     dest.positionZ = j.value("z", 90.0f);
-
-    // 1. Authoritative position + validation reset (respawn pattern).
-    const PositionStruct old = charMgr.getCharacterPosition(targetId);
-    charMgr.setCharacterPosition(targetId, dest);
-    charMgr.setLastValidatedMovement(targetId, dest, 0);
+    // Admin payloads carry no yaw (bots/admin.py sends x/y/z only): keep the
+    // current facing instead of zeroing it. Explicit rotZ wins when present.
+    dest.rotationZ = old.rotationZ;
+    if (j.contains("rotZ"))
+        dest.rotationZ = j.value("rotZ", old.rotationZ);
+    else if (j.contains("rotationZ"))
+        dest.rotationZ = j.value("rotationZ", old.rotationZ);
+    // Single commit: authoritative memory + validation reset + stale-move
+    // grace mark (in-flight pre-teleport moves must not wipe or yank).
+    charMgr.commitTeleportPosition(targetId, dest);
 
     // 2. Target session (the GM caller acts on an arbitrary character).
     const auto targetClient =
@@ -2171,11 +2198,11 @@ CharacterEventHandler::handleAdminTeleportEvent(const Event &event)
     }
     catch (const std::exception &e)
     {
-        log_->debug("[AdminTeleport] interest hook failed for char {} ({})", targetId, e.what());
+        log_->error("[AdminTeleport] interest hook failed for char {} ({})", targetId, e.what());
     }
     catch (...)
     {
-        log_->debug("[AdminTeleport] interest hook failed for char {} (unknown)", targetId);
+        log_->error("[AdminTeleport] interest hook failed for char {} (unknown)", targetId);
     }
 
     // 4. Persist position (skill-teleport pattern).
@@ -2235,11 +2262,11 @@ CharacterEventHandler::handleAdminTeleportEvent(const Event &event)
         }
         catch (const std::exception &e)
         {
-            log_->debug("[AdminTeleport] playerTeleported unicast failed for char {} ({})", targetId, e.what());
+            log_->error("[AdminTeleport] playerTeleported unicast failed for char {} ({})", targetId, e.what());
         }
         catch (...)
         {
-            log_->debug("[AdminTeleport] playerTeleported unicast failed for char {} (unknown)", targetId);
+            log_->error("[AdminTeleport] playerTeleported unicast failed for char {} (unknown)", targetId);
         }
     }
 

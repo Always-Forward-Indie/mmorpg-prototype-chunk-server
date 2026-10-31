@@ -70,6 +70,7 @@ EventDispatcher::buildRouteTable()
         {"unequipItem", &EventDispatcher::handleUnequipItem},
         {"getEquipment", &EventDispatcher::handleGetEquipment},
         {"respawnRequest", &EventDispatcher::handleRespawnRequest},
+        {"teleportAck", &EventDispatcher::handleTeleportAck},
         {"dropItem", &EventDispatcher::handleDropItemByPlayer},
         {"useItem", &EventDispatcher::handleUseItem},
         {"getBestiaryEntry", &EventDispatcher::handleGetBestiaryEntry},
@@ -1702,6 +1703,48 @@ EventDispatcher::handleRespawnRequest(const EventContext &context, std::shared_p
 // ---------------------------------------------------------------------------
 // handleDropItemByPlayer — player drops item from inventory onto the ground
 // ---------------------------------------------------------------------------
+void
+EventDispatcher::handleTeleportAck(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    // Informational confirm for a server-directed teleport (respawnResult /
+    // playerTeleported applied client-side). Never gates anything: the
+    // server already committed the position. Divergences mean client/server
+    // drift and log error-level (SEAM counter).
+    (void)socket;
+    try
+    {
+        nlohmann::json j = wireJson(context);
+        nlohmann::json body = j.value("body", nlohmann::json::object());
+        int characterId = body.value("characterId", context.characterData.characterId);
+        if (characterId <= 0)
+        {
+            log_->error("[TeleportAck] missing characterId from client " + std::to_string(context.clientData.clientId));
+            return;
+        }
+        const std::string reqEcho = body.value("requestIdEcho", "");
+        const std::string reason = body.value("reason", "");
+        const float ax = body.value("x", 0.0f);
+        const float ay = body.value("y", 0.0f);
+        const float az = body.value("z", 0.0f);
+        const PositionStruct srv = gameServices_.getCharacterManager().getCharacterPosition(characterId);
+        const float dx = srv.positionX - ax;
+        const float dy = srv.positionY - ay;
+        const float dz = srv.positionZ - az;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist > 250.0f)
+        {
+            log_->error("[TeleportAck] divergence char={} req={} reason={} server=({},{},{}) client=({},{},{}) d={}",
+                characterId, reqEcho, reason, srv.positionX, srv.positionY, srv.positionZ, ax, ay, az, dist);
+            return;
+        }
+        log_->info("[TeleportAck] char={} req={} reason={} confirmed", characterId, reqEcho, reason);
+    }
+    catch (const std::exception &e)
+    {
+        log_->error(std::string("[TeleportAck] parse error: ") + e.what());
+    }
+}
+
 void
 EventDispatcher::handleDropItemByPlayer(const EventContext &context,
     std::shared_ptr<boost::asio::ip::tcp::socket> socket)

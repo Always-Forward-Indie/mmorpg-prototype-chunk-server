@@ -36,6 +36,11 @@ class CharacterManager
     // set character position
     void setCharacterPosition(int characterID, PositionStruct position);
     void setLastValidatedMovement(int characterID, PositionStruct position, int64_t srvMs);
+    // Single teleport commit: authoritative memory + validation reset +
+    // window reset + stale-move grace mark (one call, no split state).
+    void commitTeleportPosition(int characterID, PositionStruct position);
+    // Clear the grace mark on normal accept (post-teleport truth resumes).
+    void clearTeleportCommit(int characterID);
 
     // Get characters list
     std::vector<CharacterDataStruct> getCharactersList();

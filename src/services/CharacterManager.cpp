@@ -3,6 +3,7 @@
 #include "services/StatsResolver.hpp"
 #include "utils/DistanceUtils.hpp"
 #include "utils/TimeUtils.hpp"
+#include "utils/TimestampUtils.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -286,6 +287,35 @@ CharacterManager::setCharacterPosition(int characterID, PositionStruct position)
     auto it = charactersMap_.find(characterID);
     if (it != charactersMap_.end())
         it->second.characterPosition = position;
+}
+
+void
+CharacterManager::commitTeleportPosition(int characterID, PositionStruct position)
+{
+    // Same clock the move validator uses (srvNowMs) so the grace window
+    // below compares like-for-like wall-clock milliseconds.
+    const int64_t nowMs = TimestampUtils::getCurrentTimestampMs();
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it == charactersMap_.end())
+        return;
+    it->second.characterPosition = position;
+    it->second.lastValidatedPosition = position;
+    // Real ms (never 0): the unconditional first-accept path must NOT fire
+    // here — stale in-flight moves are dropped by the grace check instead.
+    it->second.lastMoveSrvMs = nowMs;
+    it->second.movementWindowHead = 0;
+    it->second.movementWindowCount = 0;
+    it->second.teleportCommitMs = nowMs;
+}
+
+void
+CharacterManager::clearTeleportCommit(int characterID)
+{
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    auto it = charactersMap_.find(characterID);
+    if (it != charactersMap_.end())
+        it->second.teleportCommitMs = 0;
 }
 
 void

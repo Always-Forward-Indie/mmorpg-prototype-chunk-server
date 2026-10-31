@@ -424,6 +424,13 @@ struct CharacterDataStruct
     PositionStruct lastValidatedPosition;
     int64_t lastMoveSrvMs = 0;
 
+    // Teleport commit mark (server ms of the last teleport/respawn commit).
+    // Moves arriving inside the stale-grace window that are FAR from the
+    // committed destination are pre-teleport in-flight history: dropped
+    // silently (accepting them would wipe teleport memory, correcting them
+    // would yank the freshly-teleported client back). Zero = no commit.
+    int64_t teleportCommitMs = 0;
+
     // Sliding window for VPN jitter tolerance.
     // When an individual move check fails (packets arrived in a burst), the
     // average speed over the window is checked as a fallback.  Teleport/respawn
