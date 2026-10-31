@@ -975,6 +975,11 @@ MobAIController::updateMobCombatState(MobDataStruct &mob, MobMovementData &movem
             movementData.targetPlayerId = 0;
             movementData.hasPatrolTarget = false; // pick fresh waypoint from spawn (plan §5.1)
             mobMovement_.updateMobMovementData(mob.uid, movementData);
+            // AAA: every combat-state transition force-updates (this one was
+            // missing). Without it the client learns PATROLLING only with the
+            // first patrol step — up to 6s later — and then plays a long
+            // blend-slide toward the jumped position.
+            mobMovement_.forceMobStateUpdate(mob.uid);
             logger_.log("[COMBAT] Mob " + std::to_string(mob.uid) +
                         " EVADING finished, back to patrol");
         }

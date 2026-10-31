@@ -1288,8 +1288,15 @@ MobMovementManager::calculateChaseMovement(
     }
 
     // Step size — distance the mob moves this tick.
-    // AAA: arrive exactly at attackRange (no 2-unit early-stop buffer that caused
-    // alternating move/stop ticks at the boundary). At/below range → explicit hold.
+    // AAA arrival-stop: when the remaining distance to attack range fits inside
+    // a short arrival radius, step EXACTLY onto the boundary (2u inside, so float
+    // error can never strand the mob a hair outside spinning holds forever) and
+    // report speed=0. The client glides these last meters via settle and can never
+    // dead-reckon past the stop point — no overshoot, no rollback. The state
+    // machine transitions to PREPARING on the next tick from inside the range.
+    // Placement follows the desired (player-ward) direction for an exact range fix.
+    constexpr float kArrivalHoldRadius = 15.0f;
+    constexpr float kAttackEntryInset = 2.0f;
     float stepSize = mobChaseSpeed * aiConfig_.chaseMovementInterval;
     stepSize = std::min(stepSize, params.maxStepSizeAbsolute);
     float overshoot = distance - mob.attackRange;
@@ -1304,6 +1311,22 @@ MobMovementManager::calculateChaseMovement(
         hold.newDirectionY = finalDy;
         hold.newPosition.rotationZ =
             std::atan2(finalDy, finalDx) * (180.0f / static_cast<float>(M_PI));
+        return hold;
+    }
+    if (overshoot <= kArrivalHoldRadius)
+    {
+        const float arriveStep = overshoot + kAttackEntryInset;
+        MobMovementResult hold;
+        hold.newPosition = mob.position;
+        hold.newPosition.positionX = mob.position.positionX + desiredDx * arriveStep;
+        hold.newPosition.positionY = mob.position.positionY + desiredDy * arriveStep;
+        hold.newPosition.rotationZ =
+            std::atan2(desiredDy, desiredDx) * (180.0f / static_cast<float>(M_PI));
+        hold.newDirectionX = desiredDx;
+        hold.newDirectionY = desiredDy;
+        hold.validMovement = true;
+        hold.speed = 0.0f;
+        hold.deflectionSign = 0.0f;
         return hold;
     }
     stepSize = std::min(stepSize, overshoot);
