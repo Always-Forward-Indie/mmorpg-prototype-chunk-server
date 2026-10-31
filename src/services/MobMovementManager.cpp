@@ -453,6 +453,49 @@ MobMovementManager::runMobTick(
             }
 
             updateMobMovementData(mob.uid, stuckData);
+
+            // AAA watchdog: a patrolling mob must never stand still silently.
+            // stuck-guard teleports every 10 cycles, but if teleports keep
+            // failing (or the mob is wedged in a way the counter misses),
+            // the client sees a corpse-like freeze for minutes. Track actual
+            // position change; beyond 30 s of stillness in a mobile state
+            // this is an ERROR with a full dump (uid/zone/pos/state/timing),
+            // never info/debug — a silent eternal freeze is a FATAL-class bug.
+            {
+                static std::unordered_map<int, std::pair<PositionStruct, float>> s_lastSeenPos;
+                static std::unordered_map<int, float> s_lastWatchWarn;
+                auto it = s_lastSeenPos.find(mob.uid);
+                if (it == s_lastSeenPos.end())
+                {
+                    s_lastSeenPos.emplace(mob.uid, std::make_pair(mob.position, currentTime));
+                }
+                else
+                {
+                    const float dx = mob.position.positionX - it->second.first.positionX;
+                    const float dy = mob.position.positionY - it->second.first.positionY;
+                    if (dx * dx + dy * dy > 1.0f)
+                    {
+                        it->second.first = mob.position;
+                        it->second.second = currentTime;
+                    }
+                    else if (currentTime - it->second.second > 30.0f)
+                    {
+                        auto wit = s_lastWatchWarn.find(mob.uid);
+                        if (wit == s_lastWatchWarn.end() || currentTime - wit->second > 60.0f)
+                        {
+                            s_lastWatchWarn[mob.uid] = currentTime;
+                            log_->error("WATCHDOG mob UID " + std::to_string(mob.uid) +
+                                        " frozen " + std::to_string(currentTime - it->second.second) +
+                                        "s in PATROLLING zone " + std::to_string(zone.zoneId) +
+                                        " pos=(" + std::to_string(mob.position.positionX) + "," +
+                                        std::to_string(mob.position.positionY) + ")" +
+                                        " stuckCount=" + std::to_string(stuckData.stuckCount) +
+                                        " nextMoveTime=" + std::to_string(stuckData.nextMoveTime) +
+                                        " lastMoveTime=" + std::to_string(stuckData.lastMoveTime));
+                        }
+                    }
+                }
+            }
         }
     }
 
