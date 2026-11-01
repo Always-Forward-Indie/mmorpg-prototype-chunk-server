@@ -60,6 +60,8 @@ EventDispatcher::buildRouteTable()
         {"openRepairShop", &EventDispatcher::handleOpenRepairShop},
         {"repairItem", &EventDispatcher::handleRepairItem},
         {"repairAll", &EventDispatcher::handleRepairAll},
+        {"buybackList", &EventDispatcher::handleBuybackList},
+        {"buybackItem", &EventDispatcher::handleBuybackItem},
         {"tradeRequest", &EventDispatcher::handleTradeRequest},
         {"tradeAccept", &EventDispatcher::handleTradeAccept},
         {"tradeDecline", &EventDispatcher::handleTradeDecline},
@@ -1475,6 +1477,49 @@ EventDispatcher::handleRepairAll(const EventContext &context, std::shared_ptr<bo
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("[EventDispatcher] handleRepairAll: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleBuybackList(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        BuybackListRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::BUYBACK_LIST, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleBuybackList: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handleBuybackItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        nlohmann::json j = wireJson(context);
+        BuybackItemRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.npcId = j["body"].value("npcId", 0);
+        req.slot = j["body"].value("slot", 0);
+        req.quantity = j["body"].value("quantity", 1);
+        req.playerPosition = context.positionData;
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::BUYBACK_ITEM, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handleBuybackItem: " + std::string(e.what()));
     }
 }
 

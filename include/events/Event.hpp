@@ -119,6 +119,8 @@ class Event
         OPEN_REPAIR_SHOP, // Player opens blacksmith repair window
         REPAIR_ITEM,      // Player repairs one item
         REPAIR_ALL,       // Player repairs all equipped items
+        BUYBACK_LIST,     // Player requests the buyback list (last sold stacks)
+        BUYBACK_ITEM,     // Player repurchases a buyback slot
         // P2P trade events (client → chunk-server)
         TRADE_REQUEST,      // Initiate P2P trade with another player
         TRADE_ACCEPT,       // Accept incoming trade invite

@@ -3,6 +3,7 @@
 #include "utils/Logger.hpp"
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <deque>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -171,6 +172,46 @@ class VendorManager
         class InventoryManager &inventoryMgr,
         float sellTaxPct);
 
+    // ── Buyback (per-character last-sold list, in-memory, capped) ─────────
+    // WoW rule: the last N sold stacks can be bought back at the price paid.
+    // In-memory only (chunk restart clears); no persistence, no cross-vendor
+    // split (one list per character — any vendor shows it).
+
+    /** One sold stack available for repurchase. */
+    struct BuybackEntry
+    {
+        int itemId = 0;
+        std::string slug;
+        int quantity = 0;
+        int unitPrice = 0; // gold per unit (floor of paid line)
+    };
+
+    /** Maximum retained sold stacks per character (FIFO eviction). */
+    static constexpr size_t MAX_BUYBACK = 12;
+
+    /** Snapshot of the character's current buyback list (oldest first). */
+    std::vector<BuybackEntry> getBuyback(int characterId) const;
+
+    /**
+     * @brief Repurchase a buyback slot (partial quantities allowed).
+     * @param slot  index into getBuyback() (validated again here).
+     * @return {success, reason, itemId, quantity, pricePaid}.
+     */
+    struct BuybackResult
+    {
+        bool success = false;
+        std::string reason;
+        int itemId = 0;
+        int quantity = 0;
+        int pricePaid = 0;
+    };
+    BuybackResult buyback(
+        int characterId,
+        size_t slot,
+        int quantity,
+        int goldItemId,
+        class InventoryManager &inventoryMgr);
+
   private:
     // Single source of truth for the vendor buy-price formula (Wave 2.5):
     // explicit per-slot override wins, otherwise base price + markup,
@@ -190,4 +231,10 @@ class VendorManager
 
     mutable std::shared_mutex mutex_;
     std::unordered_map<int, VendorNPCDataStruct> vendors_; ///< npcId → data
+
+    /** Buyback lists: characterId → oldest-first sold stacks (see MAX_BUYBACK). */
+    std::unordered_map<int, std::deque<BuybackEntry>> buyback_;
+
+    /** Record one sold stack (FIFO-capped at MAX_BUYBACK). Thread-safe. */
+    void recordBuyback(int characterId, int itemId, const std::string &slug, int quantity, int unitPrice);
 };

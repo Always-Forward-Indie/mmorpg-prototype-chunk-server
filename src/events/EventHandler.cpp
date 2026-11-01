@@ -499,6 +499,12 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::REPAIR_ALL:
             vendorEventHandler_->handleRepairAllEvent(event);
             break;
+        case Event::BUYBACK_LIST:
+            vendorEventHandler_->handleBuybackListEvent(event);
+            break;
+        case Event::BUYBACK_ITEM:
+            vendorEventHandler_->handleBuybackItemEvent(event);
+            break;
         case Event::TRADE_REQUEST:
             vendorEventHandler_->handleTradeRequestEvent(event);
             break;

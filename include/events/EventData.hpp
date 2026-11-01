@@ -140,6 +140,8 @@ using EventData = std::variant<
     OpenRepairShopRequestStruct,
     RepairItemRequestStruct,
     RepairAllRequestStruct,
+    BuybackListRequestStruct,
+    BuybackItemRequestStruct,
     TradeRequestStruct,
     TradeRespondStruct,
     TradeOfferUpdateStruct,

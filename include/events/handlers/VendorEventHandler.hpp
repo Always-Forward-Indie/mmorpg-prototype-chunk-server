@@ -46,6 +46,11 @@ class VendorEventHandler : public BaseEventHandler
     void handleRepairItemEvent(const Event &event);
     void handleRepairAllEvent(const Event &event);
 
+    // ── Buyback events ─────────────────────────────────────────────────────
+
+    void handleBuybackListEvent(const Event &event);
+    void handleBuybackItemEvent(const Event &event);
+
     // ── P2P trade events ─────────────────────────────────────────────────────
 
     void handleTradeRequestEvent(const Event &event);

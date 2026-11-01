@@ -58,6 +58,8 @@ class EventDispatcher
     void handleOpenRepairShop(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleRepairItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleRepairAll(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleBuybackList(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handleBuybackItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleTradeRequest(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleTradeAccept(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleTradeDecline(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);

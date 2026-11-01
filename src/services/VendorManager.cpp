@@ -264,6 +264,10 @@ VendorManager::sellItem(
 
     inventoryMgr.addItemToInventory(characterId, goldItemId, goldReceived);
 
+    // Buyback: remember the stack at the price paid (FIFO-capped).
+    // quantity > 0 is guaranteed by the guard at the top of this function.
+    recordBuyback(characterId, invSlot->itemId, item.slug, quantity, goldReceived / quantity);
+
     log_->info("[VendorManager] char {} sold {}x item {} to NPC {} for {} gold",
         characterId,
         quantity,
@@ -488,6 +492,13 @@ VendorManager::sellBatch(
         removedItems.emplace_back(invSlot->itemId, r.quantity);
         inventoryMgr.addItemToInventory(characterId, goldItemId, r.goldReceived);
         goldCredited += r.goldReceived;
+        // Buyback per committed line (slug re-looked-up: the row may be gone).
+        if (r.quantity > 0)
+        {
+            const auto soldItem = itemManager_.getItemById(invSlot->itemId);
+            recordBuyback(characterId, invSlot->itemId, soldItem.slug, r.quantity,
+                r.goldReceived / r.quantity);
+        }
     }
 
     log_->info("[VendorManager] char {} batch-sold {} items to NPC {} for {} gold total",
@@ -496,4 +507,89 @@ VendorManager::sellBatch(
         npcId,
         totalGold);
     return {true, "", totalGold, std::move(resultItems)};
+}
+
+// ── Buyback ───────────────────────────────────────────────────────────────────
+
+void
+VendorManager::recordBuyback(int characterId, int itemId, const std::string &slug, int quantity, int unitPrice)
+{
+    if (characterId <= 0 || itemId <= 0 || quantity <= 0)
+        return;
+    std::unique_lock lock(mutex_);
+    auto &list = buyback_[characterId];
+    list.push_back(BuybackEntry{itemId, slug, quantity, unitPrice});
+    while (list.size() > MAX_BUYBACK)
+        list.pop_front();
+}
+
+std::vector<VendorManager::BuybackEntry>
+VendorManager::getBuyback(int characterId) const
+{
+    std::shared_lock lock(mutex_);
+    auto it = buyback_.find(characterId);
+    if (it == buyback_.end())
+        return {};
+    return std::vector<BuybackEntry>(it->second.begin(), it->second.end());
+}
+
+VendorManager::BuybackResult
+VendorManager::buyback(
+    int characterId,
+    size_t slot,
+    int quantity,
+    int goldItemId,
+    InventoryManager &inventoryMgr)
+{
+    if (quantity <= 0)
+        return {false, "invalid_quantity", 0, 0, 0};
+
+    BuybackEntry entry;
+    {
+        std::shared_lock lock(mutex_);
+        auto it = buyback_.find(characterId);
+        if (it == buyback_.end() || slot >= it->second.size())
+            return {false, "invalid_buyback_slot", 0, 0, 0};
+        entry = it->second[slot];
+    }
+    if (quantity > entry.quantity)
+        return {false, "invalid_quantity", 0, 0, 0};
+
+    const int price = entry.unitPrice * quantity;
+    if (inventoryMgr.getGoldAmount(characterId) < price)
+        return {false, "insufficient_gold", 0, 0, 0};
+
+    if (!inventoryMgr.removeItemFromInventory(characterId, goldItemId, price))
+        return {false, "gold_remove_failed", 0, 0, 0};
+    if (!inventoryMgr.addItemToInventory(characterId, entry.itemId, quantity))
+    {
+        // Refund on the (unlikely) restore failure — never eat the gold.
+        inventoryMgr.addItemToInventory(characterId, goldItemId, price);
+        return {false, "item_restore_failed", 0, 0, 0};
+    }
+
+    {
+        std::unique_lock lock(mutex_);
+        auto it = buyback_.find(characterId);
+        if (it == buyback_.end() || slot >= it->second.size())
+        {
+            // List changed under us; the item is already restored — drop the
+            // whole list rather than corrupt slot accounting.
+            buyback_.erase(characterId);
+        }
+        else if (static_cast<int>(quantity) >= it->second[slot].quantity)
+        {
+            it->second.erase(it->second.begin() + static_cast<ptrdiff_t>(slot));
+        }
+        else
+        {
+            it->second[slot].quantity -= quantity;
+        }
+        if (it != buyback_.end() && it->second.empty())
+            buyback_.erase(it);
+    }
+
+    log_->info("[VendorManager] char {} bought back {}x item {} for {} gold",
+        characterId, quantity, entry.itemId, price);
+    return {true, "", entry.itemId, quantity, price};
 }

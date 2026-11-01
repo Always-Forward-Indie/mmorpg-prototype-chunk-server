@@ -1639,6 +1639,26 @@ struct PlayerInspectRequestStruct
     TimestampStruct timestamps;
 };
 
+/// Client → chunk: request the buyback list (last sold stacks, per character).
+struct BuybackListRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    TimestampStruct timestamps;
+};
+
+/// Client → chunk: repurchase a buyback slot (partial quantities allowed).
+struct BuybackItemRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int npcId = 0;
+    int slot = 0;
+    int quantity = 1;
+    PositionStruct playerPosition;
+    TimestampStruct timestamps;
+};
+
 /// Client → chunk: accept / decline trade invite
 struct TradeRespondStruct
 {

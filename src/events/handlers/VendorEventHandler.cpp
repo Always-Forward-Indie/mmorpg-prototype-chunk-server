@@ -902,6 +902,98 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
     }
 }
 
+// ─── Buyback events ───────────────────────────────────────────────────────────
+
+void
+VendorEventHandler::handleBuybackListEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<BuybackListRequestStruct>(data))
+            return;
+
+        const auto &req = std::get<BuybackListRequestStruct>(data);
+        auto socket = gameServices_.getClientManager().getClientSocket(req.clientId);
+        if (!socket)
+            return;
+
+        const auto list = gameServices_.getVendorManager().getBuyback(req.characterId);
+        nlohmann::json arr = nlohmann::json::array();
+        for (size_t i = 0; i < list.size(); ++i)
+        {
+            const auto &e = list[i];
+            nlohmann::json entry;
+            entry["slot"] = static_cast<int>(i);
+            entry["itemId"] = e.itemId;
+            entry["slug"] = e.slug;
+            entry["quantity"] = e.quantity;
+            entry["unitPrice"] = e.unitPrice;
+            entry["totalPrice"] = e.unitPrice * e.quantity;
+            arr.push_back(entry);
+        }
+        ResponseBuilder builder;
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buybackList").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("entries", arr).build(), req.timestamps);
+        networkManager_.sendResponse(socket, msg);
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[VendorEventHandler] handleBuybackListEvent: {}", ex.what());
+    }
+}
+
+void
+VendorEventHandler::handleBuybackItemEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<BuybackItemRequestStruct>(data))
+            return;
+
+        const auto &req = std::get<BuybackItemRequestStruct>(data);
+        auto socket = gameServices_.getClientManager().getClientSocket(req.clientId);
+        if (!socket)
+            return;
+
+        const auto &npc = gameServices_.getNPCManager().getNPCById(req.npcId);
+        if (npc.id == 0)
+        {
+            sendErrorResponseWithTimestamps(socket, "vendor_not_found", "buybackItem", req.clientId, req.timestamps);
+            return;
+        }
+        if (!isPlayerInRange(req.playerPosition, npc.position, npc.radius + DistanceUtils::kVendorRadiusBonus))
+        {
+            sendErrorResponseWithTimestamps(socket, "out_of_range", "buybackItem", req.clientId, req.timestamps);
+            return;
+        }
+
+        const ItemDataStruct *goldItem = gameServices_.getItemManager().getItemBySlug("gold_coin");
+        if (!goldItem)
+        {
+            sendErrorResponseWithTimestamps(socket, "server_error", "buybackItem", req.clientId, req.timestamps);
+            return;
+        }
+
+        auto result = gameServices_.getVendorManager().buyback(
+            req.characterId, static_cast<size_t>(std::max(0, req.slot)), req.quantity,
+            goldItem->id, gameServices_.getInventoryManager());
+        if (!result.success)
+        {
+            sendErrorResponseWithTimestamps(socket, result.reason, "buybackItem", req.clientId, req.timestamps);
+            return;
+        }
+
+        ResponseBuilder builder;
+        std::string msg = networkManager_.generateResponseMessage("success", builder.setHeader("eventType", "buybackResult").setHeader("status", "success").setHeader("clientId", req.clientId).setHeader("hash", "").setBody("itemId", result.itemId).setBody("quantity", result.quantity).setBody("pricePaid", result.pricePaid).setBody("newGoldBalance", gameServices_.getInventoryManager().getGoldAmount(req.characterId)).build(), req.timestamps);
+        networkManager_.sendResponse(socket, msg);
+    }
+    catch (const std::exception &ex)
+    {
+        log_->error("[VendorEventHandler] handleBuybackItemEvent: {}", ex.what());
+    }
+}
+
 // ─── P2P Trade events ─────────────────────────────────────────────────────────
 
 void
