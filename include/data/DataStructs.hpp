@@ -1628,9 +1628,9 @@ struct TradeRequestStruct
 };
 
 /// Client → chunk: request a read-only public snapshot of another player
-/// (name / level / class / race / gender / equipped item slugs).
-/// The server answers `playerInspect` on the requester's socket only;
-/// no inventory, gold, position or stats leave the server.
+/// (name / level / class / race / gender / equipped item slugs / attribute
+/// totals). The server answers `playerInspect` on the requester's socket only;
+/// no inventory, gold, position or buffs leave the server.
 struct PlayerInspectRequestStruct
 {
     int characterId = 0;

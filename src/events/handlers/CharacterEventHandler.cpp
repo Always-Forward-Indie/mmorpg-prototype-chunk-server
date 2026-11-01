@@ -1336,9 +1336,17 @@ CharacterEventHandler::handlePlayerInspectEvent(const Event &event)
         return;
     }
 
-    // Public snapshot only: identity + equipped slugs. No inventory, gold,
-    // position or stats ever leave the server on this channel.
+    // Public snapshot only: identity + equipped slugs + attribute totals.
+    // No inventory, gold, position or buffs ever leave the server on this channel.
     nlohmann::json slots = gameServices_.getEquipmentManager().buildEquipmentStateJson(target.characterId);
+    nlohmann::json attrs = nlohmann::json::array();
+    for (const auto &a : target.attributes)
+    {
+        nlohmann::json entry;
+        entry["slug"] = a.slug;
+        entry["value"] = a.value;
+        attrs.push_back(entry);
+    }
     nlohmann::json response = ResponseBuilder()
                                   .setHeader("message", "success")
                                   .setHeader("eventType", "playerInspect")
@@ -1350,6 +1358,7 @@ CharacterEventHandler::handlePlayerInspectEvent(const Event &event)
                                   .setBody("characterRace", target.characterRace)
                                   .setBody("characterGender", target.characterGender)
                                   .setBody("slots", slots)
+                                  .setBody("attributes", attrs)
                                   .build();
     networkManager_.sendResponse(clientSocket,
         networkManager_.generateResponseMessage("success", response, req.timestamps));

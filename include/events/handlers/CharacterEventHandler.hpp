@@ -141,8 +141,9 @@ class CharacterEventHandler : public BaseEventHandler
      * @brief Read-only public snapshot of another player (unit menu inspect).
      *
      * Answers `playerInspect` on the requester's socket only: name / level /
-     * class / race / gender / equipped item slugs. Never sends inventory,
-     * gold, position or stats. Failures are error-level (seam rule).
+     * class / race / gender / equipped item slugs / attribute totals.
+     * Never sends inventory, gold, position or buffs. Failures are
+     * error-level (seam rule).
      *
      * @param event Event carrying PlayerInspectRequestStruct
      */
