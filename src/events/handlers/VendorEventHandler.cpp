@@ -1107,19 +1107,20 @@ VendorEventHandler::handleTradeOfferUpdateEvent(const Event &event)
             }
         }
 
-        // Apply offer update
+        // Apply offer update. ANY change unconfirms BOTH sides (WoW rule):
+        // confirming a deal the peer has since altered is a scam vector.
         if (isA)
         {
             session->offerA = req.items;
             session->goldA = req.gold;
-            session->confirmedA = false;
         }
         else
         {
             session->offerB = req.items;
             session->goldB = req.gold;
-            session->confirmedB = false;
         }
+        session->confirmedA = false;
+        session->confirmedB = false;
         session->lastActivity = std::chrono::steady_clock::now();
 
         // Notify both sides
@@ -1165,6 +1166,24 @@ VendorEventHandler::handleTradeConfirmEvent(const Event &event)
             session->confirmedA = true;
         else
             session->confirmedB = true;
+
+        // Range re-check at lock-in: walking away mid-trade must not complete.
+        // Refuses this confirm only (session lives, walk back and confirm again).
+        {
+            const float tradeRange = gameServices_.getGameConfigService().getFloat("economy.trade_range", 500.0f);
+            const PositionStruct posA = gameServices_.getCharacterManager().getCharacterPosition(session->charAId);
+            const PositionStruct posB = gameServices_.getCharacterManager().getCharacterPosition(session->charBId);
+            if ((posA.positionX != 0.f || posA.positionY != 0.f || posB.positionX != 0.f || posB.positionY != 0.f) &&
+                !DistanceUtils::withinRange2DWithZTolerance(posA, posB, tradeRange))
+            {
+                if (isA)
+                    session->confirmedA = false;
+                else
+                    session->confirmedB = false;
+                sendErrorResponseWithTimestamps(socket, "too_far", "tradeConfirm", req.clientId, req.timestamps);
+                return;
+            }
+        }
 
         session->lastActivity = std::chrono::steady_clock::now();
 
