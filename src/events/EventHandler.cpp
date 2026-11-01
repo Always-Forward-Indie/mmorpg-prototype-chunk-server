@@ -517,6 +517,9 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::TRADE_CANCEL:
             vendorEventHandler_->handleTradeCancelEvent(event);
             break;
+        case Event::PLAYER_INSPECT:
+            characterEventHandler_->handlePlayerInspectEvent(event);
+            break;
         case Event::DURABILITY_UPDATE:
             // Outbound-only event (chunk → client), no handler needed
             break;

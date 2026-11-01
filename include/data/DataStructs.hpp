@@ -1627,6 +1627,18 @@ struct TradeRequestStruct
     TimestampStruct timestamps;
 };
 
+/// Client → chunk: request a read-only public snapshot of another player
+/// (name / level / class / race / gender / equipped item slugs).
+/// The server answers `playerInspect` on the requester's socket only;
+/// no inventory, gold, position or stats leave the server.
+struct PlayerInspectRequestStruct
+{
+    int characterId = 0;
+    int clientId = 0;
+    int targetCharacterId = 0;
+    TimestampStruct timestamps;
+};
+
 /// Client → chunk: accept / decline trade invite
 struct TradeRespondStruct
 {

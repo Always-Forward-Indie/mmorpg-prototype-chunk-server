@@ -137,6 +137,17 @@ class CharacterEventHandler : public BaseEventHandler
      */
     void handleGetConnectedCharactersEvent(const Event &event);
 
+    /**
+     * @brief Read-only public snapshot of another player (unit menu inspect).
+     *
+     * Answers `playerInspect` on the requester's socket only: name / level /
+     * class / race / gender / equipped item slugs. Never sends inventory,
+     * gold, position or stats. Failures are error-level (seam rule).
+     *
+     * @param event Event carrying PlayerInspectRequestStruct
+     */
+    void handlePlayerInspectEvent(const Event &event);
+
   private:
     /**
      * @brief Push connected characters list + equipment to one client socket.

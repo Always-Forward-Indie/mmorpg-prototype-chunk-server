@@ -144,6 +144,7 @@ using EventData = std::variant<
     TradeRespondStruct,
     TradeOfferUpdateStruct,
     TradeConfirmCancelStruct,
+    PlayerInspectRequestStruct,
     DurabilityUpdateStruct,
     SaveCurrencyTransactionStruct,
     SaveDurabilityChangeStruct,

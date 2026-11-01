@@ -64,6 +64,7 @@ class EventDispatcher
     void handleTradeOfferUpdate(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleTradeConfirm(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleTradeCancel(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void handlePlayerInspect(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     // Equipment
     void handleEquipItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleUnequipItem(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket);

@@ -66,6 +66,7 @@ EventDispatcher::buildRouteTable()
         {"tradeOfferUpdate", &EventDispatcher::handleTradeOfferUpdate},
         {"tradeConfirm", &EventDispatcher::handleTradeConfirm},
         {"tradeCancel", &EventDispatcher::handleTradeCancel},
+        {"playerInspectRequest", &EventDispatcher::handlePlayerInspect},
         {"equipItem", &EventDispatcher::handleEquipItem},
         {"unequipItem", &EventDispatcher::handleUnequipItem},
         {"getEquipment", &EventDispatcher::handleGetEquipment},
@@ -1496,6 +1497,27 @@ EventDispatcher::handleTradeRequest(const EventContext &context, std::shared_ptr
     catch (const std::exception &e)
     {
         gameServices_.getLogger().logError("[EventDispatcher] handleTradeRequest: " + std::string(e.what()));
+    }
+}
+
+void
+EventDispatcher::handlePlayerInspect(const EventContext &context, std::shared_ptr<boost::asio::ip::tcp::socket> socket)
+{
+    if (context.characterData.characterId <= 0)
+        return;
+    try
+    {
+        nlohmann::json j = wireJson(context);
+        PlayerInspectRequestStruct req;
+        req.characterId = context.characterData.characterId;
+        req.clientId = context.clientData.clientId;
+        req.targetCharacterId = j["body"].value("targetCharacterId", 0);
+        req.timestamps = context.timestamps;
+        eventsBatch_.push_back(Event(Event::PLAYER_INSPECT, req.clientId, req, context.timestamps));
+    }
+    catch (const std::exception &e)
+    {
+        gameServices_.getLogger().logError("[EventDispatcher] handlePlayerInspect: " + std::string(e.what()));
     }
 }
 

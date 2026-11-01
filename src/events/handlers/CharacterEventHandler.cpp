@@ -1306,6 +1306,56 @@ CharacterEventHandler::pushConnectedCharactersToClient(
 }
 
 void
+CharacterEventHandler::handlePlayerInspectEvent(const Event &event)
+{
+    const auto &data = event.getData();
+    if (!std::holds_alternative<PlayerInspectRequestStruct>(data))
+    {
+        log_->error("[INSPECT] Unexpected data type for client " + std::to_string(event.getClientID()));
+        return;
+    }
+    const auto &req = std::get<PlayerInspectRequestStruct>(data);
+    std::shared_ptr<boost::asio::ip::tcp::socket> clientSocket = getClientSocket(event);
+
+    if (req.targetCharacterId <= 0)
+    {
+        log_->error("[INSPECT] Character " + std::to_string(req.characterId) +
+            " requested inspect with no target");
+        sendErrorResponseWithTimestamps(clientSocket, "no_inspect_target", "playerInspectRequest",
+            req.clientId, req.timestamps);
+        return;
+    }
+
+    const CharacterDataStruct target = gameServices_.getCharacterManager().getCharacterData(req.targetCharacterId);
+    if (target.characterId == 0)
+    {
+        log_->error("[INSPECT] Character " + std::to_string(req.characterId) +
+            " requested inspect of unknown character " + std::to_string(req.targetCharacterId));
+        sendErrorResponseWithTimestamps(clientSocket, "inspect_target_not_found", "playerInspectRequest",
+            req.clientId, req.timestamps);
+        return;
+    }
+
+    // Public snapshot only: identity + equipped slugs. No inventory, gold,
+    // position or stats ever leave the server on this channel.
+    nlohmann::json slots = gameServices_.getEquipmentManager().buildEquipmentStateJson(target.characterId);
+    nlohmann::json response = ResponseBuilder()
+                                  .setHeader("message", "success")
+                                  .setHeader("eventType", "playerInspect")
+                                  .setHeader("clientId", req.clientId)
+                                  .setBody("targetCharacterId", target.characterId)
+                                  .setBody("characterName", target.characterName)
+                                  .setBody("characterLevel", target.characterLevel)
+                                  .setBody("characterClass", target.characterClass)
+                                  .setBody("characterRace", target.characterRace)
+                                  .setBody("characterGender", target.characterGender)
+                                  .setBody("slots", slots)
+                                  .build();
+    networkManager_.sendResponse(clientSocket,
+        networkManager_.generateResponseMessage("success", response, req.timestamps));
+}
+
+void
 CharacterEventHandler::handleSetCharacterDataEvent(const Event &event)
 {
     const auto &data = event.getData();

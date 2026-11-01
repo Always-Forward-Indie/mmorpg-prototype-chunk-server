@@ -126,6 +126,7 @@ class Event
         TRADE_OFFER_UPDATE, // Update own offer items/gold in session
         TRADE_CONFIRM,      // Confirm current offer (lock it in)
         TRADE_CANCEL,       // Cancel / abort active trade session
+        PLAYER_INSPECT,     // Request a read-only public snapshot of another player
         // Durability event (chunk-server → clients)
         DURABILITY_UPDATE, // Notify client(s) of changed item durabilities
         // Equipment events (client → chunk-server)
