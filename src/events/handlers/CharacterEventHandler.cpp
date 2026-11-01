@@ -1321,7 +1321,7 @@ CharacterEventHandler::handlePlayerInspectEvent(const Event &event)
     {
         log_->error("[INSPECT] Character " + std::to_string(req.characterId) +
             " requested inspect with no target");
-        sendErrorResponseWithTimestamps(clientSocket, "no_inspect_target", "playerInspectRequest",
+        sendErrorResponseWithTimestamps(clientSocket, "no_inspect_target", "playerInspect",
             req.clientId, req.timestamps);
         return;
     }
@@ -1331,7 +1331,7 @@ CharacterEventHandler::handlePlayerInspectEvent(const Event &event)
     {
         log_->error("[INSPECT] Character " + std::to_string(req.characterId) +
             " requested inspect of unknown character " + std::to_string(req.targetCharacterId));
-        sendErrorResponseWithTimestamps(clientSocket, "inspect_target_not_found", "playerInspectRequest",
+        sendErrorResponseWithTimestamps(clientSocket, "inspect_target_not_found", "playerInspect",
             req.clientId, req.timestamps);
         return;
     }
