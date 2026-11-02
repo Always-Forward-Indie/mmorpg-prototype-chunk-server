@@ -228,20 +228,37 @@ class InventoryManager
     std::vector<PendingEquipSave> drainPendingEquipSaves();
 
     /**
-     * @brief Get the current gold (gold_coin) amount for a character.
-     * @return Quantity of "gold_coin" items; 0 if none.
+     * @brief Get the wallet gold balance for a character (110_currency_wallet).
+     * Ledger in playerGold_, loaded at boot from character_currencies.
+     * Gold is never an inventory row anymore.
+     * @return Balance; 0 when unknown.
      */
     int getGoldAmount(int characterId) const;
 
     /**
-     * @brief Derive gold from an already-copied inventory snapshot (#132).
-     * Same sum as getGoldAmount, but over the caller's local vector instead
-     * of re-reading the manager — items[] and gold in one response are then
-     * atomically consistent (no concurrent loadPlayerInventory can land
-     * between the two reads). Prefer this whenever a snapshot copy is
-     * already in hand.
+     * @brief Load wallet balance from the game boot snapshot (no save emit).
      */
-    int getGoldFromSnapshot(const std::vector<PlayerInventoryItemStruct> &items) const;
+    void loadPlayerGold(int characterId, int64_t amount);
+
+    /**
+     * @brief Add gold to the wallet, persist absolute balance to game + audit.
+     * @return false when amount <= 0.
+     */
+    bool addGold(int characterId, int64_t amount, const std::string &reason);
+
+    /**
+     * @brief Deduct gold when funded, persist absolute balance to game + audit.
+     * @return false when amount <= 0 or balance insufficient (no partial spend).
+     */
+    bool deductGold(int characterId, int64_t amount, const std::string &reason);
+
+    /**
+     * @brief Add gold in-memory WITHOUT persisting (atomic claim path).
+     * Caller persists via a claim packet carrying the absolute balance so
+     * the game txn converges (same pattern as addItemToInventoryNoPersist).
+     * @return new balance, or -1 when amount <= 0.
+     */
+    int64_t addGoldNoPersist(int characterId, int64_t amount);
 
     /// S15b: one retained versioned body (delta or full snapshot).
     /// Public so reconnect replay can ship entries back over the wire.
@@ -292,6 +309,11 @@ class InventoryManager
 
     // Store inventories (characterId -> vector of inventory items)
     std::map<int, std::vector<PlayerInventoryItemStruct>> playerInventories_;
+
+    // Wallet ledger (110_currency_wallet): characterId -> gold balance.
+    // Loaded from character_currencies at boot; gold never lives in
+    // playerInventories_ anymore. Same inventoryMutex_ guards both.
+    std::map<int, int64_t> playerGold_;
 
     // S15a: per-character inventory generation (separate mutex — bumped from
     // emitInventoryDelta, which must never take inventoryMutex_. A shared lock

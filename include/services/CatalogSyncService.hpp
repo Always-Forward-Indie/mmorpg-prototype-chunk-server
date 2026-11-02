@@ -45,6 +45,7 @@ class CatalogSyncService
     void handleSetPlayerActiveEffectsEvent(const Event &event);
     void handleSetPlayerSkillCooldownsEvent(const Event &event);
     void handleSetPlayerInventoryEvent(const Event &event);
+    void handleSetPlayerCurrencyEvent(const Event &event);
     void handleSetCharacterAttributesRefreshEvent(const Event &event);
     void handleSetStatusEffectTemplatesEvent(const Event &event);
     void handleSetPlayerPityEvent(const Event &event);

@@ -131,17 +131,9 @@ DialogueActionExecutor::execute(const nlohmann::json &actionGroup,
                 const int64_t amount = p.action.value("amount", 0);
                 if (amount <= 0)
                     continue;
-                const ItemDataStruct *goldItem =
-                    services_.getItemManager().getItemBySlug("gold_coin");
-                if (!goldItem)
-                {
-                    log_->error("[DialogueAction] give_gold: item 'gold_coin' not found");
-                    continue;
-                }
-                uint64_t tok = 0;
-                int rowId = 0;
-                if (!services_.getInventoryManager().addItemToInventoryNoPersist(
-                        characterId, goldItem->id, static_cast<int>(amount), tok, rowId))
+                const int64_t balance = services_.getInventoryManager().addGoldNoPersist(
+                    characterId, amount);
+                if (balance < 0)
                     continue;
                 nlohmann::json n;
                 n["type"] = "gold_received";
@@ -150,9 +142,10 @@ DialogueActionExecutor::execute(const nlohmann::json &actionGroup,
                 sendDialogueAnalytics("gold_change", characterId,
                     {{"source", "dialogue_give_gold"}, {"delta", static_cast<int>(amount)}});
                 nlohmann::json ci;
-                ci["itemId"] = goldItem->id;
-                ci["quantity"] = services_.getInventoryManager().getItemQuantity(characterId, goldItem->id);
-                ci["syncToken"] = tok;
+                ci["itemId"] = 0;
+                ci["currencySlug"] = "gold";
+                ci["quantity"] = balance;
+                ci["syncToken"] = 0;
                 items.push_back(std::move(ci));
             }
         }
@@ -447,16 +440,9 @@ DialogueActionExecutor::executeGiveGold(const nlohmann::json &action,
     if (amount <= 0)
         return;
 
-    // Resolve gold item by slug "gold_coin"
-    const ItemDataStruct *goldItem = services_.getItemManager().getItemBySlug("gold_coin");
-    if (!goldItem)
-    {
-        log_->error("[DialogueAction] give_gold: item 'gold_coin' not found in ItemManager");
-        return;
-    }
-
-    bool ok = services_.getInventoryManager().addItemToInventory(
-        characterId, goldItem->id, static_cast<int>(amount));
+    // Wallet ledger (110): gold is credited straight to playerGold_.
+    bool ok = services_.getInventoryManager().addGold(
+        characterId, amount, "dialogue_give_gold");
 
     if (ok)
     {
@@ -661,17 +647,9 @@ DialogueActionExecutor::executeLearnSkill(const nlohmann::json &action,
     const auto &inv = services_.getInventoryManager().getPlayerInventory(characterId);
     if (req.goldCost > 0)
     {
-        const ItemDataStruct *goldItem = services_.getItemManager().getItemBySlug("gold_coin");
-        if (!goldItem)
-        {
-            log_->error("[DialogueAction] learn_skill: gold_coin item not found");
-            return;
-        }
+        // Wallet ledger (110): gold is always known, balance from playerGold_.
         st.goldItemKnown = true;
-        st.goldItemId = goldItem->id;
-        for (const auto &slot : inv)
-            if (slot.itemId == goldItem->id)
-                st.totalGold += slot.quantity;
+        st.totalGold = services_.getInventoryManager().getGoldAmount(characterId);
     }
     if (req.requiresBook && req.bookItemId > 0)
     {
@@ -697,10 +675,10 @@ DialogueActionExecutor::executeLearnSkill(const nlohmann::json &action,
         services_.getInventoryManager().removeItemFromInventory(characterId, req.bookItemId, 1);
     }
 
-    // Consume gold
+    // Consume gold from the wallet (110).
     if (req.goldCost > 0)
     {
-        services_.getInventoryManager().removeItemFromInventory(characterId, st.goldItemId, req.goldCost);
+        services_.getInventoryManager().deductGold(characterId, req.goldCost, "learn_skill");
     }
 
     // Deduct SP in-memory

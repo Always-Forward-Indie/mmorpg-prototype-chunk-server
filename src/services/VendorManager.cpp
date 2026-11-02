@@ -138,7 +138,6 @@ VendorManager::buyItem(
     int npcId,
     int itemId,
     int quantity,
-    int goldItemId,
     InventoryManager &inventoryMgr,
     float buyMarkupPct)
 {
@@ -173,21 +172,20 @@ VendorManager::buyItem(
     int unitPrice = resolveBuyPrice(slot->priceOverrideBuy, item.vendorPriceBuy, buyMarkupPct);
     int totalPrice = unitPrice * quantity;
 
-    // Gold check (lock-free on inventory mutex — InventoryManager is separately locked)
+    // Wallet check (110_currency_wallet — lock-free on inventory mutex).
     lock.unlock(); // Release vendor lock before touching InventoryManager
-    int playerGold = inventoryMgr.getItemQuantity(characterId, goldItemId);
-    if (playerGold < totalPrice)
+    if (inventoryMgr.getGoldAmount(characterId) < totalPrice)
         return {false, "insufficient_gold", 0};
 
     // Deduct gold
-    if (!inventoryMgr.removeItemFromInventory(characterId, goldItemId, totalPrice))
+    if (!inventoryMgr.deductGold(characterId, totalPrice, "vendor_buy"))
         return {false, "gold_deduct_failed", 0};
 
     // Give item
     if (!inventoryMgr.addItemToInventory(characterId, itemId, quantity))
     {
         // Rollback gold
-        inventoryMgr.addItemToInventory(characterId, goldItemId, totalPrice);
+        inventoryMgr.addGold(characterId, totalPrice, "vendor_buy_rollback");
         return {false, "inventory_add_failed", 0};
     }
 
@@ -221,7 +219,6 @@ VendorManager::sellItem(
     int npcId,
     int inventoryItemId,
     int quantity,
-    int goldItemId,
     InventoryManager &inventoryMgr,
     float sellTaxPct)
 {
@@ -262,7 +259,9 @@ VendorManager::sellItem(
     if (!inventoryMgr.removeItemFromInventory(characterId, invSlot->itemId, quantity))
         return {false, "item_remove_failed", 0};
 
-    inventoryMgr.addItemToInventory(characterId, goldItemId, goldReceived);
+    // Wallet credit (110): sell proceeds land in character_currencies.
+    if (goldReceived > 0)
+        inventoryMgr.addGold(characterId, goldReceived, "vendor_sell");
 
     // Buyback: remember the stack at the price paid (FIFO-capped).
     // quantity > 0 is guaranteed by the guard at the top of this function.
@@ -284,7 +283,6 @@ VendorManager::buyBatch(
     int characterId,
     int npcId,
     const std::vector<BuyBatchItemEntry> &entries,
-    int goldItemId,
     InventoryManager &inventoryMgr,
     float buyMarkupPct)
 {
@@ -340,13 +338,12 @@ VendorManager::buyBatch(
         }
     }
 
-    // ── Phase 2: gold check ───────────────────────────────────────────────────
-    int playerGold = inventoryMgr.getItemQuantity(characterId, goldItemId);
-    if (playerGold < totalGold)
+    // ── Phase 2: wallet check ─────────────────────────────────────────────────
+    if (inventoryMgr.getGoldAmount(characterId) < totalGold)
         return {false, "insufficient_gold", 0, {}};
 
     // ── Phase 3: execute (deduct gold first, then add items one by one) ───────
-    if (!inventoryMgr.removeItemFromInventory(characterId, goldItemId, totalGold))
+    if (!inventoryMgr.deductGold(characterId, totalGold, "vendor_buy"))
         return {false, "gold_deduct_failed", 0, {}};
 
     int goldRolledBack = 0;
@@ -356,7 +353,7 @@ VendorManager::buyBatch(
         if (!inventoryMgr.addItemToInventory(characterId, r.itemId, r.quantity))
         {
             // Partial failure: rollback gold and all items already added
-            inventoryMgr.addItemToInventory(characterId, goldItemId, totalGold);
+            inventoryMgr.addGold(characterId, totalGold, "vendor_buy_rollback");
             for (int j = 0; j < i; ++j)
                 inventoryMgr.removeItemFromInventory(characterId, resultItems[j].itemId, resultItems[j].quantity);
             return {false, "inventory_add_failed", 0, {}};
@@ -397,7 +394,6 @@ VendorManager::sellBatch(
     int characterId,
     int npcId,
     const std::vector<SellBatchItemEntry> &entries,
-    int goldItemId,
     InventoryManager &inventoryMgr,
     float sellTaxPct)
 {
@@ -461,7 +457,7 @@ VendorManager::sellBatch(
     auto rollback = [&]
     {
         if (goldCredited > 0)
-            inventoryMgr.removeItemFromInventory(characterId, goldItemId, goldCredited);
+            inventoryMgr.deductGold(characterId, goldCredited, "vendor_sell_rollback");
         for (const auto &removed : removedItems)
             inventoryMgr.addItemToInventory(characterId, removed.first, removed.second);
     };
@@ -490,7 +486,8 @@ VendorManager::sellBatch(
             return {false, "item_remove_failed", 0, {}};
         }
         removedItems.emplace_back(invSlot->itemId, r.quantity);
-        inventoryMgr.addItemToInventory(characterId, goldItemId, r.goldReceived);
+        if (r.goldReceived > 0)
+            inventoryMgr.addGold(characterId, r.goldReceived, "vendor_sell");
         goldCredited += r.goldReceived;
         // Buyback per committed line (slug re-looked-up: the row may be gone).
         if (r.quantity > 0)
@@ -538,7 +535,6 @@ VendorManager::buyback(
     int characterId,
     size_t slot,
     int quantity,
-    int goldItemId,
     InventoryManager &inventoryMgr)
 {
     if (quantity <= 0)
@@ -559,12 +555,12 @@ VendorManager::buyback(
     if (inventoryMgr.getGoldAmount(characterId) < price)
         return {false, "insufficient_gold", 0, 0, 0};
 
-    if (!inventoryMgr.removeItemFromInventory(characterId, goldItemId, price))
+    if (!inventoryMgr.deductGold(characterId, price, "vendor_buyback"))
         return {false, "gold_remove_failed", 0, 0, 0};
     if (!inventoryMgr.addItemToInventory(characterId, entry.itemId, quantity))
     {
         // Refund on the (unlikely) restore failure — never eat the gold.
-        inventoryMgr.addItemToInventory(characterId, goldItemId, price);
+        inventoryMgr.addGold(characterId, price, "vendor_buyback_refund");
         return {false, "item_restore_failed", 0, 0, 0};
     }
 

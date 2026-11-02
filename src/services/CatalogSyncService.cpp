@@ -271,6 +271,32 @@ CatalogSyncService::handleSetPlayerSkillCooldownsEvent(const Event &event)
 }
 
 void
+CatalogSyncService::handleSetPlayerCurrencyEvent(const Event &event)
+{
+    try
+    {
+        const auto &data = event.getData();
+        if (!std::holds_alternative<nlohmann::json>(data))
+        {
+            log_->error("SET_PLAYER_CURRENCY: unexpected data type");
+            return;
+        }
+        const auto &body = std::get<nlohmann::json>(data);
+        const int characterId = body.value("characterId", event.getClientID());
+        const int64_t gold = body.value("gold", int64_t(0));
+
+        gameServices_.getInventoryManager().loadPlayerGold(characterId, gold);
+
+        log_->info("[EH] SET_PLAYER_CURRENCY: loaded " + std::to_string(gold) +
+                   " gold for character " + std::to_string(characterId));
+    }
+    catch (const std::exception &ex)
+    {
+        gameServices_.getLogger().logError("Error processing SET_PLAYER_CURRENCY event: " + std::string(ex.what()));
+    }
+}
+
+void
 CatalogSyncService::handleSetPlayerInventoryEvent(const Event &event)
 {
     try
@@ -332,9 +358,8 @@ CatalogSyncService::handleSetPlayerInventoryEvent(const Event &event)
         nlohmann::json snapBody;
         snapBody["characterId"] = characterId;
         snapBody["items"] = itemsArray;
-        // #132: this push previously omitted gold (client defaulted it to 0
-        // until the next explicit refresh). Derive from the same event copy.
-        snapBody["gold"] = gameServices_.getInventoryManager().getGoldFromSnapshot(items);
+        // Wallet ledger (110): gold stamped from playerGold_.
+        snapBody["gold"] = gameServices_.getInventoryManager().getGoldAmount(characterId);
         const uint64_t snapVersion =
             gameServices_.getInventoryManager().logSnapshotPublished(characterId, snapBody);
         snapBody["version"] = snapVersion;

@@ -170,6 +170,9 @@ EventHandler::dispatchEvent(const Event &event)
         case Event::SET_MOB_LOOT_INFO:
             itemEventHandler_->handleSetMobLootInfoEvent(event);
             break;
+        case Event::SET_MOB_CURRENCY_LOOT:
+            itemEventHandler_->handleSetMobCurrencyLootEvent(event);
+            break;
         case Event::SET_MOB_WEAKNESSES_RESISTANCES:
             mobEventHandler_->handleSetMobWeaknessesResistancesEvent(event);
             break;
@@ -353,6 +356,9 @@ EventHandler::dispatchEvent(const Event &event)
             break;
         case Event::SET_PLAYER_INVENTORY:
             catalogSync_->handleSetPlayerInventoryEvent(event);
+            break;
+        case Event::SET_PLAYER_CURRENCY:
+            catalogSync_->handleSetPlayerCurrencyEvent(event);
             break;
         case Event::SET_PLAYER_PITY:
             catalogSync_->handleSetPlayerPityEvent(event);

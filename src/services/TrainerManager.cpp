@@ -63,11 +63,8 @@ TrainerManager::buildSkillShopJson(
     const int charLevel = ctx.characterLevel;
     const int freeSp = ctx.freeSkillPoints;
 
-    // Resolve gold_coin item id once
-    const ItemDataStruct *goldItem = itemManager_.getItemBySlug("gold_coin");
-    int goldBalance = 0;
-    if (goldItem)
-        goldBalance = inventoryMgr.getGoldAmount(ctx.characterId);
+    // Wallet ledger (110): balance straight from playerGold_.
+    int goldBalance = inventoryMgr.getGoldAmount(ctx.characterId);
 
     nlohmann::json skills = nlohmann::json::array();
     for (const auto &e : trainer.skills)

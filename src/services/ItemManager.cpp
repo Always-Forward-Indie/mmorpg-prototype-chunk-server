@@ -65,6 +65,33 @@ ItemManager::setMobLootInfo(const std::vector<MobLootInfoStruct> &mobLootInfo)
     }
 }
 
+void
+ItemManager::setMobCurrencyLoot(const std::vector<MobCurrencyLootStruct> &entries)
+{
+    try
+    {
+        std::unique_lock<std::shared_mutex> lock(lootMutex_);
+        mobCurrencyLoot_.clear();
+        for (const auto &e : entries)
+            mobCurrencyLoot_[e.mobId].push_back(e);
+        logger_.log("Loaded currency loot for " + std::to_string(mobCurrencyLoot_.size()) + " mobs");
+    }
+    catch (const std::exception &e)
+    {
+        logger_.logError("Error loading mob currency loot: " + std::string(e.what()));
+    }
+}
+
+std::vector<MobCurrencyLootStruct>
+ItemManager::getCurrencyLootForMob(int mobId) const
+{
+    std::shared_lock<std::shared_mutex> lock(lootMutex_);
+    auto it = mobCurrencyLoot_.find(mobId);
+    if (it != mobCurrencyLoot_.end())
+        return it->second;
+    return {};
+}
+
 uint32_t
 ItemManager::getCatalogVersion() const
 {

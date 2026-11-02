@@ -30,7 +30,11 @@ struct ShopFixture : ::testing::Test
 
     void SetUp() override
     {
+        // Wallet ledger (110): the gold template is currency-typed, so the
+        // row path refuses it — gold moves only via addGold/deductGold.
         ItemDataStruct gold = makeItem(999, "gold_coin", 1000000);
+        gold.itemType = 8;
+        gold.itemTypeSlug = "currency";
         ItemDataStruct potion = makeItem(100, "health_potion", 64);
         ItemDataStruct sword = makeItem(200, "iron_sword", 1);
         sword.isEquippable = true;
@@ -102,10 +106,17 @@ TEST_F(ShopFixture, RemoveByRowIdDisambiguatesStacks)
 
 TEST_F(ShopFixture, GoldTracking)
 {
+    // Wallet ledger (110): balances live in playerGold_, never as rows.
     EXPECT_EQ(inv.getGoldAmount(1), 0);
-    EXPECT_TRUE(inv.addItemToInventory(1, 999, 250));
+    EXPECT_TRUE(inv.addGold(1, 250, "test"));
     EXPECT_EQ(inv.getGoldAmount(1), 250);
-    EXPECT_TRUE(inv.removeItemFromInventory(1, 999, 50));
+    EXPECT_TRUE(inv.deductGold(1, 50, "test"));
+    EXPECT_EQ(inv.getGoldAmount(1), 200);
+    // No partial spend: insufficient deduct fails and keeps the balance.
+    EXPECT_FALSE(inv.deductGold(1, 500, "test"));
+    EXPECT_EQ(inv.getGoldAmount(1), 200);
+    // Currency-typed templates are refused by the row path.
+    EXPECT_FALSE(inv.addItemToInventory(1, 999, 10));
     EXPECT_EQ(inv.getGoldAmount(1), 200);
 }
 
@@ -346,24 +357,23 @@ TEST_F(ShopFixture, SyncRetryGivesUpToLegacyAfterBudget)
     EXPECT_EQ(inv.getPlayerInventory(1)[0].id, 55);
 }
 
-// #132: gold derived from a snapshot copy must equal the manager read.
-// Call sites send items[] + gold from one copy; any divergence means a
-// mixed-generation response (gold 0 with present items).
-TEST_F(ShopFixture, GoldFromSnapshotMatchesManager)
+// Wallet ledger (110): boot load sets the balance, claim-path credits add
+// without persisting, and the snapshot gold always equals the manager read.
+TEST_F(ShopFixture, WalletBootAndNoPersist)
 {
-    EXPECT_TRUE(inv.addItemToInventory(7, 999, 310));
-    EXPECT_TRUE(inv.addItemToInventory(7, 100, 5));
-    const auto snapshot = inv.getPlayerInventory(7);
-    ASSERT_EQ(snapshot.size(), 2u);
-    EXPECT_EQ(inv.getGoldFromSnapshot(snapshot), 310);
-    EXPECT_EQ(inv.getGoldFromSnapshot(snapshot), inv.getGoldAmount(7));
+    inv.loadPlayerGold(7, 310);
+    EXPECT_EQ(inv.getGoldAmount(7), 310);
+    EXPECT_EQ(inv.addGoldNoPersist(7, 40), 350);
+    EXPECT_EQ(inv.getGoldAmount(7), 350);
+    EXPECT_TRUE(inv.addGold(7, 50, "test"));
+    EXPECT_EQ(inv.getGoldAmount(7), 400);
 }
 
-TEST_F(ShopFixture, GoldFromSnapshotEmptyIsZero)
+TEST_F(ShopFixture, WalletUnknownIsZero)
 {
-    EXPECT_TRUE(inv.getPlayerInventory(424242).empty());
-    EXPECT_EQ(inv.getGoldFromSnapshot({}), 0);
-    EXPECT_EQ(inv.getGoldFromSnapshot(inv.getPlayerInventory(424242)), 0);
+    EXPECT_EQ(inv.getGoldAmount(424242), 0);
+    inv.loadPlayerGold(424242, 0);
+    EXPECT_EQ(inv.getGoldAmount(424242), 0);
 }
 
 // S15a: per-character generation — 0 until first publish, +1 per delta,
@@ -372,13 +382,13 @@ TEST_F(ShopFixture, InventoryVersionStartsAtZero)
 {
     InventoryManager bare{items, logger}; // no queue: silent, stays 0
     EXPECT_EQ(bare.getInventoryVersion(11), 0u);
-    EXPECT_TRUE(bare.addItemToInventory(11, 999, 10));
+    EXPECT_TRUE(bare.addItemToInventory(11, 100, 10));
     EXPECT_EQ(bare.getInventoryVersion(11), 0u);
 }
 
 TEST_F(ShopFixture, InventoryVersionBumpsPerDelta)
 {
-    EXPECT_TRUE(inv.addItemToInventory(11, 999, 10));
+    EXPECT_TRUE(inv.addItemToInventory(11, 100, 10));
     EXPECT_EQ(inv.getInventoryVersion(11), 1u);
     EXPECT_TRUE(inv.addItemToInventory(11, 100, 2));
     EXPECT_EQ(inv.getInventoryVersion(11), 2u);
@@ -388,7 +398,7 @@ TEST_F(ShopFixture, InventoryVersionBumpsPerDelta)
 
 TEST_F(ShopFixture, InventoryVersionBumpsOnPushedSnapshot)
 {
-    EXPECT_TRUE(inv.addItemToInventory(13, 999, 10));
+    EXPECT_TRUE(inv.addItemToInventory(13, 100, 10));
     nlohmann::json body;
     body["items"] = nlohmann::json::array();
     EXPECT_EQ(inv.logSnapshotPublished(13, body), 2u);
@@ -400,7 +410,7 @@ TEST_F(ShopFixture, InventoryVersionBumpsOnPushedSnapshot)
 // (deltas and snapshots alike).
 TEST_F(ShopFixture, DeltasSinceReplaysCoveredRange)
 {
-    EXPECT_TRUE(inv.addItemToInventory(21, 999, 10)); // v1
+    EXPECT_TRUE(inv.addItemToInventory(21, 100, 10)); // v1
     EXPECT_TRUE(inv.addItemToInventory(21, 100, 2));  // v2
     std::vector<InventoryManager::VersionedBody> out;
     // lastVersion 0 with a fully retained log replays from the head.
@@ -419,7 +429,7 @@ TEST_F(ShopFixture, DeltasSinceReplaysCoveredRange)
 TEST_F(ShopFixture, DeltasSinceEvictsBeyondDepth)
 {
     for (int i = 0; i < 60; ++i)
-        EXPECT_TRUE(inv.addItemToInventory(22, 999, 1)); // 60 deltas, 60 versions
+        EXPECT_TRUE(inv.addItemToInventory(22, 100, 1)); // 60 deltas, 60 versions (potion: stackable row)
     const uint64_t cur = inv.getInventoryVersion(22);
     EXPECT_EQ(cur, 60u);
     std::vector<InventoryManager::VersionedBody> out;
@@ -433,7 +443,7 @@ TEST_F(ShopFixture, DeltasSinceEvictsBeyondDepth)
 
 TEST_F(ShopFixture, SnapshotEntriesReplayWithFullResync)
 {
-    EXPECT_TRUE(inv.addItemToInventory(23, 999, 10)); // v1 delta
+    EXPECT_TRUE(inv.addItemToInventory(23, 100, 10)); // v1 delta
     nlohmann::json body;
     body["items"] = nlohmann::json::array();
     EXPECT_EQ(inv.logSnapshotPublished(23, body), 2u); // v2 snapshot

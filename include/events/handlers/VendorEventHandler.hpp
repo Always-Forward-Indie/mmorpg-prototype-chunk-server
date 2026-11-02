@@ -97,7 +97,7 @@ class VendorEventHandler : public BaseEventHandler
         std::string reason;
     };
     RepairOneResult repairOne(
-        int characterId, int goldItemId, int npcId, PlayerInventoryItemStruct &invSlot);
+        int characterId, int npcId, PlayerInventoryItemStruct &invSlot);
 
     /** Build the list of repairable equipped items for the repair shop window.
      *  Sets outTotalCost to the sum of all repair costs. */

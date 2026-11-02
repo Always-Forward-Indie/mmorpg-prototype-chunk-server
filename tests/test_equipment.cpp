@@ -25,6 +25,8 @@ struct EquipFixture : ::testing::Test
         gold.id = 999;
         gold.slug = "gold_coin";
         gold.stackMax = 1000000;
+        gold.itemType = 8;
+        gold.itemTypeSlug = "currency";
         ItemDataStruct sword;
         sword.id = 200;
         sword.slug = "iron_sword";

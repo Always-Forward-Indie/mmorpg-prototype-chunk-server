@@ -2415,12 +2415,11 @@ EventDispatcher::handleAdminCommand(const EventContext &context, std::shared_ptr
             skills.push_back({{"slug", s.skillSlug}, {"name", s.skillName}, {"level", s.skillLevel}, {"isPassive", s.isPassive}});
         out["skills"] = skills;
         nlohmann::json items = nlohmann::json::array();
-        // #132: one snapshot copy feeds both items[] and gold (atomic).
         const auto invSnapshot = invMgr.getPlayerInventory(targetId);
         for (const auto &it : invSnapshot)
             items.push_back(invMgr.inventoryItemToJson(it));
         out["inventory"] = items;
-        out["gold"] = invMgr.getGoldFromSnapshot(invSnapshot);
+        out["gold"] = invMgr.getGoldAmount(targetId);
         nlohmann::json quests = nlohmann::json::array();
         // Progress truth lives in QuestStore (CharacterDataStruct::quests is
         // never populated — reading it here returned [] forever).
@@ -2541,6 +2540,27 @@ EventDispatcher::handleAdminCommand(const EventContext &context, std::shared_ptr
         out["itemId"] = itemId;
         out["qty"] = qty;
         out["quantity"] = invMgr.getItemQuantity(targetId, itemId);
+    }
+    else if (op == "grantCurrency")
+    {
+        // Wallet ledger (110): admin gold grants go straight to playerGold_.
+        // currencySlug reserved for the future multi-currency wallet.
+        const std::string slug = body.value("currencySlug", "gold");
+        const int qty = body.value("qty", 0);
+        if (slug != "gold" || qty <= 0)
+        {
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "invalid_params");
+            return;
+        }
+        if (!invMgr.addGold(targetId, qty, "gm_grant"))
+        {
+            log_->warn("ADMIN op={} grant failed char={}", op, targetId);
+            sendAdminResponse(chunkServer_, socket, context, "error", op, {{"ok", false}}, "grant_failed");
+            return;
+        }
+        out["currencySlug"] = slug;
+        out["qty"] = qty;
+        out["quantity"] = invMgr.getGoldAmount(targetId);
     }
     else if (op == "setHP")
     {

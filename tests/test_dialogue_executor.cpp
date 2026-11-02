@@ -47,6 +47,8 @@ struct ExecutorFixture : ::testing::Test
 
         ItemDataStruct gold = makeItem(16, "gold_coin");
         gold.stackMax = 1000000;
+        gold.itemType = 8;
+        gold.itemTypeSlug = "currency";
         ItemDataStruct potion = makeItem(100, "health_potion");
         gs.getItemManager().setItemsList({gold, potion});
 
@@ -102,7 +104,7 @@ TEST_F(ExecutorFixture, GiveGoldAndExpApply)
     auto r = exec->execute(
         actionGroup({{{"type", "give_gold"}, {"amount", 50}}, {{"type", "give_exp"}, {"amount", 30}}}),
         1, 77, ctx);
-    EXPECT_EQ(gs.getInventoryManager().getItemQuantity(1, 16), 50);
+    EXPECT_EQ(gs.getInventoryManager().getGoldAmount(1), 50);
     EXPECT_GT(gs.getCharacterManager().getCharacterData(1).characterExperiencePoints, expBefore);
     ASSERT_EQ(r.clientNotifications.size(), 2u);
 }
@@ -305,7 +307,7 @@ TEST_F(ExecutorFixture, OpenSkillShopNeedsTrainer)
 TEST_F(ExecutorFixture, LearnSkillValidationFailsLoudly)
 {
     // Already learned: learn_skill_failed, nothing consumed, nothing queued.
-    gs.getInventoryManager().addItemToInventory(1, 16, 500);
+    gs.getInventoryManager().addGold(1, 500, "test");
     PlayerContextStruct ctx;
     ctx.freeSkillPoints = 5;
     ctx.learnedSkillSlugs = {"shield_bash"};
@@ -331,7 +333,7 @@ TEST_F(ExecutorFixture, LearnSkillSuccessConsumesAndQueuesPersist)
     ItemDataStruct gold = makeItem(16, "gold_coin");
     gold.stackMax = 1000000;
     gs.getItemManager().setItemsList({gold, book});
-    ASSERT_TRUE(gs.getInventoryManager().addItemToInventory(1, 16, 500));
+    ASSERT_TRUE(gs.getInventoryManager().addGold(1, 500, "test"));
     ASSERT_TRUE(gs.getInventoryManager().addItemToInventory(1, 18, 1));
     gs.getCharacterManager().modifyFreeSkillPoints(1, 5);
 

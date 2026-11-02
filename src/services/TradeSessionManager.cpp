@@ -101,6 +101,96 @@ TradeSessionManager::closeSessionByCharacter(int characterId)
     }
 }
 
+bool
+TradeSessionManager::copySession(const std::string &sessionId, TradeSessionStruct &out)
+{
+    std::lock_guard lock(mutex_);
+    auto it = sessions_.find(sessionId);
+    if (it == sessions_.end())
+        return false;
+    out = it->second;
+    return true;
+}
+
+bool
+TradeSessionManager::hasSessionFor(int characterId)
+{
+    std::lock_guard lock(mutex_);
+    return characterToSession_.count(characterId) > 0;
+}
+
+bool
+TradeSessionManager::applyOfferUpdate(const std::string &sessionId, bool isA,
+    const std::vector<TradeOfferItemStruct> &items, int gold,
+    TradeSessionStruct &out)
+{
+    std::lock_guard lock(mutex_);
+    auto it = sessions_.find(sessionId);
+    if (it == sessions_.end())
+        return false;
+    if (isA)
+    {
+        it->second.offerA = items;
+        it->second.goldA = gold;
+    }
+    else
+    {
+        it->second.offerB = items;
+        it->second.goldB = gold;
+    }
+    it->second.confirmedA = false;
+    it->second.confirmedB = false;
+    it->second.lastActivity = std::chrono::steady_clock::now();
+    out = it->second;
+    return true;
+}
+
+TradeSessionManager::ConfirmOutcome
+TradeSessionManager::confirmSide(const std::string &sessionId, bool isA)
+{
+    ConfirmOutcome out;
+    std::lock_guard lock(mutex_);
+    auto it = sessions_.find(sessionId);
+    if (it == sessions_.end())
+        return out;
+    if (isA)
+        it->second.confirmedA = true;
+    else
+        it->second.confirmedB = true;
+    it->second.lastActivity = std::chrono::steady_clock::now();
+    out.found = true;
+    out.bothConfirmed = it->second.confirmedA && it->second.confirmedB;
+    out.snapshot = it->second;
+    return out;
+}
+
+void
+TradeSessionManager::unconfirmSide(const std::string &sessionId, bool isA)
+{
+    std::lock_guard lock(mutex_);
+    auto it = sessions_.find(sessionId);
+    if (it == sessions_.end())
+        return;
+    if (isA)
+        it->second.confirmedA = false;
+    else
+        it->second.confirmedB = false;
+}
+
+bool
+TradeSessionManager::takeSessionForCancel(const std::string &sessionId, TradeSessionStruct &out)
+{
+    std::lock_guard lock(mutex_);
+    auto it = sessions_.find(sessionId);
+    if (it == sessions_.end())
+        return false;
+    out = it->second;
+    characterToSession_.erase(it->second.charAId);
+    characterToSession_.erase(it->second.charBId);
+    sessions_.erase(it);
+    return true;
+}
+
 void
 TradeSessionManager::cleanupExpiredSessions()
 {

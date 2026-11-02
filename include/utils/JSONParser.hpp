@@ -36,6 +36,7 @@ class JSONParser
     std::vector<CharacterDataStruct> parseCharactersList(const char *data, size_t length);
     std::vector<ItemDataStruct> parseItemsList(const char *data, size_t length);
     std::vector<MobLootInfoStruct> parseMobLootInfo(const char *data, size_t length);
+    std::vector<MobCurrencyLootStruct> parseMobCurrencyLoot(const char *data, size_t length);
     std::vector<NPCDataStruct> parseNPCsList(const char *data, size_t length);
     std::vector<NPCAttributeStruct> parseNPCsAttributes(const char *data, size_t length);
 

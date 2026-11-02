@@ -1585,8 +1585,7 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
                         // Retained delta bodies predate the gold fill done on
                         // the live forward path — stamp current gold so the
                         // replay converges exactly (gold is absolute).
-                        body["gold"] = gameServices_.getInventoryManager().getGoldFromSnapshot(
-                            gameServices_.getInventoryManager().getPlayerInventory(characterId));
+                        body["gold"] = gameServices_.getInventoryManager().getGoldAmount(characterId);
                     }
                     upd["body"] = body;
                     networkManager_.sendResponse(clientSocket,
@@ -1611,7 +1610,7 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
                                           .setHeader("eventType", "getPlayerInventory")
                                           .setBody("characterId", characterId)
                                           .setBody("items", itemsArray)
-                                          .setBody("gold", invMgr.getGoldFromSnapshot(snap))
+                                          .setBody("gold", invMgr.getGoldAmount(characterId))
                                           .setBody("version", invMgr.getInventoryVersion(characterId))
                                           .setBody("fullResync", true)
                                           .build();

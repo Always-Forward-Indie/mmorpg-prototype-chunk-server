@@ -371,6 +371,11 @@ GameServerWorker::processGameServerData(std::string_view data)
         auto lootInfo = jsonParser_.parseMobLootInfo(data.data(), data.size());
         eventsBatch.emplace_back(Event::SET_MOB_LOOT_INFO, clientData.clientId, lootInfo);
     }
+    else if (eventType == "setMobCurrencyLoot")
+    {
+        auto curLoot = jsonParser_.parseMobCurrencyLoot(data.data(), data.size());
+        eventsBatch.emplace_back(Event::SET_MOB_CURRENCY_LOOT, clientData.clientId, curLoot);
+    }
     else if (eventType == "setMobWeaknessesResistances")
     {
         auto weakRes = jsonParser_.parseMobWeaknessesResistances(data.data(), data.size());
@@ -434,6 +439,19 @@ GameServerWorker::processGameServerData(std::string_view data)
     else if (eventType == "setPlayerInventoryData")
     {
         auto items = jsonParser_.parsePlayerInventory(data.data(), data.size());
+        // Wallet first (110): the inventory handler pushes a snapshot
+        // immediately when the client is online — it must already carry gold.
+        try
+        {
+            nlohmann::json body = jsonParser_.parseCombatActionData(data.data(), data.size());
+            nlohmann::json cur;
+            cur["characterId"] = body.value("characterId", clientData.clientId);
+            cur["gold"] = body.value("gold", int64_t(0));
+            eventsBatch.emplace_back(Event::SET_PLAYER_CURRENCY, clientData.clientId, cur);
+        }
+        catch (const std::exception &)
+        {
+        }
         eventsBatch.emplace_back(Event::SET_PLAYER_INVENTORY, clientData.clientId, items);
     }
     else if (eventType == "inventoryItemIdSync")

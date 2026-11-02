@@ -1044,6 +1044,36 @@ JSONParser::parseMobLootInfo(const char *data, size_t length)
     return mobLootInfo;
 }
 
+std::vector<MobCurrencyLootStruct>
+JSONParser::parseMobCurrencyLoot(const char *data, size_t length)
+{
+    std::vector<MobCurrencyLootStruct> out;
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(data, data + length);
+        if (!j.contains("body") || !j["body"].is_object() ||
+            !j["body"].contains("mobCurrencyLoot") || !j["body"]["mobCurrencyLoot"].is_array())
+            return out;
+        for (const auto &e : j["body"]["mobCurrencyLoot"])
+        {
+            MobCurrencyLootStruct c;
+            c.id = e.value("id", 0);
+            c.mobId = e.value("mobId", 0);
+            c.currencySlug = e.value("currencySlug", std::string("gold"));
+            c.dropChance = e.value("dropChance", 0.0f);
+            c.minQuantity = e.value("minQuantity", 1);
+            c.maxQuantity = e.value("maxQuantity", 1);
+            if (c.mobId > 0)
+                out.push_back(std::move(c));
+        }
+    }
+    catch (const std::exception &)
+    {
+        out.clear();
+    }
+    return out;
+}
+
 std::pair<std::unordered_map<int, std::vector<std::string>>,
     std::unordered_map<int, std::vector<std::string>>>
 JSONParser::parseMobWeaknessesResistances(const char *data, size_t length)

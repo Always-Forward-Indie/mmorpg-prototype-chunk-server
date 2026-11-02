@@ -320,17 +320,9 @@ VendorEventHandler::handleBuyItemEvent(const Event &event)
             return;
         }
 
-        const ItemDataStruct *goldItem = gameServices_.getItemManager().getItemBySlug("gold_coin");
-        if (!goldItem)
-        {
-            log_->error("[VendorEventHandler] gold_coin item not found");
-            sendErrorResponseWithTimestamps(socket, "server_error", "buyItem", req.clientId, req.timestamps);
-            return;
-        }
-
         const float markup = getEffectivePricing(req.characterId, npc.factionSlug).markupPct;
         auto result = gameServices_.getVendorManager().buyItem(
-            req.characterId, req.npcId, req.itemId, req.quantity, goldItem->id, gameServices_.getInventoryManager(), markup);
+            req.characterId, req.npcId, req.itemId, req.quantity, gameServices_.getInventoryManager(), markup);
 
         if (!result.success)
         {
@@ -431,16 +423,9 @@ VendorEventHandler::handleSellItemEvent(const Event &event)
             return;
         }
 
-        const ItemDataStruct *goldItem = gameServices_.getItemManager().getItemBySlug("gold_coin");
-        if (!goldItem)
-        {
-            sendErrorResponseWithTimestamps(socket, "server_error", "sellItem", req.clientId, req.timestamps);
-            return;
-        }
-
         const float tax = getEffectivePricing(req.characterId, npc.factionSlug).sellTaxPct;
         auto result = gameServices_.getVendorManager().sellItem(
-            req.characterId, req.npcId, req.inventoryItemId, req.quantity, goldItem->id, gameServices_.getInventoryManager(), tax);
+            req.characterId, req.npcId, req.inventoryItemId, req.quantity, gameServices_.getInventoryManager(), tax);
 
         if (!result.success)
         {
@@ -489,17 +474,9 @@ VendorEventHandler::handleBuyItemBatchEvent(const Event &event)
             return;
         }
 
-        const ItemDataStruct *goldItem = gameServices_.getItemManager().getItemBySlug("gold_coin");
-        if (!goldItem)
-        {
-            log_->error("[VendorEventHandler] gold_coin item not found");
-            sendErrorResponseWithTimestamps(socket, "server_error", "buyItemBatch", req.clientId, req.timestamps);
-            return;
-        }
-
         const float markup = getEffectivePricing(req.characterId, npc.factionSlug).markupPct;
         auto result = gameServices_.getVendorManager().buyBatch(
-            req.characterId, req.npcId, req.items, goldItem->id, gameServices_.getInventoryManager(), markup);
+            req.characterId, req.npcId, req.items, gameServices_.getInventoryManager(), markup);
 
         if (!result.success)
         {
@@ -564,16 +541,9 @@ VendorEventHandler::handleSellItemBatchEvent(const Event &event)
             return;
         }
 
-        const ItemDataStruct *goldItem = gameServices_.getItemManager().getItemBySlug("gold_coin");
-        if (!goldItem)
-        {
-            sendErrorResponseWithTimestamps(socket, "server_error", "sellItemBatch", req.clientId, req.timestamps);
-            return;
-        }
-
         const float tax = getEffectivePricing(req.characterId, npc.factionSlug).sellTaxPct;
         auto result = gameServices_.getVendorManager().sellBatch(
-            req.characterId, req.npcId, req.items, goldItem->id, gameServices_.getInventoryManager(), tax);
+            req.characterId, req.npcId, req.items, gameServices_.getInventoryManager(), tax);
 
         if (!result.success)
         {
@@ -602,7 +572,7 @@ VendorEventHandler::handleSellItemBatchEvent(const Event &event)
 
 VendorEventHandler::RepairOneResult
 VendorEventHandler::repairOne(
-    int characterId, int goldItemId, int npcId, PlayerInventoryItemStruct &invSlot)
+    int characterId, int npcId, PlayerInventoryItemStruct &invSlot)
 {
     auto &inventoryMgr = gameServices_.getInventoryManager();
     auto &itemMgr = gameServices_.getItemManager();
@@ -617,15 +587,14 @@ VendorEventHandler::repairOne(
         return {false, 0, "already_full"};
 
     int cost = computeRepairCost(item, current);
-    int playerGold = inventoryMgr.getItemQuantity(characterId, goldItemId);
-    if (playerGold < cost)
+    if (inventoryMgr.getGoldAmount(characterId) < cost)
         return {false, 0, "insufficient_gold"};
 
     // Update durability in-memory FIRST so the INVENTORY_UPDATE snapshot
-    // fired by removeItemFromInventory already contains the correct durability.
+    // fired by deductGold already contains the correct durability.
     inventoryMgr.updateDurability(characterId, invSlot.id, item.durabilityMax);
 
-    if (!inventoryMgr.removeItemFromInventory(characterId, goldItemId, cost))
+    if (!inventoryMgr.deductGold(characterId, cost, "repair"))
     {
         // Roll back durability on gold-removal failure
         inventoryMgr.updateDurability(characterId, invSlot.id, current);
@@ -745,13 +714,6 @@ VendorEventHandler::handleRepairItemEvent(const Event &event)
             return;
         }
 
-        const ItemDataStruct *goldItem = gameServices_.getItemManager().getItemBySlug("gold_coin");
-        if (!goldItem)
-        {
-            sendErrorResponseWithTimestamps(socket, "server_error", "repairItem", req.clientId, req.timestamps);
-            return;
-        }
-
         // Find the inventory slot
         auto inventory = gameServices_.getInventoryManager().getPlayerInventory(req.characterId);
         PlayerInventoryItemStruct *invSlot = nullptr;
@@ -768,7 +730,7 @@ VendorEventHandler::handleRepairItemEvent(const Event &event)
             return;
         }
 
-        auto result = repairOne(req.characterId, goldItem->id, req.npcId, *invSlot);
+        auto result = repairOne(req.characterId, req.npcId, *invSlot);
         if (!result.success)
         {
             sendErrorResponseWithTimestamps(socket, result.reason, "repairItem", req.clientId, req.timestamps);
@@ -829,13 +791,6 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
             return;
         }
 
-        const ItemDataStruct *goldItem = gameServices_.getItemManager().getItemBySlug("gold_coin");
-        if (!goldItem)
-        {
-            sendErrorResponseWithTimestamps(socket, "server_error", "repairAll", req.clientId, req.timestamps);
-            return;
-        }
-
         auto inventory = gameServices_.getInventoryManager().getPlayerInventory(req.characterId);
         int totalGoldSpent = 0;
         nlohmann::json repairedItems = nlohmann::json::array();
@@ -854,7 +809,7 @@ VendorEventHandler::handleRepairAllEvent(const Event &event)
             if (current >= item.durabilityMax)
                 continue;
 
-            auto result = repairOne(req.characterId, goldItem->id, req.npcId, invSlot);
+            auto result = repairOne(req.characterId, req.npcId, invSlot);
             if (!result.success)
             {
                 if (firstFailure.empty())
@@ -968,16 +923,9 @@ VendorEventHandler::handleBuybackItemEvent(const Event &event)
             return;
         }
 
-        const ItemDataStruct *goldItem = gameServices_.getItemManager().getItemBySlug("gold_coin");
-        if (!goldItem)
-        {
-            sendErrorResponseWithTimestamps(socket, "server_error", "buybackItem", req.clientId, req.timestamps);
-            return;
-        }
-
         auto result = gameServices_.getVendorManager().buyback(
             req.characterId, static_cast<size_t>(std::max(0, req.slot)), req.quantity,
-            goldItem->id, gameServices_.getInventoryManager());
+            gameServices_.getInventoryManager());
         if (!result.success)
         {
             sendErrorResponseWithTimestamps(socket, result.reason, "buybackItem", req.clientId, req.timestamps);
@@ -1019,10 +967,10 @@ VendorEventHandler::handleTradeRequestEvent(const Event &event)
         auto targetSocket = gameServices_.getClientManager().getClientSocket(targetChar.clientId);
         const TradeRequestValidator::Input vargs{
             isPlayerAlive(req.characterId),
-            gameServices_.getTradeSessionManager().getSessionByCharacter(req.characterId) != nullptr,
+            gameServices_.getTradeSessionManager().hasSessionFor(req.characterId),
             targetChar.characterId != 0,
             isPlayerInRange(req.playerPosition, targetChar.characterPosition, tradeRange),
-            gameServices_.getTradeSessionManager().getSessionByCharacter(req.targetCharacterId) != nullptr,
+            gameServices_.getTradeSessionManager().hasSessionFor(req.targetCharacterId),
             targetSocket != nullptr,
         };
         const std::string validationError = TradeRequestValidator::validate(vargs);
@@ -1168,15 +1116,17 @@ VendorEventHandler::handleTradeOfferUpdateEvent(const Event &event)
         if (!socket)
             return;
 
-        TradeSessionStruct *session = gameServices_.getTradeSessionManager().getSession(req.sessionId);
-        if (!session)
+        // UAF-safe: work on a manager-locked copy; the live entry may be
+        // reaped (TTL) or closed (other thread) at any moment.
+        TradeSessionStruct snap;
+        if (!gameServices_.getTradeSessionManager().copySession(req.sessionId, snap))
         {
             sendErrorResponseWithTimestamps(socket, "session_not_found", "tradeOfferUpdate", req.clientId, req.timestamps);
             return;
         }
 
-        bool isA = (session->charAId == req.characterId);
-        bool isB = (session->charBId == req.characterId);
+        bool isA = (snap.charAId == req.characterId);
+        bool isB = (snap.charBId == req.characterId);
         if (!isA && !isB)
         {
             sendErrorResponseWithTimestamps(socket, "not_in_session", "tradeOfferUpdate", req.clientId, req.timestamps);
@@ -1199,25 +1149,19 @@ VendorEventHandler::handleTradeOfferUpdateEvent(const Event &event)
             }
         }
 
-        // Apply offer update. ANY change unconfirms BOTH sides (WoW rule):
-        // confirming a deal the peer has since altered is a scam vector.
-        if (isA)
+        // Apply offer update atomically (ANY change unconfirms BOTH sides —
+        // WoW rule). The returned copy is what we notify from.
+        TradeSessionStruct applied;
+        if (!gameServices_.getTradeSessionManager().applyOfferUpdate(
+                req.sessionId, isA, req.items, req.gold, applied))
         {
-            session->offerA = req.items;
-            session->goldA = req.gold;
+            sendErrorResponseWithTimestamps(socket, "session_not_found", "tradeOfferUpdate", req.clientId, req.timestamps);
+            return;
         }
-        else
-        {
-            session->offerB = req.items;
-            session->goldB = req.gold;
-        }
-        session->confirmedA = false;
-        session->confirmedB = false;
-        session->lastActivity = std::chrono::steady_clock::now();
 
         // Notify both sides
-        sendTradeState(session->clientAId, *session, true);
-        sendTradeState(session->clientBId, *session, false);
+        sendTradeState(applied.clientAId, applied, true);
+        sendTradeState(applied.clientBId, applied, false);
     }
     catch (const std::exception &ex)
     {
@@ -1239,56 +1183,53 @@ VendorEventHandler::handleTradeConfirmEvent(const Event &event)
         if (!socket)
             return;
 
-        TradeSessionStruct *session = gameServices_.getTradeSessionManager().getSession(req.sessionId);
-        if (!session)
+        // UAF-safe: membership + range read from a locked copy; the confirm
+        // itself is recorded atomically below (confirmSide).
+        TradeSessionStruct snap;
+        if (!gameServices_.getTradeSessionManager().copySession(req.sessionId, snap))
         {
             sendErrorResponseWithTimestamps(socket, "session_not_found", "tradeConfirm", req.clientId, req.timestamps);
             return;
         }
 
-        bool isA = (session->charAId == req.characterId);
-        bool isB = (session->charBId == req.characterId);
+        bool isA = (snap.charAId == req.characterId);
+        bool isB = (snap.charBId == req.characterId);
         if (!isA && !isB)
         {
             sendErrorResponseWithTimestamps(socket, "not_in_session", "tradeConfirm", req.clientId, req.timestamps);
             return;
         }
 
-        if (isA)
-            session->confirmedA = true;
-        else
-            session->confirmedB = true;
-
         // Range re-check at lock-in: walking away mid-trade must not complete.
         // Refuses this confirm only (session lives, walk back and confirm again).
         {
             const float tradeRange = gameServices_.getGameConfigService().getFloat("economy.trade_range", 500.0f);
-            const PositionStruct posA = gameServices_.getCharacterManager().getCharacterPosition(session->charAId);
-            const PositionStruct posB = gameServices_.getCharacterManager().getCharacterPosition(session->charBId);
+            const PositionStruct posA = gameServices_.getCharacterManager().getCharacterPosition(snap.charAId);
+            const PositionStruct posB = gameServices_.getCharacterManager().getCharacterPosition(snap.charBId);
             if ((posA.positionX != 0.f || posA.positionY != 0.f || posB.positionX != 0.f || posB.positionY != 0.f) &&
                 !DistanceUtils::withinRange2DWithZTolerance(posA, posB, tradeRange))
             {
-                if (isA)
-                    session->confirmedA = false;
-                else
-                    session->confirmedB = false;
+                gameServices_.getTradeSessionManager().unconfirmSide(req.sessionId, isA);
                 sendErrorResponseWithTimestamps(socket, "too_far", "tradeConfirm", req.clientId, req.timestamps);
                 return;
             }
         }
 
-        session->lastActivity = std::chrono::steady_clock::now();
+        auto outcome = gameServices_.getTradeSessionManager().confirmSide(req.sessionId, isA);
+        if (!outcome.found)
+        {
+            sendErrorResponseWithTimestamps(socket, "session_not_found", "tradeConfirm", req.clientId, req.timestamps);
+            return;
+        }
+        // From here on: operate on the snapshot only. The live entry may be
+        // reaped (TTL) or closed (peer thread) mid-execution — closeSession
+        // below is idempotent, and all persists are absolute/convergent.
+        TradeSessionStruct session = outcome.snapshot;
 
         // Both confirmed → execute trade
-        if (session->confirmedA && session->confirmedB)
+        if (outcome.bothConfirmed)
         {
             auto &inventoryMgr = gameServices_.getInventoryManager();
-            const ItemDataStruct *goldItem = gameServices_.getItemManager().getItemBySlug("gold_coin");
-            if (!goldItem)
-            {
-                cancelAndNotify(req.sessionId, session->clientAId, session->clientBId, "server_error");
-                return;
-            }
 
             // Final validation: both players still have all offered items and gold.
             // Confirm-time shape: slot match only, no tradable re-check
@@ -1298,15 +1239,15 @@ VendorEventHandler::handleTradeConfirmEvent(const Event &event)
                 auto inv = inventoryMgr.getPlayerInventory(charId);
                 if (!TradeOfferValidator::isOfferValid(offer, inv))
                     return false;
-                if (gold > 0 && inventoryMgr.getItemQuantity(charId, goldItem->id) < gold)
+                if (gold > 0 && inventoryMgr.getGoldAmount(charId) < gold)
                     return false;
                 return true;
             };
 
-            if (!validateOfferor(session->charAId, session->offerA, session->goldA) ||
-                !validateOfferor(session->charBId, session->offerB, session->goldB))
+            if (!validateOfferor(session.charAId, session.offerA, session.goldA) ||
+                !validateOfferor(session.charBId, session.offerB, session.goldB))
             {
-                cancelAndNotify(req.sessionId, session->clientAId, session->clientBId, "offer_no_longer_valid");
+                cancelAndNotify(req.sessionId, session.clientAId, session.clientBId, "offer_no_longer_valid");
                 return;
             }
 
@@ -1346,18 +1287,23 @@ VendorEventHandler::handleTradeConfirmEvent(const Event &event)
                 }
                 if (gold > 0)
                 {
-                    inventoryMgr.removeItemFromInventory(fromChar, goldItem->id, gold);
-                    inventoryMgr.addItemToInventory(toChar, goldItem->id, gold);
+                    if (!inventoryMgr.deductGold(fromChar, gold, "trade"))
+                    {
+                        log_->error("[VendorEventHandler] trade gold deduct failed char=" +
+                                    std::to_string(fromChar));
+                        return;
+                    }
+                    inventoryMgr.addGold(toChar, gold, "trade");
                 }
             };
 
-            executeTransfer(session->charAId, session->charBId, session->offerA, session->goldA);
-            executeTransfer(session->charBId, session->charAId, session->offerB, session->goldB);
+            executeTransfer(session.charAId, session.charBId, session.offerA, session.goldA);
+            executeTransfer(session.charBId, session.charAId, session.offerB, session.goldB);
 
             // Notify both: trade complete
             for (auto [cid, charId] : std::vector<std::pair<int, int>>{
-                     {session->clientAId, session->charAId},
-                     {session->clientBId, session->charBId}})
+                     {session.clientAId, session.charAId},
+                     {session.clientBId, session.charBId}})
             {
                 auto s = gameServices_.getClientManager().getClientSocket(cid);
                 if (!s)
@@ -1372,8 +1318,8 @@ VendorEventHandler::handleTradeConfirmEvent(const Event &event)
         else
         {
             // Only one side confirmed — notify both of updated state
-            sendTradeState(session->clientAId, *session, true);
-            sendTradeState(session->clientBId, *session, false);
+            sendTradeState(session.clientAId, session, true);
+            sendTradeState(session.clientBId, session, false);
         }
     }
     catch (const std::exception &ex)
@@ -1393,11 +1339,12 @@ VendorEventHandler::handleTradeCancelEvent(const Event &event)
 
         const auto &req = std::get<TradeConfirmCancelStruct>(data);
 
-        TradeSessionStruct *session = gameServices_.getTradeSessionManager().getSession(req.sessionId);
-        if (!session)
+        // UAF-safe: copy + erase under one lock, notify from the copy.
+        TradeSessionStruct snap;
+        if (!gameServices_.getTradeSessionManager().takeSessionForCancel(req.sessionId, snap))
             return;
 
-        cancelAndNotify(req.sessionId, session->clientAId, session->clientBId, "cancelled_by_player");
+        cancelAndNotify(req.sessionId, snap.clientAId, snap.clientBId, "cancelled_by_player");
     }
     catch (const std::exception &ex)
     {

@@ -171,6 +171,18 @@ struct MobLootInfoStruct
     std::string lootTier = "common"; ///< 'common' | 'uncommon' | 'rare' | 'very_rare' (migration 040)
 };
 
+// Wallet loot (111_currency_loot): auto-credited to character_currencies on
+// kill, no world pickup. currencySlug is "gold" for now (multi-currency ready).
+struct MobCurrencyLootStruct
+{
+    int id = 0;
+    int mobId = 0;
+    std::string currencySlug = "gold";
+    float dropChance = 0.0f;
+    int minQuantity = 1;
+    int maxQuantity = 1;
+};
+
 // Structure for tracking harvestable corpses
 struct HarvestableCorpseStruct
 {

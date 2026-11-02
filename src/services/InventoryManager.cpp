@@ -126,6 +126,16 @@ InventoryManager::addItemToInventoryNoPersist(int characterId, int itemId, int q
         return false;
     }
 
+    // 110_currency_wallet: currency lives in the wallet ledger, never as rows.
+    // Any currency-typed item reaching the row path is a caller bug — refuse
+    // loudly (error-level) instead of minting a phantom stack.
+    if (itemInfo.itemType == 8 || itemInfo.itemTypeSlug == "currency")
+    {
+        log_->error("Refused currency-as-item add: itemId=" + std::to_string(itemId) +
+                    " char=" + std::to_string(characterId) + " (use addGold)");
+        return false;
+    }
+
     PlayerInventoryItemStruct touched;
     {
         std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
@@ -472,6 +482,7 @@ InventoryManager::clearPlayerInventory(int characterId)
     std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
 
     playerInventories_[characterId].clear();
+    playerGold_.erase(characterId);
     log_->info("[INVENTORY] Cleared inventory for character " + std::to_string(characterId));
 }
 
@@ -651,6 +662,14 @@ InventoryManager::loadPlayerInventory(int characterId, const std::vector<PlayerI
                 pending.push_back(row);
     playerInventories_[characterId] = items;
     auto &inv = playerInventories_[characterId];
+    // 110_currency_wallet: defensive strip — no currency-typed row may live
+    // in memory (DB no longer stores them; anything arriving is stale).
+    inv.erase(std::remove_if(inv.begin(), inv.end(),
+        [this](const PlayerInventoryItemStruct &row) {
+            ItemDataStruct info = itemManager_.getItemById(row.itemId);
+            return info.id != 0 && (info.itemType == 8 || info.itemTypeSlug == "currency");
+        }),
+        inv.end());
     for (auto &p : pending)
     {
         // Max-wins: memory holds the newest absolute quantity; the DB push
@@ -994,25 +1013,114 @@ InventoryManager::drainPendingEquipSaves()
 int
 InventoryManager::getGoldAmount(int characterId) const
 {
-    const ItemDataStruct *goldItem = itemManager_.getItemBySlug("gold_coin");
-    if (!goldItem)
-        return 0;
-    return getItemQuantity(characterId, goldItem->id);
+    std::shared_lock<std::shared_mutex> lock(inventoryMutex_);
+    auto it = playerGold_.find(characterId);
+    return it != playerGold_.end() ? static_cast<int>(it->second) : 0;
 }
 
-int
-InventoryManager::getGoldFromSnapshot(const std::vector<PlayerInventoryItemStruct> &items) const
+void
+InventoryManager::loadPlayerGold(int characterId, int64_t amount)
 {
-    const ItemDataStruct *goldItem = itemManager_.getItemBySlug("gold_coin");
-    if (!goldItem)
-        return 0;
-    int total = 0;
-    for (const auto &item : items)
+    std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
+    playerGold_[characterId] = amount < 0 ? 0 : amount;
+    log_->info("[WALLET] Loaded " + std::to_string(playerGold_[characterId]) +
+               " gold for character " + std::to_string(characterId));
+}
+
+bool
+InventoryManager::addGold(int characterId, int64_t amount, const std::string &reason)
+{
+    if (amount <= 0)
     {
-        if (item.itemId == goldItem->id)
-            total += item.quantity;
+        log_->error("[WALLET] addGold refused non-positive amount=" +
+                    std::to_string(amount) + " char=" + std::to_string(characterId));
+        return false;
     }
-    return total;
+    int64_t balance = 0;
+    std::string factKey;
+    {
+        std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
+        balance = (playerGold_[characterId] += amount);
+        // factKey: exactly-once audit on the game side (absolute upsert
+        // converges on its own; the ledger row must not double on resend).
+        factKey = "wallet:" + std::to_string(mintSyncToken(nextSyncToken_, syncTokenSeeded_));
+    }
+    if (saveInventoryCallback_)
+    {
+        nlohmann::json savePacket;
+        savePacket["header"]["eventType"] = "saveCurrencyBalance";
+        savePacket["header"]["clientId"] = 0;
+        savePacket["header"]["hash"] = "";
+        savePacket["body"]["characterId"] = characterId;
+        savePacket["body"]["currencySlug"] = "gold";
+        savePacket["body"]["amount"] = balance;
+        savePacket["body"]["reason"] = reason;
+        savePacket["body"]["factKey"] = factKey;
+        saveInventoryCallback_(savePacket.dump() + "\n");
+    }
+    // Gold-only delta for the live client (balance display refresh).
+    if (eventQueue_)
+        emitInventoryDelta(characterId, {}, {});
+    return true;
+}
+
+int64_t
+InventoryManager::addGoldNoPersist(int characterId, int64_t amount)
+{
+    if (amount <= 0)
+    {
+        log_->error("[WALLET] addGoldNoPersist refused non-positive amount=" +
+                    std::to_string(amount) + " char=" + std::to_string(characterId));
+        return -1;
+    }
+    int64_t balance = 0;
+    {
+        std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
+        balance = (playerGold_[characterId] += amount);
+    }
+    // Gold-only delta: the forward path stamps current gold, so the client
+    // refreshes its balance display (no row changed).
+    if (eventQueue_)
+        emitInventoryDelta(characterId, {}, {});
+    return balance;
+}
+
+bool
+InventoryManager::deductGold(int characterId, int64_t amount, const std::string &reason)
+{
+    if (amount <= 0)
+    {
+        log_->error("[WALLET] deductGold refused non-positive amount=" +
+                    std::to_string(amount) + " char=" + std::to_string(characterId));
+        return false;
+    }
+    int64_t balance = 0;
+    std::string factKey;
+    {
+        std::unique_lock<std::shared_mutex> lock(inventoryMutex_);
+        const int64_t have = playerGold_[characterId];
+        if (have < amount)
+            return false;
+        balance = (playerGold_[characterId] = have - amount);
+        factKey = "wallet:" + std::to_string(mintSyncToken(nextSyncToken_, syncTokenSeeded_));
+    }
+    if (saveInventoryCallback_)
+    {
+        nlohmann::json savePacket;
+        savePacket["header"]["eventType"] = "saveCurrencyBalance";
+        savePacket["header"]["clientId"] = 0;
+        savePacket["header"]["hash"] = "";
+        savePacket["body"]["characterId"] = characterId;
+        savePacket["body"]["currencySlug"] = "gold";
+        savePacket["body"]["amount"] = balance;
+        savePacket["body"]["reason"] = reason;
+        savePacket["body"]["factKey"] = factKey;
+        saveInventoryCallback_(savePacket.dump() + "\n");
+    }
+    // Gold-only delta for the live client (balance display refresh).
+    if (eventQueue_)
+        emitInventoryDelta(characterId, {}, {});
+    return true;
 }
 
 uint64_t

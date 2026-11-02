@@ -496,14 +496,11 @@ SkillEventHandler::handleRequestLearnSkillEvent(const Event &event)
         if (!isLevelUp && entry->requiresBook && entry->bookItemId > 0)
             gameServices_.getInventoryManager().removeItemFromInventory(req.characterId, entry->bookItemId, 1);
 
-        // Consume gold (fresh learns only)
+        // Consume gold from the wallet (fresh learns only, 110).
         if (!isLevelUp && entry->goldCost > 0)
         {
-            const ItemDataStruct *goldItem =
-                gameServices_.getItemManager().getItemBySlug("gold_coin");
-            if (goldItem)
-                gameServices_.getInventoryManager().removeItemFromInventory(
-                    req.characterId, goldItem->id, entry->goldCost);
+            gameServices_.getInventoryManager().deductGold(
+                req.characterId, entry->goldCost, "learn_skill");
         }
 
         // Deduct SP

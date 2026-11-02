@@ -80,6 +80,35 @@ ItemEventHandler::handleSetMobLootInfoEvent(const Event &event)
 }
 
 void
+ItemEventHandler::handleSetMobCurrencyLootEvent(const Event &event)
+{
+    const auto &data = event.getData();
+
+    try
+    {
+        if (std::holds_alternative<std::vector<MobCurrencyLootStruct>>(data))
+        {
+            std::vector<MobCurrencyLootStruct> loot =
+                std::get<std::vector<MobCurrencyLootStruct>>(data);
+            for (const auto &e : loot)
+            {
+                gameServices_.getLogger().log("CurrencyLoot - Mob ID: " + std::to_string(e.mobId) +
+                    ", " + e.currencySlug + " chance: " + std::to_string(e.dropChance));
+            }
+            gameServices_.getItemManager().setMobCurrencyLoot(loot);
+        }
+        else
+        {
+            log_->error("Error with extracting mob currency loot data!");
+        }
+    }
+    catch (const std::bad_variant_access &ex)
+    {
+        gameServices_.getLogger().logError("Error processing mob currency loot event: " + std::string(ex.what()));
+    }
+}
+
+void
 ItemEventHandler::handleItemDropEvent(const Event &event)
 {
     const auto &data = event.getData();
@@ -538,8 +567,9 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
                 gameServices_.getLogger().log("[INVENTORY] Built inventory response with " + std::to_string(itemsArray.size()) + " items");
 
                 // Create response using ResponseBuilder
-                // #132: gold from the SAME snapshot copy (atomic items+gold).
-                int goldAmount = gameServices_.getInventoryManager().getGoldFromSnapshot(inventory);
+                // Wallet ledger (110): gold from playerGold_ — row mutations
+                // no longer touch gold at all, so no snapshot coupling needed.
+                int goldAmount = gameServices_.getInventoryManager().getGoldAmount(characterId);
 
                 nlohmann::json response = ResponseBuilder()
                                               .setHeader("message", "Inventory retrieved successfully!")
@@ -657,9 +687,8 @@ ItemEventHandler::handleInventoryUpdateEvent(const Event &event)
                                   .setHeader("eventType", "INVENTORY_UPDATE")
                                   .build();
     response["body"] = inventoryData;
-    // #132: gold from one snapshot copy (atomic vs the delta payload).
-    response["body"]["gold"] = gameServices_.getInventoryManager().getGoldFromSnapshot(
-        gameServices_.getInventoryManager().getPlayerInventory(characterId));
+    // Wallet ledger (110): gold is absolute, stamped from playerGold_.
+    response["body"]["gold"] = gameServices_.getInventoryManager().getGoldAmount(characterId);
 
     networkManager_.sendResponse(clientSocket, networkManager_.generateResponseMessage("success", response));
 

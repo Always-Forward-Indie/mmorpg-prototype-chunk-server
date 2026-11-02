@@ -24,6 +24,17 @@ class ItemManager
     void setMobLootInfo(const std::vector<MobLootInfoStruct> &mobLootInfo);
 
     /**
+     * @brief Set mob currency loot (111_currency_loot) received from Game Server.
+     * @param entries Vector of MobCurrencyLootStruct
+     */
+    void setMobCurrencyLoot(const std::vector<MobCurrencyLootStruct> &entries);
+
+    /**
+     * @brief Currency loot table for a mob (empty when the mob drops no gold).
+     */
+    std::vector<MobCurrencyLootStruct> getCurrencyLootForMob(int mobId) const;
+
+    /**
      * @brief Get all items as map
      * @return Map of item ID to ItemDataStruct
      */
@@ -84,6 +95,9 @@ class ItemManager
 
     // Store mob loot information (mobId -> vector of loot entries)
     std::map<int, std::vector<MobLootInfoStruct>> mobLootInfo_;
+
+    // Wallet loot (111): mobId -> currency entries, same lootMutex_.
+    std::map<int, std::vector<MobCurrencyLootStruct>> mobCurrencyLoot_;
 
     // Thread safety
     mutable std::shared_mutex itemsMutex_;

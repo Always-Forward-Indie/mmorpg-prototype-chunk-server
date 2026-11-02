@@ -32,6 +32,8 @@ struct TrainerFixture : ::testing::Test
         gold.id = 999;
         gold.slug = "gold_coin";
         gold.stackMax = 1000000;
+        gold.itemType = 8;
+        gold.itemTypeSlug = "currency";
         items.setItemsList({gold});
 
         TrainerNPCDataStruct t;
@@ -64,7 +66,7 @@ TEST_F(TrainerFixture, LookupByNpcAndSkill)
 
 TEST_F(TrainerFixture, ShopJsonFlagsAffordability)
 {
-    ASSERT_TRUE(inv.addItemToInventory(1, 999, 1000));
+    ASSERT_TRUE(inv.addGold(1, 1000, "test"));
     auto shop = trainers.buildSkillShopJson(21, ctx(10, 5), inv);
     EXPECT_FALSE(shop.is_null());
     EXPECT_TRUE(trainers.buildSkillShopJson(424242, ctx(10, 5), inv).is_null());

@@ -35,6 +35,7 @@ class Event
         SET_ALL_NPCS_ATTRIBUTES, // Event to receive NPC attributes from game server
         SET_ALL_ITEMS_LIST,
         SET_MOB_LOOT_INFO,
+        SET_MOB_CURRENCY_LOOT,
         SET_EXP_LEVEL_TABLE,
         SPAWN_MOBS_IN_ZONE,
         SPAWN_ZONE_MOVE_MOBS,
@@ -89,6 +90,7 @@ class Event
         SET_PLAYER_FLAGS,                 // Load player flags for a specific character (on join)
         SET_PLAYER_ACTIVE_EFFECTS,        // Load non-expired active effects for a character (on join)
         SET_PLAYER_INVENTORY,             // Load player inventory items from DB (on join)
+        SET_PLAYER_CURRENCY,              // Load wallet balances from DB (on join, 110_currency_wallet)
         SET_PLAYER_SKILL_COOLDOWNS,       // Load active skill cooldowns for a character (on join)
         SET_CHARACTER_ATTRIBUTES_REFRESH, // Updated attributes after level-up or equip change
         INVENTORY_ITEM_ID_SYNC,           // Game server sends back assigned player_inventory.id after upsert

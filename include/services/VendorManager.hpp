@@ -74,7 +74,6 @@ class VendorManager
         int npcId,
         int itemId,
         int quantity,
-        int goldItemId,
         class InventoryManager &inventoryMgr,
         float buyMarkupPct);
 
@@ -98,7 +97,6 @@ class VendorManager
         int npcId,
         int inventoryItemId,
         int quantity,
-        int goldItemId,
         class InventoryManager &inventoryMgr,
         float sellTaxPct);
 
@@ -136,7 +134,6 @@ class VendorManager
         int characterId,
         int npcId,
         const std::vector<BuyBatchItemEntry> &entries,
-        int goldItemId,
         class InventoryManager &inventoryMgr,
         float buyMarkupPct);
 
@@ -168,7 +165,6 @@ class VendorManager
         int characterId,
         int npcId,
         const std::vector<SellBatchItemEntry> &entries,
-        int goldItemId,
         class InventoryManager &inventoryMgr,
         float sellTaxPct);
 
@@ -209,7 +205,6 @@ class VendorManager
         int characterId,
         size_t slot,
         int quantity,
-        int goldItemId,
         class InventoryManager &inventoryMgr);
 
   private:

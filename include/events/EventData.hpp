@@ -76,6 +76,7 @@ using EventData = std::variant<
     TargetSelectionStruct,
     ItemDataStruct,
     MobLootInfoStruct,
+    MobCurrencyLootStruct,
     DroppedItemStruct,
     PlayerInventoryItemStruct,
     ItemPickupRequestStruct,
@@ -101,6 +102,7 @@ using EventData = std::variant<
     std::vector<CharacterAttributeStruct>,
     std::vector<ItemDataStruct>,
     std::vector<MobLootInfoStruct>,
+    std::vector<MobCurrencyLootStruct>,
     std::vector<DroppedItemStruct>,
     std::vector<int>, // e.g. removed dropped item UIDs for ITEM_REMOVE broadcast
     std::vector<HarvestableCorpseStruct>,

@@ -365,20 +365,16 @@ QuestManager::turnInQuestAtomic(int characterId, const std::string &questSlug, i
         }
         else if (reward.rewardType == "gold" && reward.amount > 0)
         {
-            const ItemDataStruct *goldItem = services_->getItemManager().getItemBySlug("gold_coin");
-            if (!goldItem)
-            {
-                log_->error("[QuestManager] turnInQuestAtomic: gold_coin missing, skipped");
+            // Wallet ledger (110): in-memory credit, absolute balance rides
+            // the claim packet so the game txn SETs it atomically.
+            const int64_t balance = services_->getInventoryManager().addGoldNoPersist(
+                characterId, static_cast<int64_t>(reward.amount));
+            if (balance < 0)
                 continue;
-            }
-            uint64_t tok = 0;
-            int rowId = 0;
-            services_->getInventoryManager().addItemToInventoryNoPersist(
-                characterId, goldItem->id, static_cast<int>(reward.amount), tok, rowId);
             nlohmann::json rw;
             rw["rewardType"] = "gold";
             rw["amount"] = reward.amount;
-            rw["syncToken"] = tok;
+            rw["balance"] = balance;
             rewards.push_back(std::move(rw));
         }
     }

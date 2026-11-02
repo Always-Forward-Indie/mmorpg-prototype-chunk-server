@@ -34,6 +34,7 @@ class ItemEventHandler : public BaseEventHandler
      * @param event Event containing mob loot info
      */
     void handleSetMobLootInfoEvent(const Event &event);
+    void handleSetMobCurrencyLootEvent(const Event &event);
 
     /**
      * @brief Handle item drop event

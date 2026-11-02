@@ -267,6 +267,35 @@ LootManager::generateLootOnMobDeath(int mobId, int mobUID, const PositionStruct 
             }
         }
 
+        // Wallet loot (111_currency_loot): auto-credit, no world pickup.
+        // Pity does not apply to currency (farm-flat by design).
+        if (killerId > 0 && inventoryManager_)
+        {
+            for (const auto &cl : itemManager_.getCurrencyLootForMob(mobId))
+            {
+                if (cl.currencySlug != "gold")
+                {
+                    log_->error("[LOOT] unsupported currency " + cl.currencySlug + " — skipped");
+                    continue;
+                }
+                const float effectiveChance = cl.dropChance * lootMultiplier;
+                if (distribution(dropRng()) <= effectiveChance)
+                {
+                    int amount = cl.minQuantity;
+                    if (cl.maxQuantity > cl.minQuantity)
+                    {
+                        std::uniform_int_distribution<int> qtyDist(cl.minQuantity, cl.maxQuantity);
+                        amount = qtyDist(dropRng());
+                    }
+                    if (inventoryManager_->addGold(killerId, amount, "loot"))
+                    {
+                        logger_.log("[LOOT] Mob " + std::to_string(mobId) + " auto-credited " +
+                                    std::to_string(amount) + "g to char " + std::to_string(killerId));
+                    }
+                }
+            }
+        }
+
         // Send ITEM_DROP event for all dropped items at once
         if (!droppedItems.empty() && eventQueue_)
         {
