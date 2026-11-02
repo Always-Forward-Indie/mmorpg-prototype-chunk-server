@@ -1257,31 +1257,79 @@ VendorEventHandler::handleTradeConfirmEvent(const Event &event)
             {
                 for (const auto &oi : offer)
                 {
-                    auto inv = inventoryMgr.getPlayerInventory(fromChar);
-                    for (const auto &s : inv)
+                    // Full-row move preserves the instance (durability,
+                    // killCount, slot state) via ownership transfer.
+                    // Partial stacks split: sender keeps the remainder.
+                    if (oi.quantity <= 0 || oi.inventoryItemId <= 0)
                     {
-                        if (s.id == oi.inventoryItemId)
+                        log_->error("[VendorEventHandler] trade transfer refused bad entry char=" +
+                                    std::to_string(fromChar));
+                        return;
+                    }
+                    PlayerInventoryItemStruct row;
+                    bool bFound = false;
+                    {
+                        auto inv = inventoryMgr.getPlayerInventory(fromChar);
+                        for (const auto &s : inv)
                         {
-                            // Remove instanced item from sender's memory without a DB delete
-                            inventoryMgr.evictFromMemory(fromChar, oi.inventoryItemId);
+                            if (s.id == oi.inventoryItemId)
+                            {
+                                if (s.quantity < oi.quantity)
+                                {
+                                    log_->error("[VendorEventHandler] trade transfer overdraft char=" +
+                                                std::to_string(fromChar));
+                                    return;
+                                }
+                                row = s;
+                                bFound = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!bFound)
+                    {
+                        log_->error("[VendorEventHandler] trade transfer row gone char=" +
+                                    std::to_string(fromChar));
+                        return;
+                    }
+                    if (oi.quantity == row.quantity)
+                    {
+                        // Remove instanced item from sender's memory without a DB delete
+                        inventoryMgr.evictFromMemory(fromChar, oi.inventoryItemId);
 
-                            // Add the same instance to receiver's memory without a DB upsert
-                            PlayerInventoryItemStruct transferred = s;
-                            transferred.characterId = toChar;
-                            transferred.slotIndex = -1;
-                            transferred.isEquipped = false;
-                            inventoryMgr.addInstancedItemToInventory(toChar, transferred);
+                        // Add the same instance to receiver's memory without a DB upsert
+                        PlayerInventoryItemStruct transferred = row;
+                        transferred.characterId = toChar;
+                        transferred.slotIndex = -1;
+                        transferred.isEquipped = false;
+                        inventoryMgr.addInstancedItemToInventory(toChar, transferred);
 
-                            // Persist ownership change to game server DB
-                            nlohmann::json pkt;
-                            pkt["header"]["eventType"] = "transferInventoryItem";
-                            pkt["header"]["clientId"] = 0;
-                            pkt["header"]["hash"] = "";
-                            pkt["body"]["fromCharId"] = fromChar;
-                            pkt["body"]["toCharId"] = toChar;
-                            pkt["body"]["inventoryItemId"] = oi.inventoryItemId;
-                            gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
-                            break;
+                        // Persist ownership change to game server DB
+                        nlohmann::json pkt;
+                        pkt["header"]["eventType"] = "transferInventoryItem";
+                        pkt["header"]["clientId"] = 0;
+                        pkt["header"]["hash"] = "";
+                        pkt["body"]["fromCharId"] = fromChar;
+                        pkt["body"]["toCharId"] = toChar;
+                        pkt["body"]["inventoryItemId"] = oi.inventoryItemId;
+                        gameServerWorker_.sendDataToGameServer(pkt.dump() + "\n");
+                    }
+                    else
+                    {
+                        // Standard row primitives: absolute persists + deltas
+                        // to both clients (same path as vendor sell/buy).
+                        if (!inventoryMgr.removeItemFromInventoryById(fromChar, oi.inventoryItemId, oi.quantity))
+                        {
+                            log_->error("[VendorEventHandler] trade transfer remove failed char=" +
+                                        std::to_string(fromChar));
+                            return;
+                        }
+                        if (!inventoryMgr.addItemToInventory(toChar, row.itemId, oi.quantity))
+                        {
+                            log_->error("[VendorEventHandler] trade transfer add failed char=" +
+                                        std::to_string(toChar) + " — refunding sender");
+                            inventoryMgr.addItemToInventory(fromChar, row.itemId, oi.quantity);
+                            return;
                         }
                     }
                 }
