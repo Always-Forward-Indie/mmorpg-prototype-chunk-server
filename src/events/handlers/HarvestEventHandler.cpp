@@ -649,13 +649,15 @@ HarvestEventHandler::handleCorpseLootPickup(const CorpseLootPickupRequestStruct 
             else
             {
                 // Неудачный подбор
+                const size_t hRows = gameServices_.getInventoryManager().getPlayerInventory(pickupRequest.characterId).size();
+                const bool hFull = hRows >= 48;
                 nlohmann::json errorResponse = ResponseBuilder()
-                                                   .setHeader("message", "Failed to pickup items")
+                                                   .setHeader("message", hFull ? "inventory_full" : "Failed to pickup items")
                                                    .setHeader("hash", resolvedClientData.hash)
                                                    .setHeader("clientId", std::to_string(clientId))
                                                    .setHeader("eventType", "corpseLootPickup")
                                                    .setBody("success", false)
-                                                   .setBody("errorCode", "PICKUP_FAILED")
+                                                   .setBody("errorCode", hFull ? "inventory_full" : "PICKUP_FAILED")
                                                    .setBody("corpseUID", pickupRequest.corpseUID)
                                                    .build();
 

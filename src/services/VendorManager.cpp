@@ -181,12 +181,13 @@ VendorManager::buyItem(
     if (!inventoryMgr.deductGold(characterId, totalPrice, "vendor_buy"))
         return {false, "gold_deduct_failed", 0};
 
-    // Give item
+    // Give item (slot cap: stacking lands, new rows beyond 48 refuse as inventory_full).
     if (!inventoryMgr.addItemToInventory(characterId, itemId, quantity))
     {
         // Rollback gold
         inventoryMgr.addGold(characterId, totalPrice, "vendor_buy_rollback");
-        return {false, "inventory_add_failed", 0};
+        const bool bFull = inventoryMgr.getPlayerInventory(characterId).size() >= 48;
+        return {false, bFull ? "inventory_full" : "inventory_add_failed", 0};
     }
 
     // Decrement stock
@@ -356,7 +357,8 @@ VendorManager::buyBatch(
             inventoryMgr.addGold(characterId, totalGold, "vendor_buy_rollback");
             for (int j = 0; j < i; ++j)
                 inventoryMgr.removeItemFromInventory(characterId, resultItems[j].itemId, resultItems[j].quantity);
-            return {false, "inventory_add_failed", 0, {}};
+            const bool bFull = inventoryMgr.getPlayerInventory(characterId).size() >= 48;
+            return {false, bFull ? "inventory_full" : "inventory_add_failed", 0, {}};
         }
         goldRolledBack += r.totalPrice;
     }

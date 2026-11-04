@@ -281,13 +281,16 @@ ItemEventHandler::handleItemPickupEvent(const Event &event)
                 log_->error("[ITEM_PICKUP_EVENT] Failed to pickup item");
 
                 // Send failure response to all clients
+                const size_t curRows = gameServices_.getInventoryManager().getPlayerInventory(pickupRequest.characterId).size();
+                const bool bFull = curRows >= 48;
                 nlohmann::json response = ResponseBuilder()
-                                              .setHeader("message", "Item pickup failed")
+                                              .setHeader("message", bFull ? "inventory_full" : "Item pickup failed")
                                               .setHeader("hash", "")
                                               .setHeader("eventType", "itemPickup")
                                               .setBody("success", false)
                                               .setBody("characterId", pickupRequest.characterId)
                                               .setBody("droppedItemUID", pickupRequest.droppedItemUID)
+                                              .setBody("errorCode", bFull ? "inventory_full" : "pickup_failed")
                                               .build();
 
                 // Interest v2 (phase 4): same cell routing as success.
@@ -581,6 +584,7 @@ ItemEventHandler::handleGetPlayerInventoryEvent(const Event &event)
                                               .setBody("gold", goldAmount)
                                               // S15a: generation of this snapshot.
                                               .setBody("version", gameServices_.getInventoryManager().getInventoryVersion(characterId))
+                                              .setBody("maxSlots", 48)
                                               .build();
 
                 std::string responseData = networkManager_.generateResponseMessage("success", response);

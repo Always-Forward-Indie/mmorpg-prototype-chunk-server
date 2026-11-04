@@ -155,6 +155,16 @@ InventoryManager::addItemToInventoryNoPersist(int characterId, int itemId, int q
         }
         else
         {
+            // Slot cap: stacking already handled above; a new row beyond the cap refuses.
+            // Single owner: chunk decides, game persists the fact as-is, client mirrors for UX.
+            auto capIt = playerInventories_.find(characterId);
+            const size_t curRows = (capIt != playerInventories_.end()) ? capIt->second.size() : 0;
+            if (curRows >= static_cast<size_t>(InventoryManager::kMaxInventorySlots))
+            {
+                log_->error("Refused inventory_full add: itemId=" + std::to_string(itemId) +
+                    " char=" + std::to_string(characterId) + " rows=" + std::to_string(curRows));
+                return false;
+            }
             PlayerInventoryItemStruct newItem;
             newItem.characterId = characterId;
             newItem.itemId = itemId;

@@ -201,6 +201,9 @@ class InventoryManager
     // first-id==0 matching takes over). A permanently unsynced row is a
     // real bug — it deserves one warn, not infinite 5s noise.
     static constexpr int kSyncMaxAttempts = 60;
+    // AAA slot cap (mirrors client 6x8 grid). Stacking never needs a new row;
+    // new templates beyond this refuse with inventory_full, no partial grant.
+    static constexpr int kMaxInventorySlots = 48;
     std::vector<PlayerInventoryItemStruct> dueSyncResend(int64_t nowMs);
 
     /** One deferred equip/unequip persist, flushed once its row syncs. */
