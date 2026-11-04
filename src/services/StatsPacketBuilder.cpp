@@ -106,6 +106,7 @@ StatsPacketBuilder::build(const StatsPacketBuilderInput &in)
         activeEffectsJson.push_back({{"slug", eff.effectSlug},
             {"effectTypeSlug", eff.effectTypeSlug},
             {"attributeSlug", eff.attributeSlug},
+            {"sourceType", eff.sourceType},
             {"value", eff.value},
             {"expiresAt", eff.expiresAt}});
     }
@@ -118,6 +119,7 @@ StatsPacketBuilder::build(const StatsPacketBuilderInput &in)
         activeEffectsJson.push_back({{"slug", "overweight"},
             {"effectTypeSlug", "debuff"},
             {"attributeSlug", "move_speed"},
+            {"sourceType", "system"},
             {"value", factored - OverweightBaseSpeed},
             {"expiresAt", 0}});
     }

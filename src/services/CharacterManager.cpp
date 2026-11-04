@@ -623,11 +623,20 @@ CharacterManager::addActiveEffect(int characterID, const ActiveEffectStruct &eff
         }
         // All instances expired: fall through to plain append below.
     }
-    // Refresh if an effect with the same slug already exists (no stacking)
+    // Refresh if an effect with the same slug already exists (no stacking).
+    // Latest wins on every field: a re-applied permanent (title/mastery/passive)
+    // must converge even if an earlier application ran with stale metadata
+    // (e.g. mastery milestone applied before definitions arrived and fell back
+    // to "physical_attack" as target attribute).
     auto existing = std::find_if(effects.begin(), effects.end(), [&effect](const ActiveEffectStruct &e)
         { return e.effectSlug == effect.effectSlug; });
     if (existing != effects.end())
     {
+        existing->effectTypeSlug = effect.effectTypeSlug;
+        existing->attributeSlug = effect.attributeSlug;
+        existing->modifierType = effect.modifierType;
+        existing->sourceType = effect.sourceType;
+        existing->tickMs = effect.tickMs;
         existing->expiresAt = effect.expiresAt;
         existing->value = effect.value;
         existing->nextTickAt = effect.nextTickAt;

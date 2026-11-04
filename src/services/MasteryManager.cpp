@@ -58,9 +58,28 @@ MasteryManager::unloadCharacterMasteries(int characterId)
 void
 MasteryManager::loadMasteryDefinitions(const std::vector<MasteryDefinitionStruct> &defs)
 {
-    std::unique_lock lk(mutex_);
-    for (const auto &d : defs)
-        definitions_[d.slug] = d;
+    // Collect already-loaded characters with mastery progress so milestone
+    // effects can be re-applied after releasing the lock. This mirrors
+    // TitleManager::loadTitleDefinitions and covers the edge where player
+    // mastery data (SET_PLAYER_MASTERIES) arrived before the global
+    // definitions (SET_MASTERY_DEFINITIONS): reapplyMilestoneEffects would
+    // otherwise fall back to "physical_attack" as target attribute and the
+    // wrong-attribute effects would persist (no later reapply corrects them).
+    std::vector<int> toReapply;
+    {
+        std::unique_lock lk(mutex_);
+        for (const auto &d : defs)
+            definitions_[d.slug] = d;
+        for (const auto &[charId, masteries] : data_)
+            if (!masteries.empty())
+                toReapply.push_back(charId);
+    }
+    for (int charId : toReapply)
+    {
+        reapplyMilestoneEffects(charId);
+        if (statsNotify_ != nullptr)
+            statsNotify_->sendStatsUpdate(charId);
+    }
     log_->info("[Mastery] Loaded {} static definitions", defs.size());
 }
 

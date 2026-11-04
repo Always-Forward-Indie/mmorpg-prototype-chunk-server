@@ -1537,6 +1537,18 @@ CharacterEventHandler::handlePlayerReadyEvent(const Event &event)
     // guarantees the player sees their equipped title as soon as they enter the world.
     gameServices_.getTitleManager().sendTitleUpdateToClient(characterId);
 
+    // 6b. Converged stats barrier: game-server boot facts (active effects,
+    // inventory, masteries, titles) arrive as independent async responses and
+    // each handler emits its own stats_update. Whichever fact arrived last may
+    // have left the client with a partial activeEffects list (e.g. mastery
+    // without title). Re-applying the in-memory permanents is idempotent
+    // (addActiveEffect dedupes by effectSlug, latest wins) and the final
+    // authoritative snapshot guarantees HUD + characteristics converge even
+    // when the boot order varied.
+    gameServices_.getTitleManager().reapplyEquippedBonuses(characterId);
+    gameServices_.getMasteryManager().reapplyMilestoneEffects(characterId);
+    gameServices_.getStatsNotificationService().sendStatsUpdate(characterId);
+
     // 7. Send all world-interactive objects in this zone to the newly joined client.
     if (worldObjectEventHandler_)
     {
